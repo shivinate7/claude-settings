@@ -16727,10 +16727,10 @@ def _f1b_push_reset(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _f2_conflict_merge(w):
+def _f2_conflict_open(w):
     """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
-    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
-    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
+    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
     main = w + "-main"
     _test_author_lane(w)
     _must(w, "reset", "-q", "--hard", "lane")
@@ -16740,6 +16740,12 @@ def _f2_conflict_merge(w):
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+
+
+def _f2_conflict_merge(w):
+    """The open merge of _f2_conflict_open. The builder takes its own side of the test file and commits the
+    merge by hand (reflog `commit (merge)`)."""
+    _f2_conflict_open(w)
     write(os.path.join(w, TEST_A), LANE_TEXT)
     _must(w, "add", "-A")
     _must(w, *IDENT, "commit", "-q", "--no-edit")
@@ -16794,15 +16800,17 @@ def _push_main(w):
     _must(w + "-main", "push", "-q", "origin", "main")
 
 
-def _c1_mid_merge(w):
+def _c1_mid_merge(w, extra_tests=()):
     """Cut at main. The builder commits product work. Main then changes a test file and the product file the
-    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
-    builder resolves the product file and stops before the commit."""
+    builder changed, and adds each of `extra_tests`. The builder merges main: the product file conflicts and the
+    test files merge clean. The builder resolves the product file and stops before the commit."""
     main = w + "-main"
     _origin(w)
     _push_main(w)
     _product_commit(w)
     write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    for rel in extra_tests:
+        write(os.path.join(main, rel), "def test_clean():\n    assert 2\n")
     write(os.path.join(main, "src/app.py"), "x = 10\n")
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
@@ -16817,6 +16825,294 @@ def _c1_mid_merge(w):
 def _c1_committed(w):
     _c1_mid_merge(w)
     _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+# Twenty test files that main adds and the builder never touches: each merges clean into the builder's tree.
+MANY_CLEAN_TESTS = ["tests/test_clean_%02d.py" % n for n in range(1, 21)]
+
+
+def _c1_many_clean(w):
+    """The _c1_mid_merge shape, with twenty more test files that main adds and that merge clean beside TEST_A."""
+    _c1_mid_merge(w, MANY_CLEAN_TESTS)
+
+
+def _open_test_conflict_left(w):
+    """The open merge of _f2_conflict_open, with the builder's product edit staged. The conflicted test file stays
+    as git's merge wrote it, with its conflict markers: a test file that still holds markers is a builder's test
+    change, so the builder's commit is refused until the test-author resolves it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "src/app.py")
+
+
+def _open_test_conflict_edited(w):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to its own side.
+    The bytes are no text git's merge wrote, so this is the builder's own change."""
+    _open_test_conflict_left(w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+
+
+def _open_test_conflict_mode(w):
+    """The open merge of _f2_conflict_open, where the builder sets the exec bit on the conflicted test file and keeps
+    git's bytes. The file stays unmerged in the index, so the mode change is the builder's only change to it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    if not os.stat(os.path.join(w, TEST_A)).st_mode & 0o111:
+        sys.exit("fixture setup failed: chmod +x did not land on %r" % TEST_A)
+
+
+MAIN_CASE = "def test_main_case():\n    assert 3\n"
+BUILDER_CASE = "def test_builder_case():\n    assert 4\n"
+
+
+def _main_test_merge_open(w, builder_text=None):
+    """Cut at main. The builder commits product work. Main appends MAIN_CASE to TEST_A, which the builder never
+    touches, so git's merge takes it clean. The merge is left open. `builder_text`, when given, then replaces
+    TEST_A in the worktree."""
+    main = w + "-main"
+    _product_commit(w)
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds a case")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    _require_says(w, ["show", ":" + TEST_A], MAIN_CASE)
+    if builder_text is not None:
+        write(os.path.join(w, TEST_A), builder_text)
+
+
+def _main_test_merge_committed(w):
+    """The _main_test_merge_open merge, committed as the merge commit. Then the builder appends BUILDER_CASE to
+    TEST_A, the test file git's merge took clean."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE + BUILDER_CASE)
+
+
+def _main_test_merge_clean_committed(w):
+    """The _main_test_merge_open merge, committed as the builder's merge commit with no builder edit to a test file.
+    The commit is git's merge of its two parents, so it holds main's clean test change and nothing the builder wrote."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    if len(run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()) != 3:
+        sys.exit("fixture setup failed: HEAD in %r is not a merge commit" % w)
+
+
+def _f2_conflict_staged(w):
+    """The open merge of _f2_conflict_open, with git's markers staged by `git add`: the index holds them as the bytes
+    of the test file, and the merge is still open."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _must(w, "add", "-A")
+
+
+def _resolve_test_conflict_open(w, text):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to `text`, with no
+    marker left in it."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, TEST_A), text)
+
+
+def _strip_test_conflict_markers(w):
+    """The open merge of _f2_conflict_open, where the builder deletes git's three marker lines and keeps both sides."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    path = os.path.join(w, TEST_A)
+    with open(path, encoding="utf-8") as handle:
+        kept = [line for line in handle if not line.startswith(("<<<<<<< ", "=======", ">>>>>>> "))]
+    text = "".join(kept)
+    if "<<<<<<<" in text or "def test_lane_1" not in text or "# main's newer case" not in text:
+        sys.exit("fixture setup failed: the markers did not strip to both sides in %r" % w)
+    write(path, text)
+
+
+# A top-level test file that an add/add merge conflicts. The base holds no such file, so the lane and main each add it;
+# _f2_conflict_open changes tests/test_a.py, which the base holds. The builder's untracked file of the same name sits
+# under src/, so the guard must tell the two apart by their folders.
+TOP_TEST = "test_x.py"
+
+
+def _top_test_conflict_open(w):
+    """The open merge of an add/add conflict on TOP_TEST: the lane adds the file with one case, main adds it with
+    another, and the builder merges main. The conflicted file stays as git's merge wrote it, unmerged, and nothing is
+    committed. The builder then adds an untracked test file of the same name under src/."""
+    main = w + "-main"
+    _test_author_lane(w, TOP_TEST, "def test_x():\n    assert 1\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TOP_TEST), "def test_x():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds the same test file")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TOP_TEST)
+    write(os.path.join(w, "src", TOP_TEST), "def test_x_builder():\n    assert 3\n")
+
+
+# An empty test file is still a test file: the rows below refuse one added or deleted in a merge. They also refuse a
+# test file whose only change is one invalid UTF-8 byte. Both bytes decode to the same character, so only a comparison
+# of the bytes tells the two versions apart.
+EMPTY_TEST = "tests/test_empty.py"
+TEST_BYTES = "tests/test_bytes.py"
+COST_PATHS = ["src/app.py", "tests/test_cost_one.py", "tests/test_cost_two.py"]
+
+
+def _put_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _rewrite_bytes(path, change):
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    _put_bytes(path, change(raw))
+
+
+def _clean_merge_open(w, main_adds=None):
+    """Cut at main. The builder commits product work. Main adds each file in `main_adds` (path: bytes) and changes a
+    product file. The builder merges main with no commit: the merge is clean and stays in progress, so git's own
+    merge is the base the builder's change is judged against."""
+    main = w + "-main"
+    _product_commit(w)
+    for rel, data in (main_adds or {}).items():
+        _put_bytes(os.path.join(main, rel), data)
+    write(os.path.join(main, "src/other.py"), "z = 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds files")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+
+
+def _empty_add_open(w):
+    """A clean merge left open, where the builder adds an empty test file that git's merge does not have."""
+    _clean_merge_open(w)
+    write(os.path.join(w, EMPTY_TEST), "")
+
+
+def _empty_delete_open(w):
+    """A clean merge left open, where git's merge holds an empty test file and the builder deletes it."""
+    _clean_merge_open(w, {EMPTY_TEST: b""})
+    os.remove(os.path.join(w, EMPTY_TEST))
+
+
+def _commit_merge(w):
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _empty_add_committed(w):
+    """The _empty_add_open change, committed as the builder's merge commit (reflog `commit (merge)`)."""
+    _empty_add_open(w)
+    _commit_merge(w)
+
+
+def _empty_delete_committed(w):
+    """The _empty_delete_open change, committed as the builder's merge commit."""
+    _empty_delete_open(w)
+    _commit_merge(w)
+
+
+def _conflict_crlf(w):
+    """The open conflict of _f2_conflict_open, where the builder rewrites the conflicted test file with each LF as
+    CRLF. Only the line endings change."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r\n"))
+
+
+def _conflict_cr(w):
+    """As _conflict_crlf, with each LF as a lone CR."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r"))
+
+
+def _invalid_byte_open(w):
+    """A clean merge left open, where git's merge holds a test file with one stray byte, 0x80, and the builder
+    rewrites that byte to 0x81. Both are invalid UTF-8, so both decode to the same replacement character."""
+    _clean_merge_open(w, {TEST_BYTES: b"# \x80\n"})
+    _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
+
+
+# A gitlink (a submodule entry) and a mode-only change under a test path are refused. A gitlink has no
+# bytes in this repository, and a mode-only change keeps the same bytes, so only the mode can refuse either. The rows
+# check a gitlink to a commit the clone lacks, a gitlink to a commit the clone holds, and a mode-only change. The
+# fixtures read each change back with git first: a change that did not land would give an allow for the wrong reason.
+GITLINK = "tests/sub_lib"
+GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
+
+
+def _head_sha(w):
+    return run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+
+
+def _require_says(where, args, want):
+    """Stop the suite unless git's answer for `args` in `where` holds `want`."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0 or want not in done.stdout:
+        sys.exit("fixture setup failed: git %s in %r does not show %r: %s"
+                 % (" ".join(args), where, want, (done.stdout + done.stderr).strip()))
+
+
+def _gitlink_stage(w, sha=GITLINK_MISSING):
+    """A gitlink under tests/ at `sha`, staged, with the empty folder a checkout would make."""
+    os.makedirs(os.path.join(w, GITLINK), exist_ok=True)
+    _must(w, "update-index", "--add", "--cacheinfo", "160000," + sha + "," + GITLINK)
+    _require_says(w, ["ls-files", "-s", "--", GITLINK], "160000 " + sha)
+
+
+def _gitlink_open(w):
+    """A clean merge left open, where the builder stages a gitlink under tests/ that git's merge does not have."""
+    _clean_merge_open(w)
+    _gitlink_stage(w)
+
+
+def _gitlink_committed(w, sha=GITLINK_MISSING):
+    """The _gitlink_open change at `sha`, committed as the builder's merge commit."""
+    _clean_merge_open(w)
+    _gitlink_stage(w, sha)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", GITLINK], "160000 commit " + sha)
+
+
+def _gitlink_committed_held(w):
+    """The _gitlink_committed change, to the commit this clone holds (the work branch's HEAD), as a control."""
+    _gitlink_committed(w, _head_sha(w))
+
+
+def _mode_exec(rel):
+    """chmod +x on a test file in the worktree: the bytes stay, and only the mode changes."""
+    def go(w):
+        os.chmod(os.path.join(w, rel), 0o755)
+        _require_says(w, ["diff", "--raw", "--", rel], "100644 100755")
+    return go
+
+
+def _mode_exec_committed(w):
+    """A clean merge, where the builder sets the exec bit on a test file and commits it as the merge commit."""
+    _clean_merge_open(w)
+    _must(w, "update-index", "--chmod=+x", TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", TEST_A], "100755 ")
+    _require_says(w, ["ls-tree", "HEAD^1", "--", TEST_A], "100644 ")
+
+
+def _mode_exec_open(w):
+    """A clean merge left open, where the builder sets the exec bit on a test file in the worktree."""
+    _clean_merge_open(w)
+    _mode_exec(TEST_A)(w)
+
+
+def _cost_files(w):
+    """The builder's change for the cost checks: a product edit and two new test files."""
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    write(os.path.join(w, "tests/test_cost_one.py"), "def test_one():\n    assert 1\n")
+    write(os.path.join(w, "tests/test_cost_two.py"), "def test_two():\n    assert 2\n")
 
 
 def _g_lane_and_product(w):
@@ -17214,6 +17510,408 @@ diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
 
+# A builder never writes test content. A test file that still holds git's conflict markers is a builder's test change,
+# so the builder's commit is refused while the file is unresolved. The rows check that refusal. The test-author resolves
+# that file. The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+_bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
+sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
+   "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
+   agent_type="builder")
+_bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
+
+# The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
+# the command runs in: a conflicted test file left as git wrote it is denied, as is one rewritten to the builder's side.
+sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is denied at "
+   "commit by builder-diff from a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_left, "src"),
+   agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
+   "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
+   agent_type="builder")
+
+# A builder's own edit to a test file that a clean merge of main took in is refused, in an open merge and in a merge
+# commit. Main's own change, merged clean and left alone, is allowed: the control row below pins that.
+_bd_m_main_open = diff_repo("bd-m-main-test-open", lambda w: _main_test_merge_open(w, BASE_FILES[TEST_A] + MAIN_CASE
+                                                                                  + BUILDER_CASE))
+sh("builder-refuse: a builder's own case in a test file that main changed and git's open merge took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_open, agent_id="bld1", agent_type="builder")
+_bd_m_main_commit = diff_repo("bd-m-main-test-commit", _main_test_merge_committed)
+sh("builder-refuse: a builder's own case in a test file that main changed and a merge commit took clean is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_main_commit, agent_id="bld1", agent_type="builder")
+_bd_m_main_clean = diff_repo("bd-m-main-test-clean", lambda w: _main_test_merge_open(w))
+sh("builder-refuse: a merge in progress where main changed a test file that merged clean, with no builder edit, is "
+   "allowed at commit", COMMIT, "allow", cwd=_bd_m_main_clean, agent_id="bld1", agent_type="builder")
+# The same clean change, committed as the builder's merge commit with no builder edit: git's merge of the two parents
+# is the commit's tree, so main's test change is allowed at commit and push, and at the stop.
+_bd_m_main_merge_clean = diff_repo("bd-m-main-test-merge-clean", _main_test_merge_clean_committed)
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at commit", COMMIT, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries main's clean test change, with no "
+                         "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-m-main-test-merge-clean")))
+
+# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff, since a test
+# file that still holds markers is the builder's change. An unmerged file that is not staged is refused by builder-diff
+# too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
+_bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
+sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
+   "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+_bd_m_markers_staged = diff_repo("bd-m-markers-staged", _f2_conflict_staged)
+sh("builder-refuse: a builder's open merge that stages git's markers in a conflicted test file, then commits, is denied "
+   "by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_markers_staged, agent_id="bld1",
+   agent_type="builder")
+# The same staged markers behind a leading `echo ok;`: builder-diff refuses the test file at commit by itself.
+sh("builder-refuse: a builder's open merge, with a test file still holding git's markers, staged and committed after "
+   "`echo ok;`, is denied at commit by builder-diff", "echo ok; " + VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
+
+# A builder's resolution of a conflicted test file to main's side, or to a blend of both sides, is refused by
+# builder-diff, as its resolution to its own side is (_open_test_conflict_edited).
+_bd_m_keep_main = diff_repo("bd-m-keep-main", lambda w: _resolve_test_conflict_open(
+    w, BASE_FILES[TEST_A] + "# main's newer case\n"))
+sh("builder-refuse: a builder's merge in progress that resolves a conflicted test file to main's side is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_keep_main, agent_id="bld1", agent_type="builder")
+_bd_m_blend = diff_repo("bd-m-blend", _strip_test_conflict_markers)
+sh("builder-refuse: a builder's merge in progress that strips git's markers from a conflicted test file and keeps both "
+   "sides is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
+
+# A builder's edit to sub/tests/test_b.py is refused when it runs from sub/ with `diff.relative` set, as it is under the
+# default config. With diff.relative, git prints the path relative to sub/ (tests/test_b.py), so the rows check that the
+# refusal holds when git names the file that way. The default-config row is the control. The sibling pin for
+# `git diff --check` under diff.relative is CMK_REL (conflict-markers).
+SUB_TEST = "sub/tests/test_b.py"
+SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
+             SUB_TEST: "def test_sub():\n    assert 1\n"}
+SUB_EDIT = "def test_sub():\n    assert 2\n"
+
+
+def _folder_names(where, folder, *revs, flags=()):
+    """The names `git diff --name-only` prints from `folder`, with `flags` added. A fixture checks them before a case
+    relies on them."""
+    done = run_vcs(os.path.join(where, folder), "diff", *flags, "--name-only", *revs)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: git diff in %s/ of %r: %s" % (folder, where, done.stderr.strip()))
+    return done.stdout.split()
+
+
+def _sub_open_edit(w, relative):
+    """The open merge of a clean merge, with the builder's edit to SUB_TEST. `relative` sets diff.relative."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    if relative:
+        _must(w, "config", "diff.relative", "true")
+        if _folder_names(w, "sub", "HEAD") != ["tests/test_b.py"]:
+            sys.exit("fixture setup failed: diff.relative did not name %r relative to sub/ in %r" % (SUB_TEST, w))
+    elif SUB_TEST not in _folder_names(w, "sub", "HEAD"):
+        sys.exit("fixture setup failed: the default config did not name %r from sub/ in %r" % (SUB_TEST, w))
+
+
+def _sub_commit_edit(w):
+    """The open merge of _sub_open_edit, committed as the builder's merge commit, with diff.relative set."""
+    _clean_merge_open(w)
+    write(os.path.join(w, SUB_TEST), SUB_EDIT)
+    _commit_merge(w)
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "sub", "HEAD^1", "HEAD") != ["tests/test_b.py"]:
+        sys.exit("fixture setup failed: diff.relative did not name the merge commit's %r relative to sub/ in %r"
+                 % (SUB_TEST, w))
+
+
+_bd_sub_open_rel = diff_repo("bd-sub-open-rel", lambda w: _sub_open_edit(w, True), files=SUB_FILES)
+sh("builder-refuse: a builder's edit to sub/tests/test_b.py in an open merge, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_commit_rel = diff_repo("bd-sub-commit-rel", _sub_commit_edit, files=SUB_FILES)
+sh("builder-refuse: a builder's merge commit that edits sub/tests/test_b.py, from sub/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_commit_rel, "sub"), agent_id="bld1",
+   agent_type="builder")
+_bd_sub_open_default = diff_repo("bd-sub-open-default", lambda w: _sub_open_edit(w, False), files=SUB_FILES)
+sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the default config, from sub/, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_default, "sub"), agent_id="bld1",
+   agent_type="builder")
+
+# With `diff.relative` set, `git diff` names only the paths under the folder it runs in, so from docs/ a builder's edit
+# to the top-level tests/test_a.py is named by no plain diff. Only `--no-relative` on each name-producing diff keeps the
+# refusal. Each red row runs from docs/ and reads the edit down one call path: the working tree against HEAD, against
+# git's open merge, a committed change at push, and a merge commit at commit. Each fixture checks that premise first.
+# Each control builds the same change under the default config, where the refusal holds with or without the flag.
+DOCS_FILES = {**BASE_FILES, "docs/notes.md": "notes\n"}
+
+
+def _docs_edit(w):
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2\n")
+
+
+def _docs_relative(w, relative, *revs):
+    """With `relative`, set diff.relative and check that the plain diff from docs/ names no path while --no-relative
+    names the test file. Without it, check that the default diff from docs/ names the test file."""
+    if not relative:
+        if TEST_A not in _folder_names(w, "docs", *revs):
+            sys.exit("fixture setup failed: the default config did not name %r from docs/ in %r" % (TEST_A, w))
+        return
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "docs", *revs):
+        sys.exit("fixture setup failed: diff.relative still named a path from docs/ in %r" % w)
+    if TEST_A not in _folder_names(w, "docs", *revs, flags=("--no-relative",)):
+        sys.exit("fixture setup failed: --no-relative did not name %r from docs/ in %r" % (TEST_A, w))
+
+
+def _docs_plain(w, relative):
+    """A builder's uncommitted edit to the top-level test file."""
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_open(w, relative):
+    """A builder's edit to the top-level test file, made while git's clean merge of main is still open."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_committed(w, relative):
+    """A builder's plain commit of the top-level test file, read again at push."""
+    _docs_edit(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "builder edit")
+    _docs_relative(w, relative, "HEAD^", "HEAD")
+
+
+def _docs_merge_committed(w, relative):
+    """A builder's merge commit that edits the top-level test file, read again at commit."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _commit_merge(w)
+    _docs_relative(w, relative, "HEAD^1", "HEAD")
+
+
+_bd_docs_plain = diff_repo("bd-docs-plain-rel", lambda w: _docs_plain(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py, from docs/ with diff.relative set, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain, "docs"), agent_id="bld1", agent_type="builder")
+_bd_docs_plain_ctl = diff_repo("bd-docs-plain-ctl", lambda w: _docs_plain(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same edit to tests/test_a.py, from docs/ under the default config, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain_ctl, "docs"), agent_id="bld1", agent_type="builder")
+
+_bd_docs_open = diff_repo("bd-docs-open-rel", lambda w: _docs_open(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py in an open merge, from docs/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_open_ctl = diff_repo("bd-docs-open-ctl", lambda w: _docs_open(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same open-merge edit to tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_committed = diff_repo("bd-docs-committed-rel", lambda w: _docs_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's committed edit to tests/test_a.py, from docs/ with diff.relative set, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_committed_ctl = diff_repo("bd-docs-committed-ctl", lambda w: _docs_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same committed edit to tests/test_a.py, from docs/ under the default config, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_merge = diff_repo("bd-docs-merge-rel", lambda w: _docs_merge_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's merge commit that edits tests/test_a.py, from docs/ with diff.relative set, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_merge_ctl = diff_repo("bd-docs-merge-ctl", lambda w: _docs_merge_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same merge commit that edits tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+# An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
+# under src/ is judged as src/test_x.py. The conflicted top-level file of that name holds git's markers, so builder-diff
+# refuses it either way: this row does not tell the two readings apart.
+_bd_m_top = diff_repo("bd-m-top-test", _top_test_conflict_open)
+sh("builder-refuse: a builder's merge in progress, with a conflicted top-level test file left as git wrote it and an "
+   "untracked test file of the same name under src/, is denied at commit from a subfolder", COMMIT, "deny", rule=BDIFF,
+   cwd=os.path.join(_bd_m_top, "src"), agent_id="bld1", agent_type="builder")
+
+# A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
+_bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
+sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
+   "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
+
+# An empty test file that a builder adds or deletes is a builder's change in a merge as in a plain change. The two
+# plain cases are the controls: the same change, outside a merge, is refused.
+_bd_empty_plain_add = diff_repo("bd-empty-plain-add", _put(EMPTY_TEST, ""))
+sh("builder-refuse: a new empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_add, agent_id="bld1", agent_type="builder")
+_bd_empty_plain_del = diff_repo("bd-empty-plain-del", _rm(EMPTY_TEST), files={**BASE_FILES, EMPTY_TEST: ""})
+sh("builder-refuse: a deleted empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_del, agent_id="bld1", agent_type="builder")
+
+_bd_m_empty_add = diff_repo("bd-m-empty-add", _empty_add_open)
+sh("builder-refuse: a builder's merge in progress that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del = diff_repo("bd-m-empty-del", _empty_delete_open)
+sh("builder-refuse: a builder's merge in progress that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del, agent_id="bld1", agent_type="builder")
+_bd_m_empty_add_c = diff_repo("bd-m-empty-add-commit", _empty_add_committed)
+sh("builder-refuse: a builder's merge commit that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add_c, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del_c = diff_repo("bd-m-empty-del-commit", _empty_delete_committed)
+sh("builder-refuse: a builder's merge commit that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del_c, agent_id="bld1", agent_type="builder")
+
+# A conflicted test file whose bytes change only in line endings, LF to CRLF or a lone CR, is the builder's change. A
+# line-ending change alters the bytes of the file, so the two rows check that each is refused.
+_bd_m_crlf = diff_repo("bd-m-crlf", _conflict_crlf)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(LF to CRLF) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_crlf, agent_id="bld1",
+   agent_type="builder")
+_bd_m_cr = diff_repo("bd-m-cr", _conflict_cr)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(a lone CR) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_cr, agent_id="bld1",
+   agent_type="builder")
+
+# A test file that differs only in one invalid UTF-8 byte is the builder's change: both bytes decode alike.
+_bd_m_byte = diff_repo("bd-m-invalid-byte", _invalid_byte_open)
+sh("builder-refuse: a builder's merge in progress that changes only an invalid UTF-8 byte of a test file is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
+
+# A gitlink under tests/, and a mode-only change to a test file, are the builder's changes in a merge, refused as on
+# main. The plain changes are the controls: the same change outside a merge is refused.
+_bd_m_gitlink = diff_repo("bd-m-gitlink", _gitlink_open)
+sh("builder-refuse: a builder's merge in progress that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_c = diff_repo("bd-m-gitlink-commit", _gitlink_committed)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone lacks is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_c, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_h = diff_repo("bd-m-gitlink-held", _gitlink_committed_held)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone holds is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_h, agent_id="bld1", agent_type="builder")
+_bd_gitlink_plain = diff_repo("bd-gitlink-plain", _gitlink_stage)
+sh("builder-refuse: a builder's plain change that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_gitlink_plain, agent_id="bld1", agent_type="builder")
+
+# A mode-only change is no byte change, so the exec bit needs a POSIX checkout. The committed one sets the bit in the
+# index too, so it reads the same on every platform.
+_MODE_OPEN_CASE = ("builder-refuse: a builder's merge in progress that changes only the mode of a test file (chmod +x) "
+                   "is denied at commit")
+_MODE_PLAIN_CASE = ("builder-refuse: a builder's plain change that changes only the mode of a test file (chmod +x) "
+                    "is denied at commit")
+# The conflicted test file of an open merge, unmerged in the index, whose only change is the exec bit: the mode change
+# is the builder's change, whatever git's raw entry for an unmerged path holds.
+_MODE_CONFLICT_CASE = ("builder-refuse: a builder's merge in progress that only sets the exec bit on a conflicted test "
+                       "file, keeping git's bytes, is denied at commit")
+if os.name != "nt":
+    _bd_m_mode = diff_repo("bd-m-mode", _mode_exec_open)
+    sh(_MODE_OPEN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode, agent_id="bld1", agent_type="builder")
+    _bd_mode_plain = diff_repo("bd-mode-plain", _mode_exec(TEST_A))
+    sh(_MODE_PLAIN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_mode_plain, agent_id="bld1", agent_type="builder")
+    _bd_m_conf_mode = diff_repo("bd-m-conflict-mode", _open_test_conflict_mode)
+    sh(_MODE_CONFLICT_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_conf_mode, agent_id="bld1", agent_type="builder")
+else:
+    skip_case(_MODE_OPEN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_PLAIN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_CONFLICT_CASE, NO_EXEC_BIT)
+_bd_m_mode_c = diff_repo("bd-m-mode-commit", _mode_exec_committed)
+sh("builder-refuse: a builder's merge commit that changes only the mode of a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode_c, agent_id="bld1", agent_type="builder")
+
+
+def _reaches_merge_check_case(where, rel, committed):
+    """A builder's change to `rel` in a merge reaches the merge check: own_changes answers, and git's diff of the
+    merge's old side lists `rel` before the merge check judges it. So a deny above comes from the merge check, and an
+    allow from an unread change fails here instead."""
+    materialize(where)
+    guard = _load_guard_module()
+    if guard.own_changes(where) is None:
+        return False, "own_changes returned None, so git could not answer for %s" % rel
+    if committed:
+        old = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
+                               run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        paths = guard.changed_paths(where, old, "HEAD") if old else None
+    else:
+        old = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        paths = guard.changed_paths(where, old) if old else None
+    if paths is None:
+        return False, "git could not list the change against the merge's old side"
+    if rel not in paths:
+        return False, "git's diff against the merge's old side does not list %s" % rel
+    return True, "git lists %s against the merge's old side, and own_changes answers" % rel
+
+
+# Each red above must reach the merge check and fail there, not on an unread change.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge in progress reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink, GITLINK, False)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink_c, GITLINK, True)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_mode_c, TEST_A, True)))
+if os.name != "nt":
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge in progress "
+                             "reaches the merge check", lambda: _reaches_merge_check_case(_bd_m_mode, TEST_A, False)))
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's exec-bit change on a conflicted test file in a merge in "
+                             "progress reaches the merge check",
+                             lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
+
+
+# The git reader a guard call goes through: `_git`, which guard_core imports from git_reads. The guard calls it as
+# guard_core._git, so a patch on the core module counts each call the guard makes.
+COUNTED_READERS = ("_git",)
+
+
+def _counted_own_changes(where):
+    """own_changes(where) with every git call the guard makes counted: the changes, and the argument tuples of the
+    calls in order. The count is taken at the readers the guard calls, so it is the guard's own. A reader that another
+    counted reader calls is not counted again: a chain of readers is one call."""
+    guard = _load_guard_module()
+    core = sys.modules["guard_core"]
+    calls = []
+    depth = [0]
+    real = {name: getattr(core, name) for name in COUNTED_READERS if hasattr(core, name)}
+
+    def counted(real_call):
+        def call(root, *args):
+            if not depth[0]:
+                calls.append(args)
+            depth[0] += 1
+            try:
+                return real_call(root, *args)
+            finally:
+                depth[0] -= 1
+        return call
+
+    for name, real_call in real.items():
+        setattr(core, name, counted(real_call))
+    try:
+        changes = guard.own_changes(where)
+    finally:
+        for name, real_call in real.items():
+            setattr(core, name, real_call)
+    return changes, calls
+
+
+def _calls_naming(calls, rels):
+    """{rel: how many git calls name rel} for each path in `rels`."""
+    return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
+
+
+def plain_commit_reads_case():
+    """A builder's plain commit: own_changes makes no git call that names one of its changed paths."""
+    where = diff_repo("bd-cost-plain", _cost_files, commit=True)
+    materialize(where)
+    changes, calls = _counted_own_changes(where)
+    if changes is None:
+        return False, "own_changes returned None for the plain commit"
+    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    if found != set(COST_PATHS):
+        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
+    named = {rel: n for rel, n in _calls_naming(calls, COST_PATHS).items() if n}
+    if named:
+        return False, "the plain commit's git calls name paths %r, want none" % (named,)
+    return True, "the plain commit's three paths are read through no git call"
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
+                         plain_commit_reads_case))
+
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
 sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
@@ -17222,6 +17920,10 @@ sh("builder-refuse: a new test file is denied at commit, and the reason says to 
 sh("builder-refuse: a new test file is denied at push, and the reason says to delete it and names no path",
    PUSH, "deny", rule=BDIFF, cwd=_bd_u2, agent_id="bld1", agent_type="builder",
    lacks=("tests/", "test_new"), carries=("delete",))
+# Untracked files are listed from the checkout's top, so the same new test file, under tests/, is refused from a
+# subfolder too.
+sh("builder-refuse: a builder's plain change with an untracked test file in another folder is denied at commit from "
+   "a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_u2, "src"), agent_id="bld1", agent_type="builder")
 
 
 def stop_pair_case():
@@ -17257,6 +17959,28 @@ def stop_pair_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
                          "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
+
+
+# A test-config file is read from the run folder, so a commit run from src/ reads src/src/pytest.ini,
+# finds no text, and allows a testpaths line that disables tests. The rows from the top are the control:
+# the same file read from the top is refused.
+_bd_src_ini = diff_repo("bd-src-ini-untracked", _put("src/pytest.ini", "[pytest]\ntestpaths = nowhere\n"))
+sh("builder-refuse: a builder's commit from src/ with an untracked src/pytest.ini that sets testpaths is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ with an untracked src/pytest.ini that sets testpaths is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same untracked src/pytest.ini, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini, agent_id="bld1", agent_type="builder")
+
+# The same join for a tracked src/pytest.ini: the base holds it, and the builder adds a testpaths line from src/.
+_bd_src_ini_t = diff_repo("bd-src-ini-tracked", _put("src/pytest.ini", "[pytest]\naddopts = -q\ntestpaths = nowhere\n"),
+                          files={**BASE_FILES, "src/pytest.ini": "[pytest]\naddopts = -q\n"})
+sh("builder-refuse: a builder's commit from src/ that adds testpaths to a tracked src/pytest.ini is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's push from src/ that adds testpaths to a tracked src/pytest.ini is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_src_ini_t, "src"), agent_id="bld1", agent_type="builder")
+sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
 
 
 # =========================================================================== failing open
