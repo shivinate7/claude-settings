@@ -1507,3 +1507,6 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- waiter-clock-unescaped-op: an unescaped `>` or `<` inside `[ ]` passes as an order, because shlex drops the backslash. The shell reads a redirect, so the loop ends at once and writes a stray file (hooks/guard_stream.py `clock_test`).
+- waiter-clock-epoch-unbounded: an epoch literal has no upper bound, so a millisecond value passes and the loop never ends (hooks/guard_stream.py `CLOCK_LITERAL`).
+- waiter-long-pause-in-loop: under run_in_background a later `done` counts as the command after a long pause, so `sleep infinity` in a clock-loop body passes (hooks/guard_stream.py `waiter_verdict` `long_ok`).
