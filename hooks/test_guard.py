@@ -7245,6 +7245,15 @@ agent_push_allowed("agent push: --delete $BR from an agent checkout allows, a de
                    VCS + " push origin --delete $BR", cwd=PUSHAGENT)
 agent_push_allowed("agent push: a variable destination $BR from a lane checkout allows",
                    VCS + " push origin $BR", cwd=PUSHFEAT)
+# A `$` in the destination does not hide its start. `worktree-agent-$ID` begins with the prefix, so it is refused
+# even from a lane checkout, whose current branch is no agent's. The source `lane` is no agent's either.
+agent_push_refused("agent push: a variable destination worktree-agent-$ID from a lane checkout denies",
+                   VCS + " push origin worktree-agent-$ID", cwd=PUSHFEAT)
+agent_push_refused("agent push: a lane source to worktree-agent-$ID from a lane checkout denies",
+                   VCS + " push origin lane:worktree-agent-$ID", cwd=PUSHFEAT)
+# The start is archive/, so the prefix is not at the front: an archive name stays allowed.
+agent_push_allowed("agent push: a lane source to archive/worktree-agent-$ID from a lane checkout allows",
+                   VCS + " push origin lane:archive/worktree-agent-$ID", cwd=PUSHFEAT)
 # A lane source to a lane slug, from an agent's checkout: the source is not HEAD, but the destination holds no
 # `$` or backtick, so the variable test must not fire on it.
 agent_push_allowed("agent push: a lane source to a lane slug from an agent checkout allows, no variable",
