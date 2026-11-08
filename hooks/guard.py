@@ -1644,7 +1644,8 @@ WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")
+# The values matched are fixed and unquoted, so a `#` after whitespace past them is a YAML comment, never part of a value.
 
 
 def is_workflow_rel(rel: str) -> bool:
@@ -1819,6 +1820,8 @@ def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
 WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
 WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
+# A fallback after `||` or `;` that always exits 0 (`|| true`, `|| :`, `; exit 0`), so a failed test no longer fails the step.
+WORKFLOW_NOOP_FALLBACK = re.compile(r"(?:\|\||;)\s*(?:true|:|exit\s+0)(?=\s*(?:$|&&|\|\||[;|#]))")
 
 
 def workflow_command_tests(command: str) -> set:
@@ -1842,21 +1845,26 @@ def workflow_command_tests(command: str) -> set:
     return found
 
 
-def workflow_run_commands(text: str):
-    """The command lines of every `run:` in `text`: an inline value, or each line of a block scalar."""
+def workflow_run_command_lines(text: str):
+    """The (line number, command) of every `run:` in `text`: an inline value, or each line of a block scalar."""
     commands, block = [], None
-    for line in text.splitlines():
+    for index, line in enumerate(text.splitlines()):
         if block is not None:
             if not line.strip() or len(line) - len(line.lstrip()) > block:
-                commands.append(line.strip())
+                commands.append((index, line.strip()))
                 continue
             block = None
         opened = WORKFLOW_RUN_BLOCK.match(line)
         if opened:
             block = len(opened.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
         elif WORKFLOW_RUN_PREFIX.match(line):
-            commands.append(WORKFLOW_RUN_PREFIX.sub("", line, count=1))
+            commands.append((index, WORKFLOW_RUN_PREFIX.sub("", line, count=1)))
     return commands
+
+
+def workflow_run_commands(text: str):
+    """The command lines of every `run:` in `text`."""
+    return [command for _index, command in workflow_run_command_lines(text)]
 
 
 def workflow_invoked_tests(text: str) -> set:
@@ -1914,6 +1922,13 @@ def workflow_disables_step(old_text: str, new_text: str) -> bool:
         for index in workflow_added_indexes(old_text, new_text))
 
 
+def workflow_hides_failure(old_text: str, new_text: str) -> bool:
+    """True when an added `run:` command line runs tests and ends in a no-op fallback, so the step passes on a red test."""
+    added = set(workflow_added_indexes(old_text, new_text))
+    return any(index in added and WORKFLOW_NOOP_FALLBACK.search(command) and workflow_command_is_test(command)
+               for index, command in workflow_run_command_lines(new_text))
+
+
 def workflow_drops_tests(old_text: str, new_text: str) -> bool:
     """True when a test path that a run line runs in `old_text` is run nowhere in `new_text`."""
     return bool(workflow_invoked_tests(old_text) - workflow_invoked_tests(new_text))
@@ -1922,7 +1937,7 @@ def workflow_drops_tests(old_text: str, new_text: str) -> bool:
 def workflow_builder_refused(old_text: str, new_text: str) -> bool:
     """The one verdict on a builder's workflow change, for the write tools and the commit diff."""
     return (workflow_disables_tests(old_text, new_text) or workflow_disables_step(old_text, new_text)
-            or workflow_drops_tests(old_text, new_text))
+            or workflow_hides_failure(old_text, new_text) or workflow_drops_tests(old_text, new_text))
 
 
 def workflow_pairs(tool_input, full: str):
