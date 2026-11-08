@@ -7605,7 +7605,7 @@ sh("push-new-branch: a refusal of a sha ahead of main names the pull request's o
 # HEAD and a local branch named as the source are not judged (coordinator ruling 14:45 CST): main's verdict stands.
 sh("push-new-branch: HEAD as the source is not judged, allows",
    VCS + " push origin HEAD:refs/heads/skc-head-src", "allow", cwd=PUSHSELF)
-sh("push-new-branch: a local branch named as the source is not judged, allows",
+sh("push-new-branch: a local branch with an upstream named as the source is not judged, allows",
    VCS + " push origin mylocal:refs/heads/skc-local-src", "allow", cwd=PUSHSTRAY)
 sh("push-new-branch: a local branch pushed to its own name is exempt",
    VCS + " push origin mylocal:mylocal", "allow", cwd=PUSHSTRAY)
