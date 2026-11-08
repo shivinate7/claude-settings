@@ -60,12 +60,12 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls, one call per list read however many pages it pages.
+Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge <pr> --confirm`, and the preview, add the round-3 check's one read, however many pages: the repo's issue comments since the oldest commit new to the base, less a day. A lane's first commit comes before any review of it. One local git read gives that date. A PR with no commit new to the base reads the comments since it opened. The check reads no open PR and no check run. Checking the PR's own head and the remedy text add no read. The stale-record rule adds two local history reads per stale `yes` record, and no GitHub read.
-- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge <pr> --confirm`, and the preview, add the round-3 check's one list read: the repo's issue comments since the oldest commit new to the base, less a day. A lane's first commit comes before any review of it. One local git read gives that date. A PR with no commit new to the base reads the comments since it opened. The check reads no open PR and no check run. Checking the PR's own head and the remedy text add no read. The stale-record rule adds two local history reads per stale `yes` record, and no GitHub read.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
-- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
