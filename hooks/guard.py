@@ -591,7 +591,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_shape_hit, review_note, pr_call_target,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
@@ -1860,6 +1860,7 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 # ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 _COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
+_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/(\d+)/?")   # a comment edited in place, by comment id
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
 _CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
 
@@ -1890,13 +1891,14 @@ def _piped_cat_file(previous) -> str:
     return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
 
 
-def _api_post_bodies(args):
-    """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None. A `body` field
+def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
+    """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
+    names another route to read (the edit route returns the comment id as `number`). A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
-    route = next((a for a in args if _COMMENTS_ROUTE.fullmatch(a)), None)
+    route = next((a for a in args if routes.fullmatch(a)), None)
     if route is None or args[:1] != ["api"]:
         return None
-    repo, number = _COMMENTS_ROUTE.fullmatch(route).groups()
+    repo, number = routes.fullmatch(route).groups()
     texts, files, stdin, index = [], [], False, 1
     while index < len(args):
         arg = args[index]
@@ -1935,12 +1937,16 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(segment)
     if rest is None:
         return None
+    shape_only = False
     if rest[:2] == ["pr", "comment"]:
         args = rest[2:]
         selector, repo = _comment_target(args)
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
         posted = _api_post_bodies(rest)
+        if posted is None:
+            posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
+            shape_only = posted is not None   # an edit names a comment, not a pull request: judge its shape, read no head
         if posted is None:
             return None
         repo, selector, texts, files, stdin = posted
@@ -1971,6 +1977,8 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             review_note("the body file " + name + " could not be read")
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
+    if shape_only:
+        return review_shape_hit(texts)
     return review_record_hit(texts, repo, selector, where)
 
 

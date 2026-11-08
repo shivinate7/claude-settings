@@ -477,11 +477,14 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 
 # ---- a review record posted as a comment (rule pr-review-record)
 #
-# A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form), name
-# the pull request it is posted on, and name that pull request's live head. A hand-typed head is how a record goes stale the
-# moment it is posted. The remedy is the render, which fills the live head itself.
-# Cost: one pull request read per marked post (`Host.pr`), none for a post with no marker; a marked update adds one comment read. A read that fails allows the post
-# with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
+# A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
+# That is the shape check, `review_shape_hit`: the render output, a line exactly `---`, then the footer, with nothing between the
+# CI line and `---`. A post, and an edit in place, are both judged for shape. A post must also name the pull request it is posted
+# on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
+# posted. The remedy is the render, which fills the live head itself.
+# Cost: the shape check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
+# for a post with no marker and none for an edit, whose input names a comment, not a pull request. A read that fails allows the
+# post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
 # The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
 UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
@@ -492,6 +495,13 @@ REVIEW_REASON = (
     "Rule (pr-review-record): %s. A review record is rendered by the merge tool for the live head, never typed by hand. "
     "Remedy: run `%s` and post its output unchanged. "
     "(decision pr-review-record, a review record names the head it reviewed)"
+)
+REVIEW_SHAPE_REASON = (
+    "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
+    "A record is the render output, then a line exactly `---`, then the footer, with nothing between the CI line and `---`. "
+    "Prose after the CI line, or a body that does not open with the marker, does not parse, and `merge --reviewed` cannot read it. "
+    "Remedy: run `%s`, post its output unchanged, and put any note after the `---` line, in the footer. "
+    "(decision pr-review-record, a review record must parse)"
 )
 
 
@@ -513,12 +523,12 @@ def comment_pull_request(comment_id):
     return read
 
 
-def review_record_hit(bodies, repo: str, selector, where: str):
-    """Return (matched, reason) when a comment post must be refused, else None.
+def _review_render(module, number, head):
+    return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
-    `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
-    so its read happens only once the body parses. No body holding the marker: None, and no read."""
+
+def _marked_bodies(bodies):
+    """Return (module, marked bodies), or None when no body can be a record. A record is a body whose first line is the marker."""
     texts = [b for b in bodies if isinstance(b, str) and b]
     if not any("review-record" in b for b in texts):
         return None   # the cheap test: no marker is possible, so the merge tool is not even loaded
@@ -526,19 +536,40 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     if module is None:
         review_note("the merge tool could not be loaded")
         return None
-    marked = [b for b in texts if module.review_marked(b)]   # a record only when its first line is the marker
-    if not marked:
-        return None
+    marked = [b for b in texts if module.review_marked(b)]
+    return (module, marked) if marked else None
 
-    def render_for(number, head):
-        return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
+def _shape_refusal(module, marked, selector):
+    """Return (matched, reason) for the first marked body that does not parse, else None. Reads nothing."""
     named = "" if callable(selector) else str(selector).strip()
     for body in marked:
         if module.parse_review(body) is None:
-            render = render_for(named if named.isdigit() else "<pr>", "<live head>")
-            return "review record that does not parse", REVIEW_REASON % (
-                "this body holds the review-record marker but is not a well-formed record", render)
+            return "review record that does not parse", REVIEW_SHAPE_REASON % _review_render(
+                module, named if named.isdigit() else "<pr>", "<live head>")
+    return None
+
+
+def review_shape_hit(bodies, selector=""):
+    """Return (matched, reason) when a body that opens with the record marker does not parse, else None. The one home of the
+    shape check: an edit in place is judged by this alone, and review_record_hit calls it. It makes no read."""
+    found = _marked_bodies(bodies)
+    return _shape_refusal(*found, selector) if found else None
+
+
+def review_record_hit(bodies, repo: str, selector, where: str):
+    """Return (matched, reason) when a comment post must be refused, else None.
+
+    `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
+    so its read happens only once the body parses. No body holding the marker: None, and no read."""
+    found = _marked_bodies(bodies)
+    if not found:
+        return None
+    module, marked = found
+    hit = _shape_refusal(module, marked, selector)
+    if hit:
+        return hit
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
@@ -547,7 +578,7 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     except (Exception, SystemExit) as e:
         review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")
         return None
-    render = render_for(number, live)
+    render = _review_render(module, number, live)
     for body in marked:
         record = module.parse_review(body)
         if record["n"] != number:
