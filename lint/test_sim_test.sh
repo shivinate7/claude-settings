@@ -1170,7 +1170,7 @@ end_case "86 take-over put-back: a lock re-created in the window is not nested, 
 
 # EPERM: a live holder that kill -0 cannot signal is waited for, not taken over. As root, the holder is a root process and
 # the tool runs as nobody. Otherwise the holder is pid 1, which belongs to root, and the tool runs as this user.
-eperm_user= eperm_holder= eperm_reason=
+eperm_user='' eperm_holder='' eperm_reason=''
 if [[ $(id -u) -eq 0 ]]; then
   eperm_user=nobody
   if id nobody >/dev/null 2>&1 && command -v setpriv >/dev/null 2>&1; then eperm_holder=$(live_pid)
