@@ -843,6 +843,7 @@
 - frozen-copy-read-amp-redirect: `cp /tmp/x <frozen> &> /dev/null` is allowed because `_copy_reads` reads the bare `&` of `&>` as an operand, so the frozen DEST counts as a source; same on main (hooks/guard_frozen.py).
 - stale-stamped-tree-called-live-pin: session_start.sh calls an old `<clone>-live-<hex>` tree "the live pin" after the link has moved on, though hooks/guard_frozen.py leaves it writable; the cd advice still holds (hooks/session_start.sh)
 - pin-line-silent-on-failed-listing: when the worktree listing fails inside a pin, no pin line prints and the unknown line names only the agent count (hooks/session_start.sh)
+- tmpdir-unknown-host-gets-line: a host whose uname is missing or prints another value is treated as Linux or macOS, so it gets the TMPDIR line when TMPDIR is unset. Only a uname starting MINGW, MSYS or CYGWIN gets none (hooks/session_start.sh tmpdir_os). Fix: none — an unknown host gets the Linux and macOS behaviour of #1517. Until: 2026-11-21.
 - pin-name-fifth-copy: install.ps1 also builds `<clone>-live`, which the copy list in install.sh's comment omits (install.sh, install.ps1)
 - bg-timeout-no-beat-file: A foreground Bash call that its timeout moves to the background skips `--hook`, so it gets no beat file. Only `--stop` lists it, and nothing strands it. Decision: stall-watch
 - merge-progress-stdout-only: merge/merge.py prints its progress line to stdout only, so `merge ... | grep` hides it from the stall watch; no incident (review round 1 of PR #932). Decision: stall-watch
