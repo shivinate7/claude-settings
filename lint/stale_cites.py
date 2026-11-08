@@ -674,9 +674,9 @@ def named_too_large(text):
 
 def named_excerpt(names, text, around=3, limit=40):
     """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. Each line that holds
-    one of `names` as a whole word shows the `around` lines about it. A name, with a trailing `(...)` dropped and, for a dotted name,
-    its last segment only, that Python `text` defines as a def or class also shows from its def row through its body (python_defs).
-    A dotted `B.run` takes the def of `run` in class B, else the earliest def of `run`. The cap fills in this order: the def rows, the
+    one of `names`, each with a trailing `(...)` dropped, as a whole word shows the `around` lines about it. A name that Python `text`
+    defines as a def or class also shows from its def row through its body (python_defs); a dotted name looks up its last segment only.
+    A dotted `B.run` takes the def of `run` in class B, else the earliest def of `run` when the file defines `B`, else no def. The cap fills in this order: the def rows, the
     windows of the other lines, the def bodies, the rest of the windows. Each row is cut to NAMED_ROW_CHARS characters with a marker.
     When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line
     holds a name and no def is found, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line
@@ -685,13 +685,16 @@ def named_excerpt(names, text, around=3, limit=40):
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
+    names = [re.sub(r"\(.*\)$", "", name) for name in names]
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
     defs = python_defs(text) or []
     heads, bodies = [], []
     for name in names:
-        parts = re.sub(r"\(.*\)$", "", name).split(".")
+        parts = name.split(".")
         same = [d for d in defs if d[2] == parts[-1]]
         owned = [d for d in same if len(parts) > 1 and d[3] == parts[-2]]
+        if len(parts) > 1 and not any(d[2] == parts[-2] for d in defs):
+            same = []  # the prefix is no def or class of this file (os.path, self.x): the last segment is not its def
         for first, last, _, _ in (owned or same)[:1]:
             heads.append(first)
             bodies.extend(range(first + 1, min(last, len(rows)) + 1))
