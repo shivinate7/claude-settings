@@ -1104,13 +1104,10 @@ def _settings_place(path: str, cwd: str) -> bool:
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
         here.add(os.path.normcase(os.path.realpath(_expanded(cwd, ""))))
-        # The checkout's own root file is one write from any subfolder of the checkout, which `.git` marks.
-        root = _checkout_root_by_stat(os.path.realpath(_expanded(cwd, "")))
-        if root:
-            here.add(os.path.normcase(root))
     target = os.path.realpath(folder)
     # The target's own folder is a place too, from any cwd: a checkout root (`.git` marks it) or an install
-    # source (`install.ps1`) holds a settings file that a local install links into ~/.claude.
+    # source (`install.ps1`) holds a settings file that a local install links into ~/.claude. This also
+    # covers the working folder's own checkout root, since that root is a checkout root.
     if _checkout_root_by_stat(target) == target or os.path.exists(os.path.join(target, "install.ps1")):
         return True
     return os.path.normcase(target) in here
