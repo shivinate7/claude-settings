@@ -80,11 +80,14 @@ def scan(root):
     if not os.path.isdir(hooks):
         raise Unknown("no hooks folder under %s" % root)
     dups = {}  # rel path -> {name: [lines]} for names assigned more than once
-    for path in sorted(glob.glob(os.path.join(hooks, "*.py"))):
+    scanned = set()
+    # The folder is escaped so a root such as r[x] is read as a path, not as a glob pattern.
+    for path in sorted(glob.glob(os.path.join(glob.escape(hooks), "*.py"))):
         base = os.path.basename(path)
         if base.startswith("test_"):
             continue
         rel = "hooks/" + base
+        scanned.add(rel)
         try:
             with open(path, encoding="utf-8") as f:
                 tree = ast.parse(f.read(), filename=rel)
@@ -93,8 +96,8 @@ def scan(root):
         found = {n: ls for n, ls in top_level_assignments(tree).items() if len(ls) > 1}
         if found:
             dups[rel] = found
-    scanned = {"hooks/" + os.path.basename(p) for p in glob.glob(os.path.join(hooks, "*.py"))
-               if not os.path.basename(p).startswith("test_")}
+    if not scanned:  # nothing scanned must never read as a pass
+        raise Unknown("no hook modules under %s" % hooks)
     return dups, scanned
 
 
@@ -125,11 +128,11 @@ def main(argv):
                 fails.append("%s: FAIL: %s: %s: %s allowance for %s has an empty reason"
                              % (NAME, ALLOW, rel, name, name))
     for rel, names in sorted(allow.items()):
+        if rel not in scanned:  # checked before the name loop so an empty name dict is still stale
+            fails.append("%s: FAIL: %s: stale allowance, %s is not a scanned hook module"
+                         % (NAME, ALLOW, rel))
+            continue
         for name in names:
-            if rel not in scanned:
-                fails.append("%s: FAIL: %s: stale allowance, %s is not a scanned hook module"
-                             % (NAME, ALLOW, rel))
-                break
             if name not in dups.get(rel, {}):
                 fails.append("%s: FAIL: %s: stale allowance, %s in %s is not assigned twice"
                              % (NAME, ALLOW, name, rel))
