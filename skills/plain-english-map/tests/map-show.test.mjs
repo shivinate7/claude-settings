@@ -12,7 +12,7 @@
 //   unreadable   a map page the command cannot read: one plain stderr line, exit 3, no stack trace.
 //
 // A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. The fixture names
-// only `ts`, so a `.py` or `.json` line is no code map line there: map-show lists it only with a Decisions or Debts line.
+// only `ts`, so a `.py` or `.json` line is no code map line there: map-show lists it only when a record names its file.
 // A case that needs a code line of another extension sets `codeExtensions` in its own scratch copy. A Tables row is never a map line.
 //
 // Every case calls `needFile` first, so on a checkout with no command each case fails for the missing file.
@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { HERE, SKILL, gitIn, junction, needFile, run, scratchRepo } from './helpers.mjs';
+import { HERE, SKILL, gitIn, junction, needFile, run, scratchRepo, subLineIds } from './helpers.mjs';
 
 const CLI = join(SKILL, 'scripts', 'map-show.mjs');
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
@@ -165,6 +165,45 @@ test('3c. with codeExtensions that name py, a .py file prints its map line and i
   assert.equal(r.status, 0, `a .py file that the config names must exit 0\n${dump(r)}`);
   assert.ok(r.stdout.includes('Holds the retry wait.'), `the output must print the map line of src/retry.py\n${dump(r)}`);
   assert.ok(r.stdout.includes(RETRY_FACT), `the output must print the value fact line of src/retry.py\n${dump(r)}`);
+});
+
+/** The decision fixture, with one tracked non-code file, `assets/badge.svg`, and `lines` appended to its map page under `## Code files`. */
+const withBadge = (lines) => {
+  const dir = decisionsRepo();
+  mkdirSync(join(dir, 'assets'));
+  writeFileSync(join(dir, 'assets', 'badge.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>\n');
+  gitIn(dir, 'add', '-N', 'assets/badge.svg');
+  const page = join(dir, 'docs', 'map', 'core.md');
+  writeFileSync(page, `${readFileSync(page, 'utf8').replace(/\n*$/, '\n')}${lines.join('\n')}\n`);
+  return dir;
+};
+
+/** A non-code file that no record names is out of scope: the command exits 1, prints nothing, and its one stderr line names no map line. */
+const assertOutOfScope = (r, file) => {
+  assert.equal(r.status, 1, `${file} is named by no record, so it is out of scope and must exit 1\n${dump(r)}`);
+  assert.equal(r.stdout.trim(), '', 'nothing prints on stdout');
+  assert.equal(stderrOf(r).trim(), `no map line for ${file}`, `stderr must hold one line: no map line for ${file}`);
+};
+
+// A non-code file that no record names is out of scope, with or without a Decisions or Debts line on its map line (decision `map-lists-record-named`).
+test('3d. a non-code file that no record names is no map line, though its map line has a Decisions line', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Decisions: `D7`']);
+  // The scope first: the svg's map line must hold its Decisions line, and a code file of the same page must print its map line.
+  assert.deepEqual(subLineIds(dir, 'docs/map/core.md', 'assets/badge.svg', 'Decisions'), ['D7'], 'scope: the svg map line holds a Decisions line');
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a code file with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `the code file must print its map line\n${dump(scope)}`);
+  assertOutOfScope(show(['assets/badge.svg'], dir), 'assets/badge.svg');
+});
+
+test('3e. a non-code file that no record names is no map line, though its map line has a Debts line', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Debts: `retry-backoff`']);
+  // The scope first: the svg's map line must hold its Debts line, and a code file of the same page must print its map line.
+  assert.deepEqual(subLineIds(dir, 'docs/map/core.md', 'assets/badge.svg', 'Debts'), ['retry-backoff'], 'scope: the svg map line holds a Debts line');
+  const scope = show(['src/retry.ts'], dir);
+  assert.equal(scope.status, 0, `a code file with a map line must exit 0\n${dump(scope)}`);
+  assert.ok(scope.stdout.includes('Holds the retry wait.'), `the code file must print its map line\n${dump(scope)}`);
+  assertOutOfScope(show(['assets/badge.svg'], dir), 'assets/badge.svg');
 });
 
 test('4. a file path prints the Homes line that cites it', () => {
@@ -605,4 +644,14 @@ test('23j. the id reads each map line\'s decisions line, not the cites in the so
   // D7_ROWS without its first row, src/retry.ts, plus the map line of src/cache.ts that now cites D7.
   const expected = ['src/cache.ts — Holds the cache size.', ...D7_ROWS.slice(1)];
   assert.deepEqual(linesOf(r.stdout).sort(), [...expected].sort(), `D7 must print the map lines whose decisions line cites it: src/cache.ts, and not src/retry.ts\n${dump(r)}`);
+});
+
+// A non-code file that no record names is out of scope for an id too: its decisions line may hold the id, and the id still lists no such line (decision `map-lists-record-named`).
+test('23k. a decision id does not list a non-code file that no record names, though its decisions line holds the id', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Decisions: `D7`']);
+  const r = show(['D7'], dir);
+  // The scope first: D7 names a record and the code lines that cite it must print, or "no svg" holds for a command that printed nothing.
+  assert.equal(r.status, 0, `D7 names a record and is cited by code lines, so it must exit 0\n${dump(r)}`);
+  assert.ok(r.stdout.includes('src/retry.ts — Holds the retry wait.'), `D7 must print the map line of src/retry.ts\n${dump(r)}`);
+  assert.ok(!r.stdout.includes('assets/badge.svg'), `assets/badge.svg is named by no record, so D7 must not list it, though its decisions line holds D7\n${dump(r)}`);
 });
