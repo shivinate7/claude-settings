@@ -232,6 +232,13 @@ class CheckCase(Fixture):
                 sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)
                 self.assertFlagged(sha, "add widget tests", rel)
 
+    def test_none_in_parentheses_is_flagged(self):
+        """`none (x)` has no colon after none, so it is not the `none: <reason>` form and is flagged."""
+        self.base()
+        rel = self.new_test_path()
+        sha = self.commit("add widget tests", {rel: TEST_TEXT}, red="Red-run: none (x)")
+        self.assertFlagged(sha, "add widget tests", rel)
+
     def test_zero_failures_is_flagged(self):
         self.base()
         rel = self.new_test_path()

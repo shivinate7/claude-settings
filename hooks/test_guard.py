@@ -11356,6 +11356,7 @@ RR_RED_LINE = "Red-run: python3 -m pytest x -> 1 failed on abc1234"
 RR_NONE_LINE = "Red-run: none: re-pointed fixture"
 RR_ZERO_LINE = "Red-run: pytest x -> 0 failed on abc1234"
 RR_NOARROW_LINE = "Red-run: pytest x failed"
+RR_PAREN_NONE_LINE = "Red-run: none (fixture re-pointed)"
 RRROOT = os.path.join(ROOT, "redrun")
 RR_PLAIN = os.path.join(RRROOT, "rr-plain")            # an unpushed commit adding hooks/test_x.py, no trailer
 RR_RED = os.path.join(RRROOT, "rr-red")                # the same commit, with a valid red-run line
@@ -11378,6 +11379,7 @@ RR_NODEFAULT = os.path.join(RRROOT, "rr-nodefault")    # a trunk the default bas
 RR_TAG = os.path.join(RRROOT, "rr-tag")                # a tag on an untrailered test commit
 RR_NOLINT = os.path.join(RRROOT, "nolint")             # a copy of the hooks with no lint folder beside it
 RR_NOLINT_GUARD = os.path.join(RR_NOLINT, "guard.py")
+RR_PARENNONE = os.path.join(RRROOT, "rr-parennone")    # a test commit whose trailer is `none (...)`, no colon after none
 
 
 def _rr_run(where, *args):
@@ -11449,6 +11451,9 @@ def _build_red_run():
 
     _cmk_pushed(RR_NOARROW, {"a.txt": "base\n"})
     commit(RR_NOARROW, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_NOARROW_LINE))
+
+    _cmk_pushed(RR_PARENNONE, {"a.txt": "base\n"})
+    commit(RR_PARENNONE, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_PAREN_NONE_LINE))
 
     _cmk_pushed(RR_DOCS, {"a.txt": "base\n"})
     commit(RR_DOCS, {"docs/notes.md": "# Notes\n", "hooks/helper.py": "VALUE = 1\n",
@@ -11589,7 +11594,7 @@ def _build_red_run():
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
-              RR_NODEFAULT, RR_TAG, RR_NOLINT],
+              RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE],
              _build_red_run)
 
 
@@ -11635,6 +11640,8 @@ rr_allow("a push of a commit that only deletes test lines and a test file", VCS 
 # 8. A malformed trailer is no trailer: a zero count, or no arrow and no sha. Both are refused.
 rr_refuse("a test commit with Red-run: pytest x -> 0 failed on abc1234, a zero count", VCS + " push", RR_ZERO)
 rr_refuse("a test commit with Red-run: pytest x failed, no arrow and no sha", VCS + " push", RR_NOARROW)
+# A `none` line with a parenthesis and no colon is not the `none: <reason>` form, so it is refused.
+rr_refuse("a test commit with Red-run: none (fixture re-pointed), no colon after none", VCS + " push", RR_PARENNONE)
 
 # Full size: six test files in one commit, none with a trailer. The commit names more paths than the judge lists.
 rr_refuse("a commit that adds six test files, none with a trailer", VCS + " push", RR_SIX)
