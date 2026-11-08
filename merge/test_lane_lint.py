@@ -130,6 +130,7 @@ jobs:
           NODE_PATH: tools/guard-node-modules
         run: python3 hooks/test_guard.py
 """
+OTHER_JOB_RUNS_ON = "  checks-merge-install:\n    runs-on: ubuntu-latest\n"  # the exact text of that job's runs-on in OTHER_JOBS_WORKFLOW (checks has the same line)
 COLLISION = "error: cannot lock ref 'refs/remotes/origin/main': is at %s but expected %s" % ("a" * 40, "b" * 40)  # git's text when another fetch moved the ref
 
 
@@ -820,10 +821,16 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
 
-    def other_jobs_head(self):
+    def other_jobs_head(self, runs_on=None):
         """The lane's head with the workflow of the other jobs committed on feat. RecordsEnv.on is the one home of that push; it
-        reads only self.other and sh, so this case calls it on itself. -> feat's head."""
-        tm.RecordsEnv.on(self, "feat", {".github/workflows/checks.yml": OTHER_JOBS_WORKFLOW}, "feat: the workflow of the other jobs")
+        reads only self.other and sh, so this case calls it on itself. `runs_on` (the lines of the key, as the workflow writes
+        them) replaces checks-merge-install's runs-on; None keeps OTHER_JOBS_WORKFLOW as it is. -> feat's head."""
+        text = OTHER_JOBS_WORKFLOW
+        if runs_on is not None:
+            self.assertIn(OTHER_JOB_RUNS_ON, text, "OTHER_JOB_RUNS_ON is not in OTHER_JOBS_WORKFLOW, so the swap would change nothing")
+            text = text.replace(OTHER_JOB_RUNS_ON, "  %s:\n" % OTHER_JOB + runs_on)
+            self.assertNotIn(OTHER_JOB_RUNS_ON, text, "the runs-on swap left the workflow's own runs-on in place")
+        tm.RecordsEnv.on(self, "feat", {".github/workflows/checks.yml": text}, "feat: the workflow of the other jobs")
         return self.head("feat")
 
     def test_a_picked_suite_in_another_linux_job_runs_there_and_its_failure_fails_the_lane_lint(self):
@@ -881,6 +888,40 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         notes = [line for line in out.splitlines() if MACOS_JOB in line]
         self.assertEqual(len(notes), 1, "the macOS job's picked suite is not printed as one `not run` line: %s" % out)
+        self.assertTrue(notes[0].startswith("not run"), out)
+
+    def test_runs_on_a_quoted_or_flow_linux_label_runs_the_picked_suite_there(self):
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        for runs_on in ('    runs-on: "ubuntu-latest"\n', "    runs-on: 'ubuntu-22.04'\n", "    runs-on: [ubuntu-latest]\n"):
+            with self.subTest(runs_on=runs_on.strip()):
+                head = self.other_jobs_head(runs_on)
+                rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)  # the other job's run is asserted first: scope before subject
+                self.assertEqual(rc, 0, "a Linux runs-on that is quoted or a flow list did not run the picked suite in %s: %s" % (OTHER_JOB, out))
+                self.assertFalse(any("runs-on" in line for line in out.splitlines()), "a Linux job is printed as not run: " + out)
+                self.assertTrue(any(line.startswith("PASS") and OTHER_JOB in line and "merge/test_merge.py" in line for line in out.splitlines()),
+                                "the PASS line does not name the suite run in %s: %s" % (OTHER_JOB, out))
+
+    def test_runs_on_an_expression_a_map_or_no_value_reads_unknown_naming_the_job(self):
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        for runs_on in ("    runs-on: ${{ matrix.os }}\n", "    runs-on:\n      group: big\n      labels: ubuntu-latest\n", "    runs-on:\n"):
+            with self.subTest(runs_on=repr(runs_on)):
+                head = self.other_jobs_head(runs_on)
+                rc, out = self.lint_run("--lane-lint", head, head=head)  # no run of the other job: its runs-on names no OS this lint can read
+                self.assertNotEqual(rc, 0, "a runs-on this lint cannot read passed the lint of %s: %s" % (OTHER_JOB, out))
+                self.assertEqual(pass_lines(out), [], out)
+                self.assertTrue(any("unknown" in line and OTHER_JOB in line for line in out.splitlines()),
+                                "no unknown line names %s for a runs-on this lint cannot read: %s" % (OTHER_JOB, out))
+
+    def test_runs_on_a_quoted_windows_label_stays_not_run_and_the_lane_lint_passes(self):
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        head = self.other_jobs_head('    runs-on: "windows-latest"\n')
+        rc, out = self.lint_run("--lane-lint", head, head=head)  # no run of the other job: a quoted Windows label is not Linux
+        self.assertEqual(rc, 0, out)
+        notes = [line for line in out.splitlines() if OTHER_JOB in line]
+        self.assertEqual(len(notes), 1, "the quoted Windows job's picked suite is not one `not run` line: %s" % out)
         self.assertTrue(notes[0].startswith("not run"), out)
 
     def test_control_no_picked_suite_in_another_job_makes_no_extra_run(self):
