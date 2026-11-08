@@ -7,9 +7,10 @@ a raw call. hooks/test_nowindow.py pins this contract.
 
 Each wrapper is a drop-in for the `subprocess` function of the same name. On Windows it ORs
 CREATE_NO_WINDOW into the caller's `creationflags` and keeps every flag the caller passed. Elsewhere
-it adds nothing. On Windows, when the caller gives no stdin and no input, the child inherits this process's
-stdin only when it is a pipe or a file. A console stdin, or one that cannot be read, becomes an empty stdin: a
-no-window child cannot use an inherited console stdin, and its own subprocess calls fail with WinError 6. The
+it adds nothing. On Windows, when the caller gives no stdin and no input, the wrapper leaves stdin unset while
+this process's stdin is a pipe or a file. The child gets that stdin only when the caller redirects stdout or
+stderr. Any other stdin, such as a console or one that cannot be read, becomes an empty stdin: a no-window child
+cannot use an inherited console stdin, and its own subprocess calls fail with WinError 6. The
 platform is read at call time, and the wrapper looks up `subprocess.<name>` at call time too, so a test patch
 on `subprocess.<name>` sees the call.
 
