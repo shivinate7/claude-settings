@@ -39,8 +39,15 @@
 # At 3 or more counted new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops the
 # child, shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
 # stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
-# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
-# (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
+# First-frame check (own boot only, owner, page item 433 pick a, 2026-11-08 12:00 CST; decision sim-boot-is-verified): right
+# after record_boot it runs `hooks/sim_boot_record.py --check <UDID>`, the hook's own sim_ok (bootstatus, then a screenshot
+# that is not one colour). Exit 1 from the check prints one stderr line (first-frame check failed, with the UDID; the hook's
+# own line is not forwarded), runs no tests and no hold child, and exits 1; the trap shuts the device down. Any other outcome
+# passes, a missing hook file or python3 too (fail open, as an unjudged frame passes). A reuse runs no check. Known gap,
+# untested: a TERM during the check waits for the check to return (bootstatus, up to 90 s).
+# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3 twice
+# (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl; --check: one
+# bootstatus and one screenshot, no file kept); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
 # processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
 # leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
@@ -217,6 +224,12 @@ if [ -z "$udid" ]; then
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
+    # exit 1 only on the check's own failure code; any other outcome (pass, missing python3 or hook) passes.
+    python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --check "$udid" >/dev/null 2>&1
+    if [ $? -eq 1 ]; then
+      echo "sim-test: first-frame check failed on $udid; ran nothing, shutting it down." >&2
+      exit 1
+    fi
   fi
 fi
 echo "sim-test: using $udid"
