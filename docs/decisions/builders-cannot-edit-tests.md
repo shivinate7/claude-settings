@@ -27,7 +27,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 101 of 103 `builder-refuse` cases pass on this tip. The two that fail name `conflict-markers` for a staged-marker test file; `builder-diff` now denies it first, so a test-author re-points them.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 103 of 103 `builder-refuse` cases pass on this tip.
 
 ## Roles
 
@@ -62,7 +62,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
 
-- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). Both use the Edit path's predicate (`builder_test_path`).
+- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit` in `hooks/guard_frozen.py`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`, same module). Both use the Edit path's predicate (`builder_test_path`, in `hooks/guard.py`).
 - Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
 - Landed: 2026-11-02.
 - Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
