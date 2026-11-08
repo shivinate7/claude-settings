@@ -944,8 +944,10 @@ def case_the_at_once_relist_judges_the_newest_run_of_a_name():
 
 
 def case_failed_re_list_keeps_the_judged_verdict():
-    """A red run is judged, and then the at-once re-list is refused (HTTP 403). The judged run is the answer:
-    the hook says red with its failing jobs, not `CI unknown`. Control: the same run with no refusal."""
+    """A red run is judged, then the at-once re-list is refused (HTTP 403). The hook still says red with its failing
+    jobs. A red line states a failure the hook read, and no run the refused list could have shown undoes it. A green
+    line would claim the whole head passed, so a green run reads unknown instead (the case after this one).
+    Control: the same run with no refusal."""
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
     expect_verdict("red run, no refusal (control)", res, "red", names_in=["unit", "e2e"], names_out=["lint"])
     res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED], list_error_from=2),
@@ -954,6 +956,78 @@ def case_failed_re_list_keeps_the_judged_verdict():
     check("%s: reads run 902 and lists twice" % label, "902" in watched(res) and count(res, "run", "list") == 2,
           why(res))
     expect_verdict(label, res, "red", names_in=["unit", "e2e"], names_out=["lint"])
+
+
+def case_failed_re_list_after_a_green_run_is_unknown():
+    """A green run is judged, and then the at-once re-list is refused (HTTP 403). The re-list could have shown a
+    red or a still-running run, and a green line would say the whole head passed. So the verdict is `CI unknown`,
+    as for any read that could not run. Control: the same green run with no refusal reads green."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("green run, no refusal (control)", res, "green")
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN], list_error_from=2),
+                   extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "green run judged, then the at-once re-list is refused"
+    check("%s: reads run 901 and lists twice" % label, "901" in watched(res) and count(res, "run", "list") == 2,
+          why(res))
+    expect_verdict(label, res, "unknown")
+
+
+def case_green_run_judged_past_the_deadline_is_not_green():
+    """A green run ends at the deadline, so its jobs read is at the deadline too: no time is left for the at-once
+    re-list, and wait_for returns after the one judged run. A red run that shows only at a later list (codeql) is
+    then unread, and a line that says CI green would hide it. The line must be unknown, or the re-list must run and
+    find the red run. Scope first: the green run's jobs read is at the deadline, so the case reaches that branch.
+    Control: a red run that ends at the deadline, with no later run, stays red with its failing jobs. The status
+    reads are 30 s apart, so the last one is at 90 s and the run ends at the 100 s deadline."""
+    budget = 100
+    later_red = run(931, "codeql", "failure", [job("scan", "failure")], appears_at_list=2)
+    label = "green run ends at the deadline, a red run shows only at a later list"
+    raised, clock, calls, deadline = wait_for_on_fakes([GREEN, later_red], budget, ends_at={901: budget}, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    jobs_reads = [t for t, a in calls if a[:3] == ["run", "view", "901"] and "jobs" in " ".join(a)]
+    check("%s: the green run's jobs read is at or past the deadline (scope)" % label,
+          bool(jobs_reads) and jobs_reads[-1] >= deadline - 1e-6, detail)
+    check("%s: the line is not CI green, the later run is unread" % label,
+          not str(clock.line).startswith("CI green"), detail)
+
+    label = "red run ends at the deadline, no later run (control)"
+    raised, clock, calls, deadline = wait_for_on_fakes([RED], budget, ends_at={902: budget}, line=True)
+    detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+    check("%s: the line is CI red, naming unit and e2e, not lint" % label,
+          str(clock.line).startswith("CI red") and "unit" in clock.line and "e2e" in clock.line
+          and "lint" not in clock.line, detail)
+
+
+def refused_new_run():
+    """A run that first shows at the at-once re-list, completed, whose jobs read is refused (HTTP 403)."""
+    return dict(run(931, "codeql", "success", [job("scan", "success")], appears_at_list=2), refuse_jobs_read=True)
+
+
+def case_refused_re_list_view_keeps_a_judged_red():
+    """A red run is judged, then the at-once re-list finds a new run whose jobs read is refused (HTTP 403). The
+    refused read cannot undo the judged red run: a red run stays red, whatever the list hid (wait_for's docstring).
+    Before the deadline, and past it, where the re-list is the one list left. Scope first: the refused read is
+    reached at the re-list. Control: the same refusal after a green run is unknown (the next case)."""
+    for where, budget, ends_at in (("before the deadline", 3600, None), ("past the deadline", 100, {902: 100})):
+        label = "red run judged %s, the re-list's new run has a refused jobs read" % where
+        raised, clock, calls, deadline = wait_for_on_fakes([RED, refused_new_run()], budget, ends_at=ends_at, line=True)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
+        check("%s: the line is CI red, naming unit and e2e" % label,
+              str(clock.line).startswith("CI red") and "unit" in clock.line and "e2e" in clock.line, detail)
+
+
+def case_refused_re_list_view_after_a_green_run_is_unknown():
+    """Control. A green run is judged, then the same refused read at the re-list. The unread list could hold a red
+    or a running run, so the line is CI unknown, never CI green. Before the deadline, and past it."""
+    for where, budget, ends_at in (("before the deadline", 3600, None), ("past the deadline", 100, {901: 100})):
+        label = "green run judged %s, the re-list's new run has a refused jobs read (control)" % where
+        raised, clock, calls, deadline = wait_for_on_fakes([GREEN, refused_new_run()], budget, ends_at=ends_at, line=True)
+        detail = wait_detail(raised, clock, calls, deadline) + " line=%r" % clock.line
+        refused = [t for t, a in calls if a[:3] == ["run", "view", "931"] and "jobs" in " ".join(a)]
+        check("%s: the new run's jobs read is reached (scope)" % label, bool(refused), detail)
+        check("%s: the line is CI unknown, never CI green" % label, str(clock.line).startswith("CI unknown"), detail)
 
 
 def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
@@ -1263,14 +1337,24 @@ def case_watch_run_completed_wakes_on_the_next_read():
 
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does) and `run view`. Its `time` is the fake clock.
-def wait_for_on_fakes(runs, budget):
+def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
     """Run wait_for(SHA, cwd, deadline) in process. budget: seconds from the clock's start to the
     deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
-    no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh."""
+    no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh.
+    ends_at: {run id: seconds from the clock's start}. Until then such a run lists and reads in progress
+    with no conclusion; from then on it reads as its fixture says. line: also set clock.result (what
+    wait_for returned) and clock.line (the line the hook prints for it). A run with refuse_jobs_read: its
+    `run view ... jobs` read exits 1 with HTTP 403. Its status read does not."""
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     clock, calls = FakeTime(), []
+
+    def as_of_clock(r, out):
+        end = (ends_at or {}).get(r["databaseId"])
+        if end is not None and clock.now - T0 < end:
+            return dict(out, status="in_progress", conclusion=None)
+        return out
 
     def fake_gh(args, cwd, timeout=None):
         calls.append((clock.now, list(args)))
@@ -1278,26 +1362,41 @@ def wait_for_on_fakes(runs, budget):
             raise AssertionError("runaway reads: 400 gh calls")
         if args[:2] == ["run", "list"]:
             n = sum(1 for _, a in calls if a[:2] == ["run", "list"])
-            shown = [GH.view(r, True, n) for r in runs if r.get("appears_at_list", 1) <= n]
+            shown = [as_of_clock(r, GH.view(r, True, n)) for r in runs if r.get("appears_at_list", 1) <= n]
             return 0, json.dumps(shown) + "\n", ""
         if args[:2] == ["run", "view"]:
             hits = [r for r in runs if str(r["databaseId"]) == args[2]]
             if hits:
-                out = GH.view(hits[0], False)
+                if hits[0].get("refuse_jobs_read") and "jobs" in " ".join(args):
+                    return 1, "", "HTTP 403: Resource not accessible by integration"
+                out = as_of_clock(hits[0], GH.view(hits[0], False))
                 fields = args[args.index("--json") + 1].split(",") if "--json" in args else None
                 return 0, json.dumps({k: v for k, v in out.items() if not fields or k in fields}) + "\n", ""
         return 1, "", "stub gh: unsupported: %s" % " ".join(args)
 
     fake_shutil = types.SimpleNamespace(which=lambda name, *a, **kw: None)
     deadline = clock.now + budget
+    clock.result, clock.line = None, None
     with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
             mock.patch.object(mod, "shutil", fake_shutil):
         try:
-            mod.wait_for(SHA, os.getcwd(), deadline)
+            clock.result = mod.wait_for(SHA, os.getcwd(), deadline)
             raised = None
         except Exception as e:
             raised = e
+    if line:
+        clock.line = verdict_line(mod, raised, clock.result)
     return raised, clock, calls, deadline
+
+
+def verdict_line(mod, raised, result):
+    """The line the hook prints for one outcome: "CI unknown" when wait_for raised, else the verdict of its runs."""
+    if raised is not None:
+        return "CI unknown: %s" % raised
+    try:
+        return mod.verdict(SHA, result)
+    except mod.Unknown as e:
+        return "CI unknown: %s" % e
 
 
 def list_times(calls):
@@ -1965,6 +2064,10 @@ def main():
     case_run_visible_at_the_at_once_relist_is_judged()
     case_the_at_once_relist_judges_the_newest_run_of_a_name()
     case_failed_re_list_keeps_the_judged_verdict()
+    case_failed_re_list_after_a_green_run_is_unknown()
+    case_green_run_judged_past_the_deadline_is_not_green()
+    case_refused_re_list_view_keeps_a_judged_red()
+    case_refused_re_list_view_after_a_green_run_is_unknown()
     case_new_runs_on_every_list_are_paced_after_the_at_once_relist()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
