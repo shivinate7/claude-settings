@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL232Ko7dmr4v3fmrvF",
   "why": "A PowerShell expandable here-string (`@\"`...`\"@`) piped to pwsh or iex is not read by the draft-PR guard (decision draft-until-reviewed). Main has the same gap, and Claude writes these on the owner's Windows machine.",
-  "note": "Lane draft-pr-guard-text-false-alarm takes it after #1642, stacked. Filed at the coordinator's request, 18:45 CST Nov 7. Started 21:39 CST Nov 7 in lane draft-pr-guard-text-false-alarm, stacked on #1713 (lane message).",
-  "updatedAt": "2026-11-07T21:40:00-06:00"
+  "note": "Lane draft-pr-guard-text-false-alarm takes it after #1642, stacked. Filed at the coordinator's request, 18:45 CST Nov 7. Started 21:39 CST Nov 7 in lane draft-pr-guard-text-false-alarm, stacked on #1713 (lane message). Overlap (coordinator 11:45 CST Nov 8): #1642 and lane draft-pr-guard-heredoc (item 381 b) both replace hooks/guard_core.py _runs_written_file. Agree on one shape before either merges.",
+  "updatedAt": "2026-11-08T11:48:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A count in a debt note is flagged unless a check reads that number",
   "why": "Lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw): on #2063 it wrote \"0 doc-relative cites among 266\" into note stale010-subfolder-relative-cite; the line it added was itself a cite, so the count was wrong at once, and the failed fix check restarted the review chain.",
-  "note": "Filed 10:25 CST Nov 8 from that lane (rule verification-checked-reader-for-numbers). Fix: lint flags a count in docs/debts/notes.md (\"N cites\", \"among N\") unless a check reads that number. Related: decision-count-reader (doing). 10:27 CST Nov 8 (coordinator 10:26 CST, item 386): rides in the lane that found it, as a follow-up PR with Merge after: #2063. 10:29 CST Nov 8: lane record-claim-cites-code says it is off its topic (the number-reader rule, not stale cites) and passed it to the coordinator for a new lane. Doing 10:31 CST Nov 8 in lane session_013NEJKzEeXJNdTNedKPwtGc, topic debt-note-counts (coordinator 10:29 CST).",
+  "note": "Filed 10:25 CST Nov 8 from that lane (rule verification-checked-reader-for-numbers). Fix: lint flags a count in docs/debts/notes.md (\"N cites\", \"among N\") unless a check reads that number. Related: decision-count-reader (doing). 10:27 CST Nov 8 (coordinator 10:26 CST, item 386): rides in the lane that found it, as a follow-up PR with Merge after: #2063. 10:29 CST Nov 8: lane record-claim-cites-code says it is off its topic (the number-reader rule, not stale cites) and passed it to the coordinator for a new lane. Doing 10:31 CST Nov 8 in lane session_013NEJKzEeXJNdTNedKPwtGc, topic debt-note-counts (coordinator 10:29 CST). Lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw), 11:46 CST Nov 8: three more incidents on #2108 (stale010-dotted-cite). Round 2 failed on \"0 in 251\"; round 3 on \"11 are in notes\" and \"0 such cites on main\"; the fix check on \"no such cite is in this repo\". Each forced another review chain. bb36e0647 replaced each repo count with \"unmeasured\". A check on added record lines for a count of repo items (\"N in M\", \"N such\", \"no such X in this repo\") would have caught all four.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKzEeXJNdTNedKPwtGc",
   "status": "doing",
   "order": 728,
-  "updatedAt": "2026-11-08T10:31:00-06:00"
+  "updatedAt": "2026-11-08T11:48:00-06:00"
 }

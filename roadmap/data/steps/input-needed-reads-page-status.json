@@ -1,0 +1,11 @@
+{
+  "title": "A report check refuses an Input Needed item whose page item is closed",
+  "why": "Owner 11:44 CST Nov 8, via the coordinator: the coordinator listed items 214, 381, 383 and 222 to the owner as open, and all four were closed. Its report did not read the page item status first. Harm: the owner is asked again for what he already answered. Fix: the report guard reads each cited page item's status and refuses an Input Needed line that cites a closed item.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 767,
+  "updatedAt": "2026-11-08T11:48:00-06:00"
+}

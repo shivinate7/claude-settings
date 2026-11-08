@@ -1,0 +1,11 @@
+{
+  "title": "A batch runner says so when a handed-over lane is left out of a batch",
+  "why": "Coordinator 11:45 CST Nov 8: degen #438's handed-lane check, filed here. A runner can drop a lane that was handed to it with no word to the lane or the coordinator; this is the same gap as the earlier finding that runners drop lanes without a word. Fix: a check that each lane PR handed to the runner is in the batch, or named as left out with a reason.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 768,
+  "updatedAt": "2026-11-08T11:48:00-06:00"
+}
