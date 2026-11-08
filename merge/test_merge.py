@@ -1304,13 +1304,13 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/guide.md": "# Guide\n"})
         calls = []
         real_sh = merge.sh
-        def spy(args, *a, **k):
-            calls.append((list(args), dict(k.get("env") or {})))
-            return real_sh(args, *a, **k)
+        def spy(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+            calls.append((list(args), dict(os.environ if env is None else env)))  # env None inherits os.environ, where the var is set
+            return real_sh(args, cwd=cwd, input=input, env=env, timeout=timeout, live_stderr=live_stderr)
         missing = os.path.join(self.t, "no-such-body.md")
         with unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY_FILE": missing}), unittest.mock.patch.object(merge, "sh", spy):
             rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, "the small-move proof refused on an inherited body file: " + out)
+        self.assertEqual(rc, 0, "the small-move proof refused on an inherited body file: " + " ".join(out.split()))
         self.assertTrue(self.host.merged, out)
         ci_envs = [env for args, env in calls if merge.CI_JOB in args]
         self.assertTrue(ci_envs, "no ci-job run was seen, so the proof's lint was not read: " + out)
