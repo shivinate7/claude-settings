@@ -15,22 +15,30 @@ attribute (`question_form.page_item_hit`, for one). A call that resolves to no h
 the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
 Each check gets COUNT seeded random command strings per env shape (one stream per check and shape, seed
-SEED), built from shell and PowerShell characters and fragments, plus fixed edge inputs. Each input carries one tool:
+SEED), built from shell and PowerShell characters, digits and fragments (the config dir's settings path among
+them), plus fixed edge inputs. A share of the inputs holds a well-formed decision item, or a Write or Edit that
+adds a workflow step, in place of random text. Each input carries one tool:
 two of every three are Bash or PowerShell, the others go round the rest. A payload carries the keys
 of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
 permissionDecision on stdout. Any other exit, and any raise, is a failure.
 
 Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the
-real config. PATH is an empty folder, so git and gh are absent and every read fails as on a machine
-without them. The parsers of git and gh output are not fuzzed here.
+real config. PATH is an empty folder, so git, gh and ps are absent and every read fails as on a machine
+without them. CLAUDE_GUARD_ROOT_PID pins the session root, so a kill reaches its pid read.
+
+Not fuzzed: the parsers of git, gh and ps output. The parent walk of pid_is_owned past its first read
+(ps never answers, so it returns at once). The git-backed commit reads: own_changes returns None
+without git, so diff_violation stops before role_offences, and no input here reaches role_offences.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
 remote_session_id, and the trust-card check under a session id) run only under the shape that reaches them.
 
 Fixtures: CHECKOUT is a plain folder. PAGE_CHECKOUT is a repository root (a .git folder) whose extras file
-names a waiting page, so the item checks and the workflow check run on a real path. fixture_proof asserts
+names a waiting page, so the item checks and the workflow check run on a real path. CONFIG is also the
+pointer checkout: its CLAUDE.md names it, and it holds the role table and an agents folder with one role
+file, so the role checks read real files. fixture_proof asserts
 that each fixture reaches its check, so a moved key or path fails by name instead of leaving the fuzz blind.
 
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
@@ -83,10 +91,15 @@ CHECKOUT = os.path.join(RUN, "checkout")    # a plain folder, not a repository
 PAGE_CHECKOUT = os.path.join(RUN, "page-checkout")   # a repository root whose waiting page is PAGE_URL
 PAGE_URL = "https://claude.ai/artifact/fuzzpage"
 WORKFLOW_TARGET = ".github/workflows/ci.yml"    # a workflow file: guard.workflow_builder_refused judges its edits
+WORKFLOW_STEP = ("      - name: test\n"          # a step that runs a test and passes anyway: a builder may not add it
+                 "        run: pytest\n"
+                 "        continue-on-error: true\n")
 REMOTE_ID = "cse_fuzz01"   # the lane id a cloud session names in CLAUDE_CODE_REMOTE_SESSION_ID (override.LANE_ENV)
+ROOT_PID = "9999"          # the session root the kill checks read (guard_kill.session_root_pid, the test hook)
 TRANSCRIPT = os.path.join(RUN, "transcript.jsonl")
 EMPTY_TRANSCRIPT = os.path.join(RUN, "empty.jsonl")
 MISSING_TRANSCRIPT = os.path.join(RUN, "missing.jsonl")
+SETTINGS_PATH = os.path.join(CONFIG, "settings.json")   # a settings file in the config dir: guard_frozen judges writes to it
 for folder in (CONFIG, NO_TOOLS, CHECKOUT, os.path.join(PAGE_CHECKOUT, ".git")):
     os.makedirs(folder)
 import layout  # noqa: E402  the one home of the layout and of the waiting-page key (lint/layout.py)
@@ -99,23 +112,41 @@ with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
 os.environ["CLAUDE_CONFIG_DIR"] = CONFIG
 os.environ["PATH"] = NO_TOOLS
+os.environ["CLAUDE_GUARD_ROOT_PID"] = ROOT_PID
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
+import guard_kill  # noqa: E402  the kill checks and the session root (hooks/guard_kill.py)
 import guard_shared_tree  # noqa: E402  the shared-tree verbs (hooks/guard_shared_tree.py)
 import override  # noqa: E402  the lane id a session env names (hooks/override.py)
 import question_form  # noqa: E402  the ArtifactData item shape (hooks/question_form.py)
 import shared_names  # noqa: E402  the one home of the markers a spawn shape carries
 
+# The pointer checkout is the config dir: its CLAUDE.md names it (guard_pointer.POINTER_LINE), and it holds the role
+# table in the decisions folder and an agents folder with one role file, so role_model_table, role_name and
+# role_agent_keys read real files (decision agent-model-cap).
+ROLE_TABLE = ("| Role | Model | Effort |\n| --- | --- | --- |\n| builder | opus | high |\n"
+              "| reviewer | sonnet | high |\n| Explore | haiku | xhigh |\n")
+DECISIONS = os.path.join(CONFIG, *layout.layout()["kinds"]["decisions"]["path"].split("/"))
+os.makedirs(os.path.join(CONFIG, "agents"))
+os.makedirs(DECISIONS)
+with open(os.path.join(CONFIG, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+    handle.write("@%s/CLAUDE.md\n" % CONFIG.replace(os.sep, "/"))
+with open(os.path.join(DECISIONS, guard.ROLE_TABLE_FILE), "w", encoding="utf-8") as handle:
+    handle.write(ROLE_TABLE)
+with open(os.path.join(CONFIG, "agents", "builder.md"), "w", encoding="utf-8") as handle:
+    handle.write("---\nname: builder\nmodel: opus\n---\n\nThe builder role.\n")
+
 HOOK_MODULES = frozenset(os.path.splitext(name)[0] for name in os.listdir(HERE) if name.endswith(".py"))
 
-CHARS = "${}()[]=;'\"`|&<> \n$-*?"
+CHARS = "${}()[]=;'\"`|&<> \n$-*?0123456789"
 FRAGMENTS = (
     "git ", "env:GIT_DIR", "rm -rf", "wsl -e", "pwsh -Command", "sh -c", "<<EOF", "$(", "${",
     "${X:?", "git push --force", "git stash", "git worktree remove", "xargs kill", "pgrep x | ",
     "lsof -t", "gh pr merge", "cd ", "&& ", "| ", "'", '"', "`", "\\", "\n", "-Command ",
     "Remove-Item ", "$env:", "kill -9 ", "git -C ", "--force-with-lease", "node -e ",
     "git reset --hard", "git clean -fd", "git checkout -- x", "git restore", "git switch", WORKFLOW_TARGET,
+    SETTINGS_PATH, "> " + SETTINGS_PATH,
 )
 WEIGHTED = ("${", "$(", "'", '"', "<<EOF", "${X", "`")   # the incident class, drawn more often
 LONG = "sh -c \"git stash ${X:-$(pwd)} | rm -rf '\" <<EOF\n" * 80   # several KB, unclosed quotes and expansions
@@ -169,6 +200,16 @@ def draw_text(rng):
     return "".join(parts)
 
 
+def decision_item(text):
+    """A well-formed decision item whose Goal holds `text`. Its form lines and option effects pass, so each check
+    reaches the Departs from line (question_form.departs_hit), whose change side holds no `;`."""
+    goal = " ".join(text.split()) or "x"
+    return {"kind": "decision",
+            "context": "Goal: %s\nProblem (goal): why the owner judges it\nBased on (read): one premise\n"
+                       "Departs from: main — adds a check" % goal,
+            "options": [{"label": "a", "gain": "saves time", "lose": "one more check"}]}
+
+
 class Env:
     """The per-call context that is not the command string: tool, folders, session, transcript, role."""
 
@@ -209,6 +250,11 @@ def tool_input_for(tool, rng, text, env):
         tool_input["action"] = rng.choice(question_form.ITEM_OPS)
     if rng.random() < 0.5:
         tool_input["data"] = {"question": text, "options": [{"key": rng.choice(("a", "b", "none")), "label": text}]}
+    if rng.random() < 0.3:   # a well-formed decision item: the form passes, so the checks past the form run
+        tool_input["data"] = decision_item(text)
+    if rng.random() < 0.3:   # a Write or an Edit that adds a workflow step: the old text is empty, the new holds it
+        tool_input["old_string"] = ""
+        tool_input["content"] = tool_input["new_string"] = WORKFLOW_STEP + text
     return tool_input
 
 
@@ -490,6 +536,20 @@ def fixture_proof():
                lambda: override.remote_session_id() == expected)
         _probe(problems, "CLAUDE_CODE_REMOTE=true, yet is_cloud() is false (the CLAUDE_CODE_REMOTE read moved)",
                guard_core.is_cloud)
+    _probe(problems, "CLAUDE_GUARD_ROOT_PID is pinned, yet session_root_pid() reads no root (the root hook moved)",
+           lambda: guard_kill.session_root_pid() == int(ROOT_PID))
+    _probe(problems, "CONFIG's CLAUDE.md names no pointer checkout (POINTER_LINE or the config dir moved)",
+           lambda: guard.pointer_checkout() == os.path.normcase(os.path.realpath(CONFIG)))
+    _probe(problems, "CONFIG's decisions folder holds no builder row (the layout decisions path or ROLE_TABLE_FILE moved)",
+           lambda: (guard.role_model_table(CONFIG) or {}).get("builder") == "opus")
+    _probe(problems, "CONFIG's agents folder yields no builder role (role_agent_keys or the agents folder moved)",
+           lambda: any(keys.get("name") == "builder" for keys in guard.role_agent_keys(CONFIG)))
+    _probe(problems, "the decision item's form lines refuse it, so the Departs from check never runs (the form moved)",
+           lambda: question_form._lines_hit(decision_item("x")["context"]) == question_form.PASS)
+    _probe(problems, "WORKFLOW_STEP's continue-on-error line is no disabling step (WORKFLOW_DISABLE_STEP moved)",
+           lambda: guard.workflow_step_disables("        continue-on-error: true"))
+    _probe(problems, "SETTINGS_PATH is no settings file (the settings basenames moved)",
+           lambda: guard.is_settings_file(SETTINGS_PATH, CONFIG))
     return problems
 
 
