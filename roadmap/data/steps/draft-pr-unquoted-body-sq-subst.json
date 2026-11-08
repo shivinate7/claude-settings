@@ -1,0 +1,11 @@
+{
+  "title": "The draft-PR guard catches a PR create inside single quotes in an unquoted heredoc",
+  "why": "In an unquoted heredoc fed to an interpreter (`python3 - <<EOF`), a body line `x = '$(gh pr create)'` is allowed. Bash runs that `$(...)` while it writes the body, because single quotes do not protect inside a heredoc. Same on main d70ebd14d (lane draft-pr-guard-text-false-alarm, 01:51 CST Nov 8). Decision draft-until-reviewed.",
+  "note": "Fix: in an unquoted heredoc body, read `$(...)` and backticks as live whatever quotes surround them, and refuse a PR create found there. Red case first on the line above; control: the same line in a quoted heredoc (`<<'EOF'`) stays allowed. Built by lane draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF) after #1775. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 01:52 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 563,
+  "owner": "triage",
+  "lane": "session_013NEJL232Ko7dmr4v3fmrvF",
+  "updatedAt": "2026-11-08T01:29:00-06:00"
+}
