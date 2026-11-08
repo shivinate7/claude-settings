@@ -100,6 +100,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-brief-roles": "one lane, three roles: a send_message brief whose first non-blank line is the lane-brief marker, sent to a lane that passes lane-one-topic, is refused unless its text names a session id for each of Coordinator, Triage and Batch runner; a brief to a target that is no lane, and a message without the marker, pass; the brief template's placeholders, filled, pass and, unfilled, are refused",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10113,16 +10114,17 @@ def with_roles(first_line):
     return first_line + " " + BRIEF_ROLE_IDS
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), rule=LANE_ONE_TOPIC):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
-    the reason must not hold."""
-    add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
+    the reason must not hold. `rule` is the rule the case is for: it names the case, and the reason must name it."""
+    add(rule + ": " + name, "deny", rule=rule, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
         env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
-    add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
+def step_allow(name, transcript, message, target=ROLE_OTHER, rule=LANE_ONE_TOPIC):
+    """A send_message the guard lets through silently. `rule` is the rule the case is for. It names the case only:
+    an allow prints nothing, so the reason is never checked against it."""
+    add(rule + ": " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
         env=ROLE_ENV, session_id=target, message=message)
 
 
@@ -10209,6 +10211,112 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+
+# =========================================================================== 5h-2. lane brief roles
+FAMILY = "lane-brief-roles"
+#
+# Rule lane-brief-roles. A lane brief is a send_message whose first non-blank line starts with the marker `Lane brief:`.
+# Sent to a lane that passes lane-one-topic, the brief must name a session id for each of three roles: Coordinator,
+# Triage and Batch runner. A role is named when its label, in any case, is followed by an optional number (as in
+# `Batch runner 8`), an optional colon, optional markdown (`*`, `_`, a backtick) and whitespace, then `session_<id>`.
+# An id names a role only beside its label, and the whole message is read, not only its first line. lane-one-topic
+# runs first, so a brief it refuses keeps its own reason. A target that is no lane, and a message without the marker,
+# pass. Presence and format only: no id is matched to a roster.
+LANE_BRIEF_ROLES = "lane-brief-roles"
+BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
+
+# Refused: no role is named. The lane is on topic icons, so lane-one-topic passes the brief and only the roles are missing.
+step_refuse("a brief with no roles, to a lane on its own topic, is refused",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.", rule=LANE_BRIEF_ROLES)
+# Refused: Triage is missing. The rest is the coordinator's usual form, `Coordinator: id` then `Batch runner 7: id`. The
+# steer names Triage, so the sender knows which role to add.
+step_refuse("a brief that names Coordinator and Batch runner 7 but not Triage is refused, and the steer names Triage",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons. Coordinator: session_BRIEFCOORD01. Batch runner 7: session_BRIEFRUNNER01.",
+            rule=LANE_BRIEF_ROLES, carries=("Triage",))
+# Refused: a label with no session id after it. Coordinator's next word is Triage's label, so Triage's id does not count
+# for Coordinator.
+step_refuse("a Coordinator label with no session id after it is refused, though Triage's id follows it",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons.\nCoordinator:\nTriage session_BRIEFTRIAGE01; Batch runner 8 session_BRIEFRUNNER01.",
+            rule=LANE_BRIEF_ROLES)
+# Refused: three session ids with no role labels name no role, so the brief is refused.
+step_refuse("three session ids with no role labels are refused: an id names a role only beside its label",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons. session_BRIEFCOORD01 session_BRIEFTRIAGE01 session_BRIEFRUNNER01.",
+            rule=LANE_BRIEF_ROLES)
+# Refused on the step path: an older lane with no cs-topic is judged by its steps, and the brief names no roles. A check
+# that ran only on the topic path would allow this brief.
+step_refuse("a brief with no roles, to an older lane with no cs-topic, is refused: the roles rule runs on that path too",
+            role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.", rule=LANE_BRIEF_ROLES)
+
+# Passes: the three roles after the topic, all on line one: the brief form.
+step_allow("the three roles after the topic on line one are allowed",
+           role_path("step-topic-lane"), with_roles("Lane brief: icon-b. Topic: icons."), rule=LANE_BRIEF_ROLES)
+# Passes: the roles on a Roles line after the marker. The whole message is read.
+step_allow("the three roles on a Roles line after the marker are allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nRoles: Coordinator session_BRIEFCOORD01; Triage session_BRIEFTRIAGE01; "
+           "Batch runner 8 session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
+# Passes: each id in backticks.
+step_allow("ids in backticks are allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator `session_BRIEFCOORD01`; Triage `session_BRIEFTRIAGE01`; "
+           "Batch runner 8 `session_BRIEFRUNNER01`.", rule=LANE_BRIEF_ROLES)
+# Passes: each id after a colon.
+step_allow("ids after colons are allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator: session_BRIEFCOORD01\nTriage: session_BRIEFTRIAGE01\n"
+           "Batch runner 8: session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
+# Passes: each id after a bold label, with the colon inside the bold.
+step_allow("ids after bold labels, the colon inside the bold, are allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n**Coordinator:** session_BRIEFCOORD01\n**Triage:** session_BRIEFTRIAGE01\n"
+           "**Batch runner 8:** session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
+# Passes: the labels in lower case. A label is read in any case.
+step_allow("role labels in lower case are allowed: a label is read in any case",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons. coordinator session_BRIEFCOORD01; triage session_BRIEFTRIAGE01; "
+           "batch runner 8 session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
+# Passes: a brief to a target that is no lane (cs-build:triage) is not judged for roles.
+step_allow("a brief with no roles to a target that is no lane is allowed",
+           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.", rule=LANE_BRIEF_ROLES)
+# Passes: a message without the marker is not a brief, so it is not judged for roles.
+step_allow("a status message with no roles, to a lane, is allowed",
+           role_path("step-topic-lane"), "Status: PR #12 merged for icon-a.", rule=LANE_BRIEF_ROLES)
+# Passes: the marker is not the first non-blank line, so the message is not a brief.
+step_allow("a marker on line two, with no roles, is not a brief and is allowed",
+           role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-b. Topic: icons.", rule=LANE_BRIEF_ROLES)
+
+# The brief template carries a Roles line after its first line, with a `<role session id>` placeholder for each role.
+# fill_brief fills the step and topic slugs, so lane-one-topic passes the first line, and it fills the session ids only
+# when it is given them. The template is read from this repository, so a red copy reads the old one.
+BRIEF_TEMPLATE_IDS = {"coordinator": "session_TPLCOORD01", "triage": "session_TPLTRIAGE01",
+                      "batch runner": "session_TPLRUNNER01"}
+
+
+def fill_brief(text, ids=None):
+    """The brief template with its placeholders filled. A `<role session id>` placeholder takes that role's id from
+    `ids`, and stays as shipped when `ids` is None. The step and topic slugs take sample slugs, and any other
+    placeholder a sample word."""
+    def fill(match):
+        inner = match.group(1)
+        if inner.endswith(" session id"):
+            if ids is None:
+                return match.group(0)
+            return ids.get(inner[:-len(" session id")].strip().lower(), match.group(0))
+        return {"step-slug": "icon-b", "topic-slug": "icons"}.get(inner, "sample")
+    return re.sub(r"<([^<>\n]+)>", fill, text)
+
+
+with open(BRIEF_TEMPLATE_PATH, encoding="utf-8") as handle:
+    BRIEF_TEMPLATE = handle.read()
+step_allow("the brief template, filled with sample slugs and the three session ids, is allowed",
+           role_path("step-topic-lane"), fill_brief(BRIEF_TEMPLATE, BRIEF_TEMPLATE_IDS), rule=LANE_BRIEF_ROLES)
+# Refused: the template as shipped, its session id placeholders unfilled, names no role.
+step_refuse("the brief template with its session id placeholders unfilled is refused for the missing roles",
+            role_path("step-topic-lane"), fill_brief(BRIEF_TEMPLATE), rule=LANE_BRIEF_ROLES)
 
 
 # =========================================================================== 5d. cite by id
