@@ -25543,6 +25543,9 @@ add("agent-handoff-write: an agent's MultiEdit to its session's handoff is refus
 add("agent-handoff-write: an agent's Write to the handoff, spelled ~/.claude/handoffs, is refused", "deny", AH_RULE,
     tool="Write", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, env={"HOME": AH_HOME},
     file_path=AH_TILDE, content="x", lacks=(AH_TILDE, AH_HANDOFF))
+add("agent-handoff-write: an agent's NotebookEdit to its session's handoff is refused", "deny", AH_RULE,
+    tool="NotebookEdit", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+    notebook_path=AH_HANDOFF, new_source="x", lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
 
 # The controls: each is allowed, and the rule refuses none of them.
 add("agent-handoff-write: the parent's Write to its own handoff, with no agent_id, is allowed", "allow",
@@ -25654,6 +25657,16 @@ lazy_fixture([AH_BROKEN_PRIMARY], _build_ah_broken)
 add("agent-handoff-write: with precompact_handoff unimportable, an agent's Write into the primary checkout is refused as worktree-home",
     "deny", "worktree-home", tool="Write", cwd=AH_BROKEN_WT, session=AH_BROKEN_SID, agent_id=AH_BROKEN_AGENT,
     file_path=os.path.join(AH_BROKEN_PRIMARY, "src", "app.py"), content="x", guard=AH_BROKEN_GUARD)
+# The same agent's Write of its session's handoff, which sits in the config folder outside the worktree, so worktree-home
+# allows it. names_handoff cannot import the handoff path, so the rule fails open: allowed, with no guard-crash, and the
+# printed stdout parses (a crash or unparsable output reads as not allow). The control is the same call on the intact
+# guard, which refuses it: the failed import is the only difference.
+add("agent-handoff-write: with precompact_handoff unimportable, an agent's Write of its session's handoff is allowed, with no guard-crash",
+    "allow", tool="Write", cwd=AH_BROKEN_WT, session=HU_SID, config=AH_CFG, agent_id=AH_BROKEN_AGENT,
+    file_path=AH_HANDOFF, content="x", guard=AH_BROKEN_GUARD)
+add("agent-handoff-write: the same agent's Write of the handoff with an intact precompact_handoff is refused, so the failed import is the cause",
+    "deny", AH_RULE, tool="Write", cwd=AH_BROKEN_WT, session=HU_SID, config=AH_CFG, agent_id=AH_BROKEN_AGENT,
+    file_path=AH_HANDOFF, content="x", lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
 
 
 # =========================================================================== the machine-load brake
