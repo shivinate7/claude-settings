@@ -120,6 +120,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  sendmessage-session-id
+                       deny. A SendMessage whose `to` is a string starting `session_`: SendMessage reaches agents by
+                       name, never a cloud session. A missing or non-string `to`, an agent name, @parent and the
+                       mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -4140,6 +4144,15 @@ def page_design_hit(writes, tool_input, cwd):
     return None
 
 
+# ------------------------------------------------------------------ SendMessage to a cloud session
+#
+# SendMessage addresses in-process agents and local teammates by name. A `to` that starts `session_` names a cloud
+# session it cannot reach, so the hand-off goes missing with no error.
+SENDMESSAGE_REASON = ("SendMessage addresses an agent by name and never reaches a cloud session, so this hand-off "
+                      "would go missing. Send it with mcp__claude-code-remote__send_message, passing the id as "
+                      "session_id. Rule sendmessage-session-id.")
+
+
 # ------------------------------------------------------------------ impeccable is review-only
 #
 # docs/decisions/design-skills.md, rule `impeccable-review-only`: the skill loads only for a review
@@ -5182,6 +5195,12 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
+    if tool == "SendMessage":
+        target = tool_input.get("to")
+        if isinstance(target, str) and target.startswith("session_"):
+            refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
