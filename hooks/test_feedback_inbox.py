@@ -3744,7 +3744,7 @@ def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
 
 
 def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
-    """F1. The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
+    """The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
     the whole home check down: the Stop's repo still judges the home, and an untracked home there blocks. The
     control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
     cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
