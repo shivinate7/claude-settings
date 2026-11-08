@@ -28,7 +28,7 @@ Home: hooks/guard_push_delete.py
 
 ## Safety holes, named
 
-- (b) `--prefix` is read: its folder is the one judged. `-w` or `--workspace` on every command but `npm version`, and a plain install run inside a workspace member, are not read: npm writes the root's `node_modules`, and the walk stops at the member's `package.json`. A bypass and a false alarm both. `npm version` with a workspace flag is refused. Debt: `linked-nm-prefix-workspace`.
+- (b) `--prefix` is read: its folder is the one judged. `-w` or `--workspace` on every command but `npm version`, and a plain install run inside a workspace member, are not read: npm writes the root's `node_modules`, and the walk stops at the member's `package.json`. A bypass and a false alarm both. `npm version` with a flag that turns workspaces on is refused; a `false` value, attached or as the next word, leaves them off. Debt: `linked-nm-prefix-workspace`.
 - (d) `pnpm`, `yarn`, `bun`, `npx` and `npm.exe` are not judged. Note: `linked-nm-other-managers`.
 - (e) `find -delete`, `Get-ChildItem | Remove-Item`, `cmd rmdir /s`, `rimraf`, `cd node_modules && rm -rf x` and `-Recurse:$true` are not read as recursive deletes into the link. Note: `linked-nm-other-deletes`.
 - (f) An inner `cd` inside `bash -c` or `sh -c` is not tracked. Note: `linked-nm-shell-c-cd`.
