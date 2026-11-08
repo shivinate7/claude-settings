@@ -42,7 +42,6 @@ An update is judged only for the fields it carries. A closed item passes the for
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
 refused.
 """
-import functools
 import json
 import os
 import re
