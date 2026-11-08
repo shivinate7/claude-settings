@@ -2,7 +2,7 @@
 """Fails when a commit adds lines to a test path and carries no red-run trailer, or cites a ruling with no home and
 no time. Stdlib and git only (plus lint/report_guard.py for the time forms).
 
-    python3 lint/check_red_run.py [--base <sha>] [--root <dir>]
+    python3 lint/check_red_run.py [--base <sha>] [--root <dir>] [--ruling-only]
         # the base is env BASE_SHA when no flag is given; the repo is the current directory unless --root names one
 
 A new test is seen red on the old code before it is trusted (`roles-each-layer-proves-once`). The test-author
@@ -35,6 +35,12 @@ judged. Second, the commit's author date is at or after the author date of the f
 adds RULING_CITE_RE to this file (one `git log -S` read per run), so a commit written before the rule landed is not
 judged, a cherry-pick of it included. The Red-run rule and its own gate are unchanged.
 
+--ruling-only runs the ruling rule alone, for a repo that does not carry this file: the shared code-check action
+(actions/code-check/code_check.py) calls it so a child repo gets the one reader. Where HEAD tracks this file, the two
+gates above still decide. Where it does not, each non-merge, non-revert commit in <base>..HEAD is judged when its
+author date is at or after RULING_CITE_SINCE, a fixed cutoff in this file, because such a repo has no commit that
+adds the rule to read a date from. The Red-run rule never runs under the flag.
+
 Limits: a pure rename of a test file reads as a delete and an add, so it needs `Red-run: none: <reason>`. A
 branch that merged a newer main carries main's commits in the range, and each is judged like the rest.
 
@@ -45,6 +51,7 @@ import functools
 import os
 import re
 import sys
+from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import guard  # noqa: E402  is_test_rel is the one home of what a test path is (hooks/guard.py)
@@ -66,6 +73,7 @@ RULING_CITE_RE = re.compile(
 NEGATED_BEFORE = re.compile(r"\b(?:no|not|never|without|nor)\s+(?:(?:an?|the|any)\s+)?$", re.I)  # "not per the ruling" claims nothing
 RULING_TRAILER = re.compile(r"^Ruling:[ \t]*(\S.*)$", re.MULTILINE)
 RULING_MARKER = "RULING_CITE_RE"  # the string whose first commit starts the rollout
+RULING_CITE_SINCE = "2026-11-08T12:00:00-06:00"  # the cutoff for a repo that does not track this file (--ruling-only)
 ITEM_HOME_RE = re.compile(r"\bitem\s+(?:\d+(?:\s*[a-z]\b|,\s*pick\s+[a-z]\b)?|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)"
                           r"|\bruling\s+\d+\s*[a-z]\b", re.I)  # `ruling 178 a` names a page item
 REF_HOME_RE = re.compile(r"\b(?:step|rule):[a-z0-9][\w-]*", re.I)
@@ -198,22 +206,24 @@ def check_landed(root, parent):
     return bool(git(root, "ls-tree", "--name-only", parent, "--", SELF_REL).strip())
 
 
-def gaps(root, base):
+def gaps(root, base, ruling_only=False):
     """(kind, line) per failing commit: kind is "red" for a test gap, "ruling" for an uncited ruling claim. A commit can
-    fail both. Raises Unknown when git cannot say."""
+    fail both. ruling_only skips the test gap; a repo whose HEAD lacks this file then judges by RULING_CITE_SINCE.
+    Raises Unknown when git cannot say."""
     found = []
     rollout = check_landed(root, "HEAD")  # git's tree, not the disk: only a repo that tracks the check has a rollout
-    since = ruling_rollout_time(root)
+    child = ruling_only and not rollout
+    since = datetime.fromisoformat(RULING_CITE_SINCE).timestamp() if child else ruling_rollout_time(root)
     for sha, parent, subject, message, authored in commits(root, base):
         if parent is None or REVERT.search(message):
             continue
         landed = check_landed(root, parent)
-        if landed or not rollout:
+        if (landed or not rollout) and not ruling_only:
             paths = added_test_paths(root, parent, sha)
             if paths and not has_trailer(message):
                 shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
                 found.append(("red", "check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown)))
-        if landed and since is not None and authored >= since:
+        if (landed or child) and since is not None and authored >= since:
             lacks = missing_cite(message, decision_named(root, sha))
             if lacks:
                 found.append(("ruling", "check_red_run: FAIL: %s %s: cites a ruling with %s in the claim's paragraph" % (sha[:7], subject, lacks)))
@@ -222,11 +232,14 @@ def gaps(root, base):
 
 def main(args):
     base, root = os.environ.get("BASE_SHA", ""), os.getcwd()
-    rest = list(args)
+    rest, ruling_only = list(args), False
     while rest:
         flag = rest.pop(0)
+        if flag == "--ruling-only":
+            ruling_only = True
+            continue
         if flag not in ("--base", "--root") or not rest:
-            print("check_red_run: FAIL: usage: check_red_run.py [--base <sha>] [--root <dir>]")
+            print("check_red_run: FAIL: usage: check_red_run.py [--base <sha>] [--root <dir>] [--ruling-only]")
             return 1
         if flag == "--base":
             base = rest.pop(0)
@@ -236,7 +249,7 @@ def main(args):
         print("check_red_run: UNKNOWN, no base: pass --base <sha> or set BASE_SHA")
         return 2
     try:
-        bad = gaps(root, base)
+        bad = gaps(root, base, ruling_only)
     except Unknown as err:
         print("check_red_run: UNKNOWN, " + str(err))
         return 2

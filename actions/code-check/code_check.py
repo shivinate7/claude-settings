@@ -14,7 +14,8 @@ a relative specifier, extensionless relative imports, TypeScript-only syntax and
 import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
 It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
-which GitHub fetches whole at the pinned sha."""
+which GitHub fetches whole at the pinned sha. The same folders hold lint/check_red_run.py, which it runs with --ruling-only
+against --base so a child repo's commit messages get the ruling-cite rule from its one reader."""
 import argparse, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +56,32 @@ def comment_check(root, base, exclude):
     # Exit 3 is the node tool failing to run; exit 1 with no hit row is a crash. Neither is a verdict, so neither is
     # a clean diff.
     return hits + ["comment check could not run: %s" % err.replace("COULD NOT RUN: ", "", 1)]
+
+
+RULING_CHECK = os.path.join(HERE, "..", "..", "lint", "check_red_run.py")
+
+
+def ruling_check(root, base):
+    """Failures from the ruling-cite rule on the commits of base..HEAD. The rule is lint/check_red_run.py --ruling-only,
+    run as a child, so it has one home. No base is a skip; an unread range is unknown. Neither fails."""
+    if not base or base == ZERO:
+        print("ruling check: skipped, no base to diff against")
+        return []
+    if not os.path.isfile(RULING_CHECK):
+        print("ruling check: unknown, %s is not in this copy of the action" % os.path.normpath(RULING_CHECK))
+        return []
+    p = sh([sys.executable, RULING_CHECK, "--ruling-only", "--base", base], root)
+    rows = [r for r in p.stdout.splitlines() if r.strip()]
+    if p.returncode == 0:
+        print("ruling check: pass")
+        return []
+    if p.returncode == 2:
+        print("ruling check: unknown, %s" % (rows[-1] if rows else "exit 2"))
+        return []
+    if p.returncode == 1 and rows:
+        return rows
+    err = (p.stderr.strip().splitlines() or ["exit %d" % p.returncode])[-1]
+    return ["ruling check could not run: %s" % err]
 
 
 def load_standard():
@@ -375,6 +402,7 @@ def main(argv):
             print("code-check: %s %s: %s %s" % (lang, layer, plan[0], "FAIL" if problems else "pass"))
             failures += problems
     failures += comment_check(root, args.base, cfg.get("exclude", []))
+    failures += ruling_check(root, args.base)
     for f in failures:
         print(f)
         if f and not f.startswith((" ", "\t")):
