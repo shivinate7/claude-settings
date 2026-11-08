@@ -13,18 +13,20 @@ from guard_merge import _plain_source, _push_calls
 from guard_push_delete import push_refspecs
 
 # The families a model id and a trailer both map to a name for. An agent's model id with a word outside it maps to
-# nothing, so the check passes (fail open): `claude-zzz-9-9`. A trailer word outside it names no model and passes,
-# with or without a version after it: "Claude Code 2.1", `GPT-4` and `Claude 5.5`.
+# nothing, so the check passes (fail open): `claude-zzz-9-9`. A trailer with no family word names no model of
+# Claude's and passes, with or without a version: "Claude Code 2.1", `GPT-4` and `Claude 5.5`.
 MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 # `claude-<family>-<major>-<minor>` then an optional suffix such as `[1m]`. A minor of three or more digits is a
 # date (`claude-sonnet-4-20250514`), not a version, so it maps to nothing.
 MODEL_ID = re.compile(r"claude-([a-z]+)-(\d+)-(\d{1,2})(?:\D.*)?\Z", re.S)
-# A trailer value, in any casing: `Claude`, a family word, an optional `<major>[.<minor>]`, then a `[1m]`-style
-# suffix or anything such as the address. A space, a hyphen or an underscore separates the words (or none before
-# the version: `Opus4.5`), and a hyphen or a dot the version: so `Claude Opus 5.5`, `Claude-Opus-5.5`,
-# `Claude_Opus_5.5` and the model id form `claude-opus-5-5[1m]` all read.
-TRAILER_MODEL = re.compile(
-    r"\s*(?:claude[\s_-]+)?([a-z]+)(?:[\s_-]*(\d+)(?:[.-](\d{1,2}))?)?(?=[\s<\[]|\Z)", re.I)
+# A trailer value is read for a family word anywhere in it, in any casing, as a whole word (`Opus4.5` and
+# `Claude_Opus_5.5` read; `Opusculum` does not). The version is the number right after the word, else right before
+# it (`Claude 3.5 Sonnet`). A space, a hyphen or an underscore may sit between the word and its version, and a
+# hyphen or a dot between major and minor: so `Claude Opus 5.5`, `Claude-Opus-5.5` and `claude-opus-5-5[1m]` read.
+FAMILY_WORD = re.compile(r"(?<![a-z])(" + "|".join(MODEL_FAMILIES) + r")(?![a-z])", re.I)
+VERSION_AFTER = re.compile(r"[\s_-]*(\d+)(?:[.-](\d{1,2}))?(?!\d)")
+VERSION_BEFORE = re.compile(r"(?<!\d)(\d+)(?:[.-](\d{1,2}))?[\s_-]*\Z")
+ADDRESS = re.compile(r"<[^>]*>")
 TAIL_BYTES = 64 * 1024   # the first read of a transcript's end; it doubles until an assistant record shows
 TAIL_MAX = 16 * 1024 * 1024
 SYNTHETIC = "<synthetic>"
@@ -89,20 +91,20 @@ def own_models(path):
 
 def trailer_differs(value, own):
     """True when the trailer `value` names a model that is not `own` (family, major, minor). A family word with
-    no version differs only by family; a version with no minor differs only by major."""
-    found = TRAILER_MODEL.match(value)
+    no version differs only by family; a version with no minor differs only by major. A value with no family
+    word names no model the rule knows, so it passes."""
+    value = ADDRESS.sub(" ", value)
+    found = FAMILY_WORD.search(value)
     if not found:
-        return False
-    family = found.group(1).lower()
-    if family not in MODEL_FAMILIES:
-        return False   # "Claude Code 2.1", `GPT-4`, a person: no model family the rule knows
-    if family != own[0]:
+        return False   # "Claude Code 2.1", `GPT-4`, a person
+    if found.group(1).lower() != own[0]:
         return True
-    if found.group(2) is None:
+    version = VERSION_AFTER.match(value, found.end()) or VERSION_BEFORE.search(value[:found.start()])
+    if not version:
         return False
-    if int(found.group(2)) != own[1]:
+    if int(version.group(1)) != own[1]:
         return True
-    return found.group(3) is not None and int(found.group(3)) != own[2]
+    return version.group(2) is not None and int(version.group(2)) != own[2]
 
 
 def unpushed_trailers(where, sources):
