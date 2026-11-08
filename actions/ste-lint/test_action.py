@@ -15,7 +15,7 @@ bin/ste-changed where its own folder holds no actions/. The command still finds 
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on its ste-lint step): a drifted pin with a
 passing lint exits 0 with the drift on stderr, a failing lint still exits 1, and ci-job's ste-lint step reads PASS
-with `pin note` on its line.
+with `pin note` on its line, and that line holds the drift line's marker and its whole text.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
@@ -45,9 +45,11 @@ FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
 # Every case below makes its folder inside it, and the run folder is removed at exit.
 sys.path.append(os.path.join(ROOT, "lint"))
 sys.path.append(os.path.join(ROOT, "testing"))
+sys.path.append(os.path.join(ROOT, "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 import _test_temp  # noqa: E402
 import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
@@ -714,6 +716,9 @@ check("ci-job pin note scope: the drift is in the step's log, and the lint passe
       "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
 check("ci-job pin note: the ste-lint step reads PASS", line.startswith("PASS "), stdout)
 check("ci-job pin note: its line holds `pin note`", "pin note" in line, stdout)
+check("ci-job pin note: its line holds the drift line's marker", PIN_NOTE_MARKER in line, stdout)
+check("ci-job pin note: its line holds the whole drift line, `A line can pass here and fail CI`",
+      "A line can pass here and fail CI" in line, stdout)
 check("ci-job pin note: the job exits 0", rc == 0, stdout)
 rc, stdout, log, shas = ci_job_case(default_change)
 line = step_line(stdout)
