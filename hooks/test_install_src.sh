@@ -4123,10 +4123,11 @@ PY
 listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 module
   lines=$(sed -n "$2" "$1")
   if [ "$(printf '%s\n' "$lines" | grep -c .)" -ne 1 ]; then bad "$name" "$4: $3 is not one list line"; nmiss=$((nmiss + 1)); return; fi
-  case "$lines" in
-    *"$4"*) ;;
-    *) bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1)) ;;
-  esac
+  # A name counts only as a whole name. Splitting the line at each character a file name cannot hold
+  # leaves the names as tokens, so shared_names.py does not list names.py.
+  if ! printf '%s\n' "$lines" | tr -c '[:alnum:]_.-' '\n' | grep -Fx -- "$4" >/dev/null; then
+    bad "$name" "$4 is not in $3"; nmiss=$((nmiss + 1))
+  fi
 }
 
 guardset4() {
