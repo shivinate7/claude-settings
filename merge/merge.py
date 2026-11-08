@@ -45,8 +45,8 @@
                           label POST says the label is unknown and keeps the lint's verdict and exit code. Cost per call: one ci-job
                           run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
   merge --idle-lanes --live FILE
-                          one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
-                          skills/roadmap/build.py (the upkeep row `lanes to archive`), then one more line: `finished lanes not archived`, the
+                          one line per lane the roadmap's live file shows done and safe to archive, then a summary line when one prints. Reads
+                          skills/roadmap/build.py (the upkeep row `lanes to archive`), then, after the list and its summary when one prints, one more line: `finished lanes not archived`, the
                           count of finished lanes (the Backlog check's third count), or unknown with its reason. Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`

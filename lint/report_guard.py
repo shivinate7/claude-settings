@@ -117,8 +117,8 @@ fields, each a whole number or `unknown`: `Backlog: reviewed past one batch cycl
 or after "; " or ". ". It holds on every Stop whose reply has the report shape, landed or not, and in the rewrite after a
 missing-report block. A lane, a triage session, an untagged session and a session with no own record owe nothing. Each number
 must equal the newest read in the transcript after the newest `compact_boundary`: counts one and two from the newest
-`merge --reviewed` summary line, count three from the finished-lanes line of the newest `merge --idle-lanes` run (the line after its archive
-summary; a run with the summary and no such line, or an unknown one, gives no number; shared_names holds both
+`merge --reviewed` summary line, count three from the finished-lanes line of the newest `merge --idle-lanes` run (the line after the list, and after its summary when one prints;
+a run with the summary and no such line, or an unknown one, gives no number; shared_names holds both
 writers and patterns). A read is a Bash run whose own program is merge, past the wrappers verdict, `timeout N`, env and
 `python3 [-I]` (the guard's shell reader splits it, so quoted text, a heredoc or a grep that names the flag is no read). A run
 through verdict is read from the log its FAIL line names; a PASS verdict line that names `merge --reviewed` as the command it ran has no RED line, so both its

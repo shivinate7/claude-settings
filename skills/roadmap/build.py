@@ -1337,14 +1337,18 @@ def finished_lanes(work, slug, repo=None, main_branch="main", head_landed=None):
     failed, or review ready with no open pull holding one of its steps (pull_holds_lane, as idle_lanes reads it).
     Working and blocked never count. No step, page item or age is read. `repo` lets a draft pull whose head is on
     main release a review-ready lane; with no `repo` no draft does. A missing sessions list, a stale readAt, skipped
-    rows, or a live lane row with no status bucket enum name reads unknown, never 0. `head_landed` is a shared
-    draft_head_landed test; with none, one is made."""
+    rows, or a live lane row with no status bucket enum name reads unknown, never 0. With a `repo` whose main ref
+    cannot be read, the count reads unknown too: draft_head_landed reads main, so a draft pull's hold cannot be told
+    from a real one. Unread page items do not change the count. `head_landed` is a shared draft_head_landed test;
+    with none, one is made."""
     why = live_why(work)
     if why:
         return why
     live = [row for row in lane_rows(work, slug) if row["session_status"] != ARCHIVED_SESSION]
     if any(row.get("status_bucket") not in SESSION_BUCKETS for row in live):
         return "unknown (a live lane session row has no status_bucket enum name)"
+    if repo is not None and not main_ref(repo, main_branch):
+        return "unknown (main could not be read, so no draft pull's head can be tested against it)"
     head_landed = head_landed or draft_head_landed(repo, main_branch)
     count = 0
     for row in live:

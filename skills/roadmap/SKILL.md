@@ -264,13 +264,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - the repo's GitHub name cannot be read.
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
-  a summary line, then the line `merge: N finished lanes not archived.` (`build.finished_lanes`; the Backlog
+  a summary line when one prints, then the line `merge: N finished lanes not archived.` (`build.finished_lanes`; the Backlog
   check's third count). When the count cannot be read, the line is
   `merge: finished lanes not archived unknown (<why>).` The count is a separate
   reading from the list. A lane row of this repo counts when it is not archived and its status is completed or failed.
   A review ready row counts when no open pull is on its steps' head refs (a draft whose head is on main does not hold). It reads no
   step, page item or age. A missing sessions list, a stale file, skipped rows, or a live lane row with no status
-  enum name reads unknown. The command exits 1, with no summary but still the finished line, when every list entry is unknown;
+  enum name reads unknown. So does an unreadable main, because a draft pull's head is tested against it. Unread page items leave a number. The command exits 1, with no summary but still the finished line, when every list entry is unknown;
 - `Step:` trailers that name no step.
 
 ## Cost
