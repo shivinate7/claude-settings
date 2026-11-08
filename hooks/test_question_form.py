@@ -518,6 +518,12 @@ PAGE_BUTTON_OR_PAST_ACT = [
     "The session merges it after he has merged the base PR.",
     "The session merges it after the owner approved the plan.",
 ]
+# A Claude clause that names a press not yet made, as a noun or behind a possessive ("after your click", "after the
+# owner's click"), hands the press to the owner, so it is refused: the option needs a link.
+CLAUDE_NAMES_OWNER_PRESS = [
+    "Claude merges them after your click on Merge.",
+    "Claude merges them after the owner's click on Merge.",
+]
 
 
 def case_session_press_needs_no_link():
@@ -562,6 +568,11 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_NAMES_OWNER_PRESS:
+        page("a Claude clause that names an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that names an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
@@ -577,6 +588,51 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
         chat("a page-button press or a past act, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
+
+
+# ------------------------------------------------------------------ the session's own merge, named as Claude
+
+def case_claude_own_merge_needs_no_link():
+    # Decision act-in-place: an option whose how says Claude makes the press after the owner's pick is the
+    # session's act, as "The session merges ..." is, so the owner presses nothing and it needs no link. A press in
+    # another clause, an owner's own act, and a label that asks him to click still need one.
+    claude = {"key": "a", "label": "Merge the lane PRs into one batch.", "how": "Claude merges them after your pick.",
+              "gain": "One batch lands at once.", "lose": "A second CI run."}
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    hold = {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}
+    page("Claude's own merge after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[claude, keep])), None)
+    chat("Claude's own merge after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge the lane PRs into one batch.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         None)
+    # Claude asking the owner to press is the owner's press, however the clause starts with Claude, and however
+    # an adverb, "to", "please" or "for a click" stands between the owner's name and the act.
+    for how in ("Claude merges them after your pick, then you click Merge on GitHub.",
+                "Shivam merges the lane PRs on GitHub.",
+                "Claude asks the owner to press Merge on GitHub.",
+                "Claude asks Shivam to click Merge on GitHub.",
+                "Claude asks the owner to just click Merge.",
+                "Claude asks the owner to please click Merge.",
+                "Claude asks him to press Merge.",
+                "Claude asks the user to press Merge.",
+                "Claude asks the owner for a click on Merge."):
+        page("%r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(claude, how=how), keep])), ("press-link", None))
+        chat("%r, with no url, is refused as press-link" % how,
+             chat_box(options=[{"label": claude["label"],
+                                "description": "%s Gain: one batch lands at once. Lose: a second CI run." % how},
+                               hold]),
+             ("press-link", None))
+    page("a label that clicks Merge on GitHub, with Claude's merge as the how, is refused as press-link", "set",
+         entry_of(page_item(options=[dict(claude, label="Click Merge on GitHub."), keep])), ("press-link", None))
+    chat("a label that clicks Merge on GitHub, with Claude's merge in the description, is refused as press-link",
+         chat_box(options=[{"label": "Click Merge on GitHub.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         ("press-link", None))
 
 
 # ------------------------------------------------------------------ a press in the how-text only
@@ -1439,6 +1495,7 @@ def main():
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
+                 case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
