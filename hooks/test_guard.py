@@ -9819,8 +9819,21 @@ roots_allow("(merge --reviewed --root o/alpha=/work/alpha --root o/bravo=/work/b
 # A quoted --root whose DIR ends in `)` is one argument, so the --root after it is still read and the two tags allow.
 roots_allow('merge --reviewed --root "o/alpha=/Users/me/Foo (2026)" --root o/bravo=/b with two tagged repos allows',
             'merge --reviewed --root "o/alpha=/Users/me/Foo (2026)" --root o/bravo=/b', role_path("roots-runner"))
-# A lone `&` ends the arguments, so the --role after it is not read. Detached-launch refuses a lone `&` with no pid captured,
-# before the merge rules run, so this case captures one with `& echo $!`, and the role rule decides the call.
+# A `&` or `)` inside a quoted or `$( )` --root value is part of that argument, and a `)` glued to a redirect still closes the
+# call. So the flag after each such value is read: a lane's --role, a second --root, the bare --reviewed and the tier.
+role_refuse('merge --reviewed --root o/a="/Smith & Sons" --role batch-runner is refused on a lane record',
+            'merge --reviewed --root o/a="/Smith & Sons" --role batch-runner', role_path("lane"))
+role_refuse("merge --reviewed --root o/a=$( pwd ) --role batch-runner is refused on a lane record",
+            "merge --reviewed --root o/a=$( pwd ) --role batch-runner", role_path("lane"))
+roots_allow("merge --reviewed --root o/alpha=$( pwd ) --root o/bravo=/w/b with two tagged repos allows",
+            "merge --reviewed --root o/alpha=$( pwd ) --root o/bravo=/w/b", role_path("roots-runner"))
+roots_refuse("(merge --reviewed) 2>&1 with a two-tag runner's bare call is refused, and the reason says to pass one --root per tag",
+             roots_cmd([], "(", "merge", close=") 2>&1"), role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
+             lacks=(ROOTS_REMEDY,))
+role_allow("(merge --role batch-runner) 2>&1 allows a batch runner's own record, so the glued ) does not hide its tier",
+           "(merge --role batch-runner) 2>&1", role_path("runner"))
+# A lone `&` starts a new call, so the --role in the call after it is read and the lane is refused. Detached-launch refuses
+# a lone `&` with no pid captured, before the merge rules run, so this case captures one with `& echo $!`, and the role rule decides.
 role_refuse("merge --reviewed & merge --role batch-runner & echo $! is refused on a lane record",
             "merge --reviewed & merge --role batch-runner & echo $!", role_path("lane"))
 roots_refuse("cd merge && python3 ./merge.py --reviewed, a two-tag runner's bare call, is refused, and the reason says to pass one --root per tag",
