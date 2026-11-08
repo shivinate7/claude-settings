@@ -9008,6 +9008,18 @@ for _lang in ("perl", "ruby", "node"):
     sh("draft-pr: a %s body with a backtick gh pr create span, fed to %s, is refused" % (_lang, _lang),
        "\n".join(["%s - <<'EOF'" % _lang, TICK_BODY[_lang], "EOF"]), "deny", "draft-pr",
        cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A python body is text, but a perl body beside it is judged on its own span, so the span still denies when the
+# two bodies run in one call. The harmless python line carries no backtick, so only the perl span can deny.
+PY_PLAIN_BODY = 'print("open the pull request after review")'
+sh("draft-pr: a python body fed to python3 beside a perl body fed to perl, whose backtick span holds gh pr create, is refused",
+   "\n".join(["python3 - <<'A'", PY_PLAIN_BODY, "A", "perl - <<'B'", TICK_BODY["perl"], "B"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a python file and a perl file written in one call, the perl file's backtick span holds gh pr create, is refused",
+   "\n".join(["cat > a.py <<'A'", PY_PLAIN_BODY, "A", "cat > b.pl <<'B'", TICK_BODY["perl"], "B", "python3 a.py && perl b.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a body written to f.py and run by perl, whose backtick span holds gh pr create, is refused",
+   "\n".join(["cat > f.py <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.py"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A `$( )` or `<( )` nested in a backtick span is a shell substitution, and perl, ruby and node run the span
 # as a shell, so the gh call inside it runs. Each body carries the gh call only in that nested form.
 sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, fed to perl, is refused",
