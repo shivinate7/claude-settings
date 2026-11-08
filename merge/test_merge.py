@@ -12894,6 +12894,30 @@ class ReviewGrantForm(unittest.TestCase):
                 self.assertIsNone(rec["grant"], f"a record with no Grant line has grant {rec['grant']!r}")
                 self.assertEqual(review_fn(self, "review_body")(**rec), text, "the body of a record with no Grant line is not byte-identical")
 
+    def test_a_grant_on_an_impossible_date_is_not_a_record(self):
+        # the sibling dates are real, a leap day among them, so each refusal below is for the date alone
+        for date in ("2026-11-08 06:08 CST", "2028-02-29 06:08 CDT"):
+            with self.subTest(sibling=date):
+                parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: item 396 a, owner, {date}",)))
+        for date in ("2026-99-99 25:99 CST", "2026-02-30 06:08 CST"):
+            with self.subTest(date=date):
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: item 396 a, owner, {date}",))),
+                                  f"parse_review accepted a Grant line with the impossible date {date!r}")
+
+    def test_two_grant_lines_are_not_a_record(self):
+        parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: one Grant line parses
+        two = (f"Grant: {REVIEW_GRANT}", "Grant: item 397 b, owner, 2026-11-08 06:08 CST")
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=two)), "parse_review accepted two Grant lines")
+
+    def test_a_grant_line_with_unicode_digits_is_not_a_record(self):
+        parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: ASCII digits parse
+        # fullwidth digits in the item number, and Arabic-Indic digits in the year
+        for cause, text in (("fullwidth digits", "item ３９６ a, owner, 2026-11-08 06:08 CST"),
+                            ("Arabic-Indic digits", "item 396 a, owner, ٢٠٢٦-11-08 06:08 CST")):
+            with self.subTest(cause=cause):
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: {text}",))),
+                                  f"parse_review accepted a Grant line with {cause}")
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
     and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
@@ -13080,6 +13104,17 @@ class ReviewGrantRules(unittest.TestCase):
         for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
             with self.subTest(net=net):
                 self.assertEqual(self.granted_state("PASS", guard="yes", net=net)[0], want)
+
+    def test_a_granted_fourth_round_with_a_fix_check_reads_the_fix_on_the_fourth_round(self):
+        # the allowed case: a granted record with a valid Fix check line parses, and its PASS is read on the fourth round
+        for guard, net in (("no", "not owed"), ("yes", "zero")):
+            with self.subTest(guard=guard, net=net):
+                text = record_text(rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",), guard=guard, net=net, fix=(fix_check_line(),))
+                rec = parse_text(self, text)
+                self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse on a granted record: {rec.get('fix')!r}")
+                state, why = review_fn(self, "review_state")(rec, REVIEW_HEAD)
+                self.assertEqual(state, "done", f"a granted fourth round with a fix PASS reads {state!r}: {why!r}")
+                self.assert_names_round_four(why)
 
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
@@ -13434,6 +13469,22 @@ class ReviewGrantFlag(ReviewEnv):
         self.assertEqual(rc, 0, "merge refused the good --grant:\n" + out + err)
         out, _err = self.assert_usage_error(*self.granted("--grant", REVIEW_GRANT, rounds=self.THREE))
         self.assertNotIn(REVIEW_MARKER, out)
+
+    def test_without_a_grant_the_usage_line_is_the_one_the_tool_has_always_printed(self):
+        # with no --grant, the flags that go with --review-record are named exactly as before, so the whole line is compared
+        rc, out, err = self.run_args("7", "--head", REVIEW_HEAD)
+        self.assertEqual(rc, 2, out + err)
+        messages = [line.split(": error: ", 1)[1] for line in err.splitlines() if ": error: " in line]
+        self.assertIn("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record", messages,
+                      "the usage line changed:\n" + err)
+
+    def test_a_grant_on_an_impossible_date_is_a_usage_error(self):
+        rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))  # the sibling: a real date passes
+        self.assertEqual(rc, 0, "merge refused the good --grant:\n" + out + err)
+        for date in ("2026-99-99 25:99 CST", "2026-02-30 06:08 CST"):
+            with self.subTest(date=date):
+                out, _err = self.assert_usage_error(*self.granted("--grant", f"item 396 a, owner, {date}"))
+                self.assertNotIn(REVIEW_MARKER, out)
 
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
