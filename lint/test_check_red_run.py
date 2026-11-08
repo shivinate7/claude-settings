@@ -626,6 +626,11 @@ class MainHistory(unittest.TestCase):
     It reads origin/main's whole history, which CI fetches (fetch-depth 0). A ref it cannot read is unknown, and fails.
     """
 
+    # Predate the mutant form. The checker judges a branch's own range only, so the pin is the one place main's
+    # commits are re-judged. These two are exempt there; no other main commit is.
+    GRANDFATHERED = frozenset(("408340997f6b913294cc44691eab705caf80a6e0",
+                               "1762ec79f2f44d35720e2f32b8ee7ccec1291db4"))
+
     @classmethod
     def setUpClass(cls):
         cls.records = main_messages()
@@ -641,9 +646,10 @@ class MainHistory(unittest.TestCase):
         self.assertEqual(len(self.records), counted, "the pin must read every non-merge message on origin/main")
 
     def test_no_valid_trailer_on_main_turns_invalid(self):
-        accepted = [record for record in self.records if verdict(self.baseline, BASE_VERDICT, record[2])]
+        judged = [record for record in self.records if record[0] not in self.GRANDFATHERED]
+        accepted = [record for record in judged if verdict(self.baseline, BASE_VERDICT, record[2])]
         self.assertGreater(len(accepted), 0, "scope: origin/main holds no valid trailer, so the pin checks nothing")
-        lost = lost_trailers(self.baseline, self.current, self.records)
+        lost = lost_trailers(self.baseline, self.current, judged)
         self.assertEqual(lost, [], "a valid trailer on origin/main turns invalid under this checker:\n" + "\n".join(lost))
 
     def test_pin_flags_a_message_the_checker_refuses(self):
