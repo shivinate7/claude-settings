@@ -20,6 +20,7 @@ import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+from _test_event_body import EVENT_BODY_DEF  # noqa: E402  the one home of the test event-body reader
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
@@ -1215,22 +1216,15 @@ sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").
 
 BODY_EXCUSE = "Summary.\n\nDrops-lines: docs/guide.md -- the guide is rewritten on main\n"  # a PR body whose last paragraph excuses a path
 # A step reads the PR body from the event file that GITHUB_EVENT_PATH names, as CI gives it: no step env carries the body.
-# With no event file the step reads a sentinel, never a body, so a missing source is seen as missing.
-EVENT_BODY = ("import json, os\n"
-              "def event_body():\n"
-              "    path = os.environ.get('GITHUB_EVENT_PATH')\n"
-              "    if path is None:\n"
-              "        return '<no GITHUB_EVENT_PATH>'\n"
-              "    with open(path, encoding='utf-8') as f:\n"
-              "        return (json.load(f).get('pull_request') or {}).get('body') or ''\n")
-BODY_LINT = (EVENT_BODY + "import sys\nbody = event_body()\n"
+# With no event file the step reads a sentinel, never a body, so a missing source is seen as missing (EVENT_BODY_DEF, lint/_test_event_body.py).
+BODY_LINT = (EVENT_BODY_DEF + "import sys\nbody = event_body()\n"
              "with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
              "    f.write(body)  # what the step was given, written out for the test\n"
              "sys.exit(0 if any(line.startswith('Drops-lines:') for line in body.splitlines()) else 1)  # a stand-in for a lint that needs the excuse\n")
 BODY_CHECKS_YML = CHECKS_YML + "      - name: Body excuse\n        run: python3 lint/body_excuse.py\n"
 BODY_READ_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
                  "      - name: Read the body\n        run: python3 lint/body_read.py\n")
-BODY_READ = EVENT_BODY + ("with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+BODY_READ = EVENT_BODY_DEF + ("with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
                           "    f.write(event_body())\n")
 STUB_CI_JOB = ("import os, sys\nsys.stdout.write(open(os.environ['STUB_TEXT'], encoding='utf-8', newline='').read())\n"
                "sys.exit(int(os.environ['STUB_RC']))\n")

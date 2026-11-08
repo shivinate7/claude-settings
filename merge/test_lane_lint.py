@@ -17,6 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
+from _test_event_body import EVENT_BODY_DEF  # noqa: E402  the one home of the test event-body reader
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 import merge  # noqa: E402
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
@@ -524,7 +525,7 @@ BATCH_CI_STEPS = (SILENT_UNDO, "Comment narration check", "Red-run trailer", "ST
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
-CALL_STUB = ("import sys\n" + tm.EVENT_BODY + "with open(%r, 'a', encoding='utf-8') as f:\n"
+CALL_STUB = ("import sys\n" + EVENT_BODY_DEF + "with open(%r, 'a', encoding='utf-8') as f:\n"
              "    print(json.dumps({'argv': sys.argv, 'pr_body': event_body()}), file=f)\n")  # logs its argv and the body in its event file, exits 0
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
