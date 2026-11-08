@@ -412,9 +412,13 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+# A pipe may end a line, so `|`, a newline, then the program is a pipe to it. A NAME=value value may hold `$(...)`
+# (one nested level) with spaces, read whole so a failed read backtracks in linear time. A value ending in `,` is a
+# wrapped attribute list (`Mandatory=$true, Position=0`), not a prefix before a command.
 PS_BASH_FORMS = re.compile(
-    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
-    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
+    r"\|[ \t]*(?:\r?\n[ \t]*)?(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*="
+    r"(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|\$\((?:[^()]|\([^()]*\))*\)|(?!\$\()[^\s;}])*(?<!,)[ \t]+[A-Za-z./]"
     r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
     re.M | re.I)
 # A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
@@ -657,7 +661,7 @@ def _shell_line(span, run) -> bool:
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
                 return True
-        elif SHELL_CMDLET.fullmatch(words[0]):
+        elif SHELL_CMDLET.fullmatch(words[0].rsplit("/", 1)[-1]):   # the basename keeps its case
             return True
         elif chained and _chain_command(word, len(words) - 1):
             return True
