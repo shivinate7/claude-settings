@@ -1666,11 +1666,17 @@ class PrintedFindings(unittest.TestCase):
         r.sh("update-ref", "refs/remotes/origin/main", main)
         return r, merged
 
-    def run_main(self, argv, encoding):
-        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+    def run_main(self, argv, encoding, env=None):
+        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure.
+        env: name -> value set for the run, None pops the name."""
         out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
         with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
             os.environ.pop("CI", None)
+            for name, value in (env or {}).items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
             try:
                 rc = C.main(argv)
             except Exception as e:  # the traceback is the failure
@@ -2710,6 +2716,129 @@ class CheckStepPins(unittest.TestCase):
         self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}', github.event.pull_request.body) }}\""), "a format() wrapper hides the body")
         self.assertIsNotNone(INLINE_BODY.search("echo \"${{ format('{0}',\n  github.event.pull_request.body) }}\""), "a multi-line expression hides the body")
         self.assertIsNone(INLINE_BODY.search('echo "${{ env.PR_BODY }}"'))
+
+
+NO_BASE = {"GITHUB_BASE_REF": None}  # a PR run sets GITHUB_BASE_REF; the no-base reads pop it (None pops a name)
+STACK_BASE = "line 1\nadded by pr-base\n" + "".join("line %d\n" % i for i in range(2, 21)) + "function Card() {}\n"
+NO_LINE_1 = "".join("line %d\n" % i for i in range(2, 21)) + "function Card() {}\n"
+
+
+class PrBase(unittest.TestCase):
+    """Which base a local run reads a branch against when it names none: the PR's base, else origin/main.
+
+    The shared fixture is a lane off `pr-base`, which adds a line after `line 1`. Main deletes `line 1`, and the lane
+    merges main with `-X <strategy>`: `theirs` drops pr-base's added line, `ours` puts `line 1` back. Each case first
+    reads the explicit bases with check(), so only the default choice is under test."""
+
+    def setUp(self):
+        self.r = base_repo()
+
+    def stack(self, strategy, base_text=STACK_BASE, main_text=NO_LINE_1):
+        r = self.r
+        r.sh("checkout", "-q", "-b", "pr-base")
+        r.commit("pr-base adds a line", app_txt=base_text)
+        r.sh("push", "-q", "origin", "pr-base")
+        r.sh("checkout", "-q", "-b", "lane", "pr-base")
+        r.commit("lane edits other", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main deletes line 1", app_txt=main_text)
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "-X", strategy, "origin/main")
+
+    def explicit(self, upstream):
+        """check() against an explicit base: the verdict the default run must match."""
+        return C.check(self.r.dir, upstream, "HEAD")[0]
+
+    def run_main(self, argv, env=None):
+        return PrintedFindings.run_main(self, argv, "utf-8", env)
+
+    def run_default(self, env=None):
+        """main() with no --upstream: the run under test. No-base env unless the case names a base."""
+        return self.run_main(["--repo", self.r.dir], env={**NO_BASE, **(env or {})})
+
+    def assert_theirs_scope(self):
+        """Scope first: origin/main is quiet on the theirs lane, and origin/pr-base names the dropped base line."""
+        self.assertEqual(self.explicit("origin/main"), [], "scope: origin/main should be quiet on this lane")
+        base_bad = self.explicit("origin/pr-base")
+        self.assertTrue(any("added by pr-base" in p for p in base_bad), "scope: origin/pr-base should name the dropped line: %r" % base_bad)
+
+    def test_config_names_the_base_and_the_dropped_base_line_is_read_against_it(self):
+        self.stack("theirs")
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        self.assert_theirs_scope()
+        rc, text = self.run_default()
+        self.assertIn("added by pr-base", text, "the default run is quiet on a lane that drops its base's line: it read against origin/main")
+        self.assertEqual(rc, 1, "the default run printed the dropped line but did not exit 1")
+
+    def test_env_names_the_base_and_the_dropped_base_line_is_read_against_it(self):
+        self.stack("theirs")
+        self.assert_theirs_scope()
+        rc, text = self.run_default({"GITHUB_BASE_REF": "pr-base"})
+        self.assertIn("added by pr-base", text, "the default run is quiet on a lane that drops its base's line: GITHUB_BASE_REF=pr-base was not read")
+        self.assertEqual(rc, 1, "the default run printed the dropped line but did not exit 1")
+
+    def test_candidate_base_that_holds_the_head_is_rejected_and_named(self):
+        self.stack("ours")
+        r = self.r
+        r.sh("push", "-q", "origin", "lane")
+        r.sh("fetch", "-q", "origin")
+        r.sh("config", "branch.lane.gh-merge-base", "lane")
+        r.sh("merge-base", "--is-ancestor", "HEAD", "origin/lane")  # scope: origin/lane already holds the head
+        self.assertTrue(self.explicit("origin/main"), "scope: origin/main should FAIL on this lane")
+        rc, text = self.run_default()
+        self.assertIn("undoing", text, "the FAIL against origin/main did not print: a rejected candidate silenced the run")
+        self.assertIn("origin/lane", text, "the run printed no note naming the rejected candidate origin/lane")
+        self.assertEqual(rc, 1, "the run printed the FAIL but did not exit 1")
+
+    def test_no_base_found_names_origin_main_and_says_the_base_is_unknown(self):
+        self.r.sh("checkout", "-q", "-b", "lane")
+        self.r.commit("lane edits other", other_txt="other v2\n")
+        rc, text = self.run_default()
+        notes = [line for line in text.splitlines() if "origin/main" in line and "unknown" in line.lower()]
+        self.assertTrue(notes, "no line names origin/main as the base and says the PR base is unknown: %r" % text)
+        self.assertEqual(rc, 0, "a clean lane with no base named exited %d" % rc)
+
+    def test_missing_origin_main_falls_back_to_local_main_with_a_note(self):
+        self.r.sh("checkout", "-q", "-b", "lane")
+        self.r.commit("lane edits other", other_txt="other v2\n")
+        self.r.sh("update-ref", "-d", "refs/remotes/origin/main")
+        rc, text = self.run_default()
+        self.assertIn("origin/main", text, "the run fell back to local main with no note naming the missing origin/main")
+        self.assertEqual(rc, 0, "a clean lane on local main exited %d" % rc)
+
+    def test_clean_stack_stays_quiet_against_its_base(self):  # control: a merge with no conflict is quiet on either base
+        clean_base = "".join("line %d\n" % i for i in range(1, 21)) + "added by pr-base\nfunction Card() {}\n"
+        clean_main = "line 1\n" + "".join("line %d\n" % i for i in range(3, 21)) + "function Card() {}\n"
+        self.stack("theirs", base_text=clean_base, main_text=clean_main)
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        self.assertEqual(self.explicit("origin/main"), [], "scope: origin/main should be quiet on the clean stack")
+        self.assertEqual(self.explicit("origin/pr-base"), [], "scope: origin/pr-base should be quiet on the clean stack")
+        rc, text = self.run_default()
+        self.assertEqual(rc, 0, "a clean stack read against its base exited %d: %r" % (rc, text))
+
+    def test_explicit_upstream_keeps_its_verdict_and_prints_no_base_note(self):  # control
+        self.stack("ours")
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        expected = ["silent-undo: FAIL: " + p for p in self.explicit("origin/main")]
+        self.assertTrue(expected, "scope: origin/main should FAIL on this lane")
+        rc, text = self.run_main(["--repo", self.r.dir, "--upstream", "origin/main"], env=NO_BASE)
+        lines = text.splitlines()
+        self.assertEqual([x for x in lines if x.startswith("silent-undo: FAIL: ")], expected, "an explicit --upstream changed its FAIL lines")
+        extra = [x for x in lines if not x.startswith("silent-undo: FAIL: ") and not x.startswith("silent-undo: put the work back")]
+        self.assertEqual(extra, [], "an explicit --upstream printed a line it did not print before")
+        self.assertEqual(rc, 1)
+
+    def test_lane_on_main_keeps_its_verdict_with_no_base_named(self):  # control
+        self.r.commit("main deletes line 1", app_txt=NO_LINE_1)
+        self.r.push()
+        self.r.sh("checkout", "-q", "-b", "oops")
+        self.r.sh("revert", "--no-edit", "HEAD")
+        expected = ["silent-undo: FAIL: " + p for p in self.explicit("origin/main")]
+        self.assertTrue(expected, "scope: origin/main should FAIL on the revert")
+        rc, text = self.run_default()
+        self.assertEqual([x for x in text.splitlines() if x.startswith("silent-undo: FAIL: ")], expected, "the default run's FAIL lines changed on a lane off main")
+        self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":
