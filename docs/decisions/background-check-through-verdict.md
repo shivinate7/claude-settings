@@ -35,7 +35,7 @@ The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only
 
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select`, `check-tail-trailing-amp`, `verdict-pipe-if`, `verdict-pipe-substitution` and `narrated-tail-no-uv`. No incident has shown any of them.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select`, `check-tail-uv-script`, `check-tail-uv-flag-value`, `check-tail-trailing-amp` and `narrated-tail-no-uv`. No incident has shown any of them.
 
 Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into a truncating filter hides it, and the lane must run the check again.
 
