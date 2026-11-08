@@ -19,13 +19,15 @@ A push that would drop the remote tip of a branch, with no other copy, is refuse
 - An archive ref is any `refs/remotes/<remote>/archive/*`. A ref such as `old-archive/x` does not count.
 - A forced push keeps the `force-push` refusal; this rule runs after it. A delete of the record branch keeps
   `roadmap-one-writer`; this rule runs after it.
+- A delete of `archive/<name>` does not count its own `refs/remotes/<remote>/archive/<name>` as a holder:
+  that ref goes with the delete. It passes only when the tip is on the default base or in another archive ref.
 - A dry run writes nothing and passes.
+- A push that names no remote is not read: with no refspec there is no name to judge.
 - The deny names `<branch>` and `<remote>` only: never a real name, never a forced push.
 
 Cost: no new process or file. A push that is no delete and no archive push reads nothing. A delete or an
-archive push reads each of these once:
+archive push reads each of these once, with no `git config`:
 
-- one `git config` when no remote is named;
 - one `rev-parse` for the tracking tip, and one for the source of an archive push.
 
 Then it reads until one arm passes:

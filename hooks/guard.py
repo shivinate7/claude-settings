@@ -3858,7 +3858,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
                 continue
-            verdict, _detail = archive_tip_hit(args, where, overrides)
+            verdict, _detail = archive_tip_hit(args, where)
             if verdict == "deny":
                 refuse(tool, "deny", "archive-remote-tip", ARCHIVE_TIP_REASON, "git push " + " ".join(args))
             elif verdict == "ask":

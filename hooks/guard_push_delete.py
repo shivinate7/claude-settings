@@ -391,16 +391,16 @@ def _on_default_base(cwd: str, remote: str, tip: str):
     return _is_ancestor(cwd, tip, full)
 
 
-def _in_archive_ref(cwd: str, remote: str, tip: str):
+def _in_archive_ref(cwd: str, remote: str, tip: str, deleted: str = ""):
     """True, False, or None for some ref under `refs/remotes/<remote>/archive/` holding the tip.
     One `for-each-ref --contains` reads every archive ref at once, so a repo with many archive refs
-    costs one spawn."""
-    answer = guard_core._git(cwd, "for-each-ref", "--count=1", "--format=%(refname)",
+    costs one spawn. `deleted` is the ref the push deletes: it goes with the push, so it holds nothing."""
+    answer = guard_core._git(cwd, "for-each-ref", "--format=%(refname)",
                              "--contains=" + tip,
                              "refs/remotes/" + remote + "/" + ARCHIVE_DIR + "/")
     if answer is None or answer.returncode != 0:
         return None
-    return bool(answer.stdout.strip())
+    return any(ref != deleted for ref in answer.stdout.split())
 
 
 def _archive_names(plain, deleting: bool):
@@ -426,13 +426,13 @@ def _archive_names(plain, deleting: bool):
     return [name for name in deleted if branch(name)], [(src, name) for src, name in pushed if branch(name)]
 
 
-def archive_tip_hit(args, cwd: str, overrides=None):
+def archive_tip_hit(args, cwd: str):
     """(verdict, detail) for a `git push` the remote-tip rule judges: ('deny', ...) or ('ask', ...), else
     ('', ''). Judged: a delete of a remote branch X (`--delete`, `-d`, `:X`), and an archive push
     (`<src>:archive/<name>` or `<src>:refs/heads/archive/<name>`).
 
     A delete passes when the remote-tracking tip of X is an ancestor of the default base or of an archive
-    ref. An archive push passes when the tip of <name> is an ancestor of the source, the default base or
+    ref other than X's own. An archive push passes when the tip of <name> is an ancestor of the source, the default base or
     an archive ref. Either passes when the name has no remote-tracking ref at all: there is no tip to lose.
     A source that does not resolve, or a read git cannot answer, asks. Reads run only for a delete or an
     archive target, and each stops at the first arm that passes."""
@@ -442,10 +442,7 @@ def archive_tip_hit(args, cwd: str, overrides=None):
     deleted, pushed = _archive_names(plain, delete)
     if not deleted and not pushed:
         return "", ""
-    if not remote:
-        remote = _push_config(cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
-    remote = remote or "origin"
-    asked = ""
+    asked = ""   # `plain` is not empty here, so `_push_parse` has already read the remote from it
     for source, name in [(None, each) for each in deleted] + pushed:
         state, tip = _ref_tip(cwd, "refs/remotes/" + remote + "/" + name)
         if state == "none":
@@ -461,7 +458,8 @@ def archive_tip_hit(args, cwd: str, overrides=None):
                 continue
             arms.append(lambda sha=src_sha: _is_ancestor(cwd, tip, sha))
         arms.append(lambda: _on_default_base(cwd, remote, tip))
-        arms.append(lambda: _in_archive_ref(cwd, remote, tip))
+        own = "refs/remotes/" + remote + "/" + name if source is None else ""
+        arms.append(lambda: _in_archive_ref(cwd, remote, tip, own))
         answers = []
         for arm in arms:
             found = arm()

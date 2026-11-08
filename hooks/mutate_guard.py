@@ -414,9 +414,13 @@ MUTATIONS = [
     # archive-remote-tip. One `for-each-ref --contains` reads every archive ref, so "read only the first
     # archive ref" cannot be written; the any-ref mutant stands in: a ref that misses the tip counts.
     ("archive-remote-tip: an archive ref no longer holds a tip",
-     '        arms.append(lambda: _in_archive_ref(cwd, remote, tip))',
+     '        arms.append(lambda: _in_archive_ref(cwd, remote, tip, own))',
      '        arms.append(lambda: False)', "guard",
      'an archive push, with the holding archive ref last of three, is silent'),
+    ("archive-remote-tip: the deleted branch's own archive ref counts as a holder",
+     '    return any(ref != deleted for ref in answer.stdout.split())',
+     '    return bool(answer.stdout.split())', "guard",
+     'a delete of an archive branch whose only holder is its own ref is refused'),
     ("archive-remote-tip: an archive ref that misses the tip counts",
      '                             "--contains=" + tip,\n',
      '                             "--count=1",\n', "guard",
