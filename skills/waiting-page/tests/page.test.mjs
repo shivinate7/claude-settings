@@ -7613,7 +7613,7 @@ test("a sent Park shows the receipt Parked. with Change, and Change then a pick 
   await send(page);
   await page.waitForFunction((k) => !!window.__answers()[k] && window.__answers()[k].choice === "a", DECISION.id);
   const rec = (await answers(page))[DECISION.id];
-  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "label", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
   assert.equal(rec.choice, "a", "the changed answer lost the picked option");
 });
 
