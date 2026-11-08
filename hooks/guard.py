@@ -1700,7 +1700,7 @@ def workflow_run_is_test(value: str) -> bool:
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
         script = workflow_script_index(tokens)
-    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not is_test_rel(tokens[script]):
+    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not workflow_runs_test(tokens[script]):
         return False
     rest = tokens[:script] + tokens[script + 1:]
     return not TEST_DISABLE_FLAGS.search(" ".join(rest)) and not disables_tests([value], [])
