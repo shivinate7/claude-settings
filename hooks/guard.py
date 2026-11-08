@@ -7051,7 +7051,7 @@ def judge(payload) -> None:
     # in its schema, so a call with none fails at the host and is not judged here.
     if tool in FILE_WRITE_TOOLS:
         branch = tool_input.get("branch")
-        if isinstance(branch, str) and names_default_branch(branch):
+        if isinstance(branch, str) and names_default_branch(branch.strip()):
             refuse(tool, "ask", "push-main", PUSH_MAIN_REASON, tool + " to " + branch.strip())
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
