@@ -3478,7 +3478,7 @@ def source_record_problem(h, root, a, own_records):
     if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
         return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}", "Name the newest review record on that pull request."
     if rec["fix"] and rec["fix"][3] != "PASS":
-        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."
+        return None, f"--fix-base-record: that record's Fix check is {rec['fix'][3]}, and a chain never runs through --fix-base-record from a FAIL or WIDE Fix check", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."
     return rec, None, ""
 
 def carry_problem(h, a, info, src):
