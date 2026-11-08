@@ -29,7 +29,8 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
-SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
+import layout  # noqa: E402  lint/layout.py, the reader the guard calls for the decisions folder (it reads files only when called)
+SCRIPT =os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
@@ -51,15 +52,27 @@ def pre_split(got):
     return {n: v for n, v in got.items() if n not in GUARD_SPLIT}
 
 
-def family_files():
-    """hooks/<module>.py for each module in hooks/guard.py's _FAMILY_MODULES. The tuple is read from the file's syntax tree,
-    so guard.py is not imported (its load starts the guard's own reads)."""
+def guard_assign(name):
+    """The value node of hooks/guard.py's module-level assignment to `name`, read from the file's syntax tree, so guard.py
+    is not imported (its load starts the guard's own reads). Every case that reads a guard constant goes through here."""
     with open(os.path.join(HERE, "..", "hooks", "guard.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
-            return [f"hooks/{elt.value}.py" for elt in node.value.elts]
-    raise AssertionError("hooks/guard.py has no _FAMILY_MODULES tuple")
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return node.value
+    raise AssertionError(f"hooks/guard.py has no module-level {name}")
+
+
+def family_files():
+    """hooks/<module>.py for each module in hooks/guard.py's _FAMILY_MODULES."""
+    return [f"hooks/{m}.py" for m in ast.literal_eval(guard_assign("_FAMILY_MODULES"))]
+
+
+def role_table_path():
+    """The decision record the guard reads for the role table (hooks/guard.py role_model_table): the decisions folder from
+    lint/layout.json, read by the reader the guard calls, then ROLE_TABLE_FILE from hooks/guard.py. Both come from the code."""
+    folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
+    return "/".join(folder.split("/") + [ast.literal_eval(guard_assign("ROLE_TABLE_FILE"))])
 
 
 # The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
@@ -823,6 +836,18 @@ class GuardWindowsSplit(unittest.TestCase):
                 with self.subTest(path=p, edit=edit):
                     self.assertEqual(run([p], existing=[p] if edit else ()), want, f"{p}: its outputs differ from guard.py's")
 
+    def test_a_role_table_edit_turns_on_the_guard_and_the_full_windows_guard(self):
+        # The guard reads this record at run time (hooks/guard.py role_model_table), and the guard suite checks the real
+        # file (hooks/test_guard.py role_real_table_check). It is a .md, so only a scope arm that names it turns the guard on.
+        path = role_table_path()
+        for existing in ((), (path,)):
+            with self.subTest(path=path, edit=bool(existing)):
+                got = run([path], existing=existing)
+                self.assertEqual(got["code"], "true", f"scope: code is off for {path}")
+                self.assertEqual(got["guard"], "true", f"scope: guard is off for {path}: the guard reads its role table")
+                self.assertEqual(got.get(GUARD_FULL), "true",
+                                 f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {path}, want 'true': the guard suite checks it on the real repo")
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class GuardClosure(unittest.TestCase):
@@ -854,6 +879,25 @@ class GuardClosure(unittest.TestCase):
         for p in ("hooks/_nowindow.py", "lint/layout.json", "bin/sim-lease"):
             with self.subTest(path=p):
                 self.assertIn(p, files)
+
+    def test_a_spread_path_in_a_product_module_is_named_as_a_load_the_closure_does_not_follow(self):
+        # A spread folder (`*folder.split("/")`) is how a layout-built path is joined. The closure cannot read it, so the derivation
+        # must name it among the unfollowed loads, and LOAD_EXCEPTIONS must name it too. Otherwise a new one drops out silently.
+        src = "\n".join(["import os", "", "", "def read(root, folder, name):", '    return os.path.join(root, *folder.split("/"), name)', ""])
+        _, _, _, unfollowed = _refs("hooks/spread_probe.py", ast.parse(src), set())
+        self.assertEqual([line for line, _ in unfollowed], [5], f"the spread join on line 5 is not named as unfollowed: {unfollowed}")
+
+    def test_a_literal_join_in_a_product_module_is_not_named_as_a_spread(self):
+        # Control: a literal repo path is followed or left alone, never named as a spread.
+        src = "\n".join(["import os", "", "def read(root):", '    return os.path.join(root, "docs", "x.md")', ""])
+        _, _, _, unfollowed = _refs("hooks/literal_probe.py", ast.parse(src), set())
+        self.assertEqual(unfollowed, [], f"a literal join is named as unfollowed: {unfollowed}")
+
+    def test_a_spread_join_in_a_test_module_is_a_fixture_path_and_is_not_named(self):
+        # Control: a test module's join is a fixture path, as its joins under a run-time root already are.
+        src = "\n".join(["import os", "", "def read(root, folder):", '    return os.path.join(root, *folder.split("/"))', ""])
+        _, _, _, unfollowed = _refs("lint/test_spread_probe.py", ast.parse(src), set())
+        self.assertEqual(unfollowed, [], f"a test module's spread join is named as unfollowed: {unfollowed}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
