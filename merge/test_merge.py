@@ -13904,6 +13904,15 @@ class ReviewChainFixture(ReviewEnv):
     CODE = file_entry("merge/merge.py")  # a code file: a fix diff that holds one is not a record-only step
     NOTES_FILE = file_entry("docs/debts/notes.md")
 
+    def source_pull(self, n=None, state="closed", merged=False, created="2026-10-01T00:00:00Z"):
+        """The source pull request as GitHub lists it: number `n` (SOURCE_PR when None) at NEWEST, in `state`, created at `created`. A
+        --fix-base-record stand-in reads it through pulls/<n>, so a host that takes the stand-in must list it."""
+        return {**batch_pull(self.SOURCE_PR if n is None else n, self.NEWEST, created_at=created), "state": state, "merged": merged}
+
+    def source_host(self, *comments, head=REVIEW_HEAD, **reads):
+        """record_host with the source pull request listed, closed, so a --fix-base-record stand-in can read it. `reads` go to PullsHost."""
+        return PullsHost([batch_pull(7, head), self.source_pull()], {}, comments=comments, **reads)
+
     def pair(self, verdict, rounds=REVIEW_PASS, net="not owed", guard="no", kind="normal"):
         """Pull request 7's comments for a second small fix after a passed fix check: an older record at EARLIER, then the
         newest record at NEWEST, whose fix check of `verdict` reviewed EARLIER. A `verdict` of None leaves the newest record with no fix check line.
@@ -14573,7 +14582,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
 
     def test_a_source_record_on_another_pull_request_starts_the_fix_check(self):
         # the #1541 shape: the source record is on pull request 1541 at Head H, and this pull request has no record of its own; the fix check reads from H
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         # control, green on the old code: without the flag this pull request has no earlier record, so the same fix check is refused
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)
         self.assert_refused(rc, out, err)
@@ -14585,7 +14594,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
         # the final-round rule (decision hold-unsafe-after-round-3) holds for the record a --fix-base-record stands in for. The new record copies every
         # Round line of the source, so it reaches the source's final round and keeps every field, and a fix check may not drop one of those lines
         reaches_3 = round_args(REVIEW_FAILED_THREE)
-        host = self.record_host(self.source(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative"), head=REVIEW_HEAD)
+        host = self.source_host(self.source(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative"), head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
         url, same = self.link(), dict(guard="yes", kind="normal", net="negative")
@@ -14603,7 +14612,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
                                  ("the fix reads from a commit before the source Head", self.NOTES_HEAD, REVIEW_OLD_HEAD)):
             with self.subTest(label=label):
                 diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
-                host = self.record_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
+                host = self.source_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
                 rc, out, err = self.run_args(*self.argv(self.fix_of(fix)), host=host)  # control, green on the old code: no flag, no record here
                 self.assert_refused(rc, out, err)
                 rc, out, err = self.flagged(self.argv(self.fix_of(fix), self.link()), host)
@@ -14613,14 +14622,14 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
     def test_a_pull_request_with_its_own_record_refuses_the_flag(self):
         # two bases never compete: with its own record, the flag is refused, and the own record alone takes the same fix check
         own = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
-        host = self.record_host(own, self.source(), head=REVIEW_HEAD)
+        host = self.source_host(own, self.source(), head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: the own record takes the fix check
         self.assertEqual(rc, 0, "the own record refused its own fix check:\n" + out + err)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
         self.assert_refused(rc, out, err)
 
     def test_the_flag_goes_only_with_fix_check_and_review_record(self):
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         url = self.link()
         plain = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS"]
         rc, out, err = self.run_args(*plain, host=host)  # control, green on the old code: the record without the flag is written
@@ -14633,7 +14642,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
                 self.assertNotIn("Traceback", err)
 
     def test_a_url_that_is_not_an_issue_comment_link_is_refused(self):
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
         for url in ("https://github.com/o/r/pull/1541", "https://github.com/o/r/pull/1541#discussion_r5",
@@ -14649,7 +14658,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
                 self.assertEqual(rc, 0, f"the comment link on /{kind}/ was refused:\n" + out + err)
 
     def test_a_url_that_names_another_repo_is_refused(self):
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
         for owner, repo in (("x", "r"), ("o", "s")):
@@ -14660,22 +14669,22 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
         self.assertEqual(rc, 0, "the comment link on this repo was refused:\n" + out + err)
 
     def test_a_comment_that_is_not_a_review_record_for_its_own_pull_request_is_refused(self):
-        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.record_host(self.source(), head=REVIEW_HEAD))  # control, green on the old code
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.source_host(self.source(), head=REVIEW_HEAD))  # control, green on the old code
         self.assert_refused(rc, out, err)
         for label, comment in (("a comment that is no record", review_comment(self.SOURCE_ID, self.SOURCE_PR, "LGTM")),
                                ("a record whose PR line names another pull request",
                                 review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=1542, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))):
             with self.subTest(label=label):
-                host = self.record_host(comment, head=REVIEW_HEAD)
+                host = self.source_host(comment, head=REVIEW_HEAD)
                 rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
                 self.assert_refused(rc, out, err)
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
         self.assertEqual(rc, 0, "the record for its own pull request was refused:\n" + out + err)
 
     def test_the_source_record_must_be_the_newest_on_its_pull_request(self):
         later = review_comment(6, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=self.NOTES_HEAD, rounds=REVIEW_PASS))
-        host = self.record_host(self.source(), later, head=REVIEW_HEAD)
+        host = self.source_host(self.source(), later, head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
@@ -14687,11 +14696,11 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
     def test_a_source_record_with_a_failed_fix_check_line_is_refused(self):  # a PASS fix check may stand in (ReviewFixBaseCarry); a FAIL one is refused
         fixed = review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS,
                                                                            fix=(fix_check_line(verdict="FAIL", head=self.NOTES_HEAD),)))
-        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.record_host(fixed, head=REVIEW_HEAD))  # control, green on the old code
+        rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.source_host(fixed, head=REVIEW_HEAD))  # control, green on the old code
         self.assert_refused(rc, out, err)
-        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.record_host(fixed, head=REVIEW_HEAD))
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.source_host(fixed, head=REVIEW_HEAD))
         self.assert_refused(rc, out, err)
-        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.record_host(self.source(), head=REVIEW_HEAD))
+        rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.source_host(self.source(), head=REVIEW_HEAD))
         self.assertEqual(rc, 0, "a source record without a fix check line was refused:\n" + out + err)
 
     def test_the_fix_base_rules_hold_for_a_source_record(self):
@@ -14699,19 +14708,19 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
         for order, head, fix in (("source head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("source head older", REVIEW_OLD_HEAD, self.NOTES_HEAD)):
             with self.subTest(order=order):
                 diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"), file_entry("merge/merge.py"))}
-                host = self.record_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
+                host = self.source_host(self.source(head=head), head=REVIEW_HEAD, diffs=diffs)
                 rc, out, err = self.run_args(*self.argv(self.fix_of(fix)), host=host)  # control, green on the old code: no flag, no record here
                 self.assert_refused(rc, out, err)
                 rc, out, err = self.flagged(self.argv(self.fix_of(fix), self.link()), host)
                 self.assertTrue(self.compared(host, REVIEW_OLD_HEAD, self.NOTES_HEAD), "the fix base did not read the diff between the two heads")
                 self.assert_refused(rc, out, err)
-        host = self.record_host(self.source(), head=REVIEW_HEAD)
+        host = self.source_host(self.source(), head=REVIEW_HEAD)
         rc, out, err = self.flagged(self.argv(self.fix_of(self.OTHER_HEAD), self.link()), host)
         self.assert_refused(rc, out, err)
 
     def test_the_source_record_sets_the_round_floor(self):
         # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
-        host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
+        host = self.source_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
         low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
         rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
                                      "--round", low[0], "--round", low[1], host=host)  # control, green on the old code: no source, a record ending at 2 is written
@@ -14722,7 +14731,7 @@ class ReviewFixBaseRecord(ReviewFixBaseFixture):
         self.assertEqual(rc, 0, "a record that reaches the source's round 3 was refused:\n" + out + err)
 
     def test_a_failed_read_of_the_source_comment_exits_one(self):
-        host = self.record_host(self.source(), head=REVIEW_HEAD, comment_error="reading the comment from GitHub failed")
+        host = self.source_host(self.source(), head=REVIEW_HEAD, comment_error="reading the comment from GitHub failed")
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), host)
@@ -14770,7 +14779,7 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         compare replies."""
         pulls = [{**batch_pull(7, self.LIVE), "body": body}]
         if listed:
-            pulls.append({**batch_pull(self.SOURCE_PR, self.NEWEST, created_at=source_created), "state": source_state, "merged": merged})
+            pulls.append(self.source_pull(state=source_state, merged=merged, created=source_created))
         return PullsHost(pulls, {}, comments=comments, trees=self.tree_map() if trees is None else trees, tree_error=tree_error, diffs=diffs)
 
     def carried(self, host, url=None, fix=None, rounds=round_args(REVIEW_PASSED_THREE), guard="yes", net="positive"):
@@ -15144,7 +15153,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
     def stand_in(self, rounds, comments):
         """The run of --fix-check on pull request 7 at REVIEW_HEAD, with `rounds` and --fix-base-record naming the source record, whose head is
         the fix base. A parser that has never heard of the flag says so on stderr, which fails here by that name."""
-        host = self.record_host(*comments, head=REVIEW_HEAD)
+        host = self.source_host(*comments, head=REVIEW_HEAD)
         argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
         argv += [a for r in rounds for a in ("--round", r)]
         argv += ["--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS", "--fix-base-record", self.SOURCE_URL]
