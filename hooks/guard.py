@@ -152,8 +152,8 @@ Other tools, in `judge` order:
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
                        red-run folder passes. A relative shell write that lands outside the
                        agent's own checkout is refused, with `mkdir` and `touch` counted as writes.
-                       So is a `git restore` or `git checkout [<rev>] --` with a relative path in the
-                       own checkout, when another segment of the command names its red-run folder.
+                       So is a `git restore` or `git checkout [<rev>] [--]` with a relative file path in
+                       the own checkout, when another segment of the command names its red-run folder.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -368,7 +368,7 @@ while True:
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
-            checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
+            checkout_conflict_resolve, clean_deletes_files, named_pathspecs, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
@@ -973,6 +973,13 @@ WORKTREE_HOME_REASON = (
     "Rule (worktree home): this agent's own working tree is gone, or this call reaches outside "
     "it. "
     "Remedy: make no further change. Stop, and report this to your orchestrator."
+)
+
+WORKTREE_HOME_RESTORE_REASON = (
+    "Rule (worktree home): this restore names a relative path, which resolves in this agent's own working "
+    "tree, not in the red-run folder the command also names. "
+    "Remedy: name the red-run folder in the same command, as `git -C <folder> restore <path>`, or give an "
+    "absolute path."
 )
 
 HANDOFF_UNREAD_REASON = (
@@ -4245,41 +4252,22 @@ def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: s
                                 and path_is_inside(at, own) is False))
 
 
-# `git restore` options that take the next word as their value; its paths follow them.
-RESTORE_VALUE_FLAGS = ("-s", "--source", "--pathspec-from-file")
 RED_RESTORE_DETAIL = "relative restore meant for the red-run folder: "
 
 
-def _restore_paths(verb: str, args: list) -> list:
-    """The path words of one `git restore` or `git checkout [<rev>] -- <paths>` call. A `checkout` with no
-    `--` names no path here: it may name a branch."""
-    if verb == "checkout":
-        return args[args.index("--") + 1:] if "--" in args else []
-    paths, skip, dashed = [], False, False
-    for arg in args:
-        if dashed:
-            paths.append(arg)
-        elif skip:
-            skip = False
-        elif arg == "--":
-            dashed = True
-        elif arg in RESTORE_VALUE_FLAGS:
-            skip = True
-        elif not arg.startswith("-"):
-            paths.append(arg)
-    return paths
-
-
 def relative_restore_for_red(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
-    """The detail when a `git restore <paths>` or `git checkout [<rev>] -- <paths>` has a relative path that
+    """The detail when a `git restore <paths>` or `git checkout [<rev>] [--] <paths>` has a relative path that
     resolves inside OWN, the agent's own checkout, and another segment of the same command names the agent's
     own red-run folder, else ''. The agent meant the restore for its red-run folder, typed the path
     relative, and overwrote its own edit. A segment that names the red-run folder itself (`git -C <red>
     restore f`, `--work-tree=<red>`) or runs in it after a `cd` resolves there, and passes, as does an
     absolute, `~` or variable path, a command that names no red-run folder, and another agent's. A word
     names the folder when it, or the value after its `=`, resolves inside it (`_own_red_run`) from the
-    folder its segment runs in (`dir_before_segment`). Read with the walk of `relative_write_escape`:
-    heredoc bodies, comments and quoted text name nothing. No git is spawned and nothing is written."""
+    folder its segment runs in (`dir_before_segment`); the `=` split reads `--` words only. A word in
+    quotes counts as naming it, so `echo "<red>"` is a rare false alarm, kept for the simpler read. Heredoc
+    bodies and comments name nothing, and a quoted restore is text. The paths are read by `named_pathspecs`;
+    a `checkout` with no `--` counts an operand only when it is an existing file, as `names_only_files`
+    does. No git is spawned and nothing is written."""
     if not own or not primary:
         return ""
     command = _padded_shell_command(tool, tool_input)
@@ -4315,13 +4303,15 @@ def relative_restore_for_red(payload, tool: str, tool_input: dict, cwd: str, own
         if named is not None:
             at = None if _unexpanded(named) else shell_abs(named, at)
         for verb, args in git_calls(segment):
-            for word in _restore_paths(verb, args) if verb in ("restore", "checkout") and at else ():
+            for word in named_pathspecs(verb, args)[0] if verb in ("restore", "checkout") and at else ():
                 if "$" in word or "`" in word or shell_abs(word, None) is not None:
                     continue
                 try:
                     target = _resolved(word, at)
                 except Exception:
                     continue
+                if verb == "checkout" and "--" not in args and not os.path.isfile(target):
+                    continue   # `checkout main` switches a branch; only a file operand is a restored path
                 if path_is_inside(target, own) is True and not _own_red_run(payload, primary, target):
                     return RED_RESTORE_DETAIL + word
     return ""
@@ -4931,7 +4921,9 @@ def judge(payload) -> None:
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
     home_seen.append(home_hit)
     if home_hit:
-        refuse(tool, "deny", "worktree-home", WORKTREE_HOME_REASON, home_hit)
+        refuse(tool, "deny", "worktree-home",
+               WORKTREE_HOME_RESTORE_REASON if home_hit.startswith(RED_RESTORE_DETAIL) else WORKTREE_HOME_REASON,
+               home_hit)
     # 0, other-checkout. Every session writes only inside its own checkout of the clone. An override lifts it:
     # a rule id of its own, because the owner ruled that no override lifts worktree-home.
     other_hit = other_checkout_hit(tool, tool_input, cwd, session_id_of(payload),
