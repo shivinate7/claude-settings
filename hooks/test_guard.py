@@ -15024,6 +15024,41 @@ sh("builder-find: mv -ttests over a file is refused, the file lands in tests/",
    "mv -ttests x", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
 sh("builder-find: install -ttests over a file is refused, the file lands in tests/",
    "install -ttests x", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
+# A copy writes dest/<basename of each source>, and the check judges that written path. A test-named source copied
+# into any folder of the repo writes a test, so each copy of one is refused. FINDCP holds a test beside its source,
+# src/test_a.py. Its pins copy only names that no test has, so their writes stay allowed.
+FINDCP = os.path.join(ROOT, "findcp")
+
+
+def _build_find_cp():
+    make_repo(FINDCP, {"src/app.py": "x\n", "src/a.py": "x\n", "src/b.txt": "x\n", "src/test_a.py": "x\n",
+                       "pkg/keep.py": "x\n", "hooks/keep.py": "x\n"})
+
+
+lazy_fixture([FINDCP], _build_find_cp)
+# FINDDEEP holds src/pkg/deep/test_deep.py. Each copy below writes src/test_deep.py, a test.
+sh("builder-find: find . *.py piped to xargs, cp of each into src/, writes src/test_deep.py, is refused",
+   "find . -name '*.py' | xargs -I{} cp {} src/", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDDEEP))
+sh("builder-find: find . test_deep.py piped to xargs, cp of each into src/, writes src/test_deep.py, is refused",
+   "find . -name 'test_deep.py' | xargs -I{} cp {} src/", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDDEEP))
+sh("builder-find: cp of a find substitution of test_deep.py into src/, writes src/test_deep.py, is refused",
+   "cp $(find . -name 'test_deep.py') src/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDDEEP))
+# FINDCP: a test-named source copied into pkg/ writes pkg/test_a.py, whether the copy is fed by xargs or direct.
+sh("builder-find: find src test_a.py piped to xargs, cp -t pkg/, writes pkg/test_a.py, is refused",
+   "find src -name test_a.py | xargs cp -t pkg/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: cp of src/test_a.py into pkg/, writes pkg/test_a.py, is refused",
+   "cp src/test_a.py pkg/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: install -Dttests of src/b.txt, writes tests/b.txt, is refused",
+   "install -Dttests src/b.txt", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# The pins: each copy below writes a file whose name no test has, so each is allowed.
+sh("builder-find: cp of a find substitution of a.py into pkg/, writes pkg/a.py, is allowed",
+   "cp $(find src -name a.py) pkg/", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: find src *.txt piped to xargs, cp of each into hooks/, writes no test, is allowed",
+   "find src -name '*.txt' | xargs -I{} cp {} hooks/", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: for loop of cp of a and b into src/, writes no test, is allowed",
+   "for f in a b; do cp $f src/; done", "allow", **dict(BR, cwd=FINDCP))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
