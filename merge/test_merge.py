@@ -13098,6 +13098,11 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assert_refused_without_record(rc, out, err, "a record with a lower round no earlier record holds")
         self.assertIn(line, err, f"the refusal does not name the first missing line, {line!r}:\n" + err)
 
+    def unparsable(self, head, rounds):
+        """A record at `head` with `rounds`, and reviewer prose between its last round and Net value. Its Head and rounds are well formed, but
+        parse_review refuses the whole record."""
+        return record_text(head=head, rounds=rounds).replace("Net value:", "Reviewer prose between the rounds and Net value.\nNet value:", 1)
+
     def test_a_first_record_of_rounds_one_to_three_is_refused_and_names_round_one(self):
         # the #2235 shape: no earlier record on the pull request, and every round written at once
         rc, out, err = self.post(rounds=self.SHAPE, guard="yes", net="positive")
@@ -13207,6 +13212,54 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # control: no earlier record on this pull request, and a round 1 PASS has no lower round to hold
         rc, out, err = self.post(rounds=("1:reviewer:sonnet:PASS",))
         self.assertEqual(rc, 0, "control: a first round 1 PASS record was refused:\n" + out + err)
+
+    def test_an_earlier_record_at_this_head_that_does_not_parse_refuses_a_pass_top_round(self):
+        # fail closed: the unparsable record holds this head's round 1 FAIL, and dropping it must not let the round 1 PASS through
+        bad = self.unparsable(REVIEW_HEAD, (self.FIRST,))
+        self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier record parses, so the case tests nothing")
+        rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
+        self.assert_refused_without_record(rc, out, err, "a round 1 PASS after an earlier record at this head that does not parse")
+        self.assertRegex(err, r"earlier (?:review )?record[^\n]*does not parse", "the refusal does not say that an earlier record at this head does not parse:\n" + err)
+
+    def test_the_same_unparsable_record_at_another_head_does_not_refuse(self):
+        # control: the record is at HEAD_A, so it is no earlier record of this head and the same round 1 PASS is written
+        bad = self.unparsable(self.HEAD_A, (self.FIRST,))
+        self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier record parses, so the control tests nothing")
+        rc, out, err = self.post(review_comment(1, 7, bad), rounds=("1:reviewer:haiku:PASS",))
+        self.assertEqual(rc, 0, "control: a round 1 PASS was refused because of an unparsable record at another head:\n" + out + err)
+        self.assertNotIn("does not parse", err, "control: the refusal names a parse problem at another head:\n" + err)
+
+    def test_a_design_second_read_after_a_passed_fix_check_on_a_round_one_fail_at_this_head_is_written(self):
+        # owner item 259 a (decision design-agents): the design reviewer reads the fixed head. The earlier record's round 1 FAIL at this head is cleared by its fix check PASS
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=(self.FIRST,), fix=(fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD),)))
+        rc, out, err = self.post(earlier, rounds=round_args((self.FIRST, "Round 2: design-reviewer, opus, PASS")))
+        self.assertEqual(rc, 0, "the design second read after a passed fix check was refused:\n" + out + err)
+
+    def test_a_design_second_read_after_a_plain_round_one_fail_at_this_head_is_refused(self):
+        # control: the same earlier record without its fix check, so nothing clears its round 1 FAIL at this head
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=(self.FIRST,)))
+        rc, out, err = self.post(earlier, rounds=round_args((self.FIRST, "Round 2: design-reviewer, opus, PASS")))
+        self.assert_refused_without_record(rc, out, err, "a round 2 design PASS after a plain round 1 FAIL at this head")
+
+    def test_a_round_three_pass_after_a_passed_fix_check_on_a_round_two_fail_at_this_head_is_written(self):
+        # the fix check PASS clears the round 2 FAIL at this head, so the round 3 PASS that follows at the same head is written
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=(self.FIRST, self.SECOND), fix=(fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD),)))
+        rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "a round 3 PASS after a passed fix check on a round 2 FAIL at this head was refused:\n" + out + err)
+
+    def test_a_round_three_pass_after_a_plain_round_two_fail_at_this_head_is_refused(self):
+        # control: the same earlier record without its fix check
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_refused_without_record(rc, out, err, "a round 3 PASS after a plain round 2 FAIL at this head")
+
+    def test_the_plain_refusal_for_unrecorded_lower_rounds_names_fix_check_with_fix_base_record(self):
+        # the plain path refuses --fix-base-record alone (it goes with --fix-check), so a remedy that names that flag must name --fix-check in the same sentence
+        rc, out, err = self.post(rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_missing_line(rc, out, err, self.FIRST)
+        for sentence in re.split(r"(?<=\.)\s+", err):
+            if "--fix-base-record" in sentence:
+                self.assertIn("--fix-check", sentence, "the remedy names --fix-base-record without --fix-check, which the plain path refuses:\n" + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
