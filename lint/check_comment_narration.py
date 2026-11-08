@@ -47,11 +47,11 @@ class DatedText:
 
 
 class ReviewRound:
-    """The pattern group for round numbers, kept as a class for its exemption. A round number is narration whatever
-    follows "in", "after" or "from", and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
+    """The pattern group for round numbers, kept as a class for its exemption. A round number after "in", "after" or
+    "from" is narration, and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
     which is arithmetic. A comment that quotes a rule glosses a decision id holding `round-N`, such as
     hold-unsafe-after-round-N. A round number with the same N passes only inside that gloss, and only when
-    docs/decisions/<id>.md exists at the git top level. The gloss is the parentheses that open with the id, as in
+    a decisions folder that the layout gives for the checked repo holds <id>.md. The gloss is the parentheses that open with the id, as in
     "(decision <id>, ...)" or "(`<id>`, ...)", or the parentheses right after the id, as in "Decision <id> (...)".
     Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
     another number, and parentheses that hold the id later on."""
@@ -80,7 +80,7 @@ class ReviewRound:
         return self.known[ident]
 
     def has_decision(self, ident):
-        """True when the first decisions folder the layout allows for the repo at self.top holds ident.md. A layout
+        """True when any decisions folder the layout allows for the repo at self.top holds ident.md. A layout
         that does not read says nothing is real, so the round stays flagged."""
         try:
             return any(os.path.isfile(os.path.join(self.top, *folder.split("/"), ident + ".md"))
