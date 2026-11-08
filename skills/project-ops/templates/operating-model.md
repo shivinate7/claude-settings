@@ -35,7 +35,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
-  In each wake it runs get_session (no argument) alone first, then runs `merge --reviewed` once, with one `--root OWNER/NAME=DIR` per repo it owns (its `cs-repo:` tags), and
+  In each wake it runs get_session (no argument) alone first. Then it runs `merge --reviewed` once, with one `--root OWNER/NAME=DIR` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It never defers one repo behind another repo's batch.
   It runs each long command (`--confirm`, `--lane-lint`, `ci-job`) as a background command and ends its turn,
   so a hand-off from any repo gets a turn.
