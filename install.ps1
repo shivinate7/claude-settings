@@ -1034,3 +1034,4 @@ $script:ExitCode = 0
     Add-InstallLogLine "$(Get-LogTime) install.ps1: end id=$InstallId pid=$PID exit=$($script:ExitCode)"
     if ($LockStream) { $LockStream.Dispose() }
 }
+# proof touch
