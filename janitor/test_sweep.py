@@ -4709,6 +4709,33 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
         with self.subTest(case="outside agent-*, idle 31 min"):
             self.assertKept(lane)
 
+    def test_an_other_agent_tree_whose_head_is_only_on_another_lanes_branch_is_removed(self):
+        """Pin, not a defect: a remote branch of any name is a copy on the remote
+        (when-a-worktree-may-be-removed, owner ruling 2026-10-18 02:03 CDT). The tree's commit was
+        never pushed; a later lane built on it and pushed. The tree goes, and the commit stays on
+        the remote."""
+        ending = self.add("endpin")
+        only = self.add("onlylater")
+        self.unpushed(only)
+        sha = run_vcs(only, "rev-parse", "HEAD").stdout.strip()
+        later = os.path.join(self.root, "later")
+        require(run_vcs(self.primary, "worktree", "add", "-q", "-b", "wt-later", later, sha).returncode == 0,
+                "worktree add of the later lane failed")
+        write(os.path.join(later, "later.txt"), "later lane\n")
+        run_vcs(later, "add", "later.txt")
+        require(run_vcs(later, *IDENT, "commit", "-q", "-m", "later lane").returncode == 0,
+                "commit in the later lane failed")
+        require(run_vcs(later, "push", "-q", "origin", "HEAD:refs/heads/lane-later").returncode == 0,
+                "push of lane-later failed")
+        holders = run_vcs(self.primary, "branch", "-r", "--contains", sha).stdout.split()
+        require(holders == ["origin/lane-later"], "remote refs holding the commit: %r" % holders)
+        _age_admin_files(only, 31 * 60)
+        self.fire("endpin", ending)
+        self.assertRemoved(only)
+        remote = run_vcs(self.primary, "remote", "get-url", "origin").stdout.strip()
+        self.assertEqual(run_vcs(remote, "cat-file", "-e", sha + "^{commit}").returncode, 0,
+                         "the tree's commit is gone from the remote")
+
 
 class AgentEndRulingTests(_AgentEndFixture):
     """Edge cases of the agent-end stage. Most cases run the hook in a subprocess (`fire`,
@@ -6636,6 +6663,33 @@ class AgentWorktreeReapTests(unittest.TestCase):
         require(run_vcs(self.repo, "fetch", "-q", "origin").returncode == 0, "fetch failed")
         out = self.run_sweep(5)
         self.assertRemoved(tree, out)
+
+    # ---- (j) HEAD only on another lane's remote branch
+
+    def test_j_removes_a_tree_whose_head_is_only_on_another_lanes_branch(self):
+        """Pin, not a defect: a remote branch of any name is a copy on the remote
+        (when-a-worktree-may-be-removed, owner rulings 2026-10-09 and 2026-10-18 02:03 CDT). This
+        differs from a check that a commit is on one named branch, where a lane-branch match is a
+        false yes. The tree's commit was never pushed; a later lane built on it and pushed. The tree
+        and its local branch go, and the commit stays on the remote."""
+        tree = self.agent("j3", state="local")
+        sha = run_vcs(tree, "rev-parse", "HEAD").stdout.strip()
+        later = os.path.join(self.base, "later")
+        require(run_vcs(self.repo, "worktree", "add", "-q", "-b", "wt-later", later, sha).returncode == 0,
+                "worktree add of the later lane failed")
+        self.commit(later, "later.txt")
+        require(run_vcs(later, "push", "-q", "origin", "HEAD:refs/heads/lane-later").returncode == 0,
+                "push of lane-later failed")
+        require(run_vcs(self.repo, "merge-base", "--is-ancestor", sha, "origin/main").returncode == 1,
+                "the tree's commit is on main")
+        holders = run_vcs(self.repo, "branch", "-r", "--contains", sha).stdout.split()
+        require(holders == ["origin/lane-later"], "remote refs holding the commit: %r" % holders)
+        out = self.run_sweep(5)
+        self.assertRemoved(tree, out)
+        remote = run_vcs(self.repo, "remote", "get-url", "origin").stdout.strip()
+        self.assertEqual(run_vcs(remote, "cat-file", "-e", sha + "^{commit}").returncode, 0,
+                         "the tree's commit is gone from the remote")
+        self.assertTrue(os.path.isdir(later), "the later lane's tree was removed")
 
     # ---- (k) `git fetch --prune` at the start of the run
 
