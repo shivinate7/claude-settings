@@ -94,7 +94,7 @@
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
 - guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes)
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
-- guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
+- guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json) Fix: none — owner decides: main has 72 guard rule ids with no row in lint/rule_mechanisms.json, and rows key on CLAUDE.md anchors (options: a guards section keyed by rule id; a multi-mechanism row; an exempt list)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)
 - haiku-counter-files-not-purged: nothing purges state/; one file of at most 70 bytes stays per session (Stop reply judge hook)
 - haiku-counter-lost-updates: heavy parallel calls of one session lose counter updates; the loss errs toward judging (Stop reply judge hook)
@@ -189,7 +189,6 @@
 - override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
 - override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
-- override-veto-no-mutants: no mutant covers never_lifted, take or the veto path. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
@@ -798,8 +797,6 @@
 - cloud-setup-timeout-orphan: when `cloud-setup.sh` hits its 240 s cap, the kill may not reach install.sh's inner `timeout 40 git`. That git can run up to 40 s on, and install.sh's lock may stay, so the next install within 10 minutes fails. Found by code reading, never run (lane setup-script-install, review round 1). Decision: agent-model-cap.
 - cloud-setup-origin-copy: `origin_is_repo` in cloud-setup.sh is a looser copy of install.sh's `origin_matches_repo`, because install.sh runs on load and cannot be sourced. It differs only on contrived URLs, and no test pins the two together (lane setup-script-install). Decision: agent-model-cap.
 - cloud-setup-zombie-step: before its group kill, cloud-setup.sh first sends TERM to each child of the install, then waits 1 s. The step is there for test c2 only, because this sandbox's pid 1 never clears dead children, so a dead child still looks alive. The better fix is for c2 to count a dead child (state Z) as gone, and then drop the step (lane setup-script-install, review round 2). Decision: agent-model-cap.
-- merge-conflict-reason-inferred: the record builders-cannot-edit-tests says the builder refusal names the test-author route for a test-file merge conflict, but the refusal says only that the conflict "takes the same route". The test-author is named one sentence earlier (lane test-merge-conflict-role, review round 1). Decision: builders-cannot-edit-tests.
-- merge-conflict-case-pin: the case "builder-test: the refusal routes a test-file merge conflict" in hooks/test_guard.py pins "merge conflict" but not "test-author" beside it; its sibling cases pin "test-author" on the same reason (lane test-merge-conflict-role, review round 1). Decision: builders-cannot-edit-tests.
 - holder-slash-unpinned: nothing pins "no / in HOLDER" (janitor/test_session_end_sweep.py); a later "/" breaks Windows only, under MSYS path rewriting, while Linux stays green. Decision: c95.
 - sweep-no-pipes-kwargs-only: SweepGetsNoPipes pins the DEVNULL kwargs; no case has a grandchild holding a pipe, so a hang by another route passes unseen. A Windows-only grandchild case would make it red-capable. Decision: c95.
 - heartbeat-starved-reads-stopped: a live holder starved 1 s or more reads as stopped, a false green only when the kill also failed. Decision: c95.
@@ -1393,7 +1390,6 @@
 - test-author-run-forms-refused: a test-author cannot add `pytest tests/`, `python -m pytest`, `npm test`, or a step with an `env:` key. `workflow_run_is_test` accepts only an interpreter and a test path. `workflow_test_step` accepts only the keys in `WORKFLOW_STEP_KEYS`. A builder may add them (hooks/guard.py `workflow_run_is_test`, `workflow_test_step`). Decision: builders-cannot-edit-tests.
 - verdict-log-path-space: VERDICT_LOG_RE reads `log=(\S+)`, so a verdict log path with a space is not matched and that run's log is not read (lint/report_guard.py VERDICT_LOG_RE).
 - shared-tag-pin-partial: SharedTagNames pins REPO_TAG, STEP_TAG and repo_tag_names by identity only, so a local copy of TOPIC_TAG, BUILD_TAG or lane_head_refs stays green (skills/roadmap/test_build.py SharedTagNames).
-- guard-merge-tag-literals: hooks/guard_merge.py keeps the literals `cs-build:` (ROLE_TAG_PREFIX) and `cs-topic:` (TOPIC_TAG_PREFIX) instead of importing hooks/shared_names.py.
 - roadmap-page-date-untested: skills/roadmap/tests/page.test.mjs has no case for index.html's date and time labels (`when`, `timeLabel`, lines 452-455).
 - test-build-pin-comment-stale: skills/roadmap/test_build.py line 60 says "the page the old script used"; that comment is stale.
 - stalled-hold-missed-forms: the hold's build match (BUILD_CALL_RE, lint/report_guard.py) misses `python3 -X utf8 build.py`, a quoted path, `bash -c`, and a background run. A crashed build prints no stalled line, so it reads clean.
