@@ -3449,10 +3449,10 @@ def uncleared_round(earlier, rec):
         if any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design and not wide) for r in later[k:]):
             continue
         if stuck is None or n > stuck[0]:
-            stuck = (n, design, e)
+            stuck = (n, design, wide, e)
     if stuck:
-        n, design, e = stuck
-        ways = ([f"reaches round {n + 1}"] if n < REVIEW_LAST_ROUND else []) + ([] if design else ["carries a fix check PASS"])
+        n, design, wide, e = stuck
+        ways = ([f"reaches round {n + 1}"] if n < REVIEW_LAST_ROUND else []) + ([] if design or wide else ["carries a fix check PASS"])
         why = f"round {n} on head {e['head'][:9]} is not passed" + (", and no later record " + " or ".join(ways) if ways else "")
         return why + (("; " if ways else ", and ") + f"a fix check PASS does not clear the {REVIEW_ROLES[1].replace('-', ' ')}" if design else "")
 
