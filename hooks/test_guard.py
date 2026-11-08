@@ -12173,6 +12173,60 @@ sh("frozen: python -c that opens a frozen hook via pathlib expanduser for write 
    "python3 -c 'from pathlib import Path; open(Path(\"" + TILDE_HOOK + "\").expanduser(), \"w\")'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# THE FORM OF A FROZEN PATH IS NOT WHAT MAKES A WRITE. The deny rows write a frozen folder (hooks, bin)
+# in a spelling the scanner must read through: os.path.join, + concatenation, a pathlib join with /, a
+# homedir() join, or a shell line handed to os.system. The allow rows read, stat, glob or name the same
+# path in those forms, and write nothing. Each runs as the block above: HOME is MIRROR_HOME and
+# CLAUDE_CONFIG_DIR is unset, so `~/.claude` is the frozen config directory.
+sh("frozen form: python -c that opens a frozen hook joined by os.path.join is denied",
+   "python3 -c 'import os; open(os.path.join(os.path.expanduser(\"~/.claude/hooks\"), \"new.py\"), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that opens a frozen hook built by + concatenation is denied",
+   "python3 -c 'import os; open(os.path.expanduser(\"~/.claude/hooks/\") + \"new.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that writes a frozen hook through a pathlib join is denied",
+   "python3 -c 'from pathlib import Path; (Path(\"~/.claude/hooks\").expanduser() / \"new.py\")"
+   ".write_text(\"x\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that opens the frozen guard joined from ~ and its parts is denied",
+   "python3 -c 'import os; open(os.path.join(os.path.expanduser(\"~\"), \".claude\", \"hooks\", "
+   "\"guard.py\"), \"w\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: node -e that writes a frozen hook joined from homedir is denied",
+   "node -e 'require(\"fs\").writeFileSync(require(\"path\").join(require(\"os\").homedir(), "
+   "\".claude/hooks\", \"new.js\"), \"x\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that runs cp into the frozen bin folder through os.system is denied",
+   "python3 -c 'import os; os.system(\"cp x ~/.claude/bin/verdict\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that prints a frozen hook read through expanduser and open is allowed",
+   "python3 -c 'import os; from pathlib import Path; "
+   "print(open(Path(os.path.expanduser(\"~/.claude/hooks/guard.py\"))).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that checks a frozen bin path with os.path.exists on a Path is allowed",
+   "python3 -c 'import os; from pathlib import Path; "
+   "print(os.path.exists(Path(os.path.expanduser(\"~/.claude/bin/verdict\"))))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that reads a frozen hook through resolve and read_text is allowed",
+   "python3 -c 'from pathlib import Path; "
+   "print(Path(\"~/.claude/hooks/guard.py\").expanduser().resolve().read_text())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that stats a frozen hook through os.stat is allowed",
+   "python3 -c 'import os; print(os.stat(os.path.expanduser(\"~/.claude/hooks/guard.py\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that reads the mtime of a frozen hook through getmtime is allowed",
+   "python3 -c 'import os; print(os.path.getmtime(os.path.expanduser(\"~/.claude/hooks/guard.py\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that globs the frozen hooks folder is allowed",
+   "python3 -c 'import glob, os; print(glob.glob(os.path.expanduser(\"~/.claude/hooks/*.py\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that prints the name of a frozen hook through pathlib is allowed",
+   "python3 -c 'from pathlib import Path; print(Path(\"~/.claude/hooks/guard.py\").expanduser().name)'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that binds a frozen hook path to a variable and reads it is allowed",
+   "python3 -c 'from pathlib import Path; p = Path(\"~/.claude/hooks/guard.py\").expanduser(); "
+   "print(p.read_text())'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: node -e that stats a frozen hook from homedir is allowed",
+   "node -e 'require(\"fs\").statSync(require(\"os\").homedir() + \"/.claude/hooks/guard.py\")'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
