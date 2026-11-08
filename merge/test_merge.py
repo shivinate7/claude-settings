@@ -13411,9 +13411,9 @@ class ReviewFixCountsRound(ReviewEnv):
 class ReviewFixRemedies(ReviewChainFixture):
     """A refused fix check names the remedy for its own cause. The head remedy, "The reviewed head must be the Head of the newest earlier review
     record", fits only a head refusal: a fix base that is not the newest earlier record's Head, refused by its compare (fix_base_problem). Every other
-    refusal names its own remedy and prints no head remedy: the round floor, a failed fix slot with no FAIL line, the net value, guard and kind freeze,
-    the ancestor read, the FAIL or WIDE chain, a missing review record, each refused --fix-base-record, and fix_base_problem's unreadable layout, which
-    names the layout. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
+    refusal names its own remedy and prints no head remedy: the round floor, a copy that drops a Round line, a failed fix slot with no FAIL line, the
+    net value, guard and kind freeze, the ancestor read, the FAIL or WIDE chain, a missing review record, each refused --fix-base-record, and
+    fix_base_problem's unreadable layout, which names the layout. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
     remedy's text present. Each remedy's text is written out in its case, so a remedy that is blanked or swapped for another fails the case."""
 
     HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record"
@@ -13423,7 +13423,8 @@ class ReviewFixRemedies(ReviewChainFixture):
     WIDE_REMEDY = "Start a new lane at round 1."
     FAIL_FINAL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
     MISSING_REMEDY = "Post the round's review record first."
-    ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
+    DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
+    ALL_PASS =("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
     ALL_PASS_ARGS = round_args(ALL_PASS)
     FAIL_ONE = ("Round 1: reviewer, sonnet, FAIL",)
     FAIL_THEN_PASS = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")  # the slot a failed fix check fills holds a PASS
@@ -13565,6 +13566,16 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assert_refused(rc, out, err)
         self.assertIn("has a review record of its own", err, "scope: the refusal does not name its cause:\n" + err)
         self.assertNotIn(self.HEAD_REMEDY, err, "the own-records refusal prints the head remedy, which fits only a head refusal:\n" + err)
+
+    def test_a_copy_that_drops_a_round_line_names_the_copy_as_its_remedy_without_the_head_remedy(self):
+        # the newest earlier record's design FAIL line is dropped, so dropped_round_lines refuses the copy, and its remedy is the copy. The head
+        # remedy fits only a head refusal and must stay out. The control keeps both lines in order and is written
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        comments = self.pair(None, rounds=lines)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a copy that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines[:1]))
+        self.assert_own_remedy(rc, out, err, "this record drops or reorders Round 1: design-reviewer, opus, FAIL", self.DROPPED_REMEDY)
 
 class ReviewFixBaseRecord(ReviewEnv):
     """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
