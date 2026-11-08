@@ -23,7 +23,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
-  start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
+  start per `ArtifactData` call (unmeasured). Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
@@ -82,7 +82,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   message typed while the session runs, a `queued_command` attachment). A peer's words and machine
   notices are never owner records. A missing transcript passes every block with a systemMessage. A block
   with no owner record for its text passes alone, with a systemMessage. Cost: one whole transcript read
-  per Stop, only while an open page item exists. It writes no file and starts no process. Risk kind:
+  per Stop, only while an open page item exists (unmeasured). It writes no file and starts no process. Risk kind:
   named incident. On 2026-10-30, item 98 was answered in a coordinator's chat at 15:41 and never sent to
   the page writer, who asked again at 16:07. Landed 2026-10-30.
   A chat answer to a page item needs the same proof. An owner block whose whole text is such answers
@@ -92,7 +92,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   is left to that item. No other item line stands in for the send. Prose that holds a number is no
   answer, and `1 y, 2 n` is none. Risk kind: named incident. F46 (the answer "143 b" never reached the
   page writer) and F43 ("99 a (done)", the same shape), same audit. Landed 2026-11-02. Cost: for each
-  such block, one `git rev-parse` and one transcript read, inside the Stop process. The transcript is
+  such block, one `git rev-parse` and one transcript read, inside the Stop process (unmeasured). The transcript is
   read only for such a block in a repo with a waiting page, or for an open page item. No file written (a
   case proves it). Known gap: an answer
   to a page item inside a longer message, or in prose, is not caught: the guard cannot know which prose
@@ -106,7 +106,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   part that is not letters, digits, `.`, `_` or `-` is malformed and blocks. Same anchoring and owner-record
   rules as Pages. The stand-down systemMessage starts "Feedback guard: repo sends not checked"; the page one
   starts "Feedback guard: page sends not checked". Cost: the one transcript read Pages makes, per Stop, only while an open page or repo item
-  exists. No file written, no process started. Risk kind: likely risk (owner-named gap, 2026-11-01).
+  exists (unmeasured). No file written, no process started. Risk kind: likely risk (owner-named gap, 2026-11-01).
   Landed 2026-11-01. Known gap: the guard cannot tell the send went to that repo's triage, only that it
   names the repo.
 - **Page filing.** In a repo with a waiting page, an open `page` item whose send is proved also needs its
@@ -121,7 +121,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   the send check decides alone (rulings fb-1312-1 and fb-1313-1, the owner's grant for this check; fb-1311-3,
   verify each filing on origin or by read-back). Cost: one `git rev-parse` and one `git grep` of the copy's
   items, inside the Stop process. They run once per Stop with an open page item whose send is proved and
-  whose number no read-back returns. The read-back uses the transcript read Pages makes. No file written,
+  whose number no read-back returns (unmeasured). The read-back uses the transcript read Pages makes. No file written,
   no process left running. Risk kind: likely risk. Landed 2026-11-02. Known gap: it proves that item n exists in the copy
   or on the page, not that this answer was filed on it.
 - **Repeats.** A model matches each new item's owner message, by meaning, against older feedback and
@@ -143,9 +143,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   A line that cannot be found is reported as not marked. The session merges the work or drops the
   mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
   systemMessage line. The items count as judged, so there is no retry loop. Cost: a Stop with no new
-  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse.
+  item or no candidate makes no call. Otherwise it makes one call, one `git grep` and one rev-parse (unmeasured).
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
-  on a hit the inbox. Capture adds one small file per session and no process. Risk kind: named
+  on a hit the inbox. Capture adds one small file per session and no process (unmeasured). Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
   nothing matched the repeat. Ruling 2026-11-01 17:57 CST: a model's meaning match, no glossary.
   Landed 2026-11-01. Known gaps: inboxes from before the sidecar are not searched. Item ids

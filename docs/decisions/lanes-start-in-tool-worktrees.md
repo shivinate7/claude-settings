@@ -24,7 +24,7 @@ Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. Tha
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-20 16:53 CDT, two agents wrote into the main clone. Landed 2026-10-26.
 
-Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call. Files written: none on an allowed call; a refusal adds one line to `guard.log` (not pinned here), which `lint/guard_log_report.py` reads.
+Cost, per `outcomes-mechanize-rules`: process starts, one `git` read per `git worktree add` call, none on any other call (unmeasured). Files written: none on an allowed call; a refusal adds one line to `guard.log` (not pinned here), which `lint/guard_log_report.py` reads.
 
 ### A fix round
 

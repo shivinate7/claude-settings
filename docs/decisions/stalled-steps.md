@@ -42,11 +42,11 @@ Process picks, reported to the owner, 2026-11-06 11:48 and 12:49 CST:
 No process or timer. Per Stop, the hold adds:
 
 - No stalled entry: no transcript read. It reuses the records the Stop already read.
-- Entries: one own-record transcript read (`_own_tier_proved`).
+- Entries: one own-record transcript read (`_own_tier_proved`) (unmeasured).
 - A Stop after a refusal (`stop_hook_active`) with entries: that read, and one more for the Input Needed check (`last_reply`, since the hook carries no reply text).
-- Each verdict-run build in the transcript: one log read.
+- Each verdict-run build in the transcript: one log read (unmeasured).
 - A build result in the transcript: `build.py` loads for its line prefix (not pinned: no test counts the load).
-- A lifted override: one claim-marker file, once per override.
+- A lifted override: one claim-marker file, once per override (unmeasured).
 
 `build` reads the live file triage already writes.
 

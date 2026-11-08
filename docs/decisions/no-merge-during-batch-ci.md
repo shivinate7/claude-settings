@@ -41,7 +41,7 @@ Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each con
 
 - Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28; overlapping batches 2026-11-02.
 - Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
-- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. No process starts, no file written, no timer.
+- Cost: one batch read is one read of the open pull list (unmeasured). When another ready PR is on the base, it adds one read of the required checks (none with a pinned list) (unmeasured). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads (unmeasured). Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline (unmeasured). No process starts, no file written, no timer.
 
 Kind: process
 Home: merge/merge.py
