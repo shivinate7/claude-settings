@@ -32,11 +32,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
-- One "Batch Runner Merge:" entry quotes the same derived merge command in its Covers text. Its
-  Covers text names the coordinator that sends the merge go (cs-build:coordinator), the batch runner
-  (cs-build:batch-runner), `merge go`, and the pull request the merge go names. Its Never covers
-  names each act in BATCH_MERGE_REFUSED, the reason flags, and a merge go from a session not tagged
-  cs-build:coordinator (decision `auto-mode-owner-acts`).
+- One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
+  (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
+  (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
+  the merge go names. Its Never covers names each act in BATCH_MERGE_REFUSED, the reason flags, a
+  merge with no `--head`, and a merge go from a session not tagged cs-build:coordinator (decision
+  `auto-mode-owner-acts`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -333,10 +334,11 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
 
     def test_entry_quotes_the_merge_command(self):
         entry = self.batch_merge_entry()
-        command = merge_command()
+        command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
-        self.assertIn("`%s`" % command, bounds_text(entry),
-                      "Covers text must quote the merge command in backticks")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the head the CI ran on")
 
     def test_covers_names_the_batch_runner_tag(self):
         entry = self.batch_merge_entry()
@@ -374,6 +376,14 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
         missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
         self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.batch_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
