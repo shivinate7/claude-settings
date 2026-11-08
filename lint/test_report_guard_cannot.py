@@ -1732,5 +1732,51 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_blocked_for(out, NO_TRY, line)
 
 
+    # ---- notes with `Fix: step:clause-parser-claims`: the forms, outage nouns and merge-tool targets the clause parser reads
+
+    def test_cc_red_an_adverb_before_unable_to_is_a_claim(self):
+        # Catches: an -ly adverb that ADVERBS does not list ("temporarily", "presently") between the verb and "unable to", so
+        # the claim that the act cannot be done read as no claim and passed with no try.
+        for prompt, line in (("push the branch", "I am temporarily unable to push."),
+                             ("merge PR 12", "I am presently unable to merge PR 12.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_not_authorized_no_access_lack_permission_or_blocked_from_is_a_claim(self):
+        # Catches: "not authorized to", "do not have access to", "lack permission to" and "blocked from" missing from
+        # CANNOT_FORMS, so a claim that an act cannot be done read as no claim and passed with no try.
+        for prompt, line in (("push the branch", "I am not authorized to push."),
+                             ("merge PR 12", "I do not have access to merge PR 12."),
+                             ("push the branch", "I lack permission to push."),
+                             ("push the branch", "I am blocked from pushing.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_merge_blamed_on_an_auth_proxy_or_clone_failure_has_no_try(self):
+        # Catches: "auth checks", "proxy checks", "failing to authenticate" and "failing to clone" read as a blocker of the
+        # merge, so the merge claim beside them passed as backed. None of them names a blocker, so the claim has no try.
+        for line in ("I can't merge PR 12 because the auth checks are failing.",
+                     "I can't merge PR 12 because the proxy checks are failing.",
+                     "I can't merge PR 12 because CI is failing to authenticate.",
+                     "I can't merge PR 12 because CI is failing to clone."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_url_form_merge_success_cancels_a_failed_merge_by_number(self):
+        # Catches: a merge success whose target is the PR's URL read as another target, so the failed `gh pr merge 12` still
+        # counted as unrecovered and the past-tense line about it blocked. A later success of the same PR cancels the failure.
+        line = "I could not merge PR 12 at first."
+        by_number = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
+                     *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)]
+        by_url = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
+                  *ok_bash("gh pr merge https://github.com/o/r/pull/12", "tu_m2"), landed_reply(line)]
+        # Scope first (P7): the number form is the control, so the URL form is the only change between the two runs.
+        self.assert_passes(self.stop(by_number), "the control: a later success of PR 12 by number cancels its failure")
+        self.assert_passes(self.stop(by_url), "a later success of PR 12 by its URL does not cancel its failure")
+
+
 if __name__ == "__main__":
     unittest.main()
