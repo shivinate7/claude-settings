@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T10:56:00Z",
+  "context": "Goal: no reviewed PR waits, and every found gap gets a fix (owner, 13:20 CST Nov 7).\nProblem (rule): during the hold, only the lanes that land the fixes and your own asks start. The coordinator has read \"the fixes\" two ways. At 23:07 and 23:09 CST Nov 7 (steps feedback-same-anywhere and ci-scope-dynamic-paths), it read them as fixes that unblock a merge. Since then it has started lanes for gap fixes that block no merge, such as report-guard-role-default-model at 04:42 CST Nov 8. The hold is your ruling, so its scope needs your word.\nBased on (ruling): item 384 (your chat, 21:42 CST Nov 7): new lanes wait, and the lanes that make the idle-PR, archive and drain fixes land still start.\nBased on (ruling): your words at 13:20 CST Nov 7: a found gap gets a fix, not a note.\nBased on (ruling): item 386 b (22:28 CST Nov 7): a lane's findings ride in its own PR, so a gap a lane found starts no new lane.\nDeparts from: main, which has no record of which lanes the hold lets start \u2014 adds one reading to record lane-inflow-hold.\nMeanwhile: a gap a lane found rides in that lane. The coordinator starts new lanes only for your asks and for fixes that unblock a merge until you answer.",
+  "home": "pr-backlog-clear",
+  "id": "hold-which-fixes-start",
+  "kind": "decision",
+  "n": 410,
+  "options": [
+    {
+      "gain": "Gaps close as they are found.",
+      "how": "Record lane-inflow-hold says: during the hold, a lane may start for your own asks and for any fix for a found gap. Other new work waits.",
+      "key": "a",
+      "label": "Every fix for a found gap may start a lane",
+      "lose": "More lanes run at once, and the queue of reviewed PRs that the hold protects grows."
+    },
+    {
+      "gain": "The queue of reviewed PRs drains first.",
+      "how": "Record lane-inflow-hold says: during the hold, a lane may start for your own asks and for a fix that unblocks a merge or a queued PR. Other gap fixes wait as todo steps, or ride in the lane that found them.",
+      "key": "b",
+      "label": "Only a fix that unblocks a merge or a queued PR starts a lane",
+      "lose": "Gaps that block no merge stay open longer."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "Items 384 and 387; owner 13:20 CST Nov 7; coordinator record lane-inflow-hold (PR #1768); step pr-backlog-clear",
+  "short": "Hold: which gap fixes start a lane",
+  "status": "open",
+  "title": "During the hold on new lanes, may every fix for a found gap start a lane, or only a fix that unblocks a merge?"
+}
