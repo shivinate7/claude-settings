@@ -1466,3 +1466,5 @@
 - kept-answer-folder-name-unpinned: no test pins which folder the `kept-answer: unknown` line names; a mutant that reverts the name still passes (skills/waiting-page/test_stale_pages.py, prefix-only assert). Lane page-grant-counts-closed, fix check. Decision: relayed-grant-read-from-page.
 - restore-staged-no-guard: a builder ran git restore --staged in its own worktree; it only unstages, nothing is lost. Fix: none — rare and harmless
 - map-alias-links-unread: `jsconfig.json`, nested tsconfigs and vitest or jest aliases are unread (skills/plain-english-map/scripts/lib/tsconfig-paths.mjs). Decision: map-tested-by-line.
+- verdict-pipe-lookup-redirect: `command -v verdict 2>/dev/null | head` is refused, because a redirect token hides the lookup from `_is_lookup` (hooks/guard_stream.py `verdict_pipe_hit`). Decision: verdict-pipe-refused.
+- verdict-pipe-paren-unpinned: no case or mutant pins the glued-paren read that refuses `(verdict x | tail)` (hooks/guard_stream.py `verdict_pipe_hit`). Decision: verdict-pipe-refused.
