@@ -28031,8 +28031,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Final verdict
            "Re-check the floor fix.\nFinal verdict: PASS\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict: PASS line",
            "Re-check the floor fix.\nVerdict: PASS\nFiles: hooks/guard.py.")
-# A prior verdict is refused whatever stands before its colon, a backticked path or round word included, and whatever
-# a `,` adds after its verdict word. These pin the lines the choice rule (a verdict word joined to a second one) must
+# A prior verdict is refused whatever stands before its colon, a backticked path or round word included, and when
+# a `,` adds other words after its verdict word. These pin the lines the choice rule (a verdict word joined to a second one) must
 # not open. The instruction case that rule serves is allowed below.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict on a backticked path: FAIL, missing test line",
            "Re-check the floor fix.\nPrior verdict on `hooks/guard.py`: FAIL, missing test\nFiles: hooks/guard.py.")

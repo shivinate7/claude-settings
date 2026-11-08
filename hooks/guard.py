@@ -210,7 +210,7 @@ Other tools, in `judge` order:
                        `#`, bold) before a line's first word are skipped. A verdict word that opens a
                        choice list (verdict words joined by `,`, `/`, `or` or `and`, ending the line
                        or sentence) is a format line (`a verdict: PASS or FAIL`) and passes, as does
-                       a `verdict` quoted in backticks mid-line.
+                       a line with a backtick right before `verdict` mid-line.
                        Shapes at line start only, so a brief that quotes the rule's words passes. A
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
