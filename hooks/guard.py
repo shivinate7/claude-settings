@@ -3692,9 +3692,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Cost: one pull request read per post that holds the record marker, none for any other command.
     for index, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
         piped = segments[index - 1] if index and ends[index - 1] == "|" else ""
-        hit = review_post_hit(segment, raw, cite_where, before, piped) if segment.strip() else None
-        if hit:
-            refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+        if not segment.strip():
+            continue
+        judged = review_post_hit(segment, raw, cite_where, before, piped)
+        if judged:
+            refuse(tool, "deny", "pr-review-record", judged[1], judged[0])
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -5012,17 +5014,17 @@ def judge(payload) -> None:
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         number = str(number) if isinstance(number, (int, str)) and not isinstance(number, bool) else ""
         if number.isdigit():
-            hit = review_record_hit([tool_input.get("body")], repo, number, cwd)
-            if hit:
-                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+            judged = review_record_hit([tool_input.get("body")], repo, number, cwd)
+            if judged:
+                refuse(tool, "deny", "pr-review-record", judged[1], judged[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
 
     # A comment edited in place through the MCP update tool: its form is judged, its head is not (it names a comment, not a pull request).
     if tool == REVIEW_EDIT_TOOL:
-        hit = review_form_hit([tool_input.get("body")])
-        if hit:
-            refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+        form_judged = review_form_hit([tool_input.get("body")])
+        if form_judged:
+            refuse(tool, "deny", "pr-review-record", form_judged[1], form_judged[0])
 
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")
