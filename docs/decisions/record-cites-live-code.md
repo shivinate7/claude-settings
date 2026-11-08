@@ -19,6 +19,8 @@ Coordinator readings:
 
 Lane pick, 2026-11-08 04:16 CST, process-only, under the 04:03 reading: a dead cite has one home, STALE010 (a cite into a tracked top folder to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed). The 04:03 reading says a missing name "is red". The lane reads that as red on added lines only. So a PR is never red on work it did not do.
 
+Lane pick, 2026-11-08, process-only, under item 386: the near-miss typo test (lint/stale_cites.py `typo_of_tracked_top`, #2117) closes note stale010-top-folder-typo. That note is a finding of #2063's round 1, so it rides as a follow-up PR.
+
 ## The mistakes and the harm
 
 - Pull request #1419 at commit 7156e9a3 said the ledger reads no CI state, but the merge tool reads main's latest CI run (merge/merge.py base_state). A reader who trusts the record misjudges what the tool does.
