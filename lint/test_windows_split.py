@@ -1910,16 +1910,18 @@ class CiCoverageScope(unittest.TestCase):
         text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_win.py"], checks=checks))
         self.assertNotIn("lint/test_win.py", text, "a file that only a windows-latest job names is reported")
 
-    def test_the_gap_report_names_both_remedies(self):
-        # Named failure: the report names the files with no run step, but not the rename that a helper with no
-        # tests takes, to `_test_<name>`.
+    def test_the_gap_report_names_the_run_step_and_no_rename(self):
+        # Named failure: the report offers a rename to `_test_<name>`. A `_test_` name is outside the scope, so the
+        # rename hides a real test from the check.
         text = gap_text(make_repo(tracked=["lint/test_x.py"], checks=TEST_FILE_CHECKS))
         with self.subTest("file"):
             self.assertIn("lint/test_x.py", text, "an unnamed test file is not reported")
         with self.subTest("add a run step"):
             self.assertIn("run step", text, "the gap report does not name the add-a-run-step remedy")
-        with self.subTest("rename"):
-            self.assertIn("_test_", text, "the gap report does not name the rename remedy, _test_<name>")
+        with self.subTest("no rename"):
+            self.assertNotIn("rename", text, "the gap report offers a rename, which hides a real test from the scope")
+        with self.subTest("no _test_ name"):
+            self.assertNotIn("_test_", text, "the gap report names a _test_ file, which the scope does not read")
 
     def test_a_test_dot_file_gets_a_run_step_remedy_only(self):
         # Named failure: the report offers a rename to _test_<name> for a `.test.*` file. That name still matches the
