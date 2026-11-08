@@ -486,7 +486,9 @@ export async function watchdog({ self, ci, tempPrefix }) {
         }
       }
       if (!jobOk && ci) { failNoJob(); return; }
-      // The child must never run a test outside the job, so a go file that is not written is a failure.
+      // On CI the child never runs a test outside the job: with no job the run has failed above. Off CI
+      // with no job, the documented fallback releases the child anyway, with a printed note. Either way
+      // a go file that cannot be written is a failure, since the child would wait for it unreleased.
       try {
         if (process.env[GO_FAIL] === "1") throw new Error(`${GO_FAIL}=1 asked for a failed write`);
         writeFileSync(goFile, "go");
