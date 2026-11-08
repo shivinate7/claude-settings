@@ -8,7 +8,7 @@ hooks/test_waiting_export.py and lint/test_report_guard.py.
 This module holds no cases.
 """
 
-MAC_PREFIX = "mcp__claude-artifacts__"
+from shared_names import MAC_PREFIX  # the one home of the Mac prefix
 
 # The Mac op that a cloud write action twins. Mac `merge` has no cloud action of its own: it changes fields, as an
 # ArtifactData update does, so both `merge` and `update` twin the cloud update.

@@ -5,6 +5,10 @@ the guard's agent-model-floor never sees those calls.
 """
 import json, os, re, sys, unittest
 
+HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+sys.path.insert(0, HOOKS)
+from shared_names import MAC_DATA_TOOLS, MAC_PAGE_TOOLS, MAC_PREFIX  # noqa: E402  the one home of the Mac names
+
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
 CALL_JUDGE = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(
@@ -525,21 +529,14 @@ class JudgeModelRows(unittest.TestCase):
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
 
 
-# Mac names of the cloud artifact tools, by the cloud tool each stands in for. Owner-relayed waiting-page item 434
-# (home-artifact-tool-names) is the source. The tests below read this one constant; no copy.
-MAC_ARTIFACT_TOOLS = {
-    "Artifact": ("publish_files", "get_artifact", "read_artifact", "list_artifacts",
-                 "declare_capabilities", "describe_capabilities", "watch", "guide"),
-    "ArtifactData": ("db_get", "db_list", "db_query", "db_write", "db_str_replace", "db_usage"),
-    "ArtifactComments": ("read_comments",),
-}
-
-
-def mac_tool(name):
-    """The Mac tool name for a name in MAC_ARTIFACT_TOOLS. A name the constant does not hold is a test bug."""
-    if not any(name in names for names in MAC_ARTIFACT_TOOLS.values()):
-        raise AssertionError("%s is not in MAC_ARTIFACT_TOOLS" % name)
-    return "mcp__claude-artifacts__" + name
+# The mapped Mac names come from shared_names (the one home); the matchers below read them from there. The unmapped
+# names are negative inputs only: no artifact matcher may take one. Owner-relayed waiting-page item 434
+# (home-artifact-tool-names) is the source.
+MAC_READ_TOOLS = frozenset(name for name in MAC_DATA_TOOLS if name.endswith(("db_get", "db_list", "db_query")))
+MAC_WRITE_TOOLS = MAC_DATA_TOOLS - MAC_READ_TOOLS
+UNMAPPED_MAC_NAMES = ("get_artifact", "read_artifact", "list_artifacts", "declare_capabilities",
+                      "describe_capabilities", "watch", "guide", "db_usage", "read_comments")
+CLOUD_ARTIFACT_TOOLS = ("Artifact", "ArtifactData", "ArtifactComments")
 
 
 def guard_entries():
@@ -554,9 +551,12 @@ def page_note_entries():
 
 
 def lookalikes():
-    """Names no artifact matcher may take: each Mac name under another server, each cloud name with a prefix."""
-    names = [n for ns in MAC_ARTIFACT_TOOLS.values() for n in ns]
-    return ["mcp__claude-artifacts-evil__" + n for n in names] + ["x" + cloud for cloud in MAC_ARTIFACT_TOOLS]
+    """Names no artifact matcher may take: the unmapped Mac names, each mapped Mac name under another server, and each
+    cloud name with a prefix."""
+    mapped = sorted(MAC_DATA_TOOLS | MAC_PAGE_TOOLS)
+    unmapped = [MAC_PREFIX + n for n in UNMAPPED_MAC_NAMES]
+    other_server = ["mcp__claude-artifacts-evil__" + t[len(MAC_PREFIX):] for t in mapped + unmapped]
+    return unmapped + other_server + ["x" + cloud for cloud in CLOUD_ARTIFACT_TOOLS]
 
 
 def lookalike_hits(entries):
@@ -569,21 +569,18 @@ class ArtifactMacNames(unittest.TestCase):
         # Rule page-stale needs publish_files; page-item-design and mockup-home need the two item writes.
         entries = guard_entries()
         self.assertTrue(entries, "no PreToolUse entry runs guard.py")
-        for name, rule in (("publish_files", "page-stale"), ("db_write", "page-item-design, mockup-home"),
-                           ("db_str_replace", "page-item-design, mockup-home")):
-            with self.subTest(name=name):
-                tool = mac_tool(name)
+        for tool in sorted(MAC_PAGE_TOOLS | MAC_WRITE_TOOLS):
+            with self.subTest(name=tool):
                 self.assertTrue(any(covers(e, tool) for e in entries),
-                                "guard.py matcher does not cover %s (needed by rule %s): %r"
-                                % (tool, rule, [e.get("matcher") for e in entries]))
+                                "guard.py matcher does not cover %s: %r"
+                                % (tool, [e.get("matcher") for e in entries]))
 
     def test_call_judge_matcher_covers_mac_item_writes(self):
         # The waiting-page item review (ruled Nov 1 11:51 CST) reads the two item writes, so call_judge.py sees them.
         entries = [e for e, _ in call_judge_entries()]
         self.assertTrue(entries, "no PreToolUse entry runs call_judge.py")
-        for name in ("db_write", "db_str_replace"):
-            with self.subTest(name=name):
-                tool = mac_tool(name)
+        for tool in sorted(MAC_WRITE_TOOLS):
+            with self.subTest(name=tool):
                 self.assertTrue(any(covers(e, tool) for e in entries),
                                 "call_judge.py matcher does not cover %s (needed by the waiting-page item review): %r"
                                 % (tool, [e.get("matcher") for e in entries]))
@@ -591,9 +588,8 @@ class ArtifactMacNames(unittest.TestCase):
     def test_page_note_matcher_covers_mac_reads(self):
         entries = page_note_entries()
         self.assertTrue(entries, "no PostToolUse entry runs local_time.py --page-note")
-        for name in ("db_get", "db_list", "db_query"):
-            with self.subTest(name=name):
-                tool = mac_tool(name)
+        for tool in sorted(MAC_READ_TOOLS):
+            with self.subTest(name=tool):
                 self.assertTrue(any(covers(e, tool) for e in entries),
                                 "local_time.py --page-note matcher does not cover %s: %r"
                                 % (tool, [e.get("matcher") for e in entries]))
