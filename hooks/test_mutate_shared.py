@@ -569,8 +569,8 @@ class ShardSplitTests(unittest.TestCase):
         self.assertEqual(given, [], "the empty shard 3/3 ran %d mutants" % len(given))
 
     def test_a_shard_whose_every_mutant_is_skipped_exits_one(self):
-        # Red on the old code: the slice 1/2 is a and c, both skipped for platform, so nothing ran. The old run printed
-        # "0 of 0 mutations killed" and exit 0, a shard that proved nothing read green.
+        # The slice 1/2 is a and c, both skipped on this platform, so the shard runs nothing. It must exit 1: a shard
+        # that ran nothing proved nothing, so it must not read green.
         code, lines, _given = run_sharded(["a", "b", "c", "d"], "1/2", skip=skipped_elsewhere)
         self.assertTrue(any(SHARD_LINE.match(line) for line in lines),  # scope first: this run was a shard run
                         "shard 1/2 printed no MUTATE_SHARD line, so it did not run as a shard")
@@ -578,13 +578,16 @@ class ShardSplitTests(unittest.TestCase):
         self.assertIn("Nothing ran", "\n".join(lines), "the all-skipped shard 1/2 printed no 'Nothing ran'")
 
     def test_without_a_shard_every_skipped_mutant_still_exits_zero(self):
-        # Control, green on the old code: an unset MUTATE_SHARD keeps today's exit when every mutant is skipped.
-        code, _lines, _given = run_sharded(["a", "b", "c", "d"], None, skip=skipped_elsewhere)
+        # An unset MUTATE_SHARD is not a shard: the run covers the whole list, and with every mutant skipped it still
+        # exits 0. The stub must be given all four mutants, so the exit code is read against a full run.
+        code, _lines, given = run_sharded(["a", "b", "c", "d"], None, skip=skipped_elsewhere)
+        self.assertEqual(sorted(given), ["a", "b", "c", "d"],
+                         "an unset MUTATE_SHARD left mutants out: the stub was given %r, want all four" % sorted(given))
         self.assertEqual(code, 0, "an unset MUTATE_SHARD with every mutant skipped exits %d, want 0" % code)
 
     def test_a_shard_with_one_killed_and_one_skipped_mutant_exits_zero(self):
-        # Control, green on the old code: the slice 1/2 is a and c. a runs and is killed, c is skipped. A shard that ran
-        # one mutant is not an empty shard, so it still exits 0.
+        # The slice 1/2 is a and c: a runs and is killed, c is skipped. A shard that ran one mutant is not empty, so it
+        # exits 0.
         def skip_c(entry):
             return skipped_elsewhere(entry) if entry == "c" else None
 
