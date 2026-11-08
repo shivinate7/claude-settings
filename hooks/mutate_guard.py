@@ -246,8 +246,7 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
+     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
@@ -584,7 +583,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_split_heredocs(cmd)[0])',
+     '    return "\\n".join(line for at, line in enumerate(cmd.split("\\n")) if at in keep)',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',
@@ -1434,6 +1433,15 @@ MUTATIONS = [
      '                    os.path.normcase("agent-" + agent_id + "-"))):',
      '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
+    # A quoted argument of a script-file interpreter or of rg is data, and a written file is run only as the script.
+    ("other-checkout: a python, node, perl or ruby script file's quoted arguments are read as shell words",
+     '        start = 1 if kind == "reader" else guard_core.interpreter_script([_unquoted(w) for w in words]) + 1',
+     '        start = len(words)',
+     "guard", "heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument is allowed"),
+    ("other-checkout: a file that an interpreter gets as a later data argument reads as its script",
+     '                    scripts.add(words[at + script])   # a later argument of that interpreter is data',
+     '                    scripts.update(words[at + 1:])   # a later argument of that interpreter is data',
+     "guard", "heredoc replay split: a heredoc written to cmds.txt, body echo x > ../f, then python3 judge.py cmds.txt, is allowed"),
     # The write act's exemption: `worktree_home_red_write_case`.
     ("other-checkout: a write into the agent's own red-run folder is refused",
      '                and not _own_red_run(payload, roots[0], resolved, verb in RED_RUN_ROOT_VERBS))',

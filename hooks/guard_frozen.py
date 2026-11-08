@@ -380,6 +380,10 @@ def _resolve_vars(cmd: str) -> str:
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
 _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
+# A search that reads files and runs nothing: its quoted pattern is data. `--pre` and `--hostname-bin` name a
+# program rg runs, so a call that holds either is not read as one.
+_READERS = frozenset(("rg",))
+_READER_RUNS = ("--pre", "--hostname-bin")
 _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
@@ -444,7 +448,8 @@ def _is_redirect(word: str) -> bool:
 
 
 def _kind(words, plain: str) -> str:
-    """'printer', 'message', 'cd' or '' for one segment."""
+    """'printer', 'message', 'reader', 'interpreter', 'cd' or '' for one segment. An interpreter is a
+    python, node, perl or ruby that runs a script FILE, so its program is not in the segment's quotes."""
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
@@ -459,6 +464,11 @@ def _kind(words, plain: str) -> str:
         return "message" if words[index:index + 1] == ["commit"] else ""
     if name == "gh" and tuple(words[1:3]) in _GH_MESSAGE_CALLS:
         return "message"
+    if name in _READERS:
+        return "" if any(word.startswith(_READER_RUNS) for word in words) else "reader"
+    unquoted = [_unquoted(word) for word in words]
+    if name and guard_core.interpreter_script(unquoted) not in (None, guard_core.PROGRAM_NOT_A_FILE):
+        return "interpreter"
     return ""
 
 
@@ -473,8 +483,17 @@ def _writes_a_file(words) -> bool:
 
 
 def _data_words(kind: str, words):
-    """The indexes of the words that are data in a printer or message segment."""
+    """The indexes of the words that are data in a printer, reader, interpreter or message segment. A reader's
+    quoted words are its patterns. An interpreter's are the arguments after its script file."""
     data = set()
+    if kind in ("reader", "interpreter"):
+        start = 1 if kind == "reader" else guard_core.interpreter_script([_unquoted(w) for w in words]) + 1
+        for index in range(start, len(words)):
+            # A word that opens with a redirect names a file, quoted or not.
+            if (("'" in words[index] or '"' in words[index]) and not _is_redirect(words[index - 1])
+                    and not re.match(r"\d*[<>&|]", words[index])):
+                data.add(index)
+        return data
     if kind == "printer":
         for index in range(1, len(words)):
             if ("'" in words[index] or '"' in words[index]) and not _is_redirect(words[index - 1]):
@@ -673,8 +692,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
     scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
+    # A body that only an interpreter runs as its script file is that language, never shell text: its `()`,
+    # backtick or `eval` closes nothing, so the closed test reads the command without it.
+    view = guard_core.drop_script_bodies(cmd)
+    if view != cmd:
+        shown = split_segments(view, [])
+        closing = (shown, [_quoted_words(segment) for segment in shown], [_scan(segment) for segment in shown])
+    else:
+        closing = (segments, parsed, scans)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
-                 for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
+                 for segment, words, (unsafe, plain) in zip(*closing))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
@@ -682,7 +709,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
-        if kinds[number] in ("printer", "message"):
+        if kinds[number] in ("printer", "message", "reader", "interpreter"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
                 last += 1
