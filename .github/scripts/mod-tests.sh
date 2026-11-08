@@ -15,9 +15,10 @@ skill_dir=skills/plain-english-map/tests
 
 # The two finders are the one home of what each phase runs. The phases and list read them, so list cannot drift.
 # A pipe would hide find's exit code, so find runs alone and its output is checked before it is printed.
+# check.mjs files are checks, not tests by name, and a red one must fail the phase too.
 mod_files() {
   local list
-  list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' \) -print) || { echo "find failed" >&2; return 1; }
+  list=$(find mods -name node_modules -prune -o \( -name '*.test.mjs' -o -name '*.test.js' -o -name check.mjs \) -print) || { echo "find failed" >&2; return 1; }
   [ -n "$list" ] || { echo "no mod test file found" >&2; return 1; }
   printf '%s\n' "$list"
 }
