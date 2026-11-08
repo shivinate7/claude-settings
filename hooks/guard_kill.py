@@ -722,11 +722,18 @@ def _open_script_blocks(tokens):
         out.append(head)
         for part in rest:
             out.append("{")
-            # Text after the block's own `}` (`try{...}catch`) is its keyword, not part of the body.
-            body = part.split("}", 1)[0].rstrip(")")
-            if body:   # a `{` that ends its token leaves no empty piece behind
-                out.append(body)
-            tail = part.partition("}")[2].rstrip("})")
+            # Text glued after the block's own `}` is split off from the body when it is a keyword
+            # (`try{...}catch`) or when the block is empty (`{}$env:X=1`, a statement right after
+            # `{`). After a non-empty body it stays joined, so a set there is judged as the body's
+            # value and never as a fresh statement.
+            body, brace, tail = part.partition("}")
+            if brace and (not body.rstrip(")") or re.match(r"[A-Za-z]", tail)):
+                part = body
+                tail = tail.rstrip("})")
+            else:
+                tail = ""
+            if part.rstrip("})"):   # a `{` that ends its token leaves no empty piece behind
+                out.append(part.rstrip("})"))
             if tail:
                 out.append(tail)
     return out

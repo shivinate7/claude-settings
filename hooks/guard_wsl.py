@@ -44,7 +44,8 @@ def _climbs(seg: str) -> bool:
 
 
 def _literal_test_path(path: str, pattern) -> bool:
-    """A test path with no glob character: the runner takes one file, so a glob is a first-file false green."""
+    """A test path with no glob character. `wsl --exec` runs no shell, so nothing expands a glob: the
+    runner gets the literal text, so the run fails or runs the wrong file, and the guard cannot tell which."""
     return not set("*?[]") & set(path) and _test_path(path, pattern)
 
 
@@ -70,7 +71,8 @@ def _allowed(args) -> bool:
     if prog == "node":
         if rest[0] == "--test":
             return len(rest) > 1 and all(_test_path(p, NODE_TEST) for p in rest[1:])
-        # Plain node runs only its first file, so more would be a false green: one literal path.
+        # Plain node runs only its first file and ignores the rest, so extra paths would go untested:
+        # one literal path. A glob is no way round it, since nothing expands it (see _literal_test_path).
         return len(rest) == 1 and _literal_test_path(rest[0], NODE_TEST)
     if prog == "pwsh":
         return len(rest) == 3 and rest[:2] == ["-NoProfile", "-File"] and _literal_test_path(
