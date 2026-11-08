@@ -532,6 +532,48 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push it"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_we_werent_able_to_is_a_claim(self):
+        # Catches: "weren't able to" missing from the n't phrases, so the line reads as no claim.
+        line = "We weren't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_able_to_is_a_claim(self):
+        # Catches: "aren't able to" missing from the n't phrases, so the line reads as no claim.
+        line = "We aren't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_able_to_with_a_curly_apostrophe_is_a_claim(self):
+        # Catches: the curly apostrophe missing from "aren't", so a straight-quote-only fix passes the other reds.
+        line = "We aren’t able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_this_session_isnt_able_to_is_a_claim(self):
+        # Catches: "isn't" missing from the be-form n't phrases, so "This session isn't able to" reads as no claim.
+        line = "This session isn't able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_we_arent_going_to_be_able_to_is_a_claim(self):
+        # Catches: the n't form of "not going to be able to" missing. The listed phrase has no be-form before "not".
+        line = "We aren't going to be able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_be_n_t_able_to_forms_pass_after_a_failed_merge(self):
+        # Control: each new form passes after a failed `gh pr merge 12` that the line names as its check.
+        # Each form has its own run, so one form's block cannot hide another's pass.
+        for line in ("We weren't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren’t able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "This session isn't able to merge PR 12: `gh pr merge 12` exited 1.",
+                     "We aren't going to be able to merge PR 12: `gh pr merge 12` exited 1."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a failed gh pr merge 12, named as its check, with the form: %r" % line)
+
     def test_cc_red_no_way_i_can_is_a_claim(self):
         # Catches: "no way I can" missing from the phrase list. Only "no way to" is in it.
         line = "No way I can open the PR."
