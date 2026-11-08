@@ -729,10 +729,24 @@ class CostPinTests(unittest.TestCase):
 
     def test_note_lone_backtick_is_no_unbalanced_finding_and_its_count_is_still_read(self):
         # Pinned: a lone backtick in a debt note is plain text. It prints no unbalanced-backtick finding, and a count
-        # claim in another sentence of the same note is still read and flagged.
+        # claim in another sentence of the same note is still read and flagged. A stray backtick that held its
+        # sentence open would take the later "Unmeasured" into the same sentence, which exempts the count.
         text = self.note("- frozen-trim-quoted-backtick: a write to a file named with a trailing ` reads as the bare "
-                         "name (hooks/guard_frozen.py). The list is among 266 folder cites in this repo.\n")
-        self.assert_found([note_row(text, "among 266")], counts=True)
+                         "name (hooks/guard_frozen.py). The list is among 266 folder cites in this repo.\n"
+                         "- a: 40 of 266 cites are stale ` and the stray. Unmeasured for now.\n")
+        self.assert_found([note_row(text, "among 266"), note_row(text, "40 of 266")], counts=True)
+
+    def test_note_among_ten_is_a_claim(self):
+        # `among` takes each count word of the home's list: ten is one, as six is. The six line is the control.
+        text = self.note("- a: among six notes.\n"
+                         "- b: among ten notes.\n")
+        self.assert_found([note_row(text, "among six"), note_row(text, "among ten")], counts=True)
+
+    def test_note_two_of_a_two_digit_number_is_a_claim(self):
+        # `N of M` takes a count word for N, as it takes digits. The 40 of 266 line is the control.
+        text = self.note("- a: 40 of 266 lanes.\n"
+                         "- b: two of 40 lanes.\n")
+        self.assert_found([note_row(text, "40 of 266"), note_row(text, "two of 40")], counts=True)
 
     def test_note_run_id_followed_by_of_is_a_count_not_a_run_id(self):
         # `run N` exempts a note's sentence only when no `of` follows N: then N is a count, not a run id.
