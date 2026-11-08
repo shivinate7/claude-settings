@@ -4882,6 +4882,8 @@ def git_push_after_check_hit(command: str) -> str:
             elif start - 1 in tails and not subshell_depth(segments, start - 1):
                 covered = tails[start - 1]
             if covered is not None:
+                while covered > 0 and ends[covered - 1] in ("&&", "||", "|"):
+                    covered -= 1   # the exit guards the whole `A || B` or `A | B` list, and no check before it
                 position, first = covered, True
                 continue
             position, first = start - 1, False
