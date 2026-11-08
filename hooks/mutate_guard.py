@@ -724,10 +724,10 @@ MUTATIONS = [
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
-     '    matched = waiter_verdict(split_segments(stripped), background)\n'
+     '    matched = waiter_verdict(split_segments(stripped, ends), background, ends)\n'
      '    if matched:\n'
      '        if poller:',
-     '    matched = waiter_verdict(split_segments(stripped), background)\n'
+     '    matched = waiter_verdict(split_segments(stripped, ends), background, ends)\n'
      '    if False:\n'
      '        if poller:', "guard",
      'waiter: a bare sleep'),

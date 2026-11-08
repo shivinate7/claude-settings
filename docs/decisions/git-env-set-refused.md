@@ -9,7 +9,7 @@ No agent command may set `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE`. The gua
 - The remedy names `git -C` and a child env with the git variables removed.
 - Session start warns when `core.worktree` is set in the shared config of the repo in the cwd.
 
-Why: a child `git init` inherited the variables and wrote `core.worktree` into the shared config, so every checkout read the wrong tree. An approved ask would reopen that path, so the refusal wins.
+Why (measured in q_max on 2026-10-14): a child `git init` inherited the variables and wrote `core.worktree` into the shared config, so every checkout read the wrong tree. An approved ask would reopen that path, so the refusal wins.
 
 Kind: process
 Home: hooks/guard_kill.py

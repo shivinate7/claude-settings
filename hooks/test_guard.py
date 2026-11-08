@@ -2510,9 +2510,9 @@ sh("stash pathspec: stash --m over real uncommitted work denies like a push",
 sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
    VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
    carries=PUSH_FRAGMENT)
-# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
-# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
-# stack in a dirty checkout they take nothing, the same verdict as main.
+# The guard reads `import` and `export` as stack actions, and they keep that side. Over a real entry in a
+# clean checkout they deny with the stack remedy. Over an empty stack in a dirty checkout they take nothing,
+# the same verdict as main.
 STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
 sh("stash import: over a real stack entry in a clean checkout denies, as on main",
    VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
@@ -3680,6 +3680,14 @@ sh("pointer: a move back to main restores the invariant and passes",
    VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch main passes for the same reason",
    VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
+# A detach names no branch, so HEAD stops naming `main` even when it sits on main's commit. Rule 1b (decision
+# recovery-independent-of-state) passes only a move TO main, so a detach to `main` is refused.
+sh("pointer: checkout --detach main detaches, so it is refused",
+   VCS + " checkout --detach main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout --detach origin/main is not the main exemption, so it is refused",
+   VCS + " checkout --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout --detach of another branch is refused",
+   VCS + " checkout --detach somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 # refusal-vs-rule (pointer-head, recovery-independent-of-state): a move TO main is the recovery act and
 # passes. A reset of main onto origin/main is a move to main too. The pin runs both on main and in a
 # checkout that is off main, so the verdict cannot rest on HEAD already naming main.
@@ -3689,10 +3697,13 @@ sh("pointer: checkout -B main onto origin/main passes, from a checkout on main",
    VCS + " checkout -B main origin/main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C main onto origin/main passes, from a checkout off main",
    VCS + " switch -C main origin/main", "allow", cwd=PTROFF, config=PTROFFCFG)
-# Near misses, refused: a detach names no branch, so the exemption for main does not reach it, and a
-# reset onto any other branch is a new branch.
+# The same holds for switch: a detach names no branch, so `--detach main` and `-d main` are refused too.
 sh("pointer: switch --detach main detaches, so it is refused", VCS + " switch --detach main", "deny",
    "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch -d main detaches, so it is refused", VCS + " switch -d main", "deny",
+   "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: switch --detach origin/main is not the main exemption, so it is refused",
+   VCS + " switch --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch -C of another branch onto origin/main is refused", VCS + " switch -C somebranch origin/main",
    "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 # The reset is a move to main only when it drops nothing, and only origin/main can say so. Local main
@@ -5567,6 +5578,13 @@ sh("waiter: a loop inside a heredoc body is allowed",
    "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
+# A brace is a script block only where the command runs it. `echo {sleep}` prints the word and waits for nothing,
+# and a block that does run still counts its sleep.
+sh("waiter: a brace around sleep in an echo is text, allowed", "echo {sleep}", "allow", cwd=NOGIT)
+sh("waiter: a brace around sleep in an echo does not hide a long sleep after it, refused",
+   "echo {sleep}; sleep 30", "deny", "waiter", cwd=NOGIT)
+sh("waiter: a call operator on a script block with a long Start-Sleep is refused",
+   "& { Start-Sleep 30 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 
 # Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
@@ -5582,6 +5600,32 @@ sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
    "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
    "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+# A printing command prints what it is given, but a block that runs still counts its sleep. The control
+# `echo {sleep}`, above, stays allowed: it runs no block.
+sh("waiter: echo of a block that is then invoked, with a long Start-Sleep, is refused",
+   "echo {Start-Sleep 120}.Invoke()", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+# A block that a pipe or a variable hands to a runner is run, whichever command printed it: `iex`,
+# Invoke-Expression, `% {$_.Invoke()}`, ForEach-Object dot-sourcing the block, or a call operator on a variable.
+sh("waiter: Write-Output of a block piped to iex, with a long Start-Sleep, is refused",
+   "Write-Output {Start-Sleep 120} | iex", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: echo of a block piped to Invoke-Expression, with a long Start-Sleep, is refused",
+   "echo {Start-Sleep 120} | Invoke-Expression", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: Write-Output of a block piped to % that calls Invoke, with a long Start-Sleep, is refused",
+   "Write-Output {Start-Sleep 120} | % {$_.Invoke()}", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: Write-Output of a block piped to ForEach-Object that dot-sources it, with a long Start-Sleep, "
+   "is refused", "Write-Output {Start-Sleep 120} | ForEach-Object { . $_ }", "deny", "waiter",
+   tool="PowerShell", cwd=NOGIT)
+sh("waiter: echo of a block held in a variable, then called, with a long Start-Sleep, is refused",
+   "$b = echo {Start-Sleep 120}; & $b", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+# Control: a block that is stored and never called runs nothing, so the store alone stays allowed.
+sh("waiter: echo of a block held in a variable and never called is text, allowed",
+   "$b = echo {Start-Sleep 120}", "allow", tool="PowerShell", cwd=NOGIT)
+# Two more forms are refused by detached-launch, on main and on this branch, so the waiter never names them.
+# They pin the refusal with no rule named: a waiter name would fail on main, and this branch did not cause it.
+sh("waiter: Write-Host of a call that wraps a long Start-Sleep is refused",
+   "Write-Host ( & { Start-Sleep 120 } )", "deny", tool="PowerShell", cwd=NOGIT)
+sh("waiter: Write-Host of a block piped to a call operator, with a long Start-Sleep, is refused",
+   "Write-Host {Start-Sleep 120} | ForEach-Object { & $_ }", "deny", tool="PowerShell", cwd=NOGIT)
 sh("waiter: gh.exe run watch in the foreground is refused", "gh.exe run watch 1", "deny",
    "waiter", cwd=NOGIT)
 sh("waiter: gh pr checks --watch=true in the foreground is refused",
@@ -5612,6 +5656,29 @@ sh("waiter: gh pr -R o/r checks --watch in the foreground is refused",
    "gh pr -R o/r checks 5 --watch", "deny", "waiter", cwd=NOGIT)
 add("waiter: gh run -R o/r watch under run_in_background is refused", "deny", "waiter",
     cwd=NOGIT, command="gh run -R o/r watch 1", run_in_background=True)
+# The repo flag in each spelling (`-R o/r`, `--repo o/r`, `--repo=o/r`, `-Ro/r`) is a flag, not the verb. A foreground
+# `gh pr checks --watch` is refused in each, and under run_in_background it is allowed. The repo flag may sit between
+# `gh run` and `watch`, or after the verb, and each is still a run watch.
+sh("waiter: gh pr checks -R o/r --watch in the foreground is refused", "gh pr checks 5 -R o/r --watch", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks --repo o/r --watch in the foreground is refused", "gh pr checks 5 --repo o/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks --repo=o/r --watch in the foreground is refused", "gh pr checks 5 --repo=o/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks -Ro/r --watch in the foreground is refused", "gh pr checks 5 -Ro/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+add("waiter: gh pr checks -R o/r --watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh pr checks 5 -R o/r --watch", run_in_background=True)
+sh("waiter: gh run --repo o/r watch in the foreground is refused", "gh run --repo o/r watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh run --repo=o/r watch in the foreground is refused", "gh run --repo=o/r watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh run -Ro/r watch in the foreground is refused", "gh run -Ro/r watch 1", "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh run watch 1 -R o/r in the foreground is refused", "gh run watch 1 -R o/r", "deny", "waiter",
+   cwd=NOGIT)
+# `--watch=false` turns the watch off, so `gh pr checks` with it is not a watcher.
+sh("waiter: gh pr checks 5 --watch=false is not a watcher, allowed", "gh pr checks 5 --watch=false", "allow",
+   cwd=NOGIT)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
@@ -6013,12 +6080,22 @@ sh("wsl: a plain node script that is not a test",
    "wsl -e node script.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node file whose name only starts like a test",
    "wsl -e node x.test.mjs.evil", "deny", rule=WSL_RULE, cwd=NOGIT)
+# A bracket glob is a glob: a plain node call with one takes more than one file, so it is refused like `*`.
+sh("wsl: a bracket glob in a plain node test path is refused",
+   "wsl -e node mods/[ab]/x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a bracket glob in a --test node path is allowed",
+   "wsl -e node --test mods/[ab]/x.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: plain node with an eval flag",
    'wsl -e node -e "console.log(1)"', "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node test path that climbs",
    "wsl -e node ../x.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a plain node test path that is absolute",
    "wsl -e node /tmp/evil.test.mjs", "deny", rule=WSL_RULE, cwd=NOGIT)
+# The same false green as a plain node glob: python3 and `pwsh -File` run only the first file a glob expands to.
+sh("wsl: a glob in a plain python3 test path is refused",
+   "wsl -e python3 hooks/test_*.py", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a glob in a pwsh -File test path is refused",
+   "wsl -e pwsh -NoProfile -File hooks/test_*.test.ps1", "deny", rule=WSL_RULE, cwd=NOGIT)
 
 # The same allowed call from each role: "allowed (any role)".
 sh("wsl: an allowed test call from a builder agent",
@@ -9069,6 +9146,43 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a glued block that does not set, allowed, %s" % _cmd[:36].replace(
         "\n", " "), _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+# Two safe forms. A null set removes the name, so it points no git at another tree, and Write-Host prints
+# a script block without running it. A value set inside a block that does run stays refused, as does a call
+# operator on a block that sets.
+sh("git env set: PowerShell, a null set inside try, allowed",
+   "try{$env:GIT_DIR=$null}catch{}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a script block given to Write-Host is printed, not run, allowed",
+   "Write-Host {$env:GIT_DIR=1}", "allow", tool="PowerShell", cwd=NOGIT)
+# A trailing argument after the printed block does not make Write-Host run it.
+sh("git env set: PowerShell, a script block given to Write-Host with a trailing argument is printed, allowed",
+   "Write-Host {$env:GIT_DIR=1} ./x", "allow", tool="PowerShell", cwd=NOGIT)
+# The nearest risky forms with the trailing argument: the output still carries the block, and the pipe runs it.
+sh("git env set: PowerShell, Write-Output of a block with a trailing argument, piped to a call operator, denies",
+   "Write-Output {$env:GIT_DIR=1} ./x | % { & $_ }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, echo of a block with a trailing argument, piped to iex, denies",
+   "echo {$env:GIT_DIR=1} ./x | iex", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a value set inside try, denies",
+   "try{$env:GIT_DIR='x'}catch{}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a call operator on a block that sets, denies",
+   "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+# A printing command prints the block it is given and runs none of it. A block that the same call then runs,
+# through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression, still sets the name. The control above,
+# `Write-Host {$env:GIT_DIR=1}`, stays allowed.
+sh("git env set: PowerShell, echo of a block that is then invoked, denies",
+   "echo {$env:GIT_DIR=1}.Invoke()", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Output of a block piped to a call operator, denies",
+   "Write-Output {$env:GIT_DIR=1} | % { & $_ }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Output of a block piped to Invoke-Expression, denies",
+   "Write-Output {$env:GIT_DIR='x'} | Invoke-Expression", "deny", GIT_ENV_RULE, tool="PowerShell",
+   cwd=NOGIT)
+# A block stored in a variable is run by the call that names the variable. The call that stores it prints
+# the block and runs none of it, so the set inside still denies.
+sh("git env set: PowerShell, a Write-Output block held in a variable, then a call operator on it, denies",
+   "$b = Write-Output {$env:GIT_DIR=1}; & $b", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, an echo block held in a variable, then dot-sourced, denies",
+   "$b = echo {$env:GIT_DIR=1}; . $b", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a value set then git status, denies",
+   "$env:GIT_DIR='x'; git status", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe, a
 # newline inside a string and a here-string ahead of a glued set must not hide it.
 for _label, _head in (
@@ -28468,7 +28582,7 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
 # The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
-# that constant is new, and a read at import time would fail every case on the old code.
+# a read at import time would fail every case on a guard that lacks that name.
 EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}

@@ -734,10 +734,11 @@ check("shallow pin: the line never says does not hold or off main",
 # install.sh into a temp HOME, so each one reads what an install lands. Only PATH and HOME reach the installer:
 # CLAUDE_CODE_REMOTE in the caller's environment would force cloud mode, and CLAUDE_CONFIG_DIR would move ~/.claude.
 # A pipx stub stands in for the cloud-only `pip install --user pipx`, which needs the network.
-def install_case(mode, pointer=None, mkdirs=()):
+def install_case(mode, pointer=None, mkdirs=(), drop=()):
     """The scratch clone's install.sh in `mode` ("cloud": --cloud; "local": symlinks) into a temp HOME, then
     ~/.claude/bin/ste-changed in a child repo whose CI pins ste-lint at the older commit A. A text in `pointer`
-    replaces ~/.claude/CLAUDE.md after the install; `mkdirs` are folders made under HOME first. Returns a dict."""
+    replaces ~/.claude/CLAUDE.md after the install; `mkdirs` are folders made under HOME first; `drop` are files
+    under ~/.claude removed after the install, and `present` says each was there to drop. Returns a dict."""
     with scratch("install-" + mode) as d:
         home = os.path.join(d, "home")
         clone = os.path.join(home, "claude-settings")
@@ -756,6 +757,10 @@ def install_case(mode, pointer=None, mkdirs=()):
                  "pointer": open(md, encoding="utf-8").read().split("\n")[0] if os.path.exists(md) else ""}
         for rel in mkdirs:
             os.makedirs(os.path.join(home, rel))
+        facts["present"] = all(os.path.isfile(os.path.join(cfg, rel)) for rel in drop)
+        for rel in drop:
+            if os.path.isfile(os.path.join(cfg, rel)):
+                os.remove(os.path.join(cfg, rel))
         if pointer is not None:
             write(cfg, "CLAUDE.md", pointer)
         facts["rc"], facts["out"] = run_ste_changed(installed, pin_child(d, shas, "A"), home)
@@ -804,6 +809,12 @@ else:
           r["pointer"])
     check("installed copy, cloud: a drifted pin exits 3 with the pin message read from the checkout the pointer names",
           drifted_from_checkout(r), shown(r))
+    # The installed hooks lack guard_pointer.py, so find_root's import fails. The message must name that module.
+    r = install_case("cloud", drop=("hooks/guard_pointer.py",))
+    check("installed copy, cloud: the install lands hooks/guard_pointer.py, so the drop removes a real file",
+          r["present"], shown(r))
+    check("installed copy, cloud, hooks without guard_pointer.py: exits non-zero, no traceback, and names guard_pointer",
+          r["rc"] != 0 and "Traceback" not in r["out"] and "guard_pointer" in r["out"], shown(r))
     for label, text, mkdirs in (
             ("no pointer line", "# my own rules\n", ()),
             ("the pointer names a folder that is gone", "@~/no-such-checkout/CLAUDE.md\n", ()),
