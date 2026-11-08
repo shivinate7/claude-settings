@@ -58,7 +58,7 @@ Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/
 - `verdict` avoids this: it writes a heartbeat to the beat file, so the watch sees no stall, and it keeps the full log in its own file.
 - The harm holds without that cause. `tail` holds all output until the command ends, then keeps 8 lines. A job that ends early, or is read early, shows nothing.
 
-The coordinator asked for the four forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST on 2026-11-07, is "a gap gets a fix, not a note".
+The coordinator asked for the four forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST on 2026-11-07, is "a gap gets a fix, not a note". Its home is being written in PR #1516 (the Fix-line form).
 
 ## Why a named roster
 
