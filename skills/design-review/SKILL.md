@@ -32,6 +32,7 @@ after round 1 gets a second design read (decision `design-agents`).
    also capture the same screens on main at every size and theme. `bin/shoot` also writes
    each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
    give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
+   Touch per size: a phone or tablet gets `hasTouch` (so `(pointer: coarse)` matches, and the 44 px touch floor applies); a desktop gets none (a mouse, 24 px). Take each touch shot as a viewport shot: a full-page or element shot drops the coarse match, and it stays dropped for that page. The brief names each size's input. Cite `ux-house-rules`.
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    built screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
    design spec, tokens or design decisions.
