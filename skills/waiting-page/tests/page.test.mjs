@@ -50,7 +50,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
-  window.__hold = hold; window.__held = 0;
+  window.__hold = hold; window.__held = 0; window.__inflight = 0;
   let openLatch; const latch = new Promise((r) => { openLatch = r; }); window.__release = () => openLatch();
   const seen = { set: 0, delete: 0 };
   const holdFor = async (op) => { const h = window.__hold; if (!h || h[op] === undefined || ++seen[op] <= h[op]) return; window.__held++; await latch; };
@@ -71,7 +71,10 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   window.__putDoc = (name, id, body) => { (data[name] = data[name] || {})[id] = body; fire(name, id); };
   window.__putItem = (it) => window.__putDoc("items", it.id, it);
   // holdReceipts: the receipts' first snapshot waits for window.__releaseReceipts(), so a case can act before receipts arrive.
-  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
+  // window.__inflight counts each callback the stub has scheduled, and each fake call, until it returns, so a case waits for 0 instead of sleeping.
+  // A held receipt is not counted: it waits for window.__releaseReceipts() and may never be released.
+  const later = (fn) => { window.__inflight++; setTimeout(() => { try { fn(); } finally { window.__inflight--; } }, 0); };
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else later(() => cb(snap(name))); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
@@ -79,12 +82,12 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
       orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
         get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
-        set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
+        set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); later(() => fire(name, id)); },
         // A merge write, as the runtime's update: the fields given are set, the rest of the record stays. It is refused when the record is gone.
         // failUpdate refuses every asks update with permission-denied, as a store that cannot write does.
-        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
-        delete: async () => { if (name === "asks") await holdFor("delete"); if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
-        onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); later(() => fire(name, id)); },
+        delete: async () => { if (name === "asks") await holdFor("delete"); if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; if (name === "asks") keepAsks(); later(() => fire(name, id)); },
+        onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); later(() => cb(dsnap(name, id))); return () => {}; },
       }),
     }),
   };
@@ -95,14 +98,18 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   const cm = comments && {
     canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
     anchorFor: async (el) => ({ path: "h1", x: 0, y: 0, tag: el.tagName }),
+    // A send is counted in __inflight from its call until it returns, sendDelay included, so a held send keeps the count above 0.
     sendToClaude: async (target) => {
-      window.__sent.push(target);
-      if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
-      if (comments.failCode) throw { code: comments.failCode, message: "stub" };
-      if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
-      if (target.threadId && comments.threadFail && comments.threadFail[target.threadId]) throw { code: comments.threadFail[target.threadId], message: "stub" };
-      if (!target.threadId && comments.anchorFail) throw { code: comments.anchorFail, message: "stub" };
-      return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
+      window.__inflight++;
+      try {
+        window.__sent.push(target);
+        if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
+        if (comments.failCode) throw { code: comments.failCode, message: "stub" };
+        if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
+        if (target.threadId && comments.threadFail && comments.threadFail[target.threadId]) throw { code: comments.threadFail[target.threadId], message: "stub" };
+        if (!target.threadId && comments.anchorFail) throw { code: comments.anchorFail, message: "stub" };
+        return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
+      } finally { window.__inflight--; }
     },
   };
   window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
@@ -134,6 +141,9 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
+  // window.__decoding counts the page's image decodes until each settles. The spy returns the page's own promise. The count goes down in a then with a reject
+  // handler, not a finally, so a decode that rejects leaves no unhandled rejection for the page to report.
+  await page.addInitScript(() => { const decode = HTMLImageElement.prototype.decode; window.__decoding = 0; HTMLImageElement.prototype.decode = function () { window.__decoding++; const p = decode.call(this); const done = () => { window.__decoding--; }; p.then(done, done); return p; }; });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
@@ -596,6 +606,30 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
   await page.waitForFunction(() => window.__slowDecodeDone === true, null, { timeout: 5000 }).catch(() => assert.fail("the slow decode did not finish in 5 s"));
   const m = await markState(page);
   assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
+});
+
+// The fixture's counts (stubDb and open). Each goes to 0 once its work settles, and rises while a held piece of work is in flight.
+test("the stub's __inflight count is 0 once open has settled, rises while a sent batch is held, and returns to 0 when the send settles", async (t) => {
+  const page = await open(t, { comments: { can: "available", sendDelay: 600 } }); if (!page) return;
+  assert.equal(typeof await page.evaluate(() => window.__inflight), "number", "the stub keeps no __inflight count");
+  await page.waitForFunction(() => window.__inflight === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __inflight count is not 0 after open, in 5 s"));
+  await takePick(page, DECISION); await send(page);
+  await page.waitForFunction(() => window.__inflight > 0, null, { timeout: 5000 }).catch(() => assert.fail("the __inflight count stayed at 0 while the send was held, in 5 s"));
+  await page.waitForFunction(() => window.__inflight === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __inflight count did not return to 0 after the send settled, in 5 s"));
+  assert.equal((await sent(page)).length, 1, "the held send did not land");
+});
+
+test("the page's __decoding count is 0 once an icon has decoded, rises while a decode is held, and returns to 0 when the held decode fails", async (t) => {
+  const page = await open(t, { meta: { identity: { name: "Compass", icon: svgIcon("#11151b") } } }); if (!page) return;
+  await page.waitForSelector("#mark.icon img");
+  assert.equal(typeof await page.evaluate(() => window.__decoding), "number", "the page keeps no __decoding count");
+  await page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __decoding count is not 0 after the icon decoded, in 5 s"));
+  // An image whose request this case holds: its decode waits until the case aborts the request.
+  const held = new Promise((resolve) => page.route("https://hold.test/**", resolve));
+  await page.evaluate(() => { const i = new Image(); i.src = "https://hold.test/pending.png"; i.decode().catch(() => {}); });
+  await page.waitForFunction(() => window.__decoding > 0, null, { timeout: 5000 }).catch(() => assert.fail("no decode was counted while an image was held, in 5 s"));
+  await (await held).abort();
+  await page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __decoding count did not return to 0 after the held decode failed, in 5 s"));
 });
 
 // ---------------------------------------------------------------- designs
