@@ -7566,6 +7566,10 @@ sh("push: stray branch, a bare push under push.default current asks",
 # a PR head pushed as a stray branch). A push of B to a new name is a stacked lane, and stays allowed.
 sh("push: a new branch at another branch's tip denies, the stray-branch incident",
    VCS + " push origin HEAD~1:refs/heads/skc-ste", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
+# DENY, the `@{` revision form. HEAD@{1} is HEAD's previous value, the checkout that cut lane/fix, which is
+# origin/lane/base's tip (A). Held by a mutant in hooks/mutate_guard.py, which names this case.
+sh("push-new-branch: a reflog source HEAD@{1} at another branch's tip denies",
+   VCS + " push origin HEAD@{1}:refs/heads/skc-reflog", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
 sh("push: a new branch on top of another branch, a stacked lane, allows",
    VCS + " push origin HEAD:refs/heads/skc-stacked", "allow", cwd=PUSHNEWBR)
 # ALLOW, the exceptions to the new-branch refusal. Each one is judged by its own arm: an existing target,

@@ -455,6 +455,12 @@ MUTATIONS = [
      '        if not _source_is_judged(source, remote):\n            continue',
      '        if False:\n            continue', "guard",
      "push-new-branch: HEAD as the source is not judged, allows"),
+    # The `@{` form is judged only by the `@\{` alternative of _REVISION_SOURCE. Without it a reflog source is
+    # skipped and its push allows. Its required case is the HEAD@{1} deny beside the HEAD~1 deny.
+    ("push-new-branch: a revision source with @{ (HEAD@{1}) is not judged",
+     '(?:[~^]|@\\{)',
+     '(?:[~^])', "guard",
+     "push-new-branch: a reflog source HEAD@{1} at another branch's tip denies"),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",
