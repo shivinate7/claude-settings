@@ -368,6 +368,10 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      # No `if:`: the check reads hooks/mutate_guard.py's MUTATIONS table, and a guard edit can stale an anchor.
+      - name: Mutant anchor check
+        run: python3 lint/check_mutant_anchors.py
+
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
       - name: Red-run trailer
         if: ${{ github.event_name == 'pull_request' }}

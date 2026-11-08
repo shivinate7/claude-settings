@@ -3143,6 +3143,62 @@ def run_mutant(sources, work: str, entry):
     return label, code, red, required, None, seen
 
 
+def precheck_errors() -> list:
+    """Every pre-run error in MUTATIONS, one `ERROR ...` line each, or [] when the table is sound.
+
+    Run BEFORE any suite, so a stale mutation fails in the first second, not after the mutants ahead
+    of it in the list have spent their minutes. A mutation whose anchor sits in the WRONG file is
+    stale too, which is what the target lookup catches. An anchor must be found exactly once: across
+    every guard module for a guard target, in the target's own file for any other. The required-name
+    field is checked here too: every entry must carry one, not just the ones a reviewer remembered.
+
+    Two mutants must never write to the same path. safe_name already appends a digest of the exact
+    label, so this must not happen (see its docstring). Trust a guard only after it goes red on the
+    defect it guards. So this check recomputes the real file name for each mutant, case-folded the
+    way Windows reads names, instead of trusting the fix alone.
+
+    `lint/check_mutant_anchors.py` calls this too, so `merge --lane-lint` refuses a bad anchor before review.
+    """
+    errors = []
+    seen_paths = {}
+    for index, entry in enumerate(MUTATIONS):
+        label, old, _new, target, required, _only_on = mutation_parts(entry)
+        if target not in TARGETS:
+            errors.append("ERROR unknown mutation target %r: %s" % (target, label))
+            continue
+        # A guard target: exactly one match across every guard module, or the mutant breaks the wrong
+        # spot. Any other target: exactly one match in its own file (a doubled anchor there breaks the
+        # wrong spot just the same).
+        files = None if target == "guard" else [os.path.relpath(TARGETS[target][0], HERE)]
+        try:
+            mutate_shared.find_anchor(HERE, old, files=files)
+        except mutate_shared.StaleMutant:
+            errors.append("ERROR stale mutation, anchor text not found: %s" % label)
+            continue
+        except mutate_shared.AmbiguousMutant as error:
+            errors.append("ERROR ambiguous mutation, %s: %s" % (error, label))
+            continue
+        if not required:
+            errors.append("ERROR mutation carries no required case name: %s" % label)
+            continue
+
+        _tpath, _tsuite, _tvariable, stem = TARGETS[target]
+        safed = mutate_shared.safe_name(label)
+        # Two different entries land here. The same entry never returns twice. `index` marks
+        # identity, not `label`. A literal duplicate label is still caught. That case is worse
+        # than a case-only match, and the check treats it as a real collision, not a repeat
+        # visit.
+        for candidate in ("%s_%s.py" % (stem, safed), "cfg_%s" % safed):
+            key = candidate.lower()
+            other = seen_paths.get(key)
+            if other is not None and other[0] != index:
+                errors.append("ERROR two mutations share one path on a case-insensitive filesystem: "
+                              "%r and %r both produce %s" % (other[1], label, candidate))
+                break
+            seen_paths[key] = (index, label)
+    return errors
+
+
 def main() -> int:
     if "--report" in sys.argv[1:]:
         return report_main(sys.argv[1:])
@@ -3159,54 +3215,11 @@ def main() -> int:
         with open(path, encoding="utf-8") as handle:
             sources[name] = handle.read()
 
-    # Every anchor is checked BEFORE any suite runs, so a stale mutation fails in the first
-    # second, not after the mutants ahead of it in the list have spent their minutes. A mutation
-    # whose anchor sits in the WRONG file is stale too, which is what the target lookup catches.
-    # The required-name field is checked here too: every entry must carry one, not just the ones
-    # a reviewer remembered to fill in.
-
-    # Two mutants must never write to the same path. safe_name already appends a digest of
-    # the exact label, so this must not happen (see its docstring). Trust a guard only after
-    # it goes red on the defect it guards. So this check recomputes the real file name for
-    # each mutant, case-folded the way Windows reads names, instead of trusting the fix alone.
-
-    seen_paths = {}
-    for index, entry in enumerate(MUTATIONS):
-        label, old, _new, target, required, _only_on = mutation_parts(entry)
-        if target not in TARGETS:
-            print("ERROR unknown mutation target %r: %s" % (target, label))
-            return 1
-        if target == "guard":
-            # Across every guard module: exactly one match, or the mutant breaks the wrong spot.
-            try:
-                mutate_shared.find_anchor(HERE, old)
-            except mutate_shared.StaleMutant:
-                print("ERROR stale mutation, anchor text not found: %s" % label)
-                return 1
-            except mutate_shared.AmbiguousMutant as error:
-                print("ERROR ambiguous mutation, %s: %s" % (error, label))
-                return 1
-        elif old not in sources[target]:
-            print("ERROR stale mutation, anchor text not found: %s" % label)
-            return 1
-        if not required:
-            print("ERROR mutation carries no required case name: %s" % label)
-            return 1
-
-        _tpath, _tsuite, _tvariable, stem = TARGETS[target]
-        safed = mutate_shared.safe_name(label)
-        # Two different entries land here. The same entry never returns twice. `index` marks
-        # identity, not `label`. A literal duplicate label is still caught. That case is worse
-        # than a case-only match, and the check treats it as a real collision, not a repeat
-        # visit.
-        for candidate in ("%s_%s.py" % (stem, safed), "cfg_%s" % safed):
-            key = candidate.lower()
-            other = seen_paths.get(key)
-            if other is not None and other[0] != index:
-                print("ERROR two mutations share one path on a case-insensitive filesystem: "
-                      "%r and %r both produce %s" % (other[1], label, candidate))
-                return 1
-            seen_paths[key] = (index, label)
+    errors = precheck_errors()
+    for error in errors:
+        print(error)
+    if errors:
+        return 1
 
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
