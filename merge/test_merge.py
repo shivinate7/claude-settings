@@ -11655,9 +11655,13 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z"):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", repo=None):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads.
+    `repo` is the OWNER/NAME of the head's repo, as head.repo gives it. None leaves head.repo out, and with_head_repo gives the row its host's repo."""
+    head = {"ref": "feat%d" % number, "sha": sha}
+    if repo is not None:
+        head["repo"] = {"full_name": repo}
+    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": head}
 
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
@@ -13474,9 +13478,14 @@ def record_of(n, head, rounds=REVIEW_PASS, net="not owed"):
     """The review record comment of pull request n at `head`, as the repo's comment list gives it."""
     return review_comment(n, n, record_text(n=n, head=head, rounds=rounds, net=net))
 
+def with_head_repo(pulls, repo):
+    """The open pull rows with head.repo set to `repo` where a row names none, as GitHub gives a branch of the repo itself. A row that names its
+    repo (a fork's branch) keeps it."""
+    return [{**d, "head": {"repo": {"full_name": repo}, **d["head"]}} for d in pulls]
+
 def root_host(repo, pulls=(), comments=(), check_rows=None, **reads):
     """The fake host of one --root repo: its open pulls, their records and their check runs."""
-    return PullsHost(list(pulls), check_rows or {}, comments=list(comments), repo=repo, **reads)
+    return PullsHost(with_head_repo(pulls, repo), check_rows or {}, comments=list(comments), repo=repo, **reads)
 
 def root_blocks(out):
     """-> [(owner/name, its lines)] in the order the `repo <owner/name>:` headers print. A line belongs to the last header above it. Only the
@@ -13614,7 +13623,7 @@ unexpected(method + " " + rel)
     def root_state(self, full_name, pulls=(), comments=(), check_rows=None, contexts=("checks",), compares=None):
         """What gh answers for one repo's folder: its name, its open pulls, the repo's comments, the check runs by head, the required checks
         of its base (None: no branch protection) and the compares, by "first...second"."""
-        return {"full_name": full_name, "pulls": list(pulls), "comments": list(comments), "check_runs": check_rows or {},
+        return {"full_name": full_name, "pulls": with_head_repo(pulls, full_name), "comments": list(comments), "check_runs": check_rows or {},
                 "contexts": None if contexts is None else list(contexts), "compares": compares or {}}
 
     def lane_commit(self, root, n, parent="main"):
@@ -14051,6 +14060,26 @@ unexpected(method + " " + rel)
         self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
         self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
 
+    def test_a_shallow_root_reads_the_batch_line_unknown(self):
+        # The root is a shallow clone of its origin, with #5's head fetched at depth 1 (shallow_clone.make, the one fixture of a cut history). A
+        # containment read over a cut graph cannot be trusted, so the batch line is unknown: #5 is not named, and rc is 1. The root's own lines print.
+        head5 = self.lane_commit(self.alpha, 5)
+        origin, shallow = os.path.join(os.path.dirname(self.alpha), "origin.git"), os.path.join(os.path.dirname(self.alpha), "shallow")
+        self.assertEqual(shallow_clone.make(origin, shallow, head5), "", "the shallow fixture could not be built")
+        facts = shallow_clone.facts(shallow, head5)
+        self.assertTrue(facts["shallow"], f"the fixture is no shallow clone: {facts}")
+        self.assertTrue(facts["pin_present"], f"the fixture lacks the pinned head: {facts}")
+        self.per_root_gh({shallow: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)],
+                                                  check_rows={head5: green()})})
+        rc, out, err = self.run_roots("--reviewed", "--root", shallow, hosts=None)
+        self.assertEqual(rc, 1, out + err)
+        lines = out.splitlines()
+        self.assertEqual(batch_lines_of(lines), [], "a batch line names a pull request in a shallow root:\n" + out)
+        unknown = [l for l in lines if l.startswith("batch line unknown (")]
+        self.assertEqual(len(unknown), 1, "want one `batch line unknown (...)`:\n" + out)
+        self.assertIn("shallow", unknown[0], "the batch line unknown does not name the shallow root:\n" + out)
+        self.assertIn(" done: ", pr_lines(lines, 5)[0], "the root's own lines did not print:\n" + out)
+
     def stacked_hosts(self, compares=None, draft9=False):
         """alpha: done #5, done #6 stacked on #5 (its base is #5's head branch), and #9, the integration pull request, open with no record."""
         heads = {n: hex_head(str(n)) for n in (5, 6, 9)}
@@ -14152,6 +14181,32 @@ unexpected(method + " " + rel)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
         self.assert_done(block, 5, 6, 7)
         self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5"], "a chain that ends off main is named:\n" + out)
+
+    def test_a_fork_branch_named_like_a_childs_base_does_not_make_it_a_stacked_child(self):
+        # #5 is a done pull request from a fork whose head branch is feat5, the name #6's base carries. That branch is no branch of this repo, so #6
+        # is based on no open head: the chain never reaches main and #6 stays out. #5, done on main, is named.
+        head5, head6 = hex_head("5"), hex_head("6")
+        pulls = [batch_pull(5, head5, repo="fork/alpha"), batch_pull(6, head6, base="feat5")]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, head5), record_of(6, head6)],
+                                       check_rows={head5: green(), head6: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5"], "a fork's branch made a child stacked:\n" + out)
+
+    def test_a_real_done_pr_stacked_on_a_done_pr_is_named_after_it(self):
+        # Real commits: #6's head descends from #5's, and #6 is stacked on #5 (its base is feat5). #6 is #5's stack descendant, not a holder.
+        head5 = self.lane_commit(self.alpha, 5)
+        head6 = self.lane_commit(self.alpha, 6, parent=head5)
+        self.per_root_gh({self.alpha: self.root_state(
+            "o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, base="feat5")],
+            comments=[record_of(5, head5), record_of(6, head6)], check_rows={head5: green(), head6: green()})})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5 #6"], "a real done pull request stacked on a done one is not named after it:\n" + out)
 
     def test_the_batch_line_reads_git_once_per_root_and_reads_no_compare(self):
         # alpha: done #5, #6 and #7, and open #8 and #9 (a draft), which hold nothing. bravo: one done #4. The batch line reads each root's origin
