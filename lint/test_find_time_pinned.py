@@ -4,9 +4,10 @@
     python3 lint/test_find_time_pinned.py
 
 Each case writes a small fixture folder of plain files under the run folder and runs the real finder
-on it. The cases cover the four categories for Python, JS/TS and Swift, the must-stay-clean list, the
-scanner traps of building-scanner-respects-strings, test-file selection, the text and JSON output, and
-the exit codes. The JS trap table that the scanner suite shares is in lint/test_scanner_traps.mjs.
+on it. The cases cover the four categories for Python, JS/TS and Swift, the calendar category (a real
+date or the local zone), the must-stay-clean list, the scanner traps of building-scanner-respects-strings,
+test-file selection, the text and JSON output, and the exit codes. The JS trap table that the scanner
+suite shares is in lint/test_scanner_traps.mjs.
 """
 import json
 import os
@@ -31,13 +32,36 @@ PY_CLOCKS = [
     "time.time_ns", "time.monotonic_ns", "time.perf_counter_ns",
     "datetime.now", "datetime.utcnow", "datetime.datetime.now",
 ]
+PY_CALENDAR = [
+    "datetime.now()", "datetime.datetime.now()", "date.today()", "datetime.today()",
+    "time.localtime()", 'time.strftime("%Y")', "datetime.now().astimezone()",
+    "datetime.utcnow()", "datetime.datetime.utcnow()",
+]
 SWIFT_CLOCKS = [
     "Date()", "CFAbsoluteTimeGetCurrent()", "DispatchTime.now()",
     "ProcessInfo.processInfo.systemUptime", "mach_absolute_time()",
     "ContinuousClock.now", "SuspendingClock.now",
     "start.timeIntervalSinceNow", "start.duration(to: .now)",
 ]
-SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0); 0 unread"
+def summary_line(total, files, sleep=0, elapsed=0, calendar=0, hang_guards=0, unread=0):
+    """The one summary line. A hang guard (test-cap or wait-cap) is its own count: it is never added to the
+    total or the file count, and it is not a kind in the parenthesised list (test-practices P5)."""
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
+            "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+            % (total, files, sleep, elapsed, calendar, hang_guards, unread))
+
+
+SUMMARY_ZERO = summary_line(0, 0)
+
+
+def assert_summary(case, stdout, expected):
+    """The summary is the last line. The total and the file count come first, so a hang guard counted there
+    fails with that cause alone. Then the whole line, so a changed kinds list or hang guards count fails
+    with the summary-form cause alone."""
+    last = (stdout.splitlines() or [""])[-1]
+    case.assertEqual(last.split(" (", 1)[0], expected.split(" (", 1)[0],
+                     "a hang guard or test-cap is counted in the time-pinned total or files")
+    case.assertEqual(last, expected, "the summary line is not the pinned form")
 
 
 def src(*lines):
@@ -186,7 +210,12 @@ class PythonCategoriesTest(FinderCase):
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
             "tests/test_clocks.py", text,
-            *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS]))
+            *[(f"assert {c}() > t", "elapsed-assert") for c in PY_CLOCKS],
+            ("t = datetime.now()", "calendar"), ("t = datetime.datetime.now()", "calendar"),
+            ("t = datetime.utcnow()", "calendar"),
+            ("assert datetime.now() > t", "calendar"), ("assert datetime.datetime.now() > t", "calendar"),
+            ("assert datetime.utcnow() > t", "calendar"),
+        ), "calendar not listed")
 
     def test_elapsed_assert_on_a_bare_imported_clock(self):
         text = src(
@@ -320,6 +349,207 @@ class PythonCleanTest(FinderCase):
         self.assertEqual((code, self.rows(out)), (0, set()))
 
 
+# ---- calendar: a test that reads the real date or the local zone (P5: a calendar date is a real clock) ----
+
+def calendar_judge(case, path, text, listed=(), clean=(), root=None):
+    """Scope first (P7): the fixture was read. Then the calendar rows: each listed form is one, no clean form
+    is one, and no other line is one. Each failure names one cause."""
+    proc = run(root or case.root, "--json")
+    case.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
+    out = json.loads(proc.stdout)
+    case.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+    got = {(f["path"], f["line"]) for f in out["findings"] if f["category"] == "calendar"}
+    missing = [n for n in listed if (path, lineno(text, n)) not in got]
+    case.assertFalse(missing, "calendar not listed: " + "; ".join(missing))
+    extra = [n for n in clean if (path, lineno(text, n)) in got]
+    case.assertFalse(extra, "calendar listed where it must not be: " + "; ".join(extra))
+    case.assertEqual(got, {(path, lineno(text, n)) for n in listed}, "calendar listed on a line no case names")
+    return out
+
+
+class PythonCalendarTest(FinderCase):
+    def last_line(self):
+        proc = run(self.root)
+        self.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
+        return proc.stdout.splitlines()[-1]
+
+    def test_each_python_calendar_form_is_listed(self):
+        forms = [f"t_{i} = {form}" for i, form in enumerate(PY_CALENDAR)]
+        text = src("import datetime", "import time", "from datetime import date", "", "def test_forms(stamp):",
+                   *["    " + f for f in forms])
+        self.put("tests/test_forms.py", text)
+        calendar_judge(self, "tests/test_forms.py", text, listed=forms)
+
+    def test_datetime_now_with_a_zone_is_listed(self):
+        text = src(
+            "import datetime",
+            "from datetime import timezone",
+            "",
+            "def test_zone(tz):",
+            "    t_utc = datetime.now(timezone.utc)",
+            "    t_tz = datetime.now(tz)",
+        )
+        self.put("tests/test_zone.py", text)
+        calendar_judge(self, "tests/test_zone.py", text,
+                       listed=["t_utc = datetime.now(timezone.utc)", "t_tz = datetime.now(tz)"])
+
+    def test_utcnow_is_listed_beside_a_fixed_epoch(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "EPOCH = 0",
+            "",
+            "def test_utc(stamp):",
+            "    t_utc = datetime.utcnow()",
+            "    t_utc_dt = datetime.datetime.utcnow()",
+            "    t_fixed = time.localtime(EPOCH)",
+        )
+        self.put("tests/test_utc.py", text)
+        calendar_judge(self, "tests/test_utc.py", text,
+                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()"],
+                       clean=["t_fixed = time.localtime(EPOCH)"])
+
+    def test_epoch_and_given_time_forms_are_not_listed(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_fixed(stamp):",
+            "    t_fixed = time.localtime(EPOCH)",
+            "    t_given = time.strftime('%Y', stamp)",
+            "    t_now = time.localtime()",
+        )
+        self.put("tests/test_fixed.py", text)
+        calendar_judge(self, "tests/test_fixed.py", text,
+                       listed=["t_now = time.localtime()"],
+                       clean=["t_fixed = time.localtime(EPOCH)", "t_given = time.strftime('%Y', stamp)"])
+
+    def test_summary_and_counts_include_calendar(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "def test_summary(stamp):",
+            "    t_a = datetime.now()",
+            "    t_b = time.localtime()",
+            "    time.sleep(1)",
+        )
+        self.put("tests/test_summary.py", text)
+        out = calendar_judge(self, "tests/test_summary.py", text,
+                             listed=["t_a = datetime.now()", "t_b = time.localtime()"])
+        self.assertEqual(out["counts"].get("calendar"), 2, "calendar not counted in the JSON counts")
+        last = self.last_line()
+        self.assertTrue(last.startswith("3 time-pinned in 1 files ("), "summary total is not 3: " + last)
+        self.assertIn("calendar 2", last, "calendar not listed in the summary")
+
+    def test_summary_shows_calendar_zero_when_no_form(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_none(stamp):",
+            "    t_fixed = time.localtime(EPOCH)",
+            "    time.sleep(1)",
+        )
+        self.put("tests/test_none.py", text)
+        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.localtime(EPOCH)"])
+        self.assertIn("calendar 0", self.last_line(), "calendar not listed in the summary")
+
+    def test_hash_opener_in_a_string_does_not_hide_a_form(self):
+        text = src(
+            "import datetime",
+            "",
+            "def test_label():",
+            "    label = '# not a comment'; t_hash = datetime.now()",
+            "    t_str = 'datetime.now()'",
+        )
+        self.put("tests/test_hash.py", text)
+        calendar_judge(self, "tests/test_hash.py", text,
+                       listed=["t_hash = datetime.now()"], clean=["t_str = 'datetime.now()'"])
+
+    def test_forms_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            "# t_comment = datetime.now()",
+            "NOTE = 't_note = date.today()'",
+            "",
+            "def test_docs():",
+            "    '''Docstring: t_doc = time.localtime()'''",
+            "    t_real = datetime.today()",
+        )
+        self.put("tests/test_docs.py", text)
+        calendar_judge(self, "tests/test_docs.py", text,
+                       listed=["t_real = datetime.today()"],
+                       clean=["t_comment = datetime.now()", "t_note = date.today()", "t_doc = time.localtime()"])
+
+    def test_multi_line_string_and_a_lone_quote_do_not_hide_a_form(self):
+        text = src(
+            "import datetime",
+            "import time",
+            "",
+            'BLOCK = """',
+            "t_block = time.localtime()",
+            '"""',
+            "msg = \"Don't stop\"",
+            "",
+            "def test_after():",
+            "    t_after = datetime.now()",
+        )
+        self.put("tests/test_block.py", text)
+        calendar_judge(self, "tests/test_block.py", text,
+                       listed=["t_after = datetime.now()"], clean=["t_block = time.localtime()"])
+
+    def test_no_argument_time_readers_are_listed_and_given_time_is_not(self):
+        text = src(
+            "import time",
+            "EPOCH = 0",
+            "",
+            "def test_readers(stamp):",
+            "    t_gm_now = time.gmtime()",
+            "    t_ct_now = time.ctime()",
+            "    t_as_now = time.asctime()",
+            "    t_gm_fixed = time.gmtime(EPOCH)",
+            "    t_ct_fixed = time.ctime(EPOCH)",
+            "    t_as_fixed = time.asctime(stamp)",
+        )
+        self.put("tests/test_readers.py", text)
+        calendar_judge(self, "tests/test_readers.py", text,
+                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()"],
+                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_ct_fixed = time.ctime(EPOCH)",
+                              "t_as_fixed = time.asctime(stamp)"])
+
+    def test_zone_attributes_are_listed(self):
+        text = src(
+            "import time",
+            "",
+            "def test_zone():",
+            "    t_tzname = time.tzname",
+            "    t_offset = time.timezone",
+        )
+        self.put("tests/test_zone_attrs.py", text)
+        calendar_judge(self, "tests/test_zone_attrs.py", text,
+                       listed=["t_tzname = time.tzname", "t_offset = time.timezone"])
+
+    def test_time_readers_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "import time",
+            "",
+            "# t_comment = time.gmtime()",
+            "NOTE = 't_note = time.ctime()'",
+            "",
+            "def test_text():",
+            "    '''Docstring: t_doc = time.asctime(), t_zone = time.timezone'''",
+            "    t_real = time.gmtime()",
+        )
+        self.put("tests/test_text_readers.py", text)
+        calendar_judge(self, "tests/test_text_readers.py", text,
+                       listed=["t_real = time.gmtime()"],
+                       clean=["# t_comment = time.gmtime()", "NOTE = 't_note = time.ctime()'", "Docstring:"])
+
+
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
 
 class JsCategoriesTest(FinderCase):
@@ -386,8 +616,8 @@ class JsCategoriesTest(FinderCase):
             ("expect(dt)", "elapsed-assert"), ("assert(new Date()", "elapsed-assert"),
             ("assert.ok(process.hrtime.bigint()", "elapsed-assert"),
             ("expect(Date.now()).toBeGreaterThan", "elapsed-assert"),
-            ("assert.strictEqual(hr.length", "elapsed-assert"),
-        ))
+            ("assert.strictEqual(hr.length", "elapsed-assert"), ("assert(new Date()", "calendar"),
+        ), "calendar not listed")
 
     def test_elapsed_taint_repeats_in_js(self):
         text = src(
@@ -543,6 +773,116 @@ class JsTrapsTest(FinderCase):
         code, out = self.report()
         self.assertEqual(self.rows(out), pinned(
             "tests/template_parts.test.js", text, ("setTimeout(r, 500)", "sleep")))
+
+    def test_calendar_after_a_comment_opener_in_a_string(self):
+        text = src(
+            'const u = "http://a.test/"; const today = new Date();',
+            "const later = new Date();",
+        )
+        self.put("tests/calendar_slashes.test.js", text)
+        calendar_judge(self, "tests/calendar_slashes.test.js", text,
+                       listed=["const today = new Date();", "const later = new Date();"])
+
+    def test_bare_date_after_a_comment_opener_in_a_string(self):
+        text = src(
+            'const u = "http://a.test/"; const today = Date();',
+            "const later = Date();",
+        )
+        self.put("tests/bare_slashes.test.js", text)
+        calendar_judge(self, "tests/bare_slashes.test.js", text,
+                       listed=["const today = Date();", "const later = Date();"])
+
+    def test_calendar_inside_a_multi_line_template_is_not_listed(self):
+        text = src(
+            "const doc = `",
+            "const inside = new Date();",
+            "`;",
+            "const outside = new Date();",
+        )
+        self.put("tests/calendar_template.test.js", text)
+        calendar_judge(self, "tests/calendar_template.test.js", text,
+                       listed=["const outside = new Date();"], clean=["const inside = new Date();"])
+
+    def test_lone_quote_in_jsx_text_does_not_hide_a_calendar_form(self):
+        for name in ("note.test.jsx", "note.test.tsx"):
+            with self.subTest(name=name):
+                root = os.path.join(self.tmp.name, name)
+                text = src("export const Note = () => <p>Don't stop here</p>;", "const today = new Date();")
+                put(root, f"tests/{name}", text)
+                calendar_judge(self, f"tests/{name}", text,
+                               listed=["const today = new Date();"], root=root)
+
+
+class JsCalendarTest(FinderCase):
+    def test_new_date_with_no_argument_is_listed_and_with_one_is_not(self):
+        text = src(
+            "const c_0 = new Date();",
+            "let c_1 = new Date();",
+            "const fixed = new Date(0);",
+            "const epoch = new Date(EPOCH_MS);",
+        )
+        self.put("tests/calendar.test.js", text)
+        calendar_judge(self, "tests/calendar.test.js", text,
+                       listed=["const c_0 = new Date();", "let c_1 = new Date();"],
+                       clean=["const fixed = new Date(0);", "const epoch = new Date(EPOCH_MS);"])
+
+    def test_calendar_forms_in_a_comment_or_a_string_are_not_listed(self):
+        text = src(
+            "// const note = new Date();",
+            "/* let block = new Date(); */",
+            "const quoted = 'const q = new Date();';",
+            "const real = new Date();",
+        )
+        self.put("tests/calendar_text.test.js", text)
+        calendar_judge(self, "tests/calendar_text.test.js", text,
+                       listed=["const real = new Date();"],
+                       clean=["// const note = new Date();", "/* let block = new Date(); */",
+                              "const q = new Date();"])
+
+    def test_bare_date_call_without_new_is_listed(self):
+        text = src(
+            "const b_0 = Date();",
+            "let b_1 = Date();",
+        )
+        self.put("tests/bare_date.test.js", text)
+        calendar_judge(self, "tests/bare_date.test.js", text,
+                       listed=["const b_0 = Date();", "let b_1 = Date();"])
+
+    def test_bare_date_in_a_comment_or_a_string_is_not_listed(self):
+        text = src(
+            "// const note = Date();",
+            "const quoted = 'const q = Date();';",
+            "const doc = `",
+            "const inside = Date();",
+            "`;",
+            "const real = Date();",
+        )
+        self.put("tests/bare_date_text.test.js", text)
+        calendar_judge(self, "tests/bare_date_text.test.js", text,
+                       listed=["const real = Date();"],
+                       clean=["// const note = Date();", "const q = Date();", "const inside = Date();"])
+
+    def test_new_date_fed_by_date_now_is_listed(self):
+        text = src("const ago = new Date(Date.now() - 60000);")
+        self.put("tests/clock_fed.test.js", text)
+        calendar_judge(self, "tests/clock_fed.test.js", text,
+                       listed=["const ago = new Date(Date.now() - 60000);"])
+
+    def test_new_date_fed_by_performance_now_is_listed(self):
+        text = src("const perf = new Date(performance.now());")
+        self.put("tests/clock_perf.test.js", text)
+        calendar_judge(self, "tests/clock_perf.test.js", text,
+                       listed=["const perf = new Date(performance.now());"])
+
+    def test_new_date_with_a_declared_constant_or_a_literal_is_not_listed(self):
+        text = src(
+            "const EPOCH_MS = 1700000000000;",
+            "const fixed = new Date(0);",
+            "const epoch = new Date(EPOCH_MS);",
+        )
+        self.put("tests/fixed_date.test.js", text)
+        calendar_judge(self, "tests/fixed_date.test.js", text,
+                       clean=["const fixed = new Date(0);", "const epoch = new Date(EPOCH_MS);"])
 
 
 # ---- Swift: one-pass masker then patterns --------------------------------------------------------
@@ -814,14 +1154,12 @@ class OutputTest(FinderCase):
         self.assertIn(
             "tests/test_x.py:%d: wait-cap: subprocess.run(cmd, timeout=5)" % lineno(text, "subprocess.run"),
             lines)
-        self.assertEqual(
-            lines[-1],
-            "2 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 1); 0 unread")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=1))
 
     def test_summary_line_for_an_empty_root(self):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO)
+        assert_summary(self, proc.stdout, SUMMARY_ZERO)
 
     def test_summary_counts_each_category(self):
         text = src(
@@ -840,10 +1178,10 @@ class OutputTest(FinderCase):
         self.put("tests/test_all.py", text)
         proc = run(self.root, "--json")
         out = json.loads(proc.stdout)
-        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 1, "wait-cap": 1})
+        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 1, "wait-cap": 1, "calendar": 0},
+                         "calendar not listed in the counts")
         proc = run(self.root)
-        self.assertEqual(proc.stdout.splitlines()[-1],
-                         "4 time-pinned in 1 files (sleep 1, elapsed-assert 1, test-cap 1, wait-cap 1); 0 unread")
+        assert_summary(self, proc.stdout, summary_line(2, 1, sleep=1, elapsed=1, hang_guards=2))
 
     def test_line_text_is_trimmed_and_capped_at_120(self):
         long_line = "    time.sleep(1)  # " + "x" * 200
@@ -866,7 +1204,8 @@ class OutputTest(FinderCase):
                          ("tests/test_ok.py", 2, "time.sleep(1)"))
         self.assertEqual(out["unread"][0]["path"], "tests/test_bad.py")
         self.assertEqual(set(out["unread"][0]), {"path", "reason"})
-        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 0, "test-cap": 0, "wait-cap": 0})
+        self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 0, "test-cap": 0, "wait-cap": 0, "calendar": 0},
+                         "calendar not listed in the counts")
 
 
 # ---- exit codes -----------------------------------------------------------------------------------
@@ -901,6 +1240,122 @@ class ExitCodeTest(FinderCase):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
+
+
+# ---- a hang guard (wait-cap or test-cap) is listed, never counted (test-practices P5) ----
+
+HANG_GUARD = src(
+    "import subprocess",
+    "",
+    "def test_run(cmd):",
+    "    subprocess.run(cmd, timeout=5)",
+)
+SLEEP_FILE = src("import time", "", "def test_wait():", "    time.sleep(1)")
+TEST_CAP = src(
+    "import pytest",
+    "",
+    "pytestmark = pytest.mark.timeout(10)",
+    "",
+    "@pytest.mark.timeout(5)",
+    "def test_run():",
+    "    pass",
+)
+
+
+def hang_row(path="tests/test_run.py"):
+    return "%s:%d: wait-cap: subprocess.run(cmd, timeout=5)" % (path, lineno(HANG_GUARD, "subprocess.run"))
+
+
+def cap_rows(path="tests/test_run.py"):
+    """The two text rows of TEST_CAP: the per-suite pytestmark and the per-test decorator."""
+    return {
+        "%s:%d: test-cap: pytestmark = pytest.mark.timeout(10)" % (path, lineno(TEST_CAP, "pytestmark")),
+        "%s:%d: test-cap: @pytest.mark.timeout(5)" % (path, lineno(TEST_CAP, "@pytest.mark.timeout(5)")),
+    }
+
+
+def assert_cap_rows_listed(case, stdout):
+    """Scope first (P7): the test-cap rows are listed and the fixture was read."""
+    missing = sorted(row for row in cap_rows() if row not in stdout.splitlines())
+    case.assertFalse(missing, "scope: the test-cap was not found: %s" % missing)
+    case.assertNotIn("UNREAD", stdout, "scope: the fixture was not read")
+
+
+class HangGuardTest(FinderCase):
+    def test_hang_guard_alone_exits_0(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only finding is a hang guard exits %d, not 0" % proc.returncode)
+
+    def test_hang_guard_is_not_counted_in_the_summary(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=1))
+
+    def test_hang_guard_file_is_not_a_time_pinned_file(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        self.put("tests/test_wait.py", SLEEP_FILE)
+        proc = run(self.root)
+        lines = proc.stdout.splitlines()
+        self.assertIn(hang_row(), lines, "scope: the hang guard was not found")
+        self.assertIn("tests/test_wait.py:%d: sleep: time.sleep(1)" % lineno(SLEEP_FILE, "time.sleep(1)"), lines,
+                      "scope: the sleep was not found")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=1))
+
+    def test_hang_guard_stays_listed_in_text(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "a hang guard is no longer listed in the text output")
+
+    def test_json_still_carries_wait_cap_rows(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), {("tests/test_run.py", lineno(HANG_GUARD, "subprocess.run"), "wait-cap")},
+                         "the JSON rows lost the wait-cap finding")
+        self.assertEqual(out["counts"]["wait-cap"], 1, "the JSON counts lost the wait-cap")
+
+    def test_test_cap_alone_exits_0(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only finding is a test-cap exits %d, not 0" % proc.returncode)
+
+    def test_test_cap_is_not_counted_in_the_summary(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=2))
+
+    def test_test_cap_file_is_not_a_time_pinned_file(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        self.put("tests/test_wait.py", SLEEP_FILE)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        self.assertIn("tests/test_wait.py:%d: sleep: time.sleep(1)" % lineno(SLEEP_FILE, "time.sleep(1)"),
+                      proc.stdout.splitlines(), "scope: the sleep was not found")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=2))
+
+    def test_test_cap_stays_listed_in_text(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        missing = sorted(row for row in cap_rows() if row not in proc.stdout.splitlines())
+        self.assertFalse(missing, "a test-cap is no longer listed in the text output: %s" % missing)
+
+    def test_json_keeps_test_cap_rows(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_run.py", TEST_CAP,
+            ("pytestmark = pytest.mark.timeout(10)", "test-cap"), ("@pytest.mark.timeout(5)", "test-cap"),
+        ), "the JSON rows lost a test-cap finding or its category")
+        self.assertEqual(out["counts"]["test-cap"], 2, "the JSON counts lost a test-cap")
+        self.assertEqual(code, 0, "a file whose only findings are test-caps exits %d, not 0" % code)
 
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
