@@ -27,7 +27,8 @@
                           `merge --build-batch` posted: it comes before `batch`), `batch` (a done review record for the live head),
                           `lane: <cause>` (a done record whose Findings are not filed: a filing is owed, not a round; the cause is
                           `findings not filed: this PR`, `follow-up #N does not exist`, `follow-up #N closed unmerged` or `follow-up #N is this PR`;
-                          the lane round age limit holds; a Findings read that could not run is `findings unknown: <why>`),
+                          the lane round age limit holds; a Findings read that could not run is `findings unknown: <why>`; a done record created at or
+                          after FINDINGS_REQUIRED_FROM with no Findings line is `lane: review record lacks Findings`, at the same limit),
                           `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
@@ -3570,6 +3571,10 @@ REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never 
 # The value of the Findings line (and of --findings): none, a count filed in this pull request, or a count filed in follow-up pull requests (decision pr-review-record).
 REVIEW_FINDINGS = r"none|[1-9][0-9]*, this PR|[1-9][0-9]*, follow-up #[1-9][0-9]*(?:, #[1-9][0-9]*)*"
 FILING_KINDS = ("debts", "debt-notes")  # the layout kinds where a finding is filed: a new debt file under the first's folder, or lines added to the second's file (lint/layout.py has the paths)
+# A review record created at or after this instant with no Findings line reads not done; an earlier one stays legacy and keeps its verdict. It is the owner's
+# ruling time (owner item 386 b, 2026-11-07 22:25 CST = 04:25:00Z on Nov 8), so the records already written when the Findings line became required are not recalled.
+FINDINGS_REQUIRED_FROM = datetime.datetime(2026, 11, 8, 4, 25, 0, tzinfo=datetime.timezone.utc).timestamp()
+FINDINGS_MISSING_CAUSE = "review record lacks Findings"  # the cause the ledger line names for such a record
 FINDINGS_UNKNOWN = "findings unknown"  # the kind of a ledger line whose Findings read could not run
 FINDINGS_FLAG = "--findings-unknown-ok"  # the reason flag of --build-batch that lets such a line join the batch; Claude may type it with a reason (decision pr-review-record, as UNDO_FLAG)
 
@@ -3810,6 +3815,8 @@ def pr_acts(root, h, pulls, holds=True):
                             if m and m.group(1) == sha), None)  # the newest red line for the live head; a line for an older head is stale
                 if red:  # the lint of the head the record passed is red: the pull request is no candidate, whatever its record says
                     act = (f"lane lint red: {red[1].group(2)}", "lane lint red", red[0], None)
+                elif rec["findings"] is None and at >= FINDINGS_REQUIRED_FROM:  # after the lint line; no read, and a lane round age limit as for an unfiled filing
+                    act = (f"lane: {FINDINGS_MISSING_CAUSE}", "lane round", at, None)
                 elif rec["findings"] not in (None, "none"):  # after the lint line, so a red head costs no Findings read
                     found, why = findings_read(root, h, n, rec["findings"])
                     if found == "open":  # the lane owes a filing, not a round: the line names the cause, and keeps the lane round age limit
