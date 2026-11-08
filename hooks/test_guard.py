@@ -104,7 +104,7 @@ FAMILIES = {
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
-    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a brief that clears those checks but names no Triage: session_<id> or Batch runner: session_<id> is refused; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10734,11 +10734,29 @@ FAMILY = "lane-one-topic"
 # send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest
 # record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
 # Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
-# Any other message passes, and so does a brief to a target that is no lane. A marker brief with no record of its
-# target is refused. Only a marker brief reads the transcript: a message without the marker passes unread.
+# A brief that clears those checks is refused too when its text names no triage session or no batch runner: each is a
+# label (`Triage`, `Batch runner`), an optional number and gloss, a colon, then a session_ id that holds a digit, anywhere
+# in the message. Markdown around the label, the colon or the id (bold, italic, backticks) is no reason to refuse.
+# Any other message passes, and so does a brief to a target that is no lane, with or without those ids. A marker brief
+# with no record of its target is refused. Only a marker brief reads the transcript: a message without the marker
+# passes unread.
 LANE_ONE_TOPIC = "lane-one-topic"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
+# A lane cannot reach triage or its batch runner without their ids, so a marker brief to a lane names both. IDS_LINES
+# is appended to the briefs the allow cases send to a lane. The refusal carries both labels, and names no session.
+TRIAGE_ID = "session_TRIAGE01"
+TRIAGE_LINE = "\nTriage: " + TRIAGE_ID
+RUNNER_ID = "session_RUNNER01"
+RUNNER_LINE = "\nBatch runner: " + RUNNER_ID
+IDS_LINES = TRIAGE_LINE + RUNNER_LINE
+IDS_CARRIES = ("Triage: session_", "triage", "Batch runner: session_")
+
+
+def ids_refuse(name, transcript, message, target=ROLE_OTHER):
+    """A marker brief to a lane that clears the topic and step checks, and misses the triage or the batch runner id:
+    refused. The reason names both labels, and no session."""
+    step_refuse(name, transcript, message, target=target, carries=IDS_CARRIES, lacks=(target, TRIAGE_ID, RUNNER_ID))
 
 
 def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
@@ -10798,17 +10816,17 @@ step_allow("a marker on line two is not the first line, so the brief is not judg
            role_path("step-topic-lane"), "Status: PR #12 merged.\nLane brief: icon-a. Topic: colors.")
 # Passes: one lane, one topic, many steps. A new step on the lane's own topic is allowed.
 step_allow("a brief for a new step on the lane's own topic is allowed: one lane, one topic",
-           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.")
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + IDS_LINES)
 step_allow("a brief for the lane's own step on its own topic is allowed",
-           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons.")
+           role_path("step-topic-lane"), "Lane brief: icon-a. Topic: icons." + IDS_LINES)
 # Passes: an older lane with two cs-step tags and no topic is judged by its steps: the second step is one of them.
 step_allow("an older lane with two cs-step tags: a brief naming its second step is allowed",
-           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.")
+           role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons." + IDS_LINES)
 # Passes: a lane that create_session started on topic icons, with a new step on that topic, in both result shapes.
 step_allow("a brief for a new step on topic icons to a lane that create_session started (JSON result) is allowed",
-           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons." + IDS_LINES, target=ROLE_NEW)
 step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
-           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-text"), "Lane brief: icon-b. Topic: icons." + IDS_LINES, target=ROLE_NEW)
 # Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
 step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
            role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
@@ -10825,7 +10843,7 @@ step_refuse("a brief for topic icons, after set_session_tags on a lane with no t
             carries=("get_session",), lacks=("new lane",))
 # A create_session result shaped {"session_id": ...} is a record too: the brief is judged against the lane's topic.
 step_allow("a create_session result shaped session_id counts as the record: a brief for its own topic icons passes",
-           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
+           role_path("step-create-session-id"), "Lane brief: icon-b. Topic: icons." + IDS_LINES, target=ROLE_NEW)
 # The refusal must be the topic's, not the no-record one: a reader that misses the record refuses every brief here.
 step_refuse("a create_session result shaped session_id counts as the record: a brief for topic colors is refused",
             role_path("step-create-session-id"), "Lane brief: icon-b. Topic: colors.", target=ROLE_NEW,
@@ -10837,6 +10855,89 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+# A marker brief to a lane must name its triage session and its batch runner. Each refusal below misses one cause, and
+# the other label stays valid in it, so a failure names the cause it tests.
+# Refused: a fresh lane on topic icons. Its brief names the runner and its own topic, and no triage id.
+ids_refuse("a brief for the lane's own topic, to a fresh lane with no triage id, is refused",
+           role_path("step-create-json"), "Lane brief: icon-b. Topic: icons." + RUNNER_LINE, target=ROLE_NEW)
+# Refused: an older lane with no cs-topic. Its own step clears the step check, and the triage id is missing.
+ids_refuse("a brief for an older lane's own step, with no triage id, is refused",
+           role_path("step-old-lane"), "Lane brief: icon-a. Topic: icons." + RUNNER_LINE)
+# Refused: the triage id is present and the batch runner id is missing.
+ids_refuse("a brief with a triage id and no batch runner id is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE)
+# Refused: each form the judge does not accept. The label needs a colon, and the id needs the session_ prefix and letters.
+ids_refuse("a triage id with no session_ prefix, Triage: abc123, is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: abc123" + RUNNER_LINE)
+ids_refuse("an empty triage id, Triage: session_, is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_" + RUNNER_LINE)
+ids_refuse("a triage label with no colon, triage session_abc123, is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\ntriage session_abc123" + RUNNER_LINE)
+ids_refuse("a session id under another label, Page writer: session_abc123, is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nPage writer: session_abc123" + RUNNER_LINE)
+# Refused: the label is a whole word, so a word that only ends in triage does not count.
+ids_refuse("a label that only ends in triage, Pretriage: session_abc123, is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nPretriage: session_abc123" + RUNNER_LINE)
+# Refused with today's reasons, with no triage or runner label: the topic, step, and record checks run first.
+step_refuse("a brief for topic colors to a lane on topic icons, with no triage id, keeps the topic reason",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: colors.",
+            carries=("names a topic the lane does not hold",), lacks=("Triage:", "Batch runner:"))
+step_refuse("a brief naming a step the older lane does not carry, with no triage id, keeps the step reason",
+            role_path("step-old-lane"), "Lane brief: icon-c. Topic: icons.",
+            carries=("names a step the lane does not carry",), lacks=("Triage:", "Batch runner:"))
+step_refuse("a brief with no triage id to a target with no record keeps the no-record reason",
+            role_path("no-record"), "Lane brief: icon-b. Topic: icons.",
+            carries=("holds no get_session",), lacks=("Triage:", "Batch runner:"))
+step_refuse("a brief with no triage id and an unreadable transcript keeps the no-record reason",
+            role_path("unreadable"), "Lane brief: icon-b. Topic: icons.",
+            carries=("holds no get_session",), lacks=("Triage:", "Batch runner:"))
+# Passes: each accepted form of the triage id. The label is case-insensitive, and the id counts anywhere in the message.
+step_allow("a triage id on the line after the brief passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nTriage: session_abc123" + RUNNER_LINE)
+step_allow("a triage id with a number, Triage 5:, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nTriage 5: session_abc123" + RUNNER_LINE)
+step_allow("a triage id with a gloss, Triage (page and roadmap writer):, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nTriage (page and roadmap writer): session_abc123" + RUNNER_LINE)
+step_allow("a triage id after a coordinator id on the same line passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator: session_x. Triage: session_abc123" + RUNNER_LINE)
+step_allow("a lowercase triage label passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\ntriage: session_abc123" + RUNNER_LINE)
+step_allow("a triage id on the brief's first line passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons. Triage: session_abc123" + RUNNER_LINE)
+# Passes: the batch runner takes the same form, with a number. The triage id is present.
+step_allow("a batch runner id with a number, Batch runner 8: session_x, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner 8: session_x8")
+# Passes: both ids present, on a lane with a topic and on an older lane judged by its step.
+step_allow("a brief with both the triage id and the batch runner id passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + IDS_LINES)
+step_allow("an older lane's own step, with both ids, passes", role_path("step-old-lane"),
+           "Lane brief: icon-a. Topic: icons." + IDS_LINES)
+# Refused: a placeholder id. An id holds at least one digit, so a session_ id made of letters alone is no id. Each case
+# keeps the other label's id valid, so a failure names the placeholder and nothing else.
+ids_refuse("a triage id that is the placeholder session_TBD is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_TBD" + RUNNER_LINE)
+ids_refuse("a triage id that is the placeholder session_XXXX is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_XXXX" + RUNNER_LINE)
+ids_refuse("a triage id that is the word session_id is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_id" + RUNNER_LINE)
+ids_refuse("a batch runner id that is the word session_id is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_id")
+ids_refuse("a batch runner id that is the placeholder session_TBD is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_TBD")
+# Passes: markdown around the form, bold, italic or backticked. Each case keeps the other label's id valid.
+step_allow("a bold triage label, **Triage:** session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n**Triage:** session_abc123" + RUNNER_LINE)
+step_allow("an italic triage label, _Triage_: session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n_Triage_: session_abc123" + RUNNER_LINE)
+step_allow("a backticked triage id, Triage: `session_abc123`, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nTriage: `session_abc123`" + RUNNER_LINE)
+step_allow("a bold batch runner label, **Batch runner:** session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n**Batch runner:** session_abc123")
+step_allow("an italic batch runner label, _Batch runner_: session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n_Batch runner_: session_abc123")
+step_allow("a backticked batch runner id, Batch runner: `session_abc123`, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: `session_abc123`")
 
 
 # =========================================================================== 5d. cite by id
