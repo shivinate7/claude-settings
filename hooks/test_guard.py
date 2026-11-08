@@ -20160,6 +20160,12 @@ add("lane-start-settings: lane tag with an empty source_url is denied", "deny", 
 add("lane-start-settings: lane tag with an empty model and an empty source_url is denied", "deny",
     "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
     model="", source_url="")
+add("lane-start-settings: lane tag with a whitespace-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="   ", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=" \t\n ")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
