@@ -841,11 +841,14 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # exists: one `git merge-base --is-ancestor`, one `git diff-index`, two `git ls-tree`, one `git ls-files`
 # or `git hash-object`; a chained move adds one `git rev-parse`. No log, no process left running.
 # A bare read-tree writes no HEAD log line, so the old head stays the candidate and a later deliberate
-# `git rm` is refused. `reset -q` writes a line whose old value equals its new one, which the guard drops.
+# `git rm` is refused. The remedy's `update-ref -m ... HEAD HEAD` (agents may not run `git reset`) writes a
+# line whose old value equals its new one; `_old_heads` takes no old head from such a line.
 STALE_INDEX_REASON = (
     "Rule (Git, stale-index; decision commit-refuses-stale-index): this checkout still holds the tree of "
     "{old}, but HEAD is ahead of it, so this commit would revert the newer commit's version of: {files}. "
-    "Remedy: run `git read-tree -m -u {old} HEAD && git reset -q`, re-stage your own edits, then retry."
+    "Remedy: copy your edited files aside (read-tree stops with \"not uptodate\" on a file both you and the "
+    "moved head changed), run `git read-tree -m -u {old} HEAD && git update-ref -m \"stale-index: synced to "
+    "HEAD\" HEAD HEAD`, copy your files back, re-stage them, then retry."
 )
 STALE_PATH_CAP = 1000
 _SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -885,6 +888,7 @@ def _old_heads(gitdir, common, head, ref):
         if new != head:
             found.append(new)
         elif message.startswith("reset: moving to") or not message:
+            # A line with old equal to new (the remedy's sync) gives HEAD here, which the filter below drops.
             found.append(old)
     # With no HEAD log of its own this worktree cannot say what it last held, so the branch's newest step is
     # the only signal. With one, the log above already covers every move this worktree missed.
