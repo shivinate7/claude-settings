@@ -2816,6 +2816,25 @@ class LostSentence(unittest.TestCase):
     TAG_NEW = "- probe-unrelated-note: The probe reads each lint warning once. Decision: one-layout-every-repo."
     NUMBER_OLD = "- count-note: The finder checks 3 files. Decision: test-practices (P5)."
     NUMBER_NEW = "- count-note: The finder checks files. Decision: test-practices (P5)."
+    # The notes lines of a rename that dropped a sentence: the removed line and the added line, copied from the real diff.
+    RENAME_OLD = ("- find-time-pinned-donotfake-date: `lint/find_time_pinned.py` treats any `useFakeTimers` call as a fake clock, so "
+                  "`jest.useFakeTimers({doNotFake: ['Date']})` hides a real `new Date()` from the calendar list. The sleep scan reads "
+                  "fake timers the same way. Decision: test-practices (P5).")
+    RENAME_NEW = ("- find-time-pinned-fake-overhide: a fake clock hides more than it fakes. Under `freeze_time`, `time.ctime()`, "
+                  "`time.asctime()` and `pd.Timestamp.now()` still read the real date but are hidden. In JS, `useFakeTimers('legacy')`, "
+                  "a `toFake` list without Date, `doNotFake: ['Date']`, or fake timers with no `setSystemTime` still hide `new Date()`, "
+                  "dayjs and moment. Decision: test-practices (P5).")
+    # The same rename with the old sentences kept ahead of the new text.
+    RENAME_KEEP = ("- find-time-pinned-fake-overhide: `lint/find_time_pinned.py` treats any `useFakeTimers` call as a fake clock, so "
+                   "`jest.useFakeTimers({doNotFake: ['Date']})` hides a real `new Date()` from the calendar list. The sleep scan reads "
+                   "fake timers the same way. A fake clock hides more than it fakes. Under `freeze_time`, `time.ctime()`, "
+                   "`time.asctime()` and `pd.Timestamp.now()` still read the real date but are hidden. Decision: test-practices (P5).")
+    # A note retired in one commit, and a sibling whose slug shares its prefix and whose text is about something else.
+    GAPS_OLD = ("- find-time-pinned-doc-gaps: no case in `lint/test_find_time_pinned.py` pins `new Date(t)` where `t` holds a clock, "
+                "though the scanner lists `const t = Date.now(); new Date(t)`. Decision: test-practices (P5, a verdict that depends on "
+                "elapsed time uses a synthetic clock).")
+    ORDER_NEW = ("- find-time-pinned-doc-order: the finder prints its rows in file order, so a diff reads top to bottom. "
+                 "Decision: test-practices (P5).")
 
     def start(self, lines):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
@@ -2969,6 +2988,73 @@ class LostSentence(unittest.TestCase):
         self.assertTrue(self.named(self.r.verdict(), "count-note", "checks 3 files"),
                         "a rewrite that dropped only the 3 from `The finder checks 3 files.` in count-note was not refused by a problem "
                         "that names the note and that clause")
+
+    def test_a_rename_to_a_new_slug_that_drops_a_sentence_is_refused_and_names_it(self):
+        self.start([self.RENAME_OLD])
+        head = self.rewrite("Rename the fake-timer note to a new slug", [self.RENAME_NEW])
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2, "premise: the commit is a merge")
+        self.assertIn(self.RENAME_OLD, self.notes_at("main"), "premise: main does not hold the renamed note")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-donotfake-date:") for line in self.body(head)), 0,
+                         "premise: the rename left find-time-pinned-donotfake-date in the head")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-fake-overhide:") for line in self.body(head)), 1,
+                         "premise: the head does not hold find-time-pinned-fake-overhide once")
+        self.assertNotIn("find-time-pinned-donotfake-date", "\n".join(self.body(head)), "premise: the head names the old slug")
+        self.assertNotIn("reads fake timers the same way", "\n".join(self.body(head)), "premise: the head still holds the dropped sentence")
+        self.assertTrue(self.named(self.r.verdict(), "find-time-pinned-donotfake-date", "reads fake timers the same way"),
+                        "a rename to a new slug that dropped \"The sleep scan reads fake timers the same way.\" was not refused by a "
+                        "problem that names the old note and that sentence")
+
+    def test_a_rename_to_a_new_slug_that_keeps_every_sentence_passes(self):  # control: the same rename with the sentences kept
+        self.start([self.RENAME_OLD])
+        head = self.rewrite("Rename the fake-timer note to a new slug and keep its sentences", [self.RENAME_KEEP])
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2, "premise: the commit is a merge")
+        self.assertIn(self.RENAME_OLD, self.notes_at("main"), "premise: main does not hold the renamed note")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-donotfake-date:") for line in self.body(head)), 0,
+                         "premise: the rename left find-time-pinned-donotfake-date in the head")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-fake-overhide:") for line in self.body(head)), 1,
+                         "premise: the head does not hold find-time-pinned-fake-overhide once")
+        self.assertIn("The sleep scan reads fake timers the same way.", "\n".join(self.body(head)), "premise: the head lost a sentence")
+        self.assertEqual(self.r.verdict(), [], "a rename to a new slug that kept every sentence of the old note was refused")
+
+    def test_a_retire_beside_a_sibling_note_with_a_shared_slug_prefix_passes(self):  # control: pairing by prefix would refuse it
+        self.start([self.GAPS_OLD])
+        head = self.rewrite("Drop the gaps note and add an unrelated sibling note", [self.ORDER_NEW])
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2, "premise: the commit is a merge")
+        self.assertIn(self.GAPS_OLD, self.notes_at("main"), "premise: main does not hold find-time-pinned-doc-gaps")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-doc-gaps:") for line in self.body(head)), 0,
+                         "premise: the retire left find-time-pinned-doc-gaps in the head")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-doc-order:") for line in self.body(head)), 1,
+                         "premise: the head does not hold find-time-pinned-doc-order once")
+        self.assertNotIn("new Date(t)", "\n".join(self.body(head)), "premise: the head still holds a sentence of the retired note")
+        self.assertEqual(self.r.verdict(), [], "a retire beside a sibling note that shares a slug prefix was refused")
+
+    def test_a_rename_split_over_two_commits_that_drops_a_sentence_is_refused_and_names_it(self):
+        self.start([self.RENAME_OLD])
+        self.rewrite("Retire the fake-timer note", [])
+        head = self.rewrite("Add the renamed note", [self.RENAME_NEW])
+        self.assertEqual(len(self.r.sh("rev-list", "--no-merges", "origin/main..%s" % head).split()), 2,
+                         "premise: the range is not two non-merge commits")
+        self.assertIn(self.RENAME_OLD, self.notes_at("main"), "premise: main does not hold the renamed note")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-fake-overhide:") for line in self.body(head)), 1,
+                         "premise: the head does not hold find-time-pinned-fake-overhide once")
+        self.assertNotIn("find-time-pinned-donotfake-date", "\n".join(self.body(head)), "premise: the head names the old slug")
+        self.assertNotIn("reads fake timers the same way", "\n".join(self.body(head)), "premise: the head still holds the dropped sentence")
+        self.assertTrue(self.named(self.r.verdict(), "find-time-pinned-donotfake-date", "reads fake timers the same way"),
+                        "a rename split over two commits that dropped \"The sleep scan reads fake timers the same way.\" was not refused "
+                        "by a problem that names the old note and that sentence")
+
+    def test_a_retire_then_a_sibling_note_in_the_next_commit_passes(self):  # control: the two-commit form of the sibling case
+        self.start([self.GAPS_OLD])
+        self.rewrite("Retire the gaps note", [])
+        head = self.rewrite("Add an unrelated sibling note", [self.ORDER_NEW])
+        self.assertEqual(len(self.r.sh("rev-list", "--no-merges", "origin/main..%s" % head).split()), 2,
+                         "premise: the range is not two non-merge commits")
+        self.assertIn(self.GAPS_OLD, self.notes_at("main"), "premise: main does not hold find-time-pinned-doc-gaps")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-doc-gaps:") for line in self.body(head)), 0,
+                         "premise: the retire left find-time-pinned-doc-gaps in the head")
+        self.assertEqual(sum(line.startswith("- find-time-pinned-doc-order:") for line in self.body(head)), 1,
+                         "premise: the head does not hold find-time-pinned-doc-order once")
+        self.assertEqual(self.r.verdict(), [], "a retire followed by an unrelated sibling note in the next commit was refused")
 
     def test_a_lost_sentence_refusal_gives_the_slug_form_in_the_footer_of_the_cli_and_the_merge_tool(self):
         """A rewrite that drops a sentence is refused with a footer that gives the `- <slug>` form. A path-only trailer does
