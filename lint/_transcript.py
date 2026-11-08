@@ -93,23 +93,25 @@ def owner_text(rec, notice_tags=()):
     return text
 
 
-def last_owner_index(records, notice_tags=(), peer_tags=()):
-    """Index of the last main-session user record that starts a task, or None.
+def last_owner_index(records, peer_tags=()):
+    """Index of the last main-session record that starts a turn, or None.
 
-    A task start is an owner message (not isMeta, and owner_text reads text from it) or a peer
-    brief (text starts with one of `peer_tags`, shared_names._PEER_FRAME_TAGS). A peer brief is
-    isMeta and sits in MACHINE_TAGS, so only `peer_tags` lets it count. Other isMeta records
-    (stop-hook feedback, system reminders) never count. owner_text skips a machine notice only
-    when `notice_tags` is passed."""
+    A turn start is a record is_incoming accepts that is either not isMeta and has no peer origin,
+    whatever its text (an owner prompt, a fired wake), or a peer brief: its text starts with one of
+    `peer_tags` (shared_names._PEER_FRAME_TAGS) and it has no peer origin. isMeta records (stop-hook
+    feedback, system reminders) and peer hand-backs never start one.
+    Not last_incoming_index: the spawn window skips isMeta records and peer messages, which that
+    pick check counts."""
     idx = None
     for i, rec in enumerate(records):
-        if rec.get("type") != "user" or rec.get("isSidechain"):
+        if not is_incoming(rec) or _is_peer(rec.get("origin")):
             continue
-        text = _flat_text((rec.get("message") or {}).get("content"))
-        if peer_tags and isinstance(text, str) and text.strip().startswith(tuple(peer_tags)):
+        if not rec.get("isMeta"):
             idx = i
-        elif not rec.get("isMeta") and owner_text(rec, notice_tags) is not None:
-            idx = i
+        elif peer_tags:
+            text = _flat_text((rec.get("message") or {}).get("content"))
+            if isinstance(text, str) and text.strip().startswith(tuple(peer_tags)):
+                idx = i
     return idx
 
 
