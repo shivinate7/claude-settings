@@ -718,6 +718,24 @@ class CannotClaimTests(unittest.TestCase):
                          *ok_bash("git push origin HEAD", "tu_p"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_a_past_unable_to_push_recovered_by_a_later_push_is_no_claim(self):
+        # Catches: "was unable to" and "was not able to" read as a present claim that the push cannot be done, although a
+        # later push of the same target succeeded. A phrase after was or were is a past failure, so the line is no claim.
+        for line in ("I was unable to push at first; I rebased and pushed.",
+                     "I was not able to push at first; I rebased and pushed."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                                 *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+                self.assert_passes(out, "a past failure of a push that a later push recovered")
+
+    def test_cc_green_a_present_unable_to_push_after_a_recovered_push_still_blocks(self):
+        # Control: "I am unable to push." is a present claim. The later push cancels the failure, so the line blocks as
+        # having no try.
+        line = "I am unable to push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                         *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
     def test_cc_red_r4_rule_forms_and_the_cannot_suite_pass(self):
         # A sentence that names a rule or a decision is the rule's text, not the session's claim. "Cannot" directly
         # before a noun used as a modifier (the cannot suite, the cannot cases) is no claim.
