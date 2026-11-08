@@ -405,17 +405,20 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
 # Four more bash forms are read on the text with strings, comments and here-strings blanked out
 # (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
-# (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out), a leading `NAME=value`
-# before a command, a `[ ... ]` test after a statement start or `if`, and a backslash that ends a line
+# (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
+# before a command, a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
 # after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
-# lone backslash argument ends the text: `cd \`).
+# lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 PS_BASH_FORMS = re.compile(
-    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac)(?![\w-])"
+    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
     r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+[A-Za-z./]"
-    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*\[[ \t]+[^\]\n]*[ \t]\]"
-    r"|[ \t]\\[ \t]*\r?\n[ \t]*\S", re.M | re.I)
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
+    re.M | re.I)
+# A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
+# argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
+PS_BASH_CONTINUATION = re.compile(r"^([^\n]*[ \t])\\[ \t]*\r?\n[ \t]*(\S)", re.M)
 # A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
 # with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
 # its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
@@ -634,7 +637,7 @@ def _shell_line(span, run) -> bool:
         elif chained and _chain_command(word, len(words) - 1):
             return True
         elif len(words) >= 2 and (word in SHELL_PROGRAMS
-                                  or (CHAIN_COMMAND.fullmatch(words[0]) and SPAN_FLAG.match(words[1]))):
+                                  or (CHAIN_COMMAND.fullmatch(word) and SPAN_FLAG.match(words[1]))):
             return True
     return False
 
@@ -654,7 +657,14 @@ def _ps_bash_form(text) -> bool:
         if not comment and not quote and char == "#" and guard_core.token_start(script, index):
             comment = True
         out.append("_" if (quote or comment) and char != "\n" else char)
-    return bool(PS_BASH_FORMS.search("".join(out)))
+    blanked = "".join(out)
+    if PS_BASH_FORMS.search(blanked):
+        return True
+    for match in PS_BASH_CONTINUATION.finditer(blanked):
+        lone = len(match.group(1).split()) == 1
+        if not (lone and match.group(2) != "-"):
+            return True
+    return False
 
 
 def command_in_item_hit(data) -> str:
