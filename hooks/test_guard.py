@@ -11751,6 +11751,27 @@ sh("frozen: fakeroot dpkg-deb -b x y with no frozen path is allowed", "fakeroot 
    "allow", cwd=NOGIT)
 sh("frozen: taskset -c 0 make with no frozen path is allowed", "taskset -c 0 make", "allow", cwd=NOGIT)
 sh("frozen: chrt -i 0 sleep 1 with no frozen path is allowed", "chrt -i 0 sleep 1", "allow", cwd=NOGIT)
+# A REDIRECT WITH A SPACE BEFORE A NON-DIGIT WORD, A QUOTED WRAPPER VALUE THAT HOLDS A SPACE OR `>`, AND A UV
+# OPTION THAT UV ACCEPTS BUT `uv run --help` HIDES ARE ALL A WRITE TO THE PATH THEY NAME. bash reads `>& /dev/null`
+# ahead of a command as a redirect and then runs that command. A quoted value is one word, so the scan must not
+# split it at its space or its `>`. uv 0.11.32 accepts `--trusted-host` and `--python-preference`, and each takes a
+# value, so the scan must skip that value as it skips `--with`.
+sh("frozen: a leading redirect with a space and a non-digit word, ahead of a cp onto the config hook is denied",
+   ">& /dev/null cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a leading redirect with a space and a non-digit word, ahead of a cat of the config hook is allowed",
+   ">& /dev/null cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a uv run --with value holding a space and a greater-than sign, wrapped cp onto the config hook is denied",
+   'uv run --with "requests>=2" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value holding a space, wrapped cp onto the config hook is denied",
+   'sudo -u "a b" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run --trusted-host value wrapped cp onto the config hook is denied",
+   "uv run --trusted-host h cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run --python-preference value wrapped cp onto the config hook is denied",
+   "uv run --python-preference only-managed cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: uv run with a quoted --with value holding a greater-than sign, pytest, is allowed",
+   'uv run --with "requests>=2" pytest', "allow", cwd=NOGIT)
+sh("frozen: sudo -u with a quoted value holding a space, wrapped cat of the config hook, is allowed",
+   'sudo -u "a b" cat ' + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
