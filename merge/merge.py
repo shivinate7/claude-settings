@@ -2945,11 +2945,29 @@ def draft_step(root, cfg, n, host, info):
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
+def relayed_head_holds(root, branch, relayed, live):
+    """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
+    commit (head_claim's trailer) or its revert (claim_under_head's subject). The branch is fetched for the commits. A fetch or a log
+    that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
+    if live == relayed:
+        return True
+    c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
+    if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
+        return False
+    c, out = git(root, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
+    if c or not out.strip():
+        return False
+    for line in out.splitlines():
+        sha, subject, ids = (line.split("\t") + ["", ""])[:3]
+        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"')):
+            return False
+    return True
+
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it. A new yes from the owner is needed. Nothing was claimed or pushed."
 
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})
-    info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
+    info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
@@ -2963,7 +2981,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     try:
         info = host.pr(n)
         refuse_bad_pr(info)
-        if expected_head and info["head"] != expected_head:  # moved between main's read and the lock: still before any claim
+        if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
@@ -3635,7 +3653,7 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
-        if a.confirm and a.head and info["head"] != a.head:  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
+        if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
             raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
             cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
