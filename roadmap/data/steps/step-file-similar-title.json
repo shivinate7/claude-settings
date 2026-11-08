@@ -1,11 +1,11 @@
 {
   "title": "roadmap/build.py warns when a new step's title shares most of its key words with an open step",
   "why": "Triage mistake, 15:30 CST Nov 8: it filed step round-lines-carry-head (commit before 7b17d4884) without grepping, while open step record-rounds-name-own-head held the same question; it caught the duplicate after commit and folded it before push. Triage greps by habit (P37), and a habit is not a guard (owner 11:27 CST Nov 8). Red case: build.py prints the open step a new step likely duplicates.",
-  "note": "",
+  "note": "Scope to add (triage incident 16:23 CST Nov 8): triage folded review-record-post-check to done while its lane held an open PR (#2219). Red case: roadmap/build.py warns when a step goes done by fold while its lane names an open PR.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 828,
-  "updatedAt": "2026-11-08T15:30:00-06:00"
+  "updatedAt": "2026-11-08T16:25:00-06:00"
 }
