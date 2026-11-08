@@ -3885,6 +3885,12 @@ hm_allow("a for loop that builds its trees under the home folder passes",
 # control: a variable that resolves outside the home folder stays refused.
 hm_allow("a tree path through a variable that resolves to the lanes folder passes",
          "P=" + HMIN + "/.claude/worktrees; " + HMADD + '-q "$P/hmvar" -b hmvar')
+# A TREE PATH THAT NAMES THE CALL'S OWN FOLDER THROUGH `$PWD`. In the shell `$PWD` is the folder the call
+# runs in, which is the primary here, so a tree under the lanes folder is the home folder's tree and passes.
+# The climbing path is the control: it leaves the lanes folder, so it stays refused.
+hm_allow("a tree path through $PWD into the lanes folder passes", HMADD + "$PWD/.claude/worktrees/hmpwd")
+hm_refuse("a tree path through $PWD that climbs out of the lanes folder is refused",
+          HMADD + "$PWD/../lane-x")
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
@@ -22022,6 +22028,70 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a Write from a cwd in no checkout pass
                          homeless_write_into_own_home_case))
 
 
+def homeless_config_symlink_case():
+    """Rule other-checkout, a cwd in no checkout: the config folder passes. install.sh links hooks, settings
+    and skills from the clone into the config folder, so a write through such a link names a file the config
+    folder holds, and the link's target is the clone only by where it points. Scope first: the link must
+    resolve into the clone, or refusing it proves nothing. Controls: a plain write under the config folder
+    passes, and the same file reached by its clone path is refused."""
+    if not LINKS_MADE:
+        return SKIP, "no symlink privilege here, so the config folder's link cannot be made"
+    primary = os.path.join(ROOT, "homeless_cfg_primary")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    cfg = os.path.join(ROOT, "homeless_cfg_config")
+    nowhere = os.path.join(ROOT, "homeless_cfg_nowhere")   # a folder in no checkout
+    tmp = os.path.join(ROOT, "tmp")
+    os.makedirs(cfg, exist_ok=True)
+    os.makedirs(nowhere, exist_ok=True)
+    link = os.path.join(cfg, "linked")   # a plain name: no rule that guards the config folder's own files names it
+    os.symlink(os.path.join(primary, "src"), link, target_is_directory=True)
+    through = os.path.join(link, "new-link.py")
+    through_sh = os.path.join(link, "new-link-sh.py")
+    direct = os.path.join(primary, "src", "new-link.py")
+    direct_sh = os.path.join(primary, "src", "new-link-sh.py")
+    home = os.path.normcase(os.path.realpath(primary))
+    if os.path.commonpath([os.path.normcase(os.path.realpath(through)), home]) != home:
+        return False, ("scope: the config folder's link does not resolve into the clone, so the refusal "
+                       "proves nothing")
+    session = sh_session()
+
+    def judge(tool, tool_input):
+        return decide({
+            "raw": None, "tool": tool, "cwd": nowhere, "session": session, "env_path": None,
+            "config": cfg, "agent_id": None, "process_cwd": None, "temp": tmp,
+            "env": {"CLAUDE_PROJECT_DIR": primary}, "tool_input": tool_input})
+
+    rows = (
+        ("a Write through the config folder's link", "allow", "Write",
+         {"file_path": through, "content": "x"}),
+        ("a shell redirect through the config folder's link", "allow", "Bash",
+         {"command": "echo x > " + slash(through_sh)}),
+        ("a plain Write under the config folder (control)", "allow", "Write",
+         {"file_path": os.path.join(cfg, "r-note.md"), "content": "x"}),
+        ("a Write by the clone path (control)", "deny", "Write",
+         {"file_path": direct, "content": "x"}),
+        ("a shell redirect by the clone path (control)", "deny", "Bash",
+         {"command": "echo x > " + slash(direct_sh)}),
+    )
+    problems = []
+    for label, want, tool, tool_input in rows:
+        got, reason = judge(tool, tool_input)
+        if got != want:
+            problems.append("%s: want %s, got %s (%s)" % (label, want, got, reason[:120]))
+        elif want == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s"
+                            % (label, reason[:160]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a write through a config-folder link into the clone passes from a cwd in no checkout; "
+                  "the same file by its clone path is refused")
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: a write through a config-folder symlink into the clone, from a cwd in "
+                         "no checkout, passes; the same file by its clone path is refused",
+                         homeless_config_symlink_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -23062,6 +23132,17 @@ def session_home_lane_write_control_case():
     return sh_lane_then_visit_case("write", "echo x > f.txt")
 
 
+# A shell write that is no redirect marks the lane too: the allowed call's cwd is the lane, so the lane is
+# the home the session worked in. `touch` and `make` write no `>` and name no word of MUTATING_COMMAND, so
+# they are the case that SHELL_WRITE_HINT misses. (`npm install` matches `install` there, so it marks.)
+def session_home_lane_touch_case():
+    return sh_lane_then_visit_case("touch", "touch f.txt")
+
+
+def session_home_lane_make_case():
+    return sh_lane_then_visit_case("make", "make")
+
+
 def session_home_primary_shell_lived_case():
     """Rule session-home: a shell write from the primary checkout whose target sits inside the recorded
     lane marks the lane lived, once the write is allowed. other-checkout refuses that write unless the
@@ -23213,6 +23294,10 @@ LOG_CHECKS_EXTRA.append(("session-home: a lane merge makes the lane home, so a p
                          "the lane is removed", session_home_lane_merge_case))
 LOG_CHECKS_EXTRA.append(("session-home: a lane shell write makes the lane home, so a primary Write is refused "
                          "once the lane is removed (control)", session_home_lane_write_control_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane touch makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_touch_case))
+LOG_CHECKS_EXTRA.append(("session-home: a lane make makes the lane home, so a primary Write is refused once "
+                         "the lane is removed", session_home_lane_make_case))
 LOG_CHECKS_EXTRA.append(("session-home: an allowed shell write from the primary whose target is inside the "
                          "recorded lane marks the lane lived", session_home_primary_shell_lived_case))
 LOG_CHECKS_EXTRA.append(("session-home: a Write from the primary into the recorded lane, refused by "
