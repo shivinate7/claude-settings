@@ -13356,6 +13356,66 @@ sh(SHELL_CD + "a quoted > then a multi-line awk program in single quotes is allo
    "grep 'x > hooks/test_guard.py' f | awk '{\nprint $0\n}'", "allow", **B)
 sh(SHELL_CD + "a quoted > then a sed program with a lone quote in double quotes is allowed",
    "grep 'x > hooks/test_guard.py' f | sed -n \"/'/p\"", "allow", **B)
+# A sed program is a filter only when each command selects or prints lines. A command that writes (`w`),
+# runs a line (`e`) or cannot be read is not, so a quoted > piped into it stays a redirect onto the test path.
+sh(SHELL_CD + "a quoted > piped into sed w with a file name is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 'w x'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed w followed by ;, which sed reads as the file name, is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 'w;p'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed s with a w flag and a file name is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 's/a/b/w x'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed s with a w flag followed by ;, which sed reads as the file name, is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 's/a/b/w;p'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed e, which runs the line, is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 'e'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into a sed program with an unknown command is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 'k'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed -f, which runs a program file, after a -e script is refused",
+   "grep 'x > hooks/test_guard.py' f | sed -e '1p' -f prog.sed", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed -f with the program file before the script is refused",
+   "grep 'x > hooks/test_guard.py' f | sed -f prog.sed '1p'", "deny", rule=BT, **B)
+# An awk program is a filter only with no getline, pipe or close, and no program file or include flag: each
+# reads or runs input that the scan cannot see.
+sh(SHELL_CD + "a quoted > piped into an awk program that calls getline is refused",
+   "grep 'x > hooks/test_guard.py' f | awk 'BEGIN { getline line < \"f\" }'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into an awk program that pipes a print to a command is refused",
+   "grep 'x > hooks/test_guard.py' f | awk '{ print | \"sh\" }'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into an awk program that calls close is refused",
+   "grep 'x > hooks/test_guard.py' f | awk '{ close(\"sh\") }'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into awk -f, which runs a program file, is refused",
+   "grep 'x > hooks/test_guard.py' f | awk -f prog.awk", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into awk -i, which edits files in place, is refused",
+   "grep 'x > hooks/test_guard.py' f | awk -i inplace '{print}'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into awk --include is refused",
+   "grep 'x > hooks/test_guard.py' f | awk --include lib.awk '{print}'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into awk --exec is refused",
+   "grep 'x > hooks/test_guard.py' f | awk --exec prog.awk '{print}'", "deny", rule=BT, **B)
+# A name that is not sed, awk, head or tail is not a filter whatever its arguments are: an interpreter runs its file.
+sh(SHELL_CD + "a quoted > piped into python3 with a script file is refused",
+   "grep 'x > hooks/test_guard.py' f | python3 run.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sh with a script file is refused",
+   "grep 'x > hooks/test_guard.py' f | sh run.sh", "deny", rule=BT, **B)
+# Each sed command that the filter grammar accepts keeps a quoted > piped into it text. Dropping one piece of
+# the grammar turns that case into a refusal.
+sh(SHELL_CD + "a quoted > piped into sed s with the g flag is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed 's/a/b/g'", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed d is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed d", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed q is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed q", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed = is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed =", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed with a $ address is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed '$p'", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed with a negated address is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed '1!d'", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into sed with two -e scripts is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed -e '1p' -e '2p'", "allow", **B)
+# awk -F takes its value as the next word. That value is not the program, so the program after it is judged.
+sh(SHELL_CD + "a quoted > piped into awk with -F : as a separate word and a field print is allowed",
+   "grep 'x > hooks/test_guard.py' f | awk -F : '{print $1}'", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into awk with -F : as a separate word and a system call is refused",
+   "grep 'x > hooks/test_guard.py' f | awk -F : '{system($0)}'", "deny", rule=BT, **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
