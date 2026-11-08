@@ -904,13 +904,15 @@ _PY_ARGV_CALLS = frozenset(("run", "call", "check_call", "check_output", "Popen"
 _PY_SHELL_NAMES = frozenset((
     "sh", "bash", "zsh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd", "env", "csh", "tcsh", "ash",
     "busybox"))
+_PY_INTERPRETER = re.compile(r"python[\d.]*|py")
 
 
 def _py_list_argv_call(node) -> bool:
-    """True when NODE is `subprocess.<run|call|check_call|check_output|Popen>(...)` that runs a program
-    with no shell: the first argument is a list or tuple literal; its first element is a string that is
-    not a shell name, or `sys.executable`; `shell=` is absent or the literal False; and there is no
-    `**kwargs` and no `executable=`, which would swap the program the argv names."""
+    """True when NODE is `subprocess.<run|call|check_call|check_output|Popen>(...)` that runs a python
+    script with no shell: the first argument is a list or tuple literal; its first element is
+    `sys.executable` or a python interpreter's name, not a shell name; no literal element is `-c`; `shell=`
+    is absent or the literal False; and there is no `**kwargs` and no `executable=`, which would swap the
+    program the argv names. Any other program, such as `cp`, writes files the body's text does not show."""
     import ast
     func = node.func
     if not (isinstance(func, ast.Attribute) and func.attr in _PY_ARGV_CALLS
@@ -918,12 +920,16 @@ def _py_list_argv_call(node) -> bool:
         return False
     if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)) or not node.args[0].elts:
         return False
-    first = node.args[0].elts[0]
+    elements = node.args[0].elts
+    first = elements[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        if os.path.splitext(basename(first.value))[0] in _PY_SHELL_NAMES or not first.value:
+        name = os.path.splitext(basename(first.value))[0]
+        if name in _PY_SHELL_NAMES or not _PY_INTERPRETER.fullmatch(name):
             return False
     elif not (isinstance(first, ast.Attribute) and first.attr == "executable"
               and isinstance(first.value, ast.Name) and first.value.id == "sys"):
+        return False
+    if any(isinstance(item, ast.Constant) and item.value == "-c" for item in elements):
         return False
     for keyword in node.keywords:
         if keyword.arg is None or keyword.arg == "executable":
