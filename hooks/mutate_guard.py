@@ -934,6 +934,14 @@ MUTATIONS = [
      '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
      '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
      "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
+    ("scratchpad-commit-msg-owner: the rule never fires",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = False and scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an agent's commit -F of a scratchpad file is refused"),
+    ("scratchpad-commit-msg-owner: an orchestrator's call is refused too",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'

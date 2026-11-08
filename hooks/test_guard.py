@@ -11176,6 +11176,24 @@ if LINKS_MADE:
 else:
     skip_case("scratchpad-message: an agent's commit -F of a link out of its scratchpad is allowed", NO_LINK_HERE)
 
+# The directory the commit runs in is set in the same command: by a variable, by pushd, or by git's own
+# -C. Each form must still deny, judged from the directory the command really runs in.
+SCRATCH_DIR = slash(os.path.dirname(SCRATCH_MSG))
+scratch_deny("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
+             "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
+scratch_deny("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
+             "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
+scratch_deny("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
+             "cd " + SCRATCH_DIR + " && " + VCS + " -C . commit -F commit_msg.txt")
+# The control for the pushd form: the same directory move, to a folder outside every scratchpad, allows.
+scratch_allow("scratchpad-message: an agent's commit -F of a relative file after pushd outside every scratchpad is allowed",
+              "pushd " + slash(NOGIT) + " && " + VCS + " commit -F msg_nogit.txt")
+# A main session's payload as measured (docs/decisions/a-kill-by-pid-needs-an-owned-pid.md): agent_id and
+# agent_type both null. It is no agent call, so the same scratchpad file passes.
+add("scratchpad-message: an orchestrator payload with agent_id and agent_type null is allowed", "allow",
+    raw=json.dumps({"tool_name": "Bash", "tool_input": {"command": SCRATCH_CMD}, "cwd": NOGIT,
+                    "session_id": FAKE_SESSION, "agent_id": None, "agent_type": None}))
+
 # =========================================================================== 5c. the records page
 FAMILY = "records-page"
 #
