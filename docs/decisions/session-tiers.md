@@ -45,7 +45,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
     - A `set_session_tags` call on another session leaves the own proof current. The shared reader `_own_session_read` also serves `trust-card-in-build`. A call with no readable id list counts as naming the own session.
     - No session id, no transcript or no record is a denial. An owner override lifts it.
     - Steer: the session sends the step change to the triage session (tag `cs-build:triage`, same `cs-repo`).
-    - Cost, per `git push` call: a refspec push starts git once (`rev-parse --show-toplevel`). A `HEAD` push starts it twice (adds `symbolic-ref`). A bare push starts it three times (adds a `config` read of `push.default`). Each reads `lint/layout.json` 3 times and the extras file once, in one `record_branch()` call (not pinned: no test counts the reads). With no extras file: 2 reads of `lint/layout.json`, no extras read (not pinned). The transcript is read only when the push reaches the record branch. No new process, timer or log.
+    - Cost, per `git push` call: a refspec push starts git once (`rev-parse --show-toplevel`) (unmeasured). A `HEAD` push starts it twice (adds `symbolic-ref`) (unmeasured). A bare push starts it three times (adds a `config` read of `push.default`) (unmeasured). Each reads `lint/layout.json` 3 times and the extras file once, in one `record_branch()` call (not pinned: no test counts the reads). With no extras file: 2 reads of `lint/layout.json`, no extras read (not pinned). The transcript is read only when the push reaches the record branch. No new process, timer or log.
     - Known gaps, not fixed: a glob refspec, `git push --all`, `--mirror`, `push.default matching` and the GitHub MCP file-write tools reach the branch with no refspec that names it. A push inside `$(...)` or backticks is not read. Main's `force-push` rule has the same gap.
 - **A fork's own page and record branch** (owner, 2026-10-31 15:00 CDT, in chat to triage, pick a; roadmap step `fork-own-page`, a fork gets its own page).
   - A semi-fork is a worktree whose work never reaches main. It makes its own waiting page, with its own `waiting-page` key in `.claude/layout-extras.json`. It never reuses main's key.
@@ -149,7 +149,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
   - Passes: a message without the marker, a brief whose `Topic:` matches the target's topic (a new step on the same topic), and a non-lane target. An override lifts it.
   - Steer: start a new lane with `create_session`.
   - Known miss: a brief without the marker. Also, the coordinator may pick a topic slug too broad for its work, and the guard cannot tell.
-  - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise. No new file or timer.
+  - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise (unmeasured). No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
 
