@@ -1,11 +1,11 @@
 {
   "title": "The lane lint passes the lane's PR body to ci-job, so an excuse in the PR body reads as it does in CI",
   "why": "`merge --lane-lint` runs bin/ci-job without the lane's PR body, and ci-job maps `${{ github.event.pull_request.body }}` to \"\". So an excuse that lives only in the PR body (Drops-lines, Retire-run) reads FAIL before CI, even when CI would pass (lane silent-undo-reads-retire-run, session_013NEJL4TDRWqka4aSU2Bv7L, 04:06 CST Nov 8; coordinator 04:07 CST).",
-  "note": "Fix: the lane lint reads the lane's PR body and passes it as ci-job's PR_BODY value. Red case first: a lane whose Retire-run line is only in its PR body FAILs the lane lint today; control: with no PR the lane lint behaves as today. Owner: lane session_013NEJL4TDRWqka4aSU2Bv7L, a follow-up from #1712's head with Merge after: #1712, after step pre-existing-needs-main-run; the lane reports doing when it starts. Related: steps silent-undo-ci-body and silent-undo-checks-pr-base. Queue fix (coordinator, 04:07 CST Nov 8). Filed 04:08 CST Nov 8. Doing (lane, 04:10 CST Nov 8): red tests started on branch lane-lint-reads-pr-body from 5e95ca9b5; its PR merges after pre-existing-needs-main-run.",
+  "note": "Fix: the lane lint reads the lane's PR body and passes it as ci-job's PR_BODY value. Red case first: a lane whose Retire-run line is only in its PR body FAILs the lane lint today; control: with no PR the lane lint behaves as today. Owner: lane session_013NEJL4TDRWqka4aSU2Bv7L, a follow-up from #1712's head with Merge after: #1712, after step pre-existing-needs-main-run; the lane reports doing when it starts. Related: steps silent-undo-ci-body and silent-undo-checks-pr-base. Queue fix (coordinator, 04:07 CST Nov 8). Filed 04:08 CST Nov 8. Doing (lane, 04:10 CST Nov 8): red tests started on branch lane-lint-reads-pr-body from 5e95ca9b5; its PR merges after pre-existing-needs-main-run. Ready as draft #1932, with runner 8, `Merge after: #1712` (lane, 05:25 CST Nov 8). Round 3 notes go to step lane-lint-body-tidy.",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 587,
   "owner": "triage",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
-  "updatedAt": "2026-11-08T04:10:00-06:00"
+  "updatedAt": "2026-11-08T05:26:00-06:00"
 }
