@@ -176,12 +176,18 @@ def _background_amp(tok, k):
     return prev not in ("&", "|", "<", ">") and nxt not in ("&", ">")
 
 
-def _continues_list(prior, before, punct):
+def _continues_list(prior, tokens, i, punct):
     """True when a newline follows `&&`, `||` or `|`, so the list goes on to the next line. prior is
-    the text before the newline in its token; with none, the token before it is read."""
+    the text before the newline in its token. With none, the tokens before token i are read back past
+    those that are only newlines: a blank or comment line leaves such a token."""
     prior = prior.rstrip("\n")
-    if not prior:
-        prior = before if before and set(before) <= punct else ""
+    j = i - 1
+    while not prior and j >= 0:
+        text = tokens[j].rstrip("\n")
+        if text:
+            prior = text if set(text) <= punct else ""
+            break
+        j -= 1
     return prior.endswith(("&&", "||", "|"))
 
 
@@ -231,7 +237,7 @@ def read_named_logs(command):
                         cwd, list_dir = saved.pop()
                     else:
                         list_dir = cwd  # a case pattern ends, and its list starts
-                elif ch == ";" or (ch == "\n" and not _continues_list(tok[:k], before, punct)):
+                elif ch == ";" or (ch == "\n" and not _continues_list(tok[:k], tokens, i, punct)):
                     list_dir = cwd
                 elif ch == "&" and _background_amp(tok, k):
                     # The list before a lone `&` runs in a background subshell: the main shell stays.
