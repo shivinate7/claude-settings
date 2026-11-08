@@ -1,11 +1,11 @@
 {
   "title": "The time-pinned finder's tests cover new Date(t) with a clock value",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 684,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
   "why": "lint/test_find_time_pinned.py pins only `Date()` for a JS bare Date, and has no case for `new Date(t)` where t holds a clock (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
-  "note": "Done check: a red test where `new Date(t)` with t from the clock is listed, and with a fixed t is not. Filed by triage 09:02 CST Nov 8.",
-  "updatedAt": "2026-11-08T09:02:00-06:00"
+  "note": "Done check: a red test where `new Date(t)` with t from the clock is listed, and with a fixed t is not. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to the timing-tests lane.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
 }

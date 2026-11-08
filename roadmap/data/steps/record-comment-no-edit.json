@@ -1,11 +1,11 @@
 {
   "title": "An edit of a PR comment that holds a merge-tool review record is refused",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 689,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzUe9U19voH62VbCNA",
   "why": "Lane notes-fix-guard-1 (session_013NEJL3G6vFtN2TjNZrMETW) hand-edited the tool-printed review records on #1926, #1531, #2016 and #1989, and nothing stopped it (coordinator, 09:03 CST Nov 8).",
-  "note": "Done check: a red test where an edit of a review-record comment is refused, by `gh api -X PATCH .../comments/<id>`, `gh pr comment --edit-last` or MCP update_issue_comment; the remedy is to post a fresh record. Not part of review-record-parse-warn, which flags a record that does not parse, not an edit. Nearest home: review-record-provenance (only the merge tool may post a record); the lane extends that guard rather than a copy. Filed by triage 09:02 CST Nov 8.",
-  "updatedAt": "2026-11-08T09:02:00-06:00"
+  "note": "Done check: a red test where an edit of a review-record comment is refused, by `gh api -X PATCH .../comments/<id>`, `gh pr comment --edit-last` or MCP update_issue_comment; the remedy is to post a fresh record. Not part of review-record-parse-warn, which flags a record that does not parse, not an edit. Nearest home: review-record-provenance (only the merge tool may post a record); the lane extends that guard rather than a copy. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to lane review-record-provenance as a follow-up on #1634. The finding lane's own proposal review-record-no-edit (refuse an update_issue_comment whose body or target opens with the review-record marker; the coordinator ruled a record is never hand-edited) is this step.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
 }

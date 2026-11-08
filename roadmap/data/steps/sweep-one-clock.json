@@ -1,11 +1,11 @@
 {
   "title": "The session-end sweep tests use one injected clock",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 686,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
   "why": "janitor/test_session_end_sweep.py cases near lines 950 and 1032 stamp a fixture from the real clock and judge it with code that reads the clock again (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
-  "note": "Done check: those cases inject one clock, and a red run shows they no longer depend on the time between the two reads. Filed by triage 09:02 CST Nov 8.",
-  "updatedAt": "2026-11-08T09:02:00-06:00"
+  "note": "Done check: those cases inject one clock, and a red run shows they no longer depend on the time between the two reads. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to the timing-tests lane.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
 }

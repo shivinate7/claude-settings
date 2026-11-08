@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2Rd7tasVqys45cgDA",
   "why": "A review range in #1969's body did not start at the parent head (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8). A wrong range lets a reviewer skip commits.",
-  "note": "Done check: a red test where a PR body whose review range starts below or above the parent head is refused. Extends the lane lint's PR-body read (step lane-lint-reads-pr-body, #1969) rather than a second reader. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL2Rd7tasVqys45cgDA.",
-  "updatedAt": "2026-11-08T08:16:00-06:00"
+  "note": "Done check: a red test where a PR body whose review range starts below or above the parent head is refused. Extends the lane lint's PR-body read (step lane-lint-reads-pr-body, #1969) rather than a second reader. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL2Rd7tasVqys45cgDA. Scope answered by triage 09:08 CST Nov 8, no page item: the rule \"start equals the parent head\" is triage's wording in this note, not an owner ruling (P44), and no such check is on main. The lane takes its option a, the ancestry rule: S is an ancestor of the lane head; each parent's merge-base with the lane head is an ancestor of S; S holds no lane commit. Measured basis: 13 of about 35 range-bearing bodies among 601 open PRs fail the equality rule, 11 lagging children and #2026/#2030 on a merge base (lane, 09:01 CST). The #1969 incident is still refused.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
 }

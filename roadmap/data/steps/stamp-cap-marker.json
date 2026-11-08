@@ -1,11 +1,11 @@
 {
   "title": "The stamp cap test asserts the watchdog's armed delay, not wall time",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 683,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
   "why": "actions/stamp/test_stamp.mjs \"ends within the cap\" asserts under 30 s of wall time, so it passes or fails on runner speed (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
-  "note": "Fix: the watchdog writes its armed delay to a marker, and the case asserts the marker (P5, practice time-pinned-tests). Done check: the case reads the marker and has no wall-time assert. Filed by triage 09:02 CST Nov 8.",
-  "updatedAt": "2026-11-08T09:02:00-06:00"
+  "note": "Fix: the watchdog writes its armed delay to a marker, and the case asserts the marker (P5, practice time-pinned-tests). Done check: the case reads the marker and has no wall-time assert. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to the timing-tests lane.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
 }

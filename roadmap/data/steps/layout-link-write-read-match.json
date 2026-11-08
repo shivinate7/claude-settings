@@ -1,0 +1,11 @@
+{
+  "title": "lint/layout.py reads and writes a stored page link by the same rule",
+  "phase": "guards",
+  "status": "todo",
+  "order": 691,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "lint/layout.py refuses a stored page link with a trailing slash, `?query` or `#fragment` on write (:327-328), but reads the same link fine (artifact_id, :220-226). Found in #2065 round 1 (lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8, 09:03 CST Nov 8).",
+  "note": "How often Claude stores such a link is unmeasured; the lane counts first, and with none found this becomes a note. Done check: a red test where write and read agree on each form. Filed by triage 09:04 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:04:00-06:00"
+}
