@@ -19,6 +19,7 @@ now). Write plainly (rule output-write-in-ste).
 
 You do the work yourself. Before you stop for any reason, commit your work to your own branch
 and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Start with the point. No preamble. Report in under 25 lines unless the brief names another cap.
