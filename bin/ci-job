@@ -18,7 +18,7 @@
 # the whole diff), plus one process per picked CI step. A mutation script (a name with "mutate")
 # and every other command (bash, unpinned pipx, other uses:) is left out with one `not run` line naming the step and why, except a `uses:` of
 # this repo's own action (`$/actions/...`, `./actions/...`) it cannot run: that prints one unknown line. After the
-# last step, one line counts the steps run out of the job's total (--plan: "would run"). Neither it nor a `not run`
+# last step, one line counts the steps run out of the job's total (--plan: "would run"; a picked suite step plans as "suite would run", so merge.py reads only the lint steps). Neither it nor a `not run`
 # line starts with FAIL or unknown or moves the exit code: merge.py's lane lint reads those two words.
 # An install CI step is a run: whose every line is one install command (INSTALL_CMD: a lockfile install, or type
 # generation such as `npx astro sync`), since a lint step that reads generated files fails on a bare checkout. --lint
@@ -532,7 +532,9 @@ def main(argv):
         ran += 1
         ran_lint += kind[n - 1] in ("lint", "suite")  # a picked suite step that ran is a lint run too
         if dry:
-            print("%-15s %s" % ("would run", name))
+            # A picked suite step is chosen by the diff, not a fixed lint step: merge.py skips each `would run` line as a step lane
+            # lint ran, and a suite step is no such step, so its line starts with another word.
+            print("%-15s %s" % ("suite would run" if kind[n - 1] == "suite" else "would run", name))
             continue
         try:
             sys.stderr.write("start: %s\n" % name)

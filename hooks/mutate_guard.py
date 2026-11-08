@@ -3512,7 +3512,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     imports or loads, however deep: from each tracked `.py` the suite names, it follows the stems that file imports (`import`,
     `from`, a literal `import_module`) and the basenames it names in a path expression, to tracked `.py` files, each file
     once, so a cycle ends. A deleted `.py` path is no longer tracked, so its stem is matched against the stems those files
-    import, and its basename against the basenames they name in a path expression. A stem or basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
+    import, and its basename against the `.py` basenames they name in a path expression. A non-.py path is no load when only a module the suite reaches names it: the suite is picked only when it names that path itself. A stem or basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
     whatever the number of paths or suites."""
     import re
     listed = dict(REPORT_TARGETS)
@@ -3538,7 +3538,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     suites = [item for item in suites if profile_of(item) is not None]
     reached = {}  # a suite -> the tracked .py files its loads lead to
     reached_stems = {}  # a suite -> the stems those files import, so a deleted module (no longer tracked) still matches
-    reached_bases = {}  # a suite -> the basenames those files name in a path expression, for the same deleted-path match
+    reached_bases = {}  # a suite -> the .py basenames those files name in a path expression, for the same deleted-path match
     if chain:
         by_stem = {}
         for item in tracked:
@@ -3565,7 +3565,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
                 profile = profile_of(file)
                 if profile is not None:
                     followed.update(profile[0])
-                    named.update(profile[1])
+                    named.update(base for base in profile[1] if base.endswith(".py"))  # a non-.py name is a load only in the suite itself
                     todo.extend(loads_of(profile))
             reached[suite] = seen
             reached_stems[suite] = followed
