@@ -5,31 +5,48 @@
 # with --device pro. Its flags are double-dash and come first; the first argument it does not know starts xcodebuild's own
 # arguments, which pass through unchanged. Any other --device value, or a bad --for: one usage line, exit 2, no lock.
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
-# Reuse: duo reuses the first booted device whose name contains "iPhone Duo", pro the first booted iPhone whose name does
-# not. Reuse takes no lease and shuts nothing down. It never shuts down a simulator it did not boot.
+# Reuse: duo reuses the first booted device whose name contains "iPhone Duo" and whose slot no other pid's live lease holds
+# (`sim-lease status`); with every booted Duo leased, it takes a fresh lease (slot 2 under the load bars) and boots that
+# slot. When every booted device is a Duo and another live pid leases each one (the cap is reached), a duo run does not stop
+# at the cap check: it queues with one `sim-lease take --udid --reuse U1 --reuse U2`, takes whichever Duo's slot frees first,
+# and the re-scan after the grant reuses that Duo, or boots it if its holder shut it down. At SIM_LEASE_WAIT it exits 1
+# with no boot and no xcodebuild. Pro reuses the first booted iPhone whose name does not. A reuse takes the lease of the booted device's slot (below) and shuts nothing down. It never shuts down a simulator it did not boot.
 # Cross-role (13:51 CST: never a Duo and the 18 Pro booted together): a duo run with only a non-Duo iPhone booted, or a pro
 # run with only a Duo booted, boots nothing, runs nothing, names the booted device on stderr and exits 1.
-# Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
+# Before its own boot it counts every booted device, owner-booted too. At the cap (except the all-leased Duos above) it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
 # list that fails exits 1 with no boot.
-# Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
-# a file named pid. One atomic mkdir takes it before any simctl call. It is held for the whole run, the reuse path
-# and a hold too, and removed on every exit, INT and TERM too. A live holder: one stderr line names its pid, the lock is
+# Lock: one Mac lock, held only while a run picks and boots its device, and the slot's lease after that: the folder
+# ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in a file named pid. One atomic mkdir
+# takes it before any simctl call (owner, 2026-11-02 14:23 CST, two Duos together). It is freed once the
+# device is up and the lease is held, the reuse path and a hold too, and the lease then guards the slot until the shutdown
+# and the give. It is also removed on every exit, INT and TERM too, if this run still holds it, but only while its pid file
+# names this run. A live holder: one stderr line names its pid, the lock is
 # read again every SIM_TEST_POLL s (default 2), for at most SIM_TEST_LOCK_WAIT s (default 300); then exit 1 naming the
 # pid, with no boot and no xcodebuild. A dead holder: the folder is renamed to a name unique to this run (one rename
-# wins), removed, and the mkdir retried. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
+# wins), removed, and the mkdir retried; if the folder held another pid, it is put back only while no lock exists, and is
+# removed when another run has re-created the lock. Live means `ps -p PID` finds the pid, never `kill -0`, which reads EPERM
+# (a live process of another user) as dead. A lock folder with no pid file counts as held for 60 s, then as dead. A reused
 # pid reads as a live holder.
-# Lease: the own-boot path only. After the lock and the cap check and before `simctl boot`, it runs
+# Lease: every run takes one, after the lock and the cap check. An own boot runs, before `simctl boot`,
 # `sim-lease take --device <role> --udid --pid $$` (bin/sim-lease, beside this script). That is the one Mac-wide queue
 # and load limit for phone simulators. A refusal exits 1 with no boot and no xcodebuild. A no-op take (prints none: CI,
-# or not macOS) boots and runs nothing, prints one stderr line saying no lease, and exits 1. The lease is given back
-# after the shutdown and before the lock is freed, on every exit, INT and TERM too. The take runs in the background and
-# this tool waits on it, so INT and TERM act at once. After the grant it reads the booted list again, under the lock, and
-# reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is reused (the lease
-# goes back) or refused. A boot that fails shuts nothing down; a TERM during the boot still records, then shuts it down.
+# or not macOS) boots and runs nothing, prints one stderr line saying no lease, and exits 1. A reuse runs
+# `sim-lease take --device <role> --reuse <UDID> --pid $$` (owner, 2026-11-07 12:31 CST, page item 336): the lease of the slot
+# that boots that UDID, or slot `other` for a UDID outside SLOT_UDID, so `sim-lease status` names the user of every booted
+# phone. It skips the load bars, waits in queue order while another live pid holds that slot, and exits 1 at SIM_LEASE_WAIT
+# with no xcodebuild. A no-op take on a reuse runs on with no lease. The lease is given back after the shutdown and before
+# the lock, if still held, is freed, on every exit, INT and TERM too. A live holder renews its lease: every SIM_TEST_RENEW
+# seconds (default 60; text that is not whole seconds, or 0, counts as the default; it must stay below SIM_LEASE_MAX,
+# or a live run's lease expires) the watch loop runs `sim-lease renew --pid $$`, while the child or the hold runs, so SIM_LEASE_MAX counts the silence since the last renew and a lease never
+# expires under a live run (coordinator pick, 2026-11-07). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
+# this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
+# the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
+# reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. A boot that fails shuts nothing down; a TERM during the boot still
+# records, then shuts it down.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
-# <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
-# it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
+# <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lease is held for all of
+# it; the lock is not, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
 # or 124 when S passes first. With no CMD it waits for S (exit 0) or INT, TERM, HUP (exit 130); a session runs that in
 # the background so its MCP launch can use the device the live lease of this pid holds. The crash watch runs for the
 # whole hold. It cleans up as a test run does.
@@ -39,20 +56,34 @@
 # At 3 or more counted new files whose name starts with SpringBoard within SIM_TEST_WINDOW s (default 30), it stops the
 # child, shuts down the simulator only if it booted it, prints a line with crash, the count, the window and the UDID to
 # stderr, and exits 1. INT, TERM, HUP and QUIT stop the child too.
-# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
+# Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir, hinge (a Duo run, see Reset), and one sim-lease status read per scan (a Duo run), and one ps per lock poll that finds a holder; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
-# leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
-# the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
-# no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
+# processes (take, give) and one more simctl list; a reuse adds the same two sim-lease processes; a waiting take costs one sysctl and
+# one ps per poll there, and writes leases.json (see the header of sim-lease). While the child or the hold runs, one more
+# sim-lease process (renew) and one leases.json write per SIM_TEST_RENEW seconds. One folder listing per poll while the child runs (a waiting run also reads
+# the lock every poll). A hold's polls cost the same as a run's, the renew too, for at most 900 s, with the lease held. Itself, it writes
+# no file beyond the lock folder's pid file and, during a take, take.out (the take's output; it is written on every take); no log.
+# Reset: after the device is known (booted or reused) and before xcodebuild or the hold, every run reads the appearance
+# (`simctl ui UDID appearance`) and sets it to light when it is not. A Duo run also reads the fold (`hinge -d UDID get`) and
+# runs `hinge -d UDID close` unless the reading is the word `closed` or a number of 1.0 or less (an angle in degrees). One stderr line names each change. With hinge not on PATH, one stderr
+# line says the fold was not checked, and the run goes on. It never uninstalls and never erases. Cost: one simctl ui read
+# per run, and one more call when it sets; a Duo run adds one hinge get, and one hinge close when the fold is not closed.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
+# Run limit (coordinator pick, 2026-11-07; 1800 s is unmeasured): an xcodebuild child still running after SIM_TEST_MAX_RUN
+# seconds (default 1800; text that is not whole seconds counts as the default) is stopped. The run exits 124 and cleans up as
+# a hold does: it shuts down only what it booted, gives the lease, frees the lock. A hold has its own limit, --for.
 # The exit code is otherwise xcodebuild's.
 # macOS only. It runs under /bin/bash 3.2.
 CAP=2 # guard.SIM_BOOT_CAP: bash cannot import it; hooks/test_guard.py checks the two are equal
 POLL=${SIM_TEST_POLL:-2}
 LOCK_WAIT=${SIM_TEST_LOCK_WAIT:-300}
 WINDOW=${SIM_TEST_WINDOW:-30}
+MAX_RUN=${SIM_TEST_MAX_RUN:-1800}
+case $MAX_RUN in ''|*[!0-9]*) MAX_RUN=1800 ;; esac
+RENEW=${SIM_TEST_RENEW:-60}
+case $RENEW in ''|*[!0-9]*) RENEW=60 ;; esac
+[ $((10#$RENEW)) -ge 1 ] || RENEW=60
 CRASH_DIR=${SIM_TEST_CRASH_DIR:-$HOME/Library/Logs/DiagnosticReports}
 STATE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state
 LOCK=$STATE_DIR/sim-test.lock
@@ -104,20 +135,29 @@ record_boot() {
   python3 "$(dirname "$0")/../hooks/sim_boot_record.py" --record "$booted_by_me" >/dev/null 2>&1 || true
 }
 
-# Order: stop the child, shut down my simulator, then free the lock, so no run sees the lock free while a simulator of
-# mine is still booted. Later signals are ignored so the cleanup finishes.
+# release_lock: free the lock when this run still holds it. Only a lock whose pid file names this run is removed: a
+# take-over that wrote another pid keeps its lock.
+release_lock() {
+  if [ -n "$have_lock" ] && [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$$" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
+  have_lock=
+}
+
+# Order: stop the child, shut down my simulator, give the lease, then free the lock if this run still holds it. The lease
+# guards the slot from the pick until the give, so a run that reads the lock free still sees my device as leased.
+# Later signals are ignored so the cleanup finishes.
 cleanup() {
   trap '' INT TERM HUP QUIT
   if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then stop_child; fi
   if [ -n "$booted_by_me" ]; then record_boot; xcrun simctl shutdown "$booted_by_me"; fi
   [ -n "$have_lease" ] && "$(dirname "$0")/sim-lease" give --pid $$
-  if [ -n "$have_lock" ]; then rm -f "$LOCK/pid" "$LOCK/take.out"; rmdir "$LOCK" 2>/dev/null; fi
+  release_lock
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM HUP QUIT
 
 # take_over DEADPID: rename the lock folder to a name unique to this run. Only one rename wins. The winner removes it.
-# If the renamed folder held another pid (a new holder took the lock after the check), it is put back. DEADPID is empty
+# If the renamed folder held another pid (a new holder took the lock after the check), it is put back only while $LOCK is
+# absent; if another run has re-created $LOCK meanwhile, the folder taken is removed, never moved into it. DEADPID is empty
 # for a lock folder with no pid file. Returns 1 only when the rename failed and the lock is still there: the caller
 # then waits as for a live holder, so a rename that always fails cannot spin past SIM_TEST_LOCK_WAIT.
 takeover_n=0
@@ -126,7 +166,7 @@ take_over() {
   takeover_n=$((takeover_n + 1))
   if ! mv "$LOCK" "$dead" 2>/dev/null; then [ -e "$LOCK" ] && return 1; return 0; fi
   seen=$(cat "$dead/pid" 2>/dev/null)
-  if [ "$seen" != "$1" ]; then mv "$dead" "$LOCK" 2>/dev/null; return 0; fi
+  if [ "$seen" != "$1" ] && [ ! -e "$LOCK" ] && mv "$dead" "$LOCK" 2>/dev/null; then return 0; fi
   rm -f "$dead/pid" "$dead/take.out"
   rmdir "$dead"
 }
@@ -142,7 +182,7 @@ acquire_lock() {
     fi
     pid=$(cat "$LOCK/pid" 2>/dev/null)
     if [ -n "$pid" ]; then
-      kill -0 "$pid" 2>/dev/null || { take_over "$pid" && continue; }
+      ps -p "$pid" > /dev/null 2>&1 || { take_over "$pid" && continue; }
     elif [ -n "$(find "$LOCK" -prune -mmin +1 2>/dev/null)" ]; then
       take_over "" && continue
     fi
@@ -167,13 +207,37 @@ acquire_lock
 # scan: read the booted devices under the lock. Sets udid to the booted device of this role (reuse), else empty. Exits 1,
 # booting nothing, when the list cannot be read, when only the other phone kind is booted, or at the cap with no reuse.
 udid_of() { sed -n 's/^.* (\([0-9A-F-]\{36\}\))$/\1/p'; }
+# leased_by_others: the UDID of each live lease that another pid holds, one per line, read from `sim-lease status`.
+leased_by_others() {
+  local w1 lpid u rest
+  "$(dirname "$0")/sim-lease" status 2>/dev/null | while read -r w1 _ _ _ lpid _ _ _ u rest; do
+    [ "$w1" = lease ] && [ "$lpid" != "$$" ] && printf '%s\n' "$u"
+  done
+}
+# first_unleased LIST: the first line of LIST (booted devices, one per line) whose UDID no other pid's lease holds.
+first_unleased() {
+  local line u
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    u=$(printf '%s\n' "$line" | udid_of)
+    printf '%s\n' "$leased" | grep -Fxq "$u" || { printf '%s\n' "$line"; return 0; }
+  done <<< "$1"
+}
 scan() {
-  local listing duo_line pro_line mine other count
+  local listing duo_line pro_line mine other count leased duos
+  queued=
   listing=$(xcrun simctl list devices booted) || { echo "sim-test: simctl list failed; booted nothing, ran nothing." >&2; exit 1; }
   booted=$(printf '%s\n' "$listing" | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
   duo_line=$(printf '%s\n' "$booted" | grep 'iPhone Duo' | head -1)
   pro_line=$(printf '%s\n' "$booted" | grep iPhone | grep -v Duo | head -1)
-  if [ "$role" = duo ]; then mine=$duo_line other=$pro_line; else mine=$pro_line other=$duo_line; fi
+  if [ "$role" = duo ]; then
+    # A duo run reuses a booted Duo only when no other pid's live lease holds its slot (two Duo runs at once, decision
+    # sim-lease-tool). A leased one is left to its holder, and the run takes a fresh lease for the other slot.
+    leased=$(leased_by_others)
+    mine=$(first_unleased "$(printf '%s\n' "$booted" | grep 'iPhone Duo')") other=$pro_line
+  else
+    mine=$pro_line other=$duo_line
+  fi
   udid=$(printf '%s\n' "$mine" | udid_of)
   [ -n "$udid" ] && return 0
   if [ -n "$other" ]; then
@@ -181,6 +245,13 @@ scan() {
     exit 1
   fi
   count=$(printf '%s\n' "$booted" | grep -c .)
+  duos=$(printf '%s\n' "$booted" | grep -c 'iPhone Duo')
+  if [ "$role" = duo ] && [ "$count" -ge "$CAP" ] && [ "$duos" -eq "$count" ]; then
+    # Every booted device is a Duo and another pid's lease holds each one: the run queues for whichever frees first. The
+    # holder shuts its Duo down before it gives the lease, so the grant is followed by the re-scan, which boots it if it is down.
+    queued=$(printf '%s\n' "$booted" | udid_of)
+    return 0
+  fi
   if [ "$count" -ge "$CAP" ]; then
     echo "sim-test: $count simulators are already booted, the cap is $CAP:" >&2
     printf '%s\n' "$booted" | sed 's/^/  /' >&2
@@ -189,36 +260,95 @@ scan() {
   fi
 }
 
-scan
-if [ -z "$udid" ]; then
+# take_lease ARGS...: `sim-lease take --device <role> ARGS... --pid $$`; sets granted to its output. Exits 1 when the take is refused.
+take_lease() {
   have_lease=1 # set first: an INT or TERM during the take still gives the place back
   # The take runs in the background and this shell waits on it, so a TERM or INT runs the trap at once, not when the
   # take returns (up to SIM_LEASE_WAIT). The cleanup stops the take as the child. Its output goes to a file in the lock.
-  "$(dirname "$0")/sim-lease" take --device "$role" --udid --pid $$ > "$LOCK/take.out" &
+  "$(dirname "$0")/sim-lease" take --device "$role" "$@" --pid $$ > "$LOCK/take.out" &
   child=$!
   wait "$child"; rc=$?
   child=
   [ "$rc" -eq 0 ] || exit 1
   granted=$(cat "$LOCK/take.out")
+}
+
+scan
+if [ -n "$udid" ]; then
+  # A reuse leases the slot of the booted device (a UDID outside SLOT_UDID is slot other), so status names its user. The lease
+  # is held for the run and given back by the cleanup. A no-op lease (CI, not macOS) leaves the reuse running with none.
+  take_lease --reuse "$udid"
+else
+  # Every booted device is a Duo that another pid leases (queued, set by scan): one take waits in queue order for whichever
+  # Duo's slot frees first. Otherwise it is an own-boot take.
+  lease_args=(--udid)
+  for u in $queued; do lease_args+=(--reuse "$u"); done
+  take_lease "${lease_args[@]}"
   if [ -z "$granted" ] || [ "$granted" = none ]; then
     echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
     exit 1
   fi
   # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse, cross-role and
-  # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease goes back.
+  # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease just granted is kept.
   scan
-  if [ -n "$udid" ]; then
-    "$(dirname "$0")/sim-lease" give --pid $$
-    have_lease=
-  else
+  if [ -z "$udid" ]; then
     udid=$granted
     # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
     # device down. A failed boot clears the mark, so a device that was already booted is never shut down.
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
+  elif [ "$udid" != "$granted" ]; then
+    # The device found is of another slot than the lease just granted: give that lease back and take the lease of the slot
+    # that boots the device found, so `sim-lease status` names the device the run uses.
+    "$(dirname "$0")/sim-lease" give --pid $$
+    take_lease --reuse "$udid"
   fi
 fi
+# The device is up and the lease is held: free the Mac lock. The lease guards the slot until the shutdown and the give, so
+# a second Duo run goes on beside this one (decision sim-lease-tool). The cleanup frees the lock if an exit comes earlier.
+release_lock
+# reset_device: before xcodebuild or the hold, put the phone in the known posture: light appearance and, for a Duo, a closed
+# fold. A run stopped early, or the last holder, may have left it dark or open. It names each change on stderr and changes
+# nothing else: no uninstall, no erase. A failed read or set never stops the run. `hinge get` prints a fold angle, or the word
+# `closed` (the word is unchecked against the real binary: the skill names the verbs only). A reading of 1.0 or less, or the word, is closed;
+# anything else is closed again, and the line shows the old reading.
+# fold_is_closed READING: true for the word `closed`, or for a reading that parses as a number of 1.0 degrees or less (`hinge
+# get` prints the fold angle: 0.0 closed, 180.0 open). Any other reading, a sign or empty text included, is not closed.
+fold_is_closed() {
+  [ "$1" = closed ] && return 0
+  [[ $1 =~ ^([0-9]*)(\.([0-9]*))?$ ]] || return 1
+  local whole=${BASH_REMATCH[1]} frac=${BASH_REMATCH[3]}
+  [ -n "$whole$frac" ] || return 1
+  whole=${whole#"${whole%%[!0]*}"} # no leading zeros; empty means 0
+  [ -z "$whole" ] && return 0
+  [ "$whole" = 1 ] && [ -z "${frac//0/}" ]
+}
+reset_device() {
+  local cur
+  cur=$(xcrun simctl ui "$udid" appearance 2>/dev/null)
+  if [ "$cur" != light ]; then
+    if xcrun simctl ui "$udid" appearance light >/dev/null 2>&1; then
+      echo "sim-test: appearance ${cur:-unknown} -> light on $udid" >&2
+    else
+      echo "sim-test: could not set the appearance of $udid to light (read ${cur:-nothing})" >&2
+    fi
+  fi
+  [ "$role" = duo ] || return 0
+  if ! command -v hinge >/dev/null 2>&1; then
+    echo "sim-test: hinge is not on PATH, so the fold of $udid was not checked" >&2
+    return 0
+  fi
+  cur=$(hinge -d "$udid" get 2>/dev/null)
+  if ! fold_is_closed "$cur"; then
+    if hinge -d "$udid" close >/dev/null 2>&1; then
+      echo "sim-test: fold ${cur:-unknown} -> closed on $udid" >&2
+    else
+      echo "sim-test: could not close the fold of $udid (read ${cur:-nothing})" >&2
+    fi
+  fi
+}
+reset_device
 echo "sim-test: using $udid"
 diag=(-collect-test-diagnostics never)
 for arg in "$@"; do [ "$arg" = -collect-test-diagnostics ] && diag=(); done
@@ -240,9 +370,28 @@ else
   child=$!
 fi
 timed_out=
+run_start=$SECONDS
+last_renew=$SECONDS
+lease_lost=
 # The child ends the watch; a hold with no child ends it at its deadline.
 while [ -n "$hold$child" ]; do
   if [ -n "$child" ]; then kill -0 "$child" 2>/dev/null || break; fi
+  if [ $((SECONDS - last_renew)) -ge $((10#$RENEW)) ]; then
+    # A live holder stamps its lease again, so a lease past SIM_LEASE_MAX means a silent holder, not a long run.
+    last_renew=$SECONDS
+    "$(dirname "$0")/sim-lease" renew --pid $$ > /dev/null 2>&1
+    renew_rc=$?
+    if [ "$renew_rc" -eq 1 ] && [ -z "$lease_lost" ]; then
+      lease_lost=1
+      echo "sim-test: lease lost: sim-lease renew found no lease for pid $$ on $udid; another run may take the device." >&2
+    fi
+  fi
+  if [ -z "$hold" ] && [ $((SECONDS - run_start)) -ge "$MAX_RUN" ]; then
+    if [ -n "$booted_by_me" ]; then fate="shut down"; else fate="left running"; fi
+    echo "sim-test: run limit: xcodebuild still running after ${MAX_RUN}s on $udid; stopped it, $fate." >&2
+    stop_child
+    exit 124
+  fi
   if [ -n "$hold" ] && [ "$SECONDS" -ge "$hold_end" ]; then timed_out=1; break; fi
   for name in $(list_reports); do
     case $known in *"|$name|"*) continue ;; esac
