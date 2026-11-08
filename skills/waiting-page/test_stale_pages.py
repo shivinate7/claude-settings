@@ -45,10 +45,14 @@ NULL_BODY = '\n<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo
 EMPTY_BODIES = ("", "\n", " \t\r\n ")
 
 
+def with_block(page, body):
+    """`page` with its roadmap block's text set to `body`, and nothing else changed."""
+    return ROADMAP_RE.sub(lambda m: OPEN + body + CLOSE, page, count=1)
+
+
 def with_both_blocks(page, body=ROADMAP_BODY):
     """`page` with its designData and its roadmap block filled (`body` is the block's text), as a live page holds them."""
-    page = page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1)
-    return ROADMAP_RE.sub(lambda m: OPEN + body + CLOSE, page, count=1)
+    return with_block(page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), body)
 
 
 def empty_block_page(body):
@@ -70,6 +74,7 @@ def tearDownModule():
 # Fixtures, all derived from page.html at run time. A live page holds backslash-u escapes in its mockups.
 BLOCK = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 ALTERED = PAGE.replace("<style>", "<style>/* altered */", 1)  # differs outside designData, the roadmap block and <title> text (shiv ruling, Oct 30 14:33 CDT)
+NULLED_PAGE = with_block(PAGE, NULL_BODY)  # page.html with its roadmap block baked with no record branch: not empty, so no line
 BS = chr(92)  # one backslash: a live page's mockups hold backslash-u-003c escapes
 STALE_BODY = '{"a": "' + BS + 'u003cp>mock' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
 MOCK_BODY = '{"a": "' + BS + 'u003cp>mockup' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
@@ -198,8 +203,8 @@ class Stale(unittest.TestCase):
         self.assertIn("1 current, 1 behind, 1 unknown, 0 not-found", out)
 
     def test_page_with_own_mockups_is_current(self):
-        mock = PAGE.replace('id="designData">', 'id="designData">{"a": "\\u003cp>mockup\\u003c/p>"}', 1)
-        self.assertNotEqual(mock, PAGE)
+        mock = NULLED_PAGE.replace('id="designData">', 'id="designData">{"a": "\\u003cp>mockup\\u003c/p>"}', 1)
+        self.assertNotEqual(mock, NULLED_PAGE)
         root = self.repo("mocked", "DDD")
         self.fetch("DDD", mock)
         code, out = self.run_cmd(root)
@@ -209,8 +214,8 @@ class Stale(unittest.TestCase):
     def test_a_page_that_differs_only_in_its_title_is_current_in_both_modes(self):
         # The verdict ignores the <title> text, so a title alone never makes a page behind. The title holds a lone
         # quote and comment openers; every other byte is page.html's.
-        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", PAGE, count=1)
-        self.assertNotEqual(titled, PAGE)
+        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", NULLED_PAGE, count=1)
+        self.assertNotEqual(titled, NULLED_PAGE)
         with self.subTest("batch"):
             root = self.repo("titled", "KKK")
             self.fetch("KKK", titled)
@@ -282,13 +287,14 @@ class Stale(unittest.TestCase):
                 self.assertEqual(code, 1, out)
                 self.assertIn("behind: changed", out)
 
-    def carry_into_template(self, live):
-        """page.html with the live page's blocks carried in (splice.py --carry), as the writer republishes it."""
+    def carry_into_template(self, live, template=None):
+        """page.html (or `template`, a text) with the live page's blocks carried in (splice.py --carry), as the writer republishes it."""
         live_path = os.path.join(self.tmp.name, "live.html")
         carried_path = os.path.join(self.tmp.name, "carried.html")
         with open(live_path, "w", encoding="utf-8", newline="") as f:
             f.write(live)
-        r = subprocess.run([sys.executable, SPLICE, "--page", os.path.join(HERE, "page.html"), "--carry", live_path,
+        template_path = os.path.join(HERE, "page.html") if template is None else write_text(os.path.join(self.tmp.name, "template.html"), template)
+        r = subprocess.run([sys.executable, SPLICE, "--page", template_path, "--carry", live_path,
                             "--out", carried_path], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         with open(carried_path, encoding="utf-8", newline="") as f:
@@ -299,9 +305,9 @@ class Stale(unittest.TestCase):
         self.live_with_both_blocks()  # the template has the block to keep
         old = ROADMAP_RE.sub("", PAGE.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), count=1)
         self.assertNotEqual(DESIGN_BLOCK.findall(old), DESIGN_BLOCK.findall(PAGE))
-        carried = self.carry_into_template(old)
+        carried = self.carry_into_template(old, template=NULLED_PAGE)
         self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(old), "the carry lost the live designData")
-        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), carried), "the template's empty roadmap block is gone")
+        self.assertEqual(ROADMAP_RE.findall(carried), ROADMAP_RE.findall(NULLED_PAGE), "the carry lost the template's roadmap block")
         self.fetch("JJJ", carried)
         code, out = self.run_cmd(self.repo("before", "JJJ"))
         self.assertEqual(code, 0, out)
@@ -584,7 +590,7 @@ class Stale(unittest.TestCase):
         self.assertEqual(out, set_body(PAGE, DESIGN_BODY), "OUT is not page.html with the live designData")
 
     def test_current_page_with_mockups_is_current_and_check_mode_writes_nothing(self):
-        mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(PAGE, MOCK_BODY))
+        mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(NULLED_PAGE, MOCK_BODY))
         before = self.snapshot()
         r = self.page_run(mocked, "--main", TEMPLATE)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -614,7 +620,7 @@ class Stale(unittest.TestCase):
                 self.assert_only_new(before, set())
 
     def test_only_origin_main_proves_current_or_behind(self):
-        clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
+        clone = self.make_clone("clone", {"skills/waiting-page/page.html": NULLED_PAGE, "CLAUDE.md": "# claude-settings\n"})
         home = os.path.join(self.tmp.name, "home")
         claude = os.path.join(home, ".claude")
         installed = os.path.join(claude, "skills", "waiting-page")
@@ -628,7 +634,7 @@ class Stale(unittest.TestCase):
         link_repo_dirs(claude)
         pointer = write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
         script = os.path.join(installed, "stale_pages.py")
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)  # equals origin/main
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)  # equals origin/main
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)  # equals the installed copy
         with self.subTest("pointer: origin/main page is current"):
             self.assert_origin_run(same, home, script, 0, "current")
@@ -649,7 +655,7 @@ class Stale(unittest.TestCase):
             script_text = f.read()
         with open(SPLICE, encoding="utf-8") as f:
             splice_text = f.read()
-        clone = self.make_clone("own", {"skills/waiting-page/page.html": PAGE,
+        clone = self.make_clone("own", {"skills/waiting-page/page.html": NULLED_PAGE,
                                         "skills/waiting-page/stale_pages.py": script_text,
                                         "skills/waiting-page/splice.py": splice_text})
         home = os.path.join(self.tmp.name, "home")
@@ -657,7 +663,7 @@ class Stale(unittest.TestCase):
         link_repo_dirs(os.path.join(home, ".claude"))
         script = os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
         os.symlink(os.path.join(clone, "skills", "waiting-page", "stale_pages.py"), script)
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)
         with self.subTest("origin/main page is current"):
             self.assert_origin_run(same, home, script, 0, "current")
@@ -679,13 +685,13 @@ class Stale(unittest.TestCase):
 
     def test_host_wrapper_around_the_template_is_current_in_both_modes(self):
         with self.subTest("single page"):
-            page = write_text(os.path.join(self.fetched, "wrapped.html"), host_wrapped(PAGE))
+            page = write_text(os.path.join(self.fetched, "wrapped.html"), host_wrapped(NULLED_PAGE))
             r = self.page_run(page, "--main", TEMPLATE)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(self.verdict(r)[0], "current")
         with self.subTest("batch"):
             root = self.repo("wrapped", "HHH")
-            self.fetch("HHH", host_wrapped(PAGE))
+            self.fetch("HHH", host_wrapped(NULLED_PAGE))
             code, out = self.run_cmd(root)
             self.assertEqual(code, 0, out)
             self.assertIn("current: wrapped", out)
@@ -786,7 +792,7 @@ class Stale(unittest.TestCase):
         self.assert_unknown_run(same, home, script)
 
     def test_non_utf8_pointer_file_gives_no_traceback(self):
-        clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
+        clone = self.make_clone("clone", {"skills/waiting-page/page.html": NULLED_PAGE, "CLAUDE.md": "# claude-settings\n"})
         home = os.path.join(self.tmp.name, "home")
         claude = os.path.join(home, ".claude")
         installed = os.path.join(claude, "skills", "waiting-page")
@@ -800,7 +806,7 @@ class Stale(unittest.TestCase):
         pointer = bytes([255, 254, 32]) + b"caf" + bytes([233, 10]) + b"@" + os.fsencode(clone) + b"/CLAUDE.md" + bytes([10])
         with open(os.path.join(claude, "CLAUDE.md"), "wb") as f:
             f.write(pointer)
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)
         r = self.page_run(same, home=home, script=script)
         self.assertIn(r.returncode, (0, 1, 2), r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
@@ -809,7 +815,7 @@ class Stale(unittest.TestCase):
 
     def test_check_mode_writes_no_file_and_write_mode_writes_exactly_one(self):
         stale = write_text(os.path.join(self.fetched, "cost.html"), set_body(ALTERED, STALE_BODY))
-        mocked = write_text(os.path.join(self.fetched, "cost-current.html"), set_body(PAGE, MOCK_BODY))
+        mocked = write_text(os.path.join(self.fetched, "cost-current.html"), set_body(NULLED_PAGE, MOCK_BODY))
         before = self.snapshot()
         with mock.patch.object(subprocess, "run", wraps=subprocess.run) as spy:
             self.assertEqual(self.page_run(stale, "--main", TEMPLATE).returncode, 1)
@@ -863,8 +869,8 @@ class Stale(unittest.TestCase):
 
     def current_and_behind(self):
         """The two fetched pages the --items cases run on: page.html as it is, and the stale page the behind cases use."""
-        return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
-                write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
+        return (write_text(os.path.join(self.fetched, "current.html"), NULLED_PAGE),
+                write_text(os.path.join(self.fetched, "behind.html"), set_body(with_block(ALTERED, NULL_BODY), STALE_BODY)))
 
     def items_run(self, page, items, env):
         return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
