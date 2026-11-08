@@ -3858,6 +3858,50 @@ def case_once_home_does_not_pass_a_standing_grant_however_worded():
     check("one-shot control, approved, merge PR 12: a once: home passes", out == [], out)
 
 
+STANDING_ONCE_TEXT = "approved, always merge green PRs"
+
+
+def case_standing_grant_reason_names_the_once_bar():
+    """When a standing word bars a `once:` home, the reason says so, and names the homes that fit a standing grant:
+    a ruling home or the page."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-green-prs"
+    out = mod.problems(mod.parse(render_block(STANDING_ONCE_TEXT, items=(line,))), "")
+    reason = next((s for s in out if "has no home" in s), "")
+    check("standing once bar: the reason says a standing word bars the once: home",
+          "standing" in reason.lower() and "once:" in reason, reason)
+    check("standing once bar: the reason names a ruling home and the page for a standing grant",
+          "[ruling]" in reason and "page" in reason, reason)
+    check("standing once bar: the reason does not offer the once: home itself",
+          bool(reason) and "-> once:" not in reason, reason)
+
+
+ONE_SHOT_TEXT = "approved, merge PR 12"
+
+
+def case_one_shot_grant_reason_offers_the_once_home():
+    """An unhomed one-shot grant gets the reason that offers `once:<act>`, and no standing word bars it. The barred
+    reason runs only when a standing word bars the home, so a guard that bars every grant fails here."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT)), "")
+    reason = next((s for s in out if "has no home" in s), "")
+    check("one-shot control, approved, merge PR 12: the reason offers the -> once: home",
+          "-> once:" in reason, reason)
+    check("one-shot control, approved, merge PR 12: no standing word bars the once: home",
+          bool(reason) and "bars" not in reason and "standing" not in reason.lower(), reason)
+
+
+def case_standing_grant_without_a_once_item_keeps_today_reason():
+    """Standing text with no once: item gets the reason the guard gives today. This pins that reason and does not
+    judge it."""
+    mod = guard_module()
+    blocks = mod.parse(render_block(STANDING_ONCE_TEXT))
+    out = mod.problems(blocks, "")
+    want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
+        blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
+    check("standing control, no once: item: the reason is today's, pinned", want in out, out)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4034,6 +4078,9 @@ CASES = (
     case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
     case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
     case_once_home_does_not_pass_a_standing_grant_however_worded,
+    case_standing_grant_reason_names_the_once_bar,
+    case_one_shot_grant_reason_offers_the_once_home,
+    case_standing_grant_without_a_once_item_keeps_today_reason,
 )
 
 

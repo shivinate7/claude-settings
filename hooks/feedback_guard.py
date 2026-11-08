@@ -218,6 +218,7 @@ EXPORT_REASON = (
     " verdict is `same` also clears this.")
 EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
 ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
+STANDING_HOMES = "a [ruling] item whose home is a tracked file, or a [page] item `page:<n>` with its send"
 GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
                " [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a one-shot"
                " grant" % (NOT_A_GRANT, ONCE_HOME))
@@ -845,8 +846,13 @@ def grant_problem(b, text, items):
         if it[1].startswith("[ruling]") or (it[1].startswith("[page]") and not it[3]) or (
                 it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT) or once_home(it, text):
             return None
-    return ("the message at %s (%s) holds a grant word and has no home for it: add %s"
-            % (b["stamp"], text.split("\n")[0][:40], GRANT_HOMES))
+    head = text.split("\n")[0][:40]
+    barred = any(it is not None and it[2] and it[1].startswith("[note]") and home_word(it[1]).startswith(ONCE_HOME)
+                 for it in items) and STANDING.search(unfenced(text)) is not None
+    if barred:
+        return ("the message at %s (%s) holds a grant word and has no home for it: a standing word bars a %s home,"
+                " so add %s" % (b["stamp"], head, ONCE_HOME, STANDING_HOMES))
+    return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
 def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
