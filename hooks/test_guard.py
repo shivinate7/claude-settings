@@ -28272,6 +28272,41 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round r
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Round 2 — FAIL-safe paths stay closed. line",
           "Check the floor fix.\nRound 2 — FAIL-safe paths stay closed.\nFiles: hooks/guard.py.")
 
+# A verdict line can carry a label before its word: a builder label (`Done:`), a quote marker (`> `), a `Prior report:`,
+# `Prior review:` or `Context:` label, a round label with a nested label, or a `Verdict` word before a dash. Each refuse
+# row is one such line on its own. The allow rows are the same words in prose, which must pass. The pins are refused
+# today and must stay refused.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: FAIL line, round 1 of 3 on haiku",
+           "Check the floor fix.\nDone: FAIL, round 1 of 3, haiku\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a quoted > Done: FAIL line",
+           "Check the floor fix.\n> Done: FAIL, round 1 of 3\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior report: FAIL line",
+           "Check the floor fix.\nPrior report: FAIL, round 1 of 3\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior review: verdict: FAIL line",
+           "Check the floor fix.\nPrior review: verdict: FAIL, 3 findings\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Context: prior verdict: FAIL line",
+           "Check the floor fix.\nContext: prior verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1: reviewer verdict: FAIL line",
+           "Check the floor fix.\nRound 1: reviewer verdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict — FAIL line, em dash",
+           "Check the floor fix.\nPrior verdict — FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict - FAIL line, hyphen",
+           "Check the floor fix.\nVerdict - FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 verdict — FAIL line, em dash",
+           "Check the floor fix.\nRound 1 verdict — FAIL\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: line that asks for a verdict, PASS or FAIL",
+          "Check the floor fix.\nDone: read the diff, then give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Context: line saying the prior verdict is in the PR thread",
+          "Check the floor fix.\nContext: the prior verdict is in the PR thread.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Verdict — line that asks for one word, PASS or FAIL",
+          "Check the floor fix.\nVerdict — one word, PASS or FAIL.\nFiles: hooks/guard.py.")
+# The pins. The round-2 pin runs on sonnet, where the step-up floor allows the round, so only this rule refuses it. The
+# round-1 pin uses an en dash (U+2013), written as an escape so the dash is visible in the source.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 2 of 3 — FAIL line, em dash, pinned on sonnet",
+           "Check the floor fix.\nRound 2 of 3 — FAIL\nFiles: hooks/guard.py.", model="sonnet")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 – FAIL line, en dash, pinned",
+           "Check the floor fix.\nRound 1 – FAIL\nFiles: hooks/guard.py.")
+
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
              "model": "haiku"}
