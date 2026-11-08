@@ -127,7 +127,7 @@ PAST_RULING_ITEM = (
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 30 s.
 # Measured 10-12 s a run on a 235 KB prompt in the cloud; the Mac's load is unmeasured. The limit plus the
 # 10 s git read (question_form.STEP_GIT_TIMEOUT) must fit the Stop hook timeout in settings.json. The guard.log
-# past-ruling-run lines are the measure; reader: guard_log_report.py --rule past-ruling-run.
+# past-ruling-run lines are the measure; reader: guard_log_report.py --between START END --rule past-ruling-run.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 30
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (

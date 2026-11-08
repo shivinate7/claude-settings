@@ -1806,7 +1806,7 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
+# Cost: one git process and one Sonnet call (30 s) on a Stop whose reply asks something; none on any other Stop.
 RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
 UNVETTED_REASON = owner_line(
     "Unvetted guard (rule past-ruling)",
@@ -1920,7 +1920,8 @@ def past_ruling_problem(asked, cwd):
         result = "timeout" if error == decision_watch.MODEL_TIMEOUT_ERROR else "error"
     else:
         result = "refuse" if verdict.get("ok") is False else "ok"
-    # One guard.log line per model run, whatever its outcome. Reader: guard_log_report.py --rule past-ruling-run.
+    # One guard.log line per model run, whatever its outcome. Reader: guard_log_report.py
+    # --between START END --rule past-ruling-run. The same id is RUN_RULE in lint/guard_log_report.py.
     import guard_core  # the one guard.log writer
     guard_core.record("Stop", "noted", PAST_RULING_RUN_RULE, "ms=%d chars=%d cands=%d result=%s"
                       % (elapsed_ms, len(prompt), len(candidates), result))

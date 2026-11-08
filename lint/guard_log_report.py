@@ -39,7 +39,7 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BRAKE_RULE = "load-brake"
-RUN_RULE = "past-ruling-run"  # lint/report_guard.py writes one line per past-ruling model run
+RUN_RULE = "past-ruling-run"  # the same id as PAST_RULING_RUN_RULE in lint/report_guard.py, which writes one line per run
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
