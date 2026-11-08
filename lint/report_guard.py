@@ -1550,7 +1550,9 @@ CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
 # The past-ruling guard's own remedy says why its check could not run. A line or a sentence that starts with its label is
 # that form; the guard lets the label follow a question on the same line.
 CANNOT_UNVETTED_RE = re.compile(r"^(?:[-*+]|\d+[.)])?\s*(?:\*\*)?Unvetted:", re.I)
-CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t|was\s+not)", re.I)  # a phrase in the past tense reports a failure
+# A phrase in the past tense reports a failure: could not, wasn't able, or any phrase right after was or were ("was unable to").
+CANNOT_PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
+CANNOT_WAS_RE = re.compile(r"\b(?:was|were)(?:\s+(?:still|also|just|really|now))?\s*$", re.I)
 CANNOT_WINDOW = 6  # words after the phrase, in its clause, that may name the act
 CANNOT_ADVERB_RE = re.compile(r"^(?:(?:even|yet|currently|actually|really|still|also|just|now|directly)\s+)+", re.I)
 _PR = r"(?:PRs?|pull[- ]requests?)"
@@ -1659,7 +1661,7 @@ def _claim(body, mask, hit, floor):
         return None
     window = " ".join(words[:CANNOT_WINDOW])
     act = _window_act(window, before + " " + after)
-    return (act, window, bool(CANNOT_PAST_RE.match(hit.group()))) if act else None
+    return (act, window, bool(CANNOT_PAST_RE.match(hit.group()) or CANNOT_WAS_RE.search(before))) if act else None
 
 
 def _report_label_end(body):
