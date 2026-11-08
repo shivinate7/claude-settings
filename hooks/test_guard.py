@@ -13567,6 +13567,47 @@ sh("builder-test: workflow shell control, test-author sed -i deletes a pytest li
 sh("builder-test: workflow shell control, main session sed -i deletes a pytest line from checks.yml, is allowed",
    "sed -i '/pytest/d' .github/workflows/checks.yml", "allow", cwd=GITMAIN)
 
+# ---- a workflow path that a glob names, and a writer the shell reader does not know. A glob names every file
+# it matches, so `.github/workflows/*` and `.github/work*/checks.yml` write the workflow files, and the Edit-tool
+# reason applies. `yq -i`, `dd of=` and `rsync` write their target too. The controls only read a workflow file,
+# or write a doc or a folder outside .github/workflows, so they keep their verdicts.
+WORKFLOW_GLOB_REFUSED = (
+    ("sed -i over every file of .github/workflows/*", "sed -i s/a/b/ .github/workflows/*"),
+    ("sed -i over the c* files of .github/workflows", "sed -i s/a/b/ .github/workflows/c*"),
+    ("sed -i over checks.yml in a folder glob .github/work*", "sed -i s/a/b/ .github/work*/checks.yml"),
+    ("touch of a new workflow file", "touch .github/workflows/new.yml"),
+    ("yq -i edits checks.yml in place", "yq -i '.on = \"push\"' .github/workflows/checks.yml"),
+    ("dd of= writes checks.yml", "dd of=.github/workflows/checks.yml if=/tmp/x"),
+    ("rsync copies a file into .github/workflows/", "rsync /tmp/x.yml .github/workflows/"),
+)
+for _name, _command in WORKFLOW_GLOB_REFUSED:
+    sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries="Edit tool", **dict(B, cwd=WFGIT))
+# The scanner cases for the glob form (building-scanner-respects-strings): a lone quote in echo text, a comment
+# opener inside a quoted script, and a quoted string that runs on to a second line, each before a glob write.
+WORKFLOW_GLOB_SCANNER_REFUSED = (
+    ("scanner: a lone quote in echo text before a glob sed -i", "echo \"don't\"; sed -i s/a/b/ .github/workflows/*"),
+    ("scanner: a # in a quoted script before a glob sed -i", "sed -i 's/# note/x/' .github/workflows/*"),
+    ("scanner: a quoted string over two lines, its second a # line, before a glob sed -i",
+     "echo \"one\n# two\"; sed -i s/a/b/ .github/workflows/*"),
+)
+for _name, _command in WORKFLOW_GLOB_SCANNER_REFUSED:
+    sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries="Edit tool", **dict(B, cwd=WFGIT))
+WORKFLOW_GLOB_ALLOWED = (
+    ("ls of the workflow folder glob", "ls .github/workflows/*"),
+    ("cat of the *.yml glob", "cat .github/workflows/*.yml"),
+    ("grep over a glob of the workflow folders", "grep -l pytest .github/work*/*.yml"),
+    ("sed -i over a glob of docs", "sed -i s/a/b/ docs/*.md"),
+    ("touch of a new doc", "touch docs/new.md"),
+    ("rsync out of .github/workflows/", "rsync .github/workflows/ /tmp/wf/"),
+)
+for _name, _command in WORKFLOW_GLOB_ALLOWED:
+    sh("builder-test: workflow shell control, %s, is allowed" % _name, _command, "allow", **dict(B, cwd=WFGIT))
+# A test-author's touch of a new workflow file keeps its verdict: a test-author may add a test-run step.
+sh("builder-test: workflow shell control, test-author touch of a new workflow file, keeps its verdict",
+   "touch .github/workflows/new.yml", "allow", **A)
+
 # ---- a `.` or `./` root in a checkout whose root holds a tests folder. GITMAIN holds none (its `.`
 # case above stays allowed), so these cases get their own checkout, built on first use.
 DOTROOT = os.path.join(ROOT, "dotroot")
