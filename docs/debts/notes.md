@@ -14,7 +14,6 @@
 - ask-alone-sl-chdir-refuses: sl, chdir and Push-Location are not harmless leads, so a chain starting with them over-refuses; owner ruling names only Set-Location (hooks/guard.py harmless_lead)
 - ask-alone-tail-args-unchecked: echo and Write-Host tail arguments are not checked, so a PowerShell (...) subexpression tail counts harmless and asks alone (hooks/guard.py)
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
-- ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo. merge_check sets nothing_is_green from has_workflows(cwd), the caller's checkout, for that merge and for mcp__github__merge_pull_request. A cross-repo merge can read green when the caller has no workflows. It can be refused when the caller has workflows and the target has none (hooks/guard_merge.py merge_check)
 - bare-merge-skips-host-merge-tool: merge-checks guards mcp__github__merge_pull_request, and lint/test_settings_matcher.py keeps its name in the guard matcher; the gap left is that a merge-tool repo gets no bare-merge ask for it (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
