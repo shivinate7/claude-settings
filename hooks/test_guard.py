@@ -22517,6 +22517,32 @@ _relesc_add("other-checkout: heredoc replay fed script: x.bash run by name with 
             "deny", RELESC_FED_NAME, "home", rule="other-checkout")
 
 
+# A kept body whose run names a path the guard cannot resolve (a quoted `$` word, a bare variable, a glob, or a
+# variable inside a quoted path) keeps every body, as main does. No plain word of the kept body is `helper.sh`, so
+# nothing names the helper and its body is dropped unless the guard keeps it for the unresolved run.
+def _kept_unresolved_run(run_line):
+    """A heredoc helper.sh that echoes to ../other/f, then a heredoc run.sh whose body is RUN_LINE, then bash run.sh."""
+    return "\n".join([
+        "cat > helper.sh <<'EOF'",
+        "echo hi > ../other/f",
+        "EOF",
+        "cat > run.sh <<'EOF'",
+        run_line,
+        "EOF",
+        "bash run.sh",
+    ])
+
+
+for _run in ('bash "$PWD/helper.sh"', "bash $f", "bash h*.sh", 'sh ./"$name"', 'source "$dir/helper.sh"'):
+    _relesc_add("other-checkout: heredoc replay kept body unresolved: a heredoc helper.sh that echoes to ../other/f, "
+                "then a heredoc run.sh whose body is %s, then bash run.sh, is refused" % _run,
+                "deny", _kept_unresolved_run(_run), "home", rule="other-checkout")
+# Control: a kept body that runs no script and only writes text stays allowed.
+_relesc_add("other-checkout: heredoc replay kept body control: a heredoc run.sh that runs no script and only writes "
+            "out.txt, then bash run.sh, is allowed",
+            "allow", "\n".join(["cat > run.sh <<'EOF'", "echo done > out.txt", "EOF", "bash run.sh"]), "home")
+
+
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
 # (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
 # argument. The cd rows and the frozen row run from the root, and the mirror swaps the two. Each other folder holds
