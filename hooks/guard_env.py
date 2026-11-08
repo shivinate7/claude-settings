@@ -88,6 +88,7 @@ ENV_FILE_LONG = ("--file", "--from-file")
 ENV_VALUE_LONG = (
     "--max-count", "--context", "--after-context", "--before-context", "--include", "--exclude",
     "--exclude-dir", "--exclude-from", "--glob", "--max-depth", "--max-filesize", "--type",
+    "--file-search-regex",
 )
 # The value of these flags is a glob that EXCLUDES files, so it reads nothing and is no path.
 # `--include`, `-g`, `--glob` and `--exclude-from` are not here: each names a file or a file of
@@ -103,9 +104,9 @@ ENV_SCRIPT_VALUE_SHORT = "Fv"
 # rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. The word
 # after rg `-t` or `-T` is a type name and no path, so it is skipped.
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
-# `ag -G` takes a regex that picks the files to search, so its value is a path glob, judged as a
-# path. In grep `-G` is a plain switch, so the letter is not shared.
-ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
+# `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns. Each
+# value is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
 ENV_TYPE_SHORT_BY_COMMAND = {"rg": "tT"}
 # `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
 # Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
@@ -116,15 +117,11 @@ ENV_PROGRAM_COMMANDS = ("jq", "gojq", "yq")
 # takes a value, a module directory, which is judged as a path. yq has no short value letter here.
 ENV_PROGRAM_VALUE_SHORT = {"jq": "L", "gojq": "L", "yq": ""}
 ENV_YQ_SUBCOMMANDS = ("e", "eval", "ea", "eval-all")
-# `cd`, `pushd` and `mkdir` take a folder. They read no contents, so an env-prefixed folder name
-# (`.envs`) is no read. `git add` and `cat` stay refused: they cannot tell a folder from a file.
-# Not merged into ENV_EXISTENCE_COMMANDS, which ENV_RELAY_SAFE reuses.
-ENV_FOLDER_COMMANDS = ("cd", "pushd", "mkdir")
-# `cd` and `pushd` change the folder the rest of the command reads from. After a move into an
-# env-prefixed folder, only these commands may follow in the same command: a read there names the
-# contents of that folder. The folder is kept between calls, so a lone move stays allowed.
-ENV_FOLDER_MOVES = ("cd", "pushd")
-ENV_AFTER_MOVE_SAFE = ENV_FOLDER_COMMANDS + ENV_EXISTENCE_COMMANDS + ENV_TEXT_COMMANDS
+# `mkdir` makes a folder and reads no contents, so an env-prefixed folder name (`.envs`) is no read.
+# `cd` and `pushd` stay refused: the shell keeps its folder between calls, so a later read in that
+# folder cannot be tied to the move. `git add` and `cat` stay refused: they cannot tell a folder
+# from a file. Not merged into ENV_EXISTENCE_COMMANDS, which ENV_RELAY_SAFE reuses.
+ENV_FOLDER_COMMANDS = ("mkdir",)
 
 # The message or body of a commit or a pull request is text. Its value is blanked before the words
 # are read, so an env name in prose reads no contents. A substitution in the value is cut out
@@ -411,8 +408,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
         # The command itself is last. Its `echo` or `printf` prints to stdout or a file, and an env
         # name among the arguments is text. A substitution's output is an ARGUMENT of the command
         # around it, so only a message value may treat it as text.
-        refusal = _env_flat(text, in_message or index == len(texts) - 1,
-                            index == len(texts) - 1 and len(texts) > 1)
+        refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
     return _env_relay(texts)
@@ -662,13 +658,8 @@ def _env_relay(texts):
     return "", ""
 
 
-def _env_flat(cmd: str, text_ok: bool = False, substituted: bool = False):
-    """The segment rules over one text whose substitutions are already cut out.
-
-    `substituted` is set for the command text when substitutions were cut out of it. They cannot be
-    placed before or after a folder move, so a move into an env-prefixed folder is refused then.
-    """
-    moved = ""
+def _env_flat(cmd: str, text_ok: bool = False):
+    """The segment rules over one text whose substitutions are already cut out."""
     ends = []
     pieces = split_segments(cmd, ends)
     for piece, end in zip(pieces, ends):
@@ -677,10 +668,6 @@ def _env_flat(cmd: str, text_ok: bool = False, substituted: bool = False):
             words, position, command = _env_words(segment)
             if not words:
                 continue
-            if moved and command not in ENV_AFTER_MOVE_SAFE:
-                return (ENV_CONTENTS_REASON,
-                        "'%s' would read from the folder '%s' that was just entered" % (
-                            command or "this command", moved))
             # A segment that pipes onward hands its output to another command, which may read it
             # as a path. Only its stdout to the terminal or to a file keeps the text allowance.
             piped = end == "|" and number == len(parts) - 1
@@ -736,12 +723,7 @@ def _env_flat(cmd: str, text_ok: bool = False, substituted: bool = False):
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
                 if command in ENV_FOLDER_COMMANDS:
-                    if command in ENV_FOLDER_MOVES:
-                        if substituted:
-                            return (ENV_CONTENTS_REASON,
-                                    "a command may read from the folder '%s' that is entered" % named)
-                        moved = named
-                    continue  # a folder is made or entered, and none of it is read
+                    continue  # a folder is made, and none of it is read
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
                         "%s would read, write or commit the contents of '%s'" % (actor, named))
