@@ -7,11 +7,12 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import local_time  # noqa: E402  the one home of the Central clock and its DST rule
 USAGE = "usage: now-central [--full | --iso]"
-FORMS = {"": local_time.central_hhmm, "--full": local_time.central_full, "--iso": local_time.central_iso}
+FORMS = {"--full": local_time.central_full, "--iso": local_time.central_iso}
 def main(argv):
     if len(argv) > 1 or (argv and argv[0] not in FORMS):
         print(USAGE, file=sys.stderr); return 2
-    print(FORMS[argv[0] if argv else ""](local_time.clock()))
+    form = FORMS[argv[0]] if argv else local_time.central_hhmm
+    print(form(local_time.clock()))
     return 0
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
