@@ -15,13 +15,16 @@ attribute (`question_form.page_item_hit`, for one). A call that resolves to no h
 the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
 Each check gets COUNT seeded random command strings per env shape (one stream per check and shape, seed
-SEED), built from shell and PowerShell characters, digits and fragments, plus fixed edge inputs. Fragments hold
-CONFIG_TOKEN where the config dir's settings path goes, and run_checks swaps in the run folder when it hands an
-input to a check, so the drawn text is the same on every run. A share of the inputs opens with a kill of one
-pid (`kill <pid>` or `kill -9 <pid>`, the pid 0, 1, -1 or random digits), the act that reaches pid_is_owned. A share
-of the payloads holds a well-formed decision item in `data`, and another share holds a workflow step (continue-on-error)
-ahead of the text in `content` and `new_string`, with `old_string` empty: the step rides on every tool, not only a Write
-or an Edit. Each input carries one tool: two of every three are Bash or PowerShell, the others go round the rest.
+SEED), built from shell and PowerShell characters, digits and fragments, plus fixed edge inputs. The fragments
+include the real command lines in COMMANDS (grep, sed, rg, cp, ln, python, npm, pkill, killall, a git commit
+heredoc), each after a separator, and bare EOF lines. Fragments hold CONFIG_TOKEN where the config dir's settings
+path goes, and run_checks swaps in the run folder when it hands an input to a check, so the drawn text is the same on
+every run. A share of the inputs opens with a kill of one pid (`kill <pid>` or `kill -9 <pid>`, the pid 0, 1, -1 or
+random digits), the act that reaches pid_is_owned, and another share opens with a command from COMMANDS, so a direct
+check reads it in command position. A share of the payloads holds a well-formed decision item in `data`, and another
+share holds a workflow step (continue-on-error) ahead of the text in `content` and `new_string`, with `old_string`
+empty: the step rides on every tool, not only a Write or an Edit. Each input carries one tool: two of every three are
+Bash or PowerShell, the others go round the rest.
 A payload carries the keys of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
 permissionDecision on stdout. Any other exit, and any raise, is a failure.
@@ -37,9 +40,9 @@ Not fuzzed: the parsers of git, gh and ps output. The parent walk of pid_is_owne
 answers, so the walk returns 0 at once and its loop over each parent's name never runs). The rest of
 in_own_agent_worktree past its first line (ps never answers, so it returns False at once, and its cwd read and
 transcript-folder check never run). The rest of foreign_pid_kill past pid_is_owned: _under_init, holds_session_tag
-and the refusal after them (pid_is_owned never says False with ps absent). The git-backed commit reads:
-own_changes returns None without git, so diff_violation stops before role_offences, and no input here reaches
-role_offences.
+and the refusal after them (pid_is_owned never says False with ps absent). The taskkill, Stop-Process, fuser -k and
+kill-port arms of kill_hit: no fragment names them. The git-backed commit reads: own_changes returns None without
+git, so diff_violation stops before role_offences, and no input here reaches role_offences.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
@@ -129,6 +132,7 @@ os.environ[ROOT_ENV] = ROOT_PID
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
+import guard_env  # noqa: E402  the env reads of the search and script commands (hooks/guard_env.py)
 import guard_kill  # noqa: E402  the kill checks and the session root (hooks/guard_kill.py)
 import guard_shared_tree  # noqa: E402  the shared-tree verbs (hooks/guard_shared_tree.py)
 import override  # noqa: E402  the lane id a session env names (hooks/override.py)
@@ -156,6 +160,13 @@ CHARS = "${}()[]=;'\"`|&<> \n$-*?0123456789"
 CONFIG_TOKEN = "{config}"   # where the config dir's path goes in a drawn fragment; run_checks swaps in CONFIG
 SETTINGS_FRAGMENT = CONFIG_TOKEN + os.sep + "settings.json"   # SETTINGS_PATH with the run folder held back
 KILL_SHARE = 0.25   # the share of inputs that open with a kill of one pid: the act that reaches pid_is_owned
+COMMAND_SHARE = 0.25   # the share of inputs that open with a COMMANDS line: a direct check reads it as a command
+COMMIT_HEREDOC = "git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\""   # the shape a commit's message heredoc takes
+COMMANDS = (   # real command lines, each also in FRAGMENTS after a separator
+    "grep -n x f", "rg -n x f", "sed -n 1p f", "cp a b", "ln -s a b", "python3 -c 'print(1)'", "npm test",
+    "pkill -f node", "killall node", "pkill -P 12 node", "pkill --parent 12", COMMIT_HEREDOC,
+    "git commit -F - <<EOF\nmsg\nEOF\n",
+)
 FRAGMENTS = (
     "git ", "env:GIT_DIR", "rm -rf", "wsl -e", "pwsh -Command", "sh -c", "<<EOF", "$(", "${",
     "${X:?", "git push --force", "git stash", "git worktree remove", "xargs kill", "pgrep x | ",
@@ -163,6 +174,8 @@ FRAGMENTS = (
     "Remove-Item ", "$env:", "kill -9 ", "git -C ", "--force-with-lease", "node -e ",
     "git reset --hard", "git clean -fd", "git checkout -- x", "git restore", "git switch", WORKFLOW_TARGET,
     SETTINGS_FRAGMENT, "> " + SETTINGS_FRAGMENT,
+    *("; " + command for command in COMMANDS),
+    "\nEOF\n", "EOF",   # bare EOF lines: the end of a heredoc body
 )
 WEIGHTED = ("${", "$(", "'", '"', "<<EOF", "${X", "`")   # the incident class, drawn more often
 LONG = "sh -c \"git stash ${X:-$(pwd)} | rm -rf '\" <<EOF\n" * 80   # several KB, unclosed quotes and expansions
@@ -208,12 +221,16 @@ def kill_fragment(rng):
 
 
 def draw_text(rng):
-    """A random command string: mostly short, sometimes several hundred characters. A share opens with a kill of one pid."""
+    """A random command string: mostly short, sometimes several hundred characters. A share opens with a kill of one
+    pid, another with a COMMANDS line."""
     limit = rng.randint(0, 400) if rng.random() < 0.1 else rng.randint(0, 60)
-    parts, size = [], 0
-    if rng.random() < KILL_SHARE:
+    parts = []
+    roll = rng.random()
+    if roll < KILL_SHARE:
         parts.append(kill_fragment(rng))
-        size = len(parts[0])
+    elif roll < KILL_SHARE + COMMAND_SHARE:
+        parts.append(rng.choice(COMMANDS))
+    size = sum(len(part) for part in parts)
     while size < limit:
         roll = rng.random()
         if roll < 0.35:
@@ -546,20 +563,29 @@ def root_unpinned():
             os.environ[ROOT_ENV] = before
 
 
-def calls_pid_is_owned(run):
-    """True when `run()` calls guard_kill.pid_is_owned. The real function still answers, and the wrap is undone on exit."""
-    calls, real = [], guard_kill.pid_is_owned
+def calls_function(module, name, run):
+    """True when `run()` calls module.<name>. The real function still answers, and the wrap is undone on exit."""
+    calls, real = [], getattr(module, name)
 
-    def recording(pid, root):
-        calls.append(pid)
-        return real(pid, root)
+    def recording(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
 
-    guard_kill.pid_is_owned = recording
+    setattr(module, name, recording)
     try:
         run()
     finally:
-        guard_kill.pid_is_owned = real
+        setattr(module, name, real)
     return bool(calls)
+
+
+def judge_shell_on(text):
+    """Run judge_shell on `text` as a Bash command in the run folder. A refusal is a SystemExit: the answer here."""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            guard.judge_shell("Bash", text, CHECKOUT)
+        except SystemExit:
+            pass
 
 
 def _probe(problems, cause, probe):
@@ -601,7 +627,18 @@ def fixture_proof():
                lambda: guard_kill.session_root_pid() == 0)
     _probe(problems, "a kill of one pid under the pinned root does not reach pid_is_owned (the kill path of "
                      "foreign_pid_kill moved, or the root read did)",
-           lambda: calls_pid_is_owned(lambda: guard_kill.foreign_pid_kill(tokens_of("kill 4242"))))
+           lambda: calls_function(guard_kill, "pid_is_owned",
+                                  lambda: guard_kill.foreign_pid_kill(tokens_of("kill 4242"))))
+    with pinned_env(SHAPES[0][1]):
+        _probe(problems, "the commit heredoc shape reaches no own_heredoc_bodies (the message reader or COMMIT_HEREDOC "
+                         "moved)",
+               lambda: calls_function(guard, "own_heredoc_bodies", lambda: judge_shell_on(COMMIT_HEREDOC)))
+        _probe(problems, "'grep -n x f' reaches no _pattern_words (the env read of search commands moved)",
+               lambda: calls_function(guard_env, "_pattern_words", lambda: judge_shell_on("grep -n x f")))
+        _probe(problems, "'pkill -f node' does not read as a kill in kill_hit's pkill/killall arm (the arm moved)",
+               lambda: guard_kill.kill_hit(tokens_of("pkill -f node")) == "pkill")
+        _probe(problems, "'pkill -P 12 node' reaches no parent_filter_pids (the parent filter read moved)",
+               lambda: calls_function(guard_kill, "parent_filter_pids", lambda: judge_shell_on("pkill -P 12 node")))
     _probe(problems, "a drawn fragment holds the run folder's name, so the drawn inputs differ on each run "
                      "(CONFIG_TOKEN moved, or a fragment takes RUN)",
            lambda: not any(os.path.basename(RUN) in piece for piece in [*FRAGMENTS, *CHARS, *WEIGHTED, *EDGE]))
