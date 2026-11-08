@@ -13000,6 +13000,15 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
+    def test_review_comments_finds_a_marker_line_with_trailing_spaces(self):
+        # the marker is the record's first line; the MCP tool may add spaces to it, and review_marked reads the line with its spaces taken out
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
+        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[review_comment(1, 7, spaced, created="2026-10-02T00:00:00Z")])
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [("2026-10-02T00:00:00Z", spaced)]},
+                         "review_comments dropped a record whose marker line has trailing spaces")
+
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
@@ -14048,6 +14057,57 @@ class ReviewStampSince(unittest.TestCase):
     def test_without_a_salt_commit_the_cutover_is_none(self):
         root = self.repo(salt_at=None)
         self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
+
+    def git_at(self, root, date, *args):
+        """Run git in the temp repo with its author and committer times set to `date`."""
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+        return subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, env=env)
+
+    def test_a_failed_salt_read_stops_naming_the_read(self):
+        # not a repository: git log fails. A read that could not run is no "no salt commit" answer, so the cutover stops the run
+        root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        with self.assertRaises(merge.Stop) as cm:
+            review_fn(self, "review_stamp_since")(root, "main")
+        self.assertIn("origin/main", str(cm.exception), "the Stop does not name the read of origin/main:\n" + str(cm.exception))
+
+    def test_a_missing_origin_ref_stops_naming_the_read(self):
+        root = self.repo(salt_at=2)
+        self.git_at(root, "2026-10-23 10:00:00 +0000", "update-ref", "-d", "refs/remotes/origin/main")
+        with self.assertRaises(merge.Stop) as cm:
+            review_fn(self, "review_stamp_since")(root, "main")
+        self.assertIn("origin/main", str(cm.exception), "the Stop does not name the read of origin/main:\n" + str(cm.exception))
+
+    def test_a_merge_commit_on_main_that_brings_the_salt_is_the_cutover(self):
+        # the side commit adds the salt; the --no-ff merge on main is the first-parent commit that brings it in, so its time is the cutover
+        root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, capture_output=True)
+        self.commit(root, 1, "def f():\n    return 1\n", "2026-10-20 10:00:00 +0000")
+        self.git_at(root, "2026-10-20 11:00:00 +0000", "switch", "-q", "-c", "side")
+        self.commit(root, 2, 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\ndef f():\n    return 1\n', "2026-10-21 15:04:05 +0000")
+        self.git_at(root, "2026-10-21 16:00:00 +0000", "switch", "-q", "main")
+        self.commit(root, 3, "def f():\n    return 1\n# main moved\n", "2026-10-21 17:00:00 +0000")
+        self.git_at(root, "2026-10-22 09:00:00 +0000", "merge", "-q", "--no-ff", "-m", "merge side", "side")
+        subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
+        self.assertEqual(review_fn(self, "review_stamp_since")(root, "main"), "2026-10-22T09:00:00Z",
+                         "the cutover is not the merge commit's committer time on main")
+
+    def test_two_calls_with_the_same_root_and_base_run_git_once(self):
+        root = self.repo(salt_at=2)
+        fn = review_fn(self, "review_stamp_since")
+        real, argvs = merge.sh, []
+
+        def counting(args, *a, **k):  # every git call goes through sh, the one seam
+            argvs.append(args)
+            return real(args, *a, **k)
+
+        with unittest.mock.patch.object(merge, "sh", counting):
+            first = fn(root, "main")
+            second = fn(root, "main")
+        self.assertEqual(first, second)
+        self.assertEqual(len(argvs), 1, "two calls with the same root and base ran git %d times:\n%r" % (len(argvs), argvs))
 
 
 if __name__ == "__main__":
