@@ -132,7 +132,7 @@ def main(argv):
                CHANGED_PATHS_GLOB=default(text, "changed_paths"),
                DECISIONS_DIR=default(text, "decisions-dir"))
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
-    # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
+    # nowindow: the lint step prints its findings on the caller's terminal; the wrapper's no-window flag could hide that output
     rc = subprocess.run([find_bash(), run], env=env).returncode
     drift = pin_report()
     sys.exit(rc or (3 if drift else 0))
