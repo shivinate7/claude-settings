@@ -14,7 +14,8 @@ Output names pinned (the selector writes them to $GITHUB_OUTPUT):
   any    true when files is non-empty, else false
   files_windows  a JSON list of the test files the Windows job runs
   files_macos    a JSON list of the test files the macOS job runs
-  matrix         {"include": [{"os", "files": [{"path", "cmd"}]}]}, one entry per OS with files; cmd is the run line's command
+  matrix         {"include": [{"os", "files": [path]}]}, one entry per OS with files
+  commands       {path: cmd} over every selected file; cmd is the command the run line names before the path
 
 Run with:  python3 lint/test_touched_tests.py -v
 """
@@ -229,7 +230,7 @@ class Selector(unittest.TestCase):
         return windows, macos, stdout
 
     def include_entries(self, matrix_text):
-        """The matrix's include entries, each as {os, files}: files a list of {path, cmd} sorted by path."""
+        """The matrix's include entries, each as {os, files}: files a sorted list of path strings."""
         matrix = self.json_value(matrix_text, "matrix")
         self.assertIsInstance(matrix, dict, f"matrix= is not a JSON object: {matrix_text!r}")
         include = matrix.get("include")
@@ -240,10 +241,16 @@ class Selector(unittest.TestCase):
             files = entry.get("files")
             self.assertIsInstance(files, list, f"a matrix entry's files is not a JSON list: {entry!r}")
             for item in files:
-                self.assertIsInstance(item, dict, f"a matrix file is not an object: {item!r}")
-                self.assertEqual(sorted(item), ["cmd", "path"], f"a matrix file is not {{path, cmd}}: {item!r}")
-            entries.append({"os": entry.get("os"), "files": sorted(files, key=lambda item: item["path"])})
+                self.assertIsInstance(item, str, f"a matrix file is not a path string: {item!r}")
+            entries.append({"os": entry.get("os"), "files": sorted(files)})
         return sorted(entries, key=lambda e: str(e["os"]))
+
+    def commands_of(self, outputs):
+        """The `commands` output: a JSON object {path: cmd} over the selected files."""
+        self.assertIn("commands", outputs, f"no commands= line in GITHUB_OUTPUT: {outputs}")
+        commands = self.json_value(outputs["commands"], "commands")
+        self.assertIsInstance(commands, dict, f"commands= is not a JSON object: {outputs['commands']!r}")
+        return commands
 
     def exits_1(self, base, change=None, delete=()):
         """Run the selector on a checks.yml it cannot read. -> its stderr. The run exits 1 and writes no output."""
@@ -396,11 +403,12 @@ class Selector(unittest.TestCase):
         self.assertEqual(windows, [a], "files_windows names a test no Windows job runs")
         self.assertEqual(macos, [c], "files_macos names a test no macOS job runs")
         self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
-        cmds = {a: "python3", c: "python3"}  # the fixture's run lines
-        built = [{"os": name, "files": [{"path": p, "cmd": cmds[p]} for p in listed]}
-                 for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
+        built = [{"os": name, "files": listed} for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
         self.assertEqual(self.include_entries(outputs["matrix"]), sorted(built, key=lambda e: e["os"]),
                          "matrix is not the include entries built from files_windows and files_macos")
+        # The fixture's run lines name python3 for each file.
+        self.assertEqual(self.commands_of(outputs), {a: "python3", c: "python3"},
+                         "commands does not name each selected file's command from its run line")
 
     def test_matrix_is_empty_when_nothing_is_selected(self):
         """A touched test no CI job runs selects nothing, so the matrix is {"include": []}."""
@@ -606,7 +614,7 @@ class Selector(unittest.TestCase):
         self.assertIn("checks.yml", stderr, f"the exit does not name a checks.yml missing at HEAD: {stderr}")
 
     # Row 7: each file's cmd is the command its run line names before the path.
-    def test_matrix_files_carry_the_command_from_the_run_line(self):
+    def test_commands_name_each_files_command_from_its_run_line(self):
         files = ["merge/test_y.sh", "lint/z.test.mjs", "skills/alpha/tests/a.test.mjs"]
         text = dedent("""\
             name: fixture checks
@@ -622,10 +630,13 @@ class Selector(unittest.TestCase):
         outputs, _ = self.run_outputs(with_checks({p: "old\n" for p in files}, text), {p: "new\n" for p in files})
         self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
         self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [
-            {"path": "lint/z.test.mjs", "cmd": "node"},
-            {"path": "merge/test_y.sh", "cmd": "sh"},
-            {"path": "skills/alpha/tests/a.test.mjs", "cmd": "node --test"},
-        ]}], "a matrix file's cmd is not the command its run line names")
+            "lint/z.test.mjs", "merge/test_y.sh", "skills/alpha/tests/a.test.mjs",
+        ]}], "the windows matrix entry is not the windows job's paths")
+        self.assertEqual(self.commands_of(outputs), {
+            "lint/z.test.mjs": "node",
+            "merge/test_y.sh": "sh",
+            "skills/alpha/tests/a.test.mjs": "node --test",
+        }, "commands does not name each file's command from its run line")
 
     # Row 7: a file mod-tests.sh runs keeps that script's form: node for a mods test, node --test for a map skill test.
     def test_a_runner_script_file_keeps_the_script_form(self):
@@ -641,10 +652,10 @@ class Selector(unittest.TestCase):
             """)
         outputs, _ = self.run_outputs(with_checks({mods: "old\n", skill: "old\n"}, text), {mods: "new\n", skill: "new\n"})
         self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
-        self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [
-            {"path": mods, "cmd": "node"},
-            {"path": skill, "cmd": "node --test"},
-        ]}], "a runner-script file did not keep the script's own command form")
+        self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [mods, skill]}],
+                         "the windows matrix entry is not the runner script's paths")
+        self.assertEqual(self.commands_of(outputs), {mods: "node", skill: "node --test"},
+                         "a runner-script file did not keep the script's own command form")
 
 
 if __name__ == "__main__":
