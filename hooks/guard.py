@@ -402,8 +402,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_may_write,
+            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -4834,7 +4834,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         targets = None
         raw = str(tool_input.get("command", "") or "")
         command = strip_heredoc_bodies(raw)
-        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
+        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command))) or interpreter_may_write(raw)
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
         writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
@@ -4886,6 +4886,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        if not hit and interpreter_may_write(raw):
+            hit = interpreter_write_hit(raw, where, elsewhere)
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
