@@ -211,8 +211,8 @@ class Case(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
-    def scan(self, files):
-        self.base({"keep.py": "x = 1\n"})
+    def scan(self, files, extra_base=None):
+        self.base({"keep.py": "x = 1\n", **(extra_base or {})})
         self.change(files)
         return self.lint()
 
@@ -1182,9 +1182,37 @@ class ShellScan(Case):
 
 
 class RuleQuotes(Case):
-    def test_round_cited_with_a_matching_id_is_clean(self):
+    DECISION = {"docs/decisions/hold-unsafe-after-round-3.md": "# hold-unsafe-after-round-3\n\nA held change stays parked until the owner decides.\n"}
+
+    def scan(self, files):
+        return super().scan(files, extra_base=self.DECISION)
+
+    def test_round_outside_the_gloss_stays_flagged_even_with_a_real_id(self):
         rc, out = self.scan({"x.py": "# keeps the net value round 3 gave (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_inside_a_decision_gloss_is_clean(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
         self.assertEqual(rc, 0, out)
+
+    def test_round_with_a_non_gloss_citation_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (added in round 3, per hold-unsafe-after-round-3)\n# Added during round 3 (hold-unsafe-after-round-3)\n# Round 3 fix: x (hold-unsafe-after-round-3)\n# Round 2 fix (round-2 finding)\n# the round 2 reviewer asked (round-2 review)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertHit(out, "x.py", 2)
+        self.assertHit(out, "x.py", 3)
+        self.assertHit(out, "x.py", 4)
+        self.assertHit(out, "x.py", 5)
+        self.assertEqual(rc, 1, out)
+
+    def test_id_before_a_gloss_is_clean(self):
+        rc, out = self.scan({"x.py": "# Decision hold-unsafe-after-round-3 (net-value hold after round 3)\n# `hold-unsafe-after-round-3` (net-value hold after round 3)\nx = 1\n"})
+        self.assertEqual(rc, 0, out)
+
+    def test_gloss_with_an_id_that_has_no_decision_file_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (decision some-other-round-3, net-value hold after round 3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
 
     def test_round_without_a_cited_id_stays_flagged(self):
         rc, out = self.scan({"x.py": "# fixed in round 2\nx = 1\n"})
@@ -1202,10 +1230,6 @@ class RuleQuotes(Case):
         self.assertHit(out, "x.py", 2)
         self.assertHit(out, "x.py", 3)
         self.assertEqual(rc, 1, out)
-
-    def test_round_quotes_with_only_the_decision_and_the_round_stay_clean(self):
-        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3, net-value hold after round 3)\n# keeps the net value round 3 gave (decision hold-unsafe-after-round-3, net-value hold after round 3)\nx = 1\n"})
-        self.assertEqual(rc, 0, out)
 
 
 class SelfCheck(unittest.TestCase):
