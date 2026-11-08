@@ -21782,7 +21782,9 @@ add("other-checkout: a Write into a clone that shares a local bare origin with t
 # The write forms the shell-write scan does not read as writes: a python `-c` or heredoc script that
 # opens a path for writing, and `git -C <dir>` with a verb that changes files. A shell or python write
 # into another checkout is refused from an agent and from a top-level session alike. A git -C verb that
-# changes files is refused from an agent. A top-level session keeps main's verdict for it, because a git
+# changes files is refused from an agent into another checkout. An agent's git -C verb that changes files into
+# its own worktree, or a folder in it, passes, even from the primary with no home record (the rows named below).
+# A top-level session keeps main's verdict for it, because a git
 # command run with -C into another checkout is no write there (decision an-agent-outside-its-home-tree-must-stop,
 # Tools bullet). A read, a git read verb run with -C, and a write into the own checkout pass. The verb list
 # is SESSION_HOME_GIT_VERBS.
@@ -21799,6 +21801,12 @@ SIB_FILE = os.path.join("src", "app.py")                   # tracked in every ch
 
 
 SIB_OUTSIDE = os.path.join(ROOT, SIB_NAME + "_outside")    # a linked worktree of the clone, outside .claude/worktrees
+# An agent whose home record is never written: every row that names it runs from the primary's cwd, and a
+# record is written only by a call whose cwd is inside that worktree. SIB_PREFIX is a folder whose name only
+# starts with that id.
+SIB_NOREC_ID = "sfa0003"
+SIB_NOREC = os.path.join(SIB_PRIMARY, ".claude", "worktrees", "agent-" + SIB_NOREC_ID)
+SIB_PREFIX = os.path.join(SIB_PRIMARY, ".claude", "worktrees", "agent-" + SIB_NOREC_ID + "b")
 
 
 def _build_sibling_forms():
@@ -21812,9 +21820,17 @@ def _build_sibling_forms():
         made = run_vcs(SIB_PRIMARY, "worktree", "add", "-q", SIB_OUTSIDE, "-b", SIB_NAME + "-outside")
         if made.returncode != 0:
             sys.exit("fixture setup failed: the worktree add at %r: %s" % (SIB_OUTSIDE, made.stderr.strip()))
+    # The no-record agent's own worktree and the prefix-named folder, both real checkouts, so the guard
+    # resolves each to its own owner. `sub` is a folder inside the own worktree.
+    for where, agent in ((SIB_NOREC, SIB_NOREC_ID), (SIB_PREFIX, SIB_NOREC_ID + "b")):
+        if not os.path.exists(os.path.join(where, ".git")):
+            made = run_vcs(SIB_PRIMARY, "worktree", "add", "-q", where, "-b", SIB_NAME + "-agent-" + agent)
+            if made.returncode != 0:
+                sys.exit("fixture setup failed: the worktree add at %r: %s" % (where, made.stderr.strip()))
+    os.makedirs(os.path.join(SIB_NOREC, "sub"), exist_ok=True)
 
 
-lazy_fixture((SIB_PRIMARY, SIB_AGENT, SIB_OTHER, SIB_OUTSIDE), _build_sibling_forms)
+lazy_fixture((SIB_PRIMARY, SIB_AGENT, SIB_OTHER, SIB_OUTSIDE, SIB_NOREC, SIB_PREFIX), _build_sibling_forms)
 
 
 def _sibling_write_forms(placement, file_path, **who):
@@ -21876,6 +21892,20 @@ sh(SF + "from a lane worktree into the primary: a git -C checkout of an unmodifi
 # .claude/worktrees is allowed (decision agent-worktree-discard-is-noted, Named files).
 sh(SF + "top-level: a git -C restore of one named file in an outside linked worktree is allowed",
    VCS + " -C " + slash(SIB_OUTSIDE) + " restore " + slash(SIB_FILE), "allow", cwd=SIB_PRIMARY)
+# An agent with no recorded home, run from the primary's cwd. worktree-home has no home to judge, so the only
+# refusal left is other-checkout's git -C act. The agent's own worktree and a folder in it pass. A sibling and
+# a folder whose name only starts with the agent's id are still refused. Every row here runs from SIB_PRIMARY,
+# so none writes the agent's home record.
+for where, label in ((SIB_NOREC, "its own worktree"), (os.path.join(SIB_NOREC, "sub"), "a folder in it")):
+    for verb_args in ("checkout -b x", "commit -m x", "add f"):
+        sh(SF + "no home record, from the primary: git -C " + verb_args + " into " + label + " is allowed",
+           VCS + " -C " + slash(where) + " " + verb_args, "allow", cwd=SIB_PRIMARY, agent_id=SIB_NOREC_ID)
+sh(SF + "no home record, from the primary: git -C commit into a sibling worktree is refused",
+   VCS + " -C " + slash(SIB_OTHER) + " commit -m x", "deny", "other-checkout",
+   cwd=SIB_PRIMARY, agent_id=SIB_NOREC_ID)
+sh(SF + "no home record, from the primary: git -C commit into a folder whose name starts with the agent's id is refused",
+   VCS + " -C " + slash(SIB_PREFIX) + " commit -m x", "deny", "other-checkout",
+   cwd=SIB_PRIMARY, agent_id=SIB_NOREC_ID)
 TEMP_DIR = None  # back to the system temp for the sections below
 
 
