@@ -828,6 +828,28 @@ class BatchLintFlags(tm.Env):
         self.calls = os.path.join(self.t, "calls")
         os.makedirs(self.calls)
         self.ci_job = self.copy_ci_job()
+        self.cfg, self.home = os.path.join(self.t, "cfg"), os.path.join(self.t, "home")
+        os.makedirs(self.cfg)
+        os.makedirs(self.home)
+        self.linted = False  # set by lane_lint: a case that never lints takes no slot to check
+        self.addCleanup(self.check_no_slot_under_home)  # cleanups run last in, first out: this runs before Env's rmtree of self.t
+
+    def slot_files(self, config):
+        """The lane-lint slot locks under the config dir `config`, by full path. [] when it holds no slot folder."""
+        folder = os.path.join(config, "state", "lane-lint-slots")
+        if not os.path.isdir(folder):
+            return []
+        return [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if n.startswith("slot-") and n.endswith(".lock")]
+
+    def check_no_slot_under_home(self):
+        """Each case that linted: its lint took a lane-lint slot, and the slot sits under this case's config dir, never under HOME (the real
+        ~/.claude on a machine, where parallel lane lints hold every slot). The scope comes first: a lint that took no slot at all would pass
+        the HOME check for nothing."""
+        if not self.linted:
+            return
+        under_home = self.slot_files(os.path.join(self.home, ".claude"))
+        self.assertTrue(self.slot_files(self.cfg) or under_home, "no lane-lint slot was taken: the lint never reached lint_slot()")
+        self.assertEqual(under_home, [], "a lane lint took its slot under HOME, not under this case's config dir: %s" % under_home)
 
     def call_log(self, script):
         return os.path.join(self.calls, os.path.basename(script) + ".jsonl")
@@ -870,7 +892,10 @@ class BatchLintFlags(tm.Env):
 
     def lane_lint(self, target, out):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
-        env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
+        self.linted = True
+        # one log for the run: no ci-job log lands in the system temp dir. This case's own config dir takes the lint slot, and a scratch HOME
+        # holds any default one: parallel lane lints hold every slot of the real ~/.claude, so a case there waits with no deadline.
+        env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log"), "CLAUDE_CONFIG_DIR": self.cfg, "HOME": self.home, "USERPROFILE": self.home}
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
