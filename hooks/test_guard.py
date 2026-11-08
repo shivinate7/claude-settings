@@ -10696,6 +10696,42 @@ REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot
 REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot see is allowed over an unmarked comment after one gh read, gh api -X PATCH --input",
                          review_reads("Bash", {"command": "%s --input %s" % (API_EDIT_CMD, UNMARKED_INPUT)}, "allow", 1,
                                       folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
+
+# The `=` form of --input is the same unseen body as the bare token. The method may be `-X PATCH` or `--method=PATCH`; the edit
+# route judges both alike. Decision pr-review-record, the edit-read cost: each form reads the old body once.
+API_METHOD_EQ_EDIT_CMD = "gh api --method=PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is refused over a stamped record after one gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_EDIT_CMD, OLD_INPUT)}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is refused over a stamped record after one gh read, gh api --method=PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_METHOD_EQ_EDIT_CMD, OLD_INPUT)}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is allowed over an unmarked comment after one gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_EDIT_CMD, UNMARKED_INPUT)}, "allow", 1,
+                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
+
+
+def review_refused_quietly(tool, tool_input, carries):
+    """A checker for one edit the guard must refuse over the stamped record that GHRECORDOLD holds for comment 4417. `decide` keeps the
+    stderr of its run in LAST_RUN. Decision pr-review-record: a post fails open and prints the not-checked note; an edit fails closed,
+    so a refused edit must not print that note."""
+    def check():
+        decision, reason = decide(review_case(tool, tool_input, GHRECORDOLD + os.pathsep + PY_PATH))
+        note = LAST_RUN.get("stderr", "")
+        if decision != "deny":
+            return False, "want deny, got %s: %s" % (decision, reason[:90])
+        missing = [fragment for fragment in carries if fragment not in reason]
+        if missing:
+            return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
+        if "review-record: not checked" in note:
+            return False, "refused, but stderr carries the not-checked note: %r" % note.strip()[:120]
+        return True, "refused, with no not-checked note on stderr"
+    return check
+
+
+REVIEW_LOG_CHECKS.append(("review-record:a refused edit whose body file cannot be read prints no not-checked note on stderr, gh api -F body=@",
+                         review_refused_quietly("Bash", {"command": "%s -F body=@no-such-body.md" % API_EDIT_CMD}, carries=("could not run",))))
+
 # A bare edit names no pull request. This pins the count the code makes today, not a ruling: the open-PR list, then the comment listing.
 REVIEW_LOG_CHECKS.append(("review-record:a bare edit with no pull request number makes two gh reads today, the open-PR list and the listing, gh pr comment --edit-last",
                          review_reads("Bash", {"command": "gh pr comment --edit-last --body x"}, "allow", 2,
