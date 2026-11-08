@@ -292,8 +292,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 
     'agent' (rule push-agent-branch): a push whose destination name is an agent-worktree branch name
     (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
-    branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part after `:`, `refs/heads/` stripped; a colon-less refspec is its own
-    name. An explicit destination adds no read.
+    branch (a bare push with no upstream too, under push.autoSetupRemote); an explicit one is the part
+    after `:`, `refs/heads/` stripped; a colon-less refspec is its own name. A destination after `:` adds
+    no read. A colon-less refspec other than `main` or `master` reads the current branch once
+    (`symbolic-ref`), to tell an implied destination from a literal one.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
     included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
@@ -303,8 +305,9 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
-    one; one `git config --get-regexp` when the upstream is needed.
+    cannot be read is allowed. Reads: none for a destination after `:`; one `symbolic-ref` for the current
+    branch for a bare push or a colon-less refspec; one `git config --get-regexp` when the upstream is
+    needed.
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):

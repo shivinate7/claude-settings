@@ -3517,8 +3517,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif subcommand == "push" and not read_verb("push", args):
-                # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
-                # implied destination off the branch's upstream. A dry run writes nothing.
+                # A non-forced push that writes main or master (rule push-main), an agent-worktree
+                # branch name (rule push-agent-branch), or an implied destination off the branch's
+                # upstream (rule push-stray-branch). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
