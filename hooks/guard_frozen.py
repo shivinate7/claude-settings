@@ -635,7 +635,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     name as a third argument (`''` when none). `extra_verbs` is a regex of more command names that count as
     writes (CREATING_COMMAND); it needs `command_position`. `skip_after_cd` (needs `follow_cd`) is a
     function of the folder the last absolute or `~` `cd` before a segment landed in (`dir_before_segment`,
-    `origin`); a segment it accepts is left unjudged, as its absolute form is the caller's to judge."""
+    `origin`) and the folder the segment runs in; a segment it accepts is left unjudged, as its absolute
+    form is the caller's to judge."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -684,7 +685,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if follow_cd:
             at, anchor = dir_before_segment(segments, number, cwd, ends, origin=True)
             at = at or cwd
-        if anchor and skip_after_cd and skip_after_cd(anchor):
+        if anchor and skip_after_cd and skip_after_cd(anchor, at):
             continue
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
