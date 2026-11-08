@@ -29,9 +29,10 @@
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
-                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree.
+                          CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no merge lock
+                          and merges and pushes nothing; any session may run it, cloud included. It waits for a lane-lint slot
+                          (one per CPU) before its ci-job run, holding its worktree meanwhile. Cost per call: one ci-job run (about
+                          550 s, measured once on one PR head), one worktree, one slot lock file.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2528,7 +2529,7 @@ def ci_job_run(wt, *args):
 LINT_SLOT_POLL = 0.25  # seconds between looks for a free slot
 
 def lint_slots():
-    """How many lane lints run ci-job at once on this machine: one per CPU. Measured at ~400 CPU-s per lint on 4 CPUs: N = CPUs
+    """How many lane lints that share one config folder (CLAUDE_CONFIG_DIR, else ~/.claude) run ci-job at once: one per CPU. Measured at ~400 CPU-s per lint on 4 CPUs: N = CPUs
     runs with no slowdown, 2 x CPUs doubles each lint's wall time and makes a load-sensitive test FAIL."""
     return os.cpu_count() or 1
 
@@ -2573,7 +2574,8 @@ def lint_slot():
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
-    in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
+    in a temporary detached worktree at the head, removed on every exit. Takes no merge lock, only a lane-lint slot (lint_slot), which it
+    waits for while it holds the worktree; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
