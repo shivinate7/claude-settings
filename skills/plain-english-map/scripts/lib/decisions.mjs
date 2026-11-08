@@ -10,10 +10,14 @@ import { commentsOf } from './source-text.mjs';
 /** An id in the form that compares: each run of digits by value, so `D7` and `D007` are one key. */
 export const idKey = (id) => id.replace(/\d+/g, (d) => d.replace(/^0+(?=\d)/, ''));
 
-/** The keys of the records in `decisionsDir`: each `.md` file directly in the folder, by its name without `.md`. A sub-folder holds none. */
+// A folder of records holds files that are no record: its index and its notes. Every reader of a record file here skips them.
+const NOT_RECORDS = new Set(['notes.md', 'README.md']);
+const isRecordFile = (e) => e.isFile() && e.name.endsWith('.md') && !NOT_RECORDS.has(e.name);
+
+/** The keys of the records in `decisionsDir`: each `.md` file directly in the folder, except notes.md and README.md, by its name without `.md`. A sub-folder holds none. */
 export const recordKeys = (root, decisionsDir) =>
   readdirSync(path.join(root, decisionsDir), { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .filter(isRecordFile)
     .map((e) => idKey(e.name.slice(0, -3)));
 
 // A record's key is the id's key, or starts with the id's key and a `-`.
@@ -29,7 +33,7 @@ export const namesRecord = (id, keys) => {
 export const recordFiles = (root, decisionsDir, id) => {
   const k = idKey(id);
   return readdirSync(path.join(root, decisionsDir), { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith('.md') && keyNames(k, idKey(e.name.slice(0, -3))))
+    .filter((e) => isRecordFile(e) && keyNames(k, idKey(e.name.slice(0, -3))))
     .map((e) => `${decisionsDir.replace(/\/?$/, '/')}${e.name}`);
 };
 
@@ -41,8 +45,6 @@ export const citedIds = (src, file, pattern) => {
 
 // ---- The files a record names ----
 
-// A folder of records holds files that are no record: its index and its notes. One list for the decisions folder and the debts folder.
-const NOT_RECORDS = new Set(['notes.md', 'README.md']);
 const stemOf = (name) => name.slice(0, -3);
 
 // lint/layout.json sits in the claude-settings root, four folders above this file. Through the install link its real path is inside the clone.
@@ -74,13 +76,13 @@ export const debtsDir = (root) => {
 };
 
 const mdNames = (root, dir) => {
-  try { return readdirSync(path.join(root, dir), { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name).sort(); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  try { return readdirSync(path.join(root, dir), { withFileTypes: true }).filter(isRecordFile).map((e) => e.name).sort(); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
 };
 
 /** The debt records of `root`: each `.md` file directly in the debts folder, except notes.md and README.md. As { dir, exists, slugs }; `slugs` are the file names without `.md`. */
 export const debtRecords = (root) => {
   const dir = debtsDir(root);
-  return { dir, exists: !!dir && existsSync(path.join(root, dir)), slugs: dir ? mdNames(root, dir).filter((n) => !NOT_RECORDS.has(n)).map(stemOf) : [] };
+  return { dir, exists: !!dir && existsSync(path.join(root, dir)), slugs: dir ? mdNames(root, dir).map(stemOf) : [] };
 };
 
 /** The id of a decision record: the leading match of `pattern` on its file name without `.md`, when that id names the record. Else null. */
@@ -108,7 +110,7 @@ export const recordNaming = ({ root, read, all, decisionsDir, idPattern }) => {
       if (name && !list.some((x) => idKey(x) === idKey(name))) list.push(name);
     }
   };
-  if (dd) for (const n of mdNames(root, dd).filter((x) => !NOT_RECORDS.has(x))) scan(`${dd}${n}`, 'decisions', recordId(stemOf(n), idPattern));
+  if (dd) for (const n of mdNames(root, dd)) scan(`${dd}${n}`, 'decisions', recordId(stemOf(n), idPattern));
   if (debts.dir) for (const slug of debts.slugs) scan(`${debts.dir}/${slug}.md`, 'debts', slug);
   return found;
 };

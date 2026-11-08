@@ -1,7 +1,7 @@
 // The show command: prints one part of `docs/map/` as short plain text.
 // Use: node <skill>/scripts/map-show.mjs <path|area|folder/|decision-id> [--full], run from the root of a repository that has `map.config.json`.
 //   a file path  prints its area, its map line, its fact lines, its tested-by line, its Homes lines and its trace steps.
-//                A non-code file (a record can name any file) prints its map line, then its `Decisions:` ids and its `Debts:` slugs when it has them.
+//                A non-code file prints its map line, then its `Decisions:` ids and its `Debts:` slugs, only when a record names the file or its map line has either.
 //                A test path also prints `Named as a test of:` and the files whose tested-by line names it. A test with no map line prints that alone.
 //   an area id   prints each map line of that area as `path — sentence`.
 //   a folder     (ends with `/`) prints each map line whose path starts with it.
@@ -11,13 +11,14 @@
 //                A record that no map line cites: `no map line cites <id>` on stderr, exit 1.
 //                An id that names no record: one plain stderr line that names the id and the decisions folder, exit 1.
 //                `--full` with any other arg is ignored.
-// A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. A Tables row is none.
+// A code map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. A Tables row is none.
+// A non-code map line is read only for a file that a record names, or whose line has a decisions line or a debts line.
 // A path may be absolute: under the repository root it is read as its relative form.
 // Nothing found: `no map line for <arg>` on stderr, exit 1. No arg: a usage line, exit 2.
 // A map the skill cannot read (a bad config, or a page that is tracked and not on disk): one plain stderr line, exit 3.
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, subLineEntries, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
+import { extRe, factLines, gitLsFiles, homeLines, mapFilePaths, mapLines, namedNonCode, subLineEntries, TRACE_PAGE_RE, traceStepItems } from './map-check.mjs';
 import { repoMapConfig } from './lib/map-config.mjs';
 import { idKey, recordFiles } from './lib/decisions.mjs';
 
@@ -117,10 +118,14 @@ if (cfg.decisionsDir && new RegExp(`^(?:${cfg.decisionIdPattern})$`).test(arg)) 
       if (steps.length) out.push('Trace:', ...steps);
     }
   }
-  // A non-code file: its map line, then its decisions line and its debts line when it has them.
+  // A non-code file that a record names, or whose map line has a decisions line or a debts line: its map line, then those lines.
+  let namedFiles;
+  const isNamed = (f) => {
+    try { return (namedFiles ??= namedNonCode({ cfg, root, read, all: gitLsFiles(root) })).has(f); } catch (e) { return fail(e.message.replace(/\s*\n\s*/g, ' '), 3); }
+  };
   for (const a of areas) {
     for (const e of a.others) {
-      if (e.file !== want) continue;
+      if (e.file !== want || !(e.ids.length || e.slugs.length || isNamed(e.file))) continue;
       out.push(`${want} — area ${a.id}`, e.sentence);
       if (e.ids.length) out.push(`Decisions: ${e.ids.join(', ')}`);
       if (e.slugs.length) out.push(`Debts: ${e.slugs.join(', ')}`);
