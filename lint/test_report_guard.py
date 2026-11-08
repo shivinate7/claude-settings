@@ -1010,6 +1010,50 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
 
+    def test_dm_green_next_names_role_and_model_with_no_done_name(self):
+        # A role that Next names with its model counts, even when Done names no such role.
+        self.assertIsNone(self.verdict(
+            "> **Done** OTHER: made branch x at #2059's head (a96bd8294)\n"
+            "> **Next** The test-author (haiku) writes the failing tests, then a builder (sonnet) makes them pass. "
+            "Then come review rounds 1-3. Unstarted: none",
+            [{"subagent_type": "test-author", "prompt": "write the tests"},
+             {"subagent_type": "builder", "model": "sonnet", "prompt": "build it"}]))
+
+    def test_dm_green_next_names_reviewer_sonnet_from_an_earlier_window(self):
+        # The turn's reviewer ran haiku by its pin. Next's sonnet reviewer matches the earlier-turn one.
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT: #2157 opened as a draft (test-author haiku, builder sonnet)\n"
+            "> **Next** Round 1 (reviewer haiku), then rounds 2-3 (reviewer sonnet) with the net-value test. "
+            "Unstarted: none",
+            [{"subagent_type": "test-author", "prompt": "write the tests"},
+             {"subagent_type": "builder", "model": "sonnet", "prompt": "build it"},
+             {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}],
+            before_human=[{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}]))
+
+    def test_dm_green_next_names_record_writer_in_any_case(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** OTHER: made branch y at #2157's head\n"
+            "> **Deviations** none\n"
+            "> **Next** Record-writer (haiku) adds both notes. Unstarted: none",
+            [{"subagent_type": "record-writer", "prompt": "add the notes"}]))
+
+    def test_dm_red_in_turn_role_named_nowhere_blocks(self):
+        # A builder ran in the turn, and neither Done nor Next names it.
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** The guard keeps going. Unstarted: none",
+                           [self.BUILDER])
+        self.assertIsNotNone(out, "a builder that ran in the turn and is named nowhere got through")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_next_names_model_no_spawn_ran_blocks(self):
+        # Next's reviewer opus matches no reviewer spawn: the turn's reviewer ran haiku, and an
+        # earlier-turn reviewer ran sonnet.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer haiku)\n"
+                           "> **Next** Round 2 (reviewer opus). Unstarted: none",
+                           [{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}],
+                           before_human=[{"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}])
+        self.assertIsNotNone(out, "a reviewer name under Next that no reviewer spawn ran got through")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
