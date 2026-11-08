@@ -3757,10 +3757,18 @@ def expect_unreadable_sidecar(bad):
     check("unreadable sidecar repo: git for-each-ref fails there", rc != 0, "rc=%s" % rc)
 
 
+def names_unreadable_sidecar(reason, bad, cwd):
+    """True when the block reason names the unreadable sidecar repo `bad`. The Stop's repo is judged too, and its
+    path and name start with `bad`'s, so its own path and name are cut out before the search."""
+    rest = reason.replace(cwd, "").replace(os.path.realpath(cwd), "").replace(os.path.basename(cwd), "")
+    return any(name in rest for name in (bad, os.path.realpath(bad), os.path.basename(bad)))
+
+
 def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
     """The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
     the whole home check down: the Stop's repo still judges the home, and an untracked home there blocks. The
-    control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
+    control, the same unreadable sidecar with a home tracked in the Stop's repo, passes. The block reason also
+    names the unreadable sidecar repo, though the Stop's repo decides the verdict."""
     cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
     bad = unreadable_sidecar_repo()
     expect_unreadable_sidecar(bad)
@@ -3768,8 +3776,10 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
     cfg, sid = new_cfg(), "r-unreadable-sidecar"
     write_file(sidecar_of(cfg, sid), bad)
     write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-12 [ruling] -> decisions/untracked.md",)))
-    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks",
-                 guard(cfg, sid, cwd=cwd), named=("fb-12",))
+    p = guard(cfg, sid, cwd=cwd)
+    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks", p, named=("fb-12",))
+    check("unreadable sidecar repo: the block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-control"
     write_file(sidecar_of(cfg, sid), bad)
     write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-13 [ruling] -> decisions/a-ruling.md",)))
@@ -3781,8 +3791,8 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
 def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
     """The sidecar names a repo git cannot read, so a read of its refs raises _GitFailure. A task homed to
     `step:<slug>` with no step file on any branch of the Stop's repo still blocks. The control, the same sidecar
-    with the step file on a lane branch of the Stop's repo, passes. Red on the base `Homes._held`: the unreadable
-    repo's error stands the step check down, so the untracked step home passes."""
+    with the step file on a lane branch of the Stop's repo, passes. The block reason also names the unreadable
+    sidecar repo, though the Stop's repo decides the verdict."""
     cwd = step_repo()
     bad = unreadable_sidecar_repo()
     expect_unreadable_sidecar(bad)
@@ -3793,6 +3803,8 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
     p = homed(cfg, sid, ("- fb-14 [task] -> step:no-such-step",), cwd=cwd, text=text)
     expect_block("unreadable sidecar repo: a task homed to a step with no file on any branch still blocks", p,
                  named=("fb-14",))
+    check("unreadable sidecar repo: the step block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-step-control"
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-15 [task] -> step:%s" % STEP_SLUG,), cwd=cwd, text=text)
@@ -3803,8 +3815,8 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
 def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home():
     """The sidecar names a repo git cannot read. A closed note homed to `decisions/nowhere.md`, a file no branch
     tracks, still blocks: the Stop's repo judges it. The control, a closed note homed to the file the Stop's repo
-    tracks, passes. Red on the base `Homes._held`: the unreadable repo's error stands the closed-note check down,
-    so the untracked home passes."""
+    tracks, passes. The block reason also names the unreadable sidecar repo, though the Stop's repo decides the
+    verdict."""
     cwd = step_repo()
     bad = unreadable_sidecar_repo()
     expect_unreadable_sidecar(bad)
@@ -3813,6 +3825,8 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home():
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-16 [note] -> decisions/nowhere.md [closed]",), cwd=cwd, text=text)
     expect_block("unreadable sidecar repo: a closed note homed to an untracked file still blocks", p, named=("fb-16",))
+    check("unreadable sidecar repo: the closed-note block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-close-control"
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-17 [note] -> decisions/a-ruling.md [closed]",), cwd=cwd, text=text)
@@ -3873,14 +3887,17 @@ def case_one_shot_grant_reason_offers_the_once_home():
 
 
 def case_standing_grant_without_a_once_item_keeps_today_reason():
-    """Standing text with no once: item gets the reason the guard gives today. This pins that reason and does not
-    judge it."""
+    """Standing text with no once: item gets the reason the guard gives today, with no items and with a [note] whose
+    home is not once:. This pins that reason and does not judge it. The standing bar names a once: home only."""
     mod = guard_module()
-    blocks = mod.parse(render_block(STANDING_ONCE_TEXT))
-    out = mod.problems(blocks, "")
-    want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
-        blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
-    check("standing control, no once: item: the reason is today's, pinned", want in out, out)
+    for label, items in (("no once: item", ()), ("a [note] -> other item", ("- fb-0958-2 [note] -> other",))):
+        blocks = mod.parse(render_block(STANDING_ONCE_TEXT, items=items))
+        out = mod.problems(blocks, "")
+        want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
+            blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
+        check("standing control, %s: the reason is today's, pinned" % label, want in out, out)
+        check("standing control, %s: no standing word bars a once: home" % label,
+              not any("bars" in s for s in out), out)
 
 
 CASES = (
