@@ -37,6 +37,12 @@ The handoff holds these sections, in this order:
 - Rulings with NO HOME YET, first: only a ruling whose record is being written now. Name
   the branch that writes it. File every other ruling and task at once, in a decision record,
   a rule, or the repo's todo or debt store. The handoff is never their home.
+- Waiting on the owner, under the heading `## Waiting on the owner in this session`: one
+  line per thing only the owner can clear in this session, with what it unblocks. List an
+  open permission prompt (allow once or always allow) with the exact command or tool it
+  holds, a refusal that printed an override line, and a grant that needs his typed words
+  here. Name a page item by its number only (its home is the page), and write `none` when
+  empty. A coordinator's Stop blocks until each unanswered refused act is named here.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
