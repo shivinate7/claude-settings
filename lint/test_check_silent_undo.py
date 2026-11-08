@@ -2866,6 +2866,34 @@ class LostSentence(unittest.TestCase):
     GEN_UNRELATED = "- gen-unrelated: The branch never checks each run."
     GEN_PAIR_SRC = "- gen-pair-src: The branch never checks the finding twice. The finder lists each calendar read once."
     GEN_LOOKALIKE = "- gen-lookalike: The branch never checks the lint finding."
+    # The rename gate's constants, each pinned by a clause. SENT holds six content words and is in no new note, so it is always dropped
+    # when a note loses it. A rename keeps seven of PH_CLAUSE's ten content words (below PAIR_HELD) or eight (above it). A clause of four
+    # content words never pairs (PAIR_WORDS), and one of five does.
+    SENT = "Each runner uploads coverage tallies to the nightly dashboard."
+    PH_CLAUSE = "The sweep flags each stale fixture folder left in the cache once a run ends."
+    PH_SEVEN = "The sweep flags each stale fixture folder kept in the cache when runs stop."
+    PH_EIGHT = "The sweep flags each stale fixture folder kept in the cache when runs end."
+    PH_SRC = "- pair-held-src: %s %s Decision: test-practices (P5)." % (PH_CLAUSE, SENT)
+    PH_SEVEN_LINE = "- pair-held-kept: %s Decision: test-practices (P5)." % PH_SEVEN
+    PH_EIGHT_LINE = "- pair-held-kept: %s Decision: test-practices (P5)." % PH_EIGHT
+    PW_FOUR = "The sweep flags stale fixtures."
+    PW_FIVE = "The sweep flags stale fixture folders."
+    PW_FOUR_SRC = "- pair-words-four-src: %s %s Decision: test-practices (P5)." % (PW_FOUR, SENT)
+    PW_FOUR_LINE = "- pair-words-four-kept: %s Decision: test-practices (P5)." % PW_FOUR
+    PW_FIVE_SRC = "- pair-words-five-src: %s %s Decision: test-practices (P5)." % (PW_FIVE, SENT)
+    PW_FIVE_LINE = "- pair-words-five-kept: %s Decision: test-practices (P5)." % PW_FIVE
+    # A fold into an existing note that keeps one clause of the folded note and does not name it.
+    FOLD_CLAUSE = "The sweep flags stale fixture folders left in the cache."
+    FOLD_PLAIN_SRC = "- fold-plain-src: %s %s Decision: test-practices (P5)." % (FOLD_CLAUSE, SENT)
+    FOLD_HOST = "- fold-host-note: The finder lists calendar reads in the sweep. Decision: test-practices (P5)."
+    FOLD_HOST_KEPT = "- fold-host-note: The finder lists calendar reads in the sweep. %s Decision: test-practices (P5)." % FOLD_CLAUSE
+    # A clause of four content words moved verbatim into a note that a later commit adds, beside the rename of the note it left.
+    MOVE_SRC = "- move-pend-src: %s Runners upload coverage tallies. Decision: test-practices (P5)." % FOLD_CLAUSE
+    MOVE_KEPT = "- move-pend-kept: %s Decision: test-practices (P5)." % FOLD_CLAUSE
+    MOVE_TARGET = "- move-pend-target: Runners upload coverage tallies. Decision: test-practices (P5)."
+    # A retired note whose clause shares only the generic words of a later note that is no rename of it.
+    GENERIC_SRC = "- generic-pend-src: The branch never checks the finding twice. %s Decision: test-practices (P5)." % SENT
+    GENERIC_LOOK = "- generic-pend-look: The branch never checks the lint finding. Decision: test-practices (P5)."
 
     def start(self, lines, filler=None):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
@@ -2883,13 +2911,21 @@ class LostSentence(unittest.TestCase):
         """The branch's one commit: its notes file is the filler and `lines`. -> the sha."""
         return self.commit_notes(msg, self.base + lines)
 
-    def premises(self, head, old, slug, gone):
-        """The scope, read before the verdict (P7): the commit is no merge, main holds the old line, the head holds one line for
-        the slug, and the sentence the case drops is absent from the head."""
-        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2, "premise: the commit is a merge")
+    def premises(self, head, old, slug, gone, new_slug=None):
+        """The scope, read before the verdict (P7): the commit has one parent, main holds the old line, the head holds one line for
+        the slug, or for `new_slug` when the note moved and the slug is gone from the head, and the sentence the case drops is
+        absent from the head."""
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 2,
+                         "premise: the commit does not have exactly one parent")
         self.assertIn(old, self.notes_at("main"), "premise: main does not hold the old line of %s" % slug)
-        self.assertEqual(sum(line.startswith("- %s:" % slug) for line in self.body(head)), 1,
-                         "premise: the head does not hold one line for %s" % slug)
+        if new_slug is None:
+            self.assertEqual(sum(line.startswith("- %s:" % slug) for line in self.body(head)), 1,
+                             "premise: the head does not hold one line for %s" % slug)
+        else:
+            self.assertEqual(sum(line.startswith("- %s:" % new_slug) for line in self.body(head)), 1,
+                             "premise: the head does not hold one line for %s" % new_slug)
+            self.assertEqual(sum(line.startswith("- %s:" % slug) for line in self.body(head)), 0,
+                             "premise: the head still holds %s" % slug)
         self.assertNotIn(gone, "\n".join(self.body(head)), "premise: the head still holds %r" % gone)
 
     def named(self, got, *parts):
@@ -3310,6 +3346,86 @@ class LostSentence(unittest.TestCase):
         self.assertGreaterEqual(sum(line.startswith("- ") for line in self.body(head)), 20, "premise: the head has fewer than 20 notes")
         got = self.r.verdict()
         self.assertEqual(got, [], "a plain retire was refused because an unrelated note shares only generic words with a clause: %r" % got)
+
+    def test_a_rename_that_keeps_seven_tenths_of_a_clause_does_not_pair_and_passes(self):
+        self.start([self.PH_SRC])
+        head = self.rewrite("Rename pair-held-src and keep seven of its ten words", [self.PH_SEVEN_LINE])
+        self.assertEqual(len(C.content_words(self.PH_CLAUSE)), 10, "premise: the clause does not have ten content words")
+        self.assertEqual(len(C.content_words(self.PH_CLAUSE) & C.content_words(self.PH_SEVEN)), 7,
+                         "premise: the new clause does not keep seven of the ten words")
+        self.premises(head, self.PH_SRC, "pair-held-src", self.SENT, new_slug="pair-held-kept")
+        self.assertIn(self.PH_SEVEN, "\n".join(self.body(head)), "premise: the head does not hold the kept clause")
+        self.assertEqual(self.r.verdict(), [], "a rename that kept seven of ten content words of a clause paired, and its dropped "
+                         "clause was refused")
+
+    def test_a_rename_that_keeps_eight_tenths_of_a_clause_pairs_and_refuses_the_dropped_clause(self):
+        self.start([self.PH_SRC])
+        head = self.rewrite("Rename pair-held-src and keep eight of its ten words", [self.PH_EIGHT_LINE])
+        self.assertEqual(len(C.content_words(self.PH_CLAUSE)), 10, "premise: the clause does not have ten content words")
+        self.assertEqual(len(C.content_words(self.PH_CLAUSE) & C.content_words(self.PH_EIGHT)), 8,
+                         "premise: the new clause does not keep eight of the ten words")
+        self.premises(head, self.PH_SRC, "pair-held-src", self.SENT, new_slug="pair-held-kept")
+        self.assertIn(self.PH_EIGHT, "\n".join(self.body(head)), "premise: the head does not hold the kept clause")
+        self.assertTrue(self.named(self.r.verdict(), "pair-held-src", self.SENT),
+                        "a rename that kept eight of ten content words of a clause did not pair, so its dropped clause was not refused "
+                        "by a problem that names the old note and that clause")
+
+    def test_a_rename_that_keeps_a_four_word_clause_does_not_pair_and_passes(self):
+        self.start([self.PW_FOUR_SRC])
+        head = self.rewrite("Rename pair-words-four-src and keep its four-word clause", [self.PW_FOUR_LINE])
+        self.assertEqual(len(C.content_words(self.PW_FOUR)), 4, "premise: the clause does not have four content words")
+        self.premises(head, self.PW_FOUR_SRC, "pair-words-four-src", self.SENT, new_slug="pair-words-four-kept")
+        self.assertIn(self.PW_FOUR, "\n".join(self.body(head)), "premise: the head does not hold the kept four-word clause")
+        self.assertEqual(self.r.verdict(), [], "a rename that kept a clause of four content words paired, and its dropped clause was "
+                         "refused")
+
+    def test_a_rename_that_keeps_a_five_word_clause_pairs_and_refuses_the_dropped_clause(self):  # control: the same at five words
+        self.start([self.PW_FIVE_SRC])
+        head = self.rewrite("Rename pair-words-five-src and keep its five-word clause", [self.PW_FIVE_LINE])
+        self.assertEqual(len(C.content_words(self.PW_FIVE)), 5, "premise: the clause does not have five content words")
+        self.premises(head, self.PW_FIVE_SRC, "pair-words-five-src", self.SENT, new_slug="pair-words-five-kept")
+        self.assertIn(self.PW_FIVE, "\n".join(self.body(head)), "premise: the head does not hold the kept five-word clause")
+        self.assertTrue(self.named(self.r.verdict(), "pair-words-five-src", self.SENT),
+                        "a rename that kept a clause of five content words did not pair, so its dropped clause was not refused by a "
+                        "problem that names the old note and that clause")
+
+    def test_a_fold_into_an_existing_note_that_does_not_name_the_source_passes(self):
+        self.start([self.FOLD_PLAIN_SRC, self.FOLD_HOST])
+        head = self.rewrite("Fold fold-plain-src into fold-host-note and drop its second clause", [self.FOLD_HOST_KEPT])
+        self.premises(head, self.FOLD_PLAIN_SRC, "fold-plain-src", self.SENT, new_slug="fold-host-note")
+        self.assertIn(self.FOLD_HOST, self.notes_at("main"), "premise: main does not hold fold-host-note")
+        self.assertIn(self.FOLD_CLAUSE, "\n".join(self.body(head)), "premise: the head does not hold the kept clause")
+        self.assertEqual(self.r.verdict(), [], "a fold into an existing note that does not name the folded note was refused")
+
+    def test_a_clause_moved_verbatim_in_a_later_commit_is_kept_for_a_rename_split_over_two_commits(self):
+        self.start([self.MOVE_SRC])
+        self.rewrite("Retire move-pend-src", [])
+        head = self.rewrite("Add the renamed note and move its short clause into a new note", [self.MOVE_KEPT, self.MOVE_TARGET])
+        self.assertEqual(len(self.r.sh("rev-list", "--no-merges", "origin/main..%s" % head).split()), 2,
+                         "premise: the range is not two non-merge commits")
+        self.assertIn(self.MOVE_SRC, self.notes_at("main"), "premise: main does not hold move-pend-src")
+        self.assertEqual(sum(line.startswith("- move-pend-src:") for line in self.body(head)), 0, "premise: the head holds move-pend-src")
+        self.assertEqual(sum(line.startswith("- move-pend-kept:") for line in self.body(head)), 1,
+                         "premise: the head does not hold move-pend-kept once")
+        self.assertEqual(sum(line.startswith("- move-pend-target:") for line in self.body(head)), 1,
+                         "premise: the head does not hold move-pend-target once")
+        self.assertNotIn(self.SENT, "\n".join(self.body(head)), "premise: the head holds the dropped sentence")
+        self.assertEqual(self.r.verdict(), [], "a clause moved verbatim into a note that a later commit adds was refused as a drop")
+
+    def test_a_retired_clause_is_not_paired_by_a_later_note_that_shares_only_generic_words(self):
+        self.start([self.GENERIC_SRC])
+        self.rewrite("Retire generic-pend-src", [])
+        head = self.rewrite("Add a note that shares only generic words with the retired clause", [self.GENERIC_LOOK])
+        self.assertEqual(len(self.r.sh("rev-list", "--no-merges", "origin/main..%s" % head).split()), 2,
+                         "premise: the range is not two non-merge commits")
+        self.assertIn(self.GENERIC_SRC, self.notes_at("main"), "premise: main does not hold generic-pend-src")
+        self.assertEqual(sum(line.startswith("- generic-pend-src:") for line in self.body(head)), 0, "premise: the head holds generic-pend-src")
+        self.assertEqual(sum(line.startswith("- generic-pend-look:") for line in self.body(head)), 1,
+                         "premise: the head does not hold generic-pend-look once")
+        self.assertTrue({"branch", "never", "check", "finding"} <= C.generic_words("\n".join(self.notes_at(head))),
+                        "premise: the words the look-alike shares with the clause are not generic at head")
+        self.assertEqual(self.r.verdict(), [], "a retire followed by a note that shares only generic words with the retired clause was "
+                         "refused")
 
 
 if __name__ == "__main__":
