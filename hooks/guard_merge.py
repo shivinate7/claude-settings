@@ -1070,9 +1070,12 @@ _BRIEF_LINE = re.compile(
     re.IGNORECASE)
 BRIEF_TRIAGE_LABEL = "Triage"  # a lane brief names triage's and the batch runner's session ids, so the lane can reach them
 BRIEF_RUNNER_LABEL = "Batch runner"
-_BRIEF_ID_FORM = r"\b{label}(?:\s*\d+)?(?:\s*\([^()]*\))?\s*:\s*session_[A-Za-z0-9]+"
-_BRIEF_TRIAGE_ID = re.compile(_BRIEF_ID_FORM.format(label=re.escape(BRIEF_TRIAGE_LABEL)), re.IGNORECASE)
-_BRIEF_RUNNER_ID = re.compile(_BRIEF_ID_FORM.format(label=re.escape(BRIEF_RUNNER_LABEL)), re.IGNORECASE)
+_BRIEF_MD = r"[*_`]*"  # markdown around the label, the colon and the id: bold, italic, backticks
+# An id holds a digit, so a placeholder such as session_TBD or session_id is no id.
+_BRIEF_ID_FORM = (r"(?<![A-Za-z0-9]){md}{label}{md}(?:\s*\d+)?{md}(?:\s*\([^()]*\))?{md}\s*:{md}\s*{md}"
+                  r"session_(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+")
+_BRIEF_TRIAGE_ID = re.compile(_BRIEF_ID_FORM.format(md=_BRIEF_MD, label=re.escape(BRIEF_TRIAGE_LABEL)), re.IGNORECASE)
+_BRIEF_RUNNER_ID = re.compile(_BRIEF_ID_FORM.format(md=_BRIEF_MD, label=re.escape(BRIEF_RUNNER_LABEL)), re.IGNORECASE)
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
