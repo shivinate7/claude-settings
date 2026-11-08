@@ -2798,8 +2798,18 @@ class LostSentence(unittest.TestCase):
     PLAN_TRAILER = "Drops-lines: docs/debts/notes.md -- time-pinned-plan-stale reworded into short sentences"
     THREE_OLD = ("- three-sentence-note: The sweep lists each stale fixture in the folder. The fixture cache keeps every run folder "
                  "for a day. Decision: test-practices (P5).")
-    THREE_TARGET = "- fold-target-tag-only: The finder reads the calendar column of the plan. Decision: test-practices (P5)."
-    TAG_OLD = ("- layout-probe-note: Its layout probe cannot run. Other repos' extras files were not read. "
+    THREE_SAME = "- three-sentence-note: The finder reads the calendar column of the plan. Decision: test-practices (P5)."
+    THREE_NAMED = ("- fold-target-named: The finder reads the calendar column of the plan. Folded in from three-sentence-note. "
+                   "Decision: test-practices (P5).")
+    REAL_OLD = ("- map-kind-extra-clash-unread: a repo whose extras file already names a kind `map` now gets LayoutError from lint/layout.py "
+                "(\"kind map is in the layout already\"), so its layout probe cannot run; other repos' extras files were not read. "
+                "Decision: one-layout-every-repo.")
+    REAL_NEW_A = ("- layout-repeat-unnormalised-path: `lint/layout.py` `kinds()` compares a repeated kind's path with `strip(\"/\")` only, "
+                  "so an extras path such as `\"docs//map\"` gets the both-paths message instead of the delete remedy. It is still "
+                  "refused. Decision: one-layout-every-repo.")
+    REAL_NEW_B = ("- layout-repeat-test-order: `lint/test_layout.py`'s repeat tests check that each path is in the message, not which path is "
+                  "the layout's, so a swapped message still passes. Decision: one-layout-every-repo.")
+    TAG_OLD =("- layout-probe-note: Its layout probe cannot run. Other repos' extras files were not read. "
                "Decision: one-layout-every-repo.")
     TAG_NEW = "- probe-unrelated-note: The probe reads each lint warning once. Decision: one-layout-every-repo."
     NUMBER_OLD = "- count-note: The finder checks 3 files. Decision: test-practices (P5)."
@@ -2902,19 +2912,40 @@ class LostSentence(unittest.TestCase):
         self.assertNotIn("old sweep no longer runs", "\n".join(self.body(head)), "premise: the head holds a sentence of retire-note")
         self.assertEqual(self.r.verdict(), [], "a plain retire of a whole note added a finding")
 
-    def test_a_fold_of_three_sentences_into_a_tag_only_target_is_refused_for_both_lost_sentences(self):
+    def test_a_rewrite_of_three_sentences_that_drops_two_under_the_same_slug_is_refused(self):  # control: green on 4149c0b2d
         self.start([self.THREE_OLD])
-        head = self.rewrite("Fold the three-sentence note into a new note", [self.THREE_TARGET])
+        head = self.rewrite("Cut the three-sentence note to one sentence", [self.THREE_SAME])
+        self.premises(head, self.THREE_OLD, "three-sentence-note", "sweep lists each stale fixture")
+        self.assertNotIn("keeps every run folder", "\n".join(self.body(head)), "premise: the head holds a lost sentence")
+        self.assertTrue(self.named(self.r.verdict(), "three-sentence-note", "sweep lists each stale fixture", "keeps every run folder"),
+                        "a rewrite under the same slug that lost two sentences of three-sentence-note was not refused by a problem "
+                        "that names the note and both sentences")
+
+    def test_a_fold_of_three_sentences_into_a_note_that_names_the_old_slug_is_refused_for_both_lost_sentences(self):
+        self.start([self.THREE_OLD])
+        head = self.rewrite("Fold the three-sentence note into a new note", [self.THREE_NAMED])
         self.assertIn(self.THREE_OLD, self.notes_at("main"), "premise: main does not hold the folded note")
         self.assertEqual(sum(line.startswith("- three-sentence-note:") for line in self.body(head)), 0,
                          "premise: the fold left three-sentence-note in the head")
-        self.assertEqual(sum(line.startswith("- fold-target-tag-only:") for line in self.body(head)), 1,
+        self.assertEqual(sum(line.startswith("- fold-target-named:") for line in self.body(head)), 1,
                          "premise: the head does not hold the fold target once")
         self.assertNotIn("sweep lists each stale fixture", "\n".join(self.body(head)), "premise: the head holds a lost sentence")
         self.assertNotIn("keeps every run folder", "\n".join(self.body(head)), "premise: the head holds a lost sentence")
         self.assertTrue(self.named(self.r.verdict(), "three-sentence-note", "sweep lists each stale fixture", "keeps every run folder"),
-                        "a fold that lost two sentences of three-sentence-note, into a target that shares only its Decision tag, was "
-                        "not refused by a problem that names the note and both sentences")
+                        "a fold into a note that names three-sentence-note, which lost two sentences, was not refused by a problem that "
+                        "names the note and both sentences")
+
+    def test_a_retire_beside_added_notes_that_share_the_tag_and_topic_words_is_not_refused(self):
+        # The shape of 6a5465ea9: two added notes share the deleted note's tag and several of its words, but neither carries
+        # its slug or names it, so nothing pairs and the retire passes.
+        self.start([self.REAL_OLD])
+        head = self.rewrite("Drop the map-kind clash line, add two layout-repeat notes", [self.REAL_NEW_A, self.REAL_NEW_B])
+        self.assertIn(self.REAL_OLD, self.notes_at("main"), "premise: main does not hold map-kind-extra-clash-unread")
+        self.assertEqual(sum(line.startswith("- map-kind-extra-clash-unread:") for line in self.body(head)), 0,
+                         "premise: the retire left map-kind-extra-clash-unread in the head")
+        self.assertEqual(sum(line.startswith("- layout-repeat-") for line in self.body(head)), 2,
+                         "premise: the head does not hold both added notes once")
+        self.assertEqual(self.r.verdict(), [], "a retire was refused because two added notes share its tag and topic words")
 
     def test_a_deliberate_retire_beside_an_unrelated_note_with_the_same_tag_is_not_refused(self):
         # The smallest shape of the false alarm in 6a5465ea9. The tag's word `layout` and one topic word, `probe`, hold half of
