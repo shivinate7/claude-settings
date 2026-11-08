@@ -136,6 +136,7 @@ FAMILIES = {
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "heredoc-keep": "a heredoc body a run line reads: its kept body keeps its closing line, a refusal after it stays, and the retire forms of the false alarm pass",
+    "heredoc-tail": "a command after a closed heredoc whose body no run line reads: the tail is judged as the command it is, under each heredoc header shape",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -14053,6 +14054,66 @@ sh("heredoc-keep: a written file holding gh pr create --title x, run by find -ex
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("heredoc-keep: control, a plain body in f run by find -exec ./f, allowed",
    "cat > f <<'EOF'\nhello\nEOF\nfind . -exec ./f {} \\;", "allow", cwd=NOGIT)
+
+
+# ---- heredoc-tail: a command after a closed heredoc whose body no run line reads. judge_shell strips such a body
+# with its closing line (no run keeps it), so the stripped text ends in an open heredoc header. _run_dir strips
+# again and reads every line after that header as body: the tail never reaches shared-tree, the root is the clean
+# cwd, and a reset in the dirty checkout is allowed. The controls keep the verdict where the tail is still judged.
+FAMILY = "heredoc-tail"
+HT_BODY = "cat > notes.md <<'EOT'\necho hi\nEOT\n"   # a data body: no command in its call runs it
+HT_CD = "cd " + slash(SUBJDIRTY) + " && "
+HT_RESET = HT_CD + VCS + " reset --hard HEAD"
+
+
+# RED. The form from the brief, then each tail the strip drops. SUBJDIRTY holds a modified f.txt and an untracked
+# new.txt, so each tail is refused in that tree.
+sh("heredoc-tail: a data body, then cd into the dirty checkout and reset --hard, denies",
+   HT_BODY + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a data body, then cd into the dirty checkout and checkout -- ., denies",
+   HT_BODY + HT_CD + VCS + " checkout -- .", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a data body, then cd into the dirty checkout and clean -fd, denies",
+   HT_BODY + HT_CD + VCS + " clean -fd", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a data body, then a cd line and a reset line, denies",
+   HT_BODY + "cd " + slash(SUBJDIRTY) + "\n" + VCS + " reset --hard HEAD", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a data body, then a checkout line and a clean line in the dirty checkout, denies",
+   HT_BODY + HT_CD + VCS + " checkout -- .\n" + VCS + " clean -fd", "deny", "shared-tree", cwd=SUBJCLEAN)
+
+
+# RED. Other heredoc shapes that reach the same strip, each with the reset tail: a `<<-` header with a tab-indented
+# closer, two bodies in a row, an unquoted or double-quoted delimiter, a pipe into tee, a redirect before the `<<`,
+# a body with a `$( )` substitution, and a body whose text holds a cd line (text, so inert; the tail still counts).
+sh("heredoc-tail: a <<- body with a tab-indented closer, then cd into the dirty checkout and reset --hard, denies",
+   "cat > notes.md <<-'EOT'\n\techo hi\n\tEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: two data bodies in a row, then cd into the dirty checkout and reset --hard, denies",
+   "cat > a.md <<'EOT'\necho a\nEOT\ncat > b.md <<'EOT'\necho b\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: an unquoted EOT data body, then cd into the dirty checkout and reset --hard, denies",
+   "cat > notes.md <<EOT\necho hi\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh('heredoc-tail: a double-quoted "EOT" data body, then cd into the dirty checkout and reset --hard, denies',
+   'cat > notes.md <<"EOT"\necho hi\nEOT\n' + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a body piped to tee, then cd into the dirty checkout and reset --hard, denies",
+   "cat <<'EOT' | tee notes.md\necho hi\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a redirect before the header, cat <<'EOT' > notes.md, then cd into the dirty checkout and reset --hard, denies",
+   "cat <<'EOT' > notes.md\necho hi\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: an unquoted body with a $( ) substitution, then cd into the dirty checkout and reset --hard, denies",
+   "cat > notes.md <<EOT\n$(echo hi)\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a data body holding a cd line, then cd into the dirty checkout and reset --hard, denies",
+   "cat > notes.md <<'EOT'\ncd " + slash(SUBJCLEAN) + "\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+
+
+# CONTROLS. Each keeps its verdict on main and after the fix. The reset alone is refused. A tail that only reads is
+# allowed. A reset in the clean checkout is allowed, so a fix that refuses every tail after a heredoc fails here. A
+# python body, and a body a bash run reads, keep their closers in view, so the tail after them is judged as it is.
+sh("heredoc-tail: control, the reset alone after cd into the dirty checkout, denies",
+   HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, a data body then cd into the dirty checkout and status, allowed",
+   HT_BODY + HT_CD + VCS + " status", "allow", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, a data body then cd into the clean checkout and reset --hard, allowed",
+   HT_BODY + "cd " + slash(SUBJCLEAN) + " && " + VCS + " reset --hard HEAD", "allow", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, a python body then cd into the dirty checkout and reset --hard, denies",
+   "python3 <<'EOF'\nprint(1)\nEOF\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, a body a bash run reads, then cd into the dirty checkout and reset --hard, denies",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\nbash run.sh\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
 
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
