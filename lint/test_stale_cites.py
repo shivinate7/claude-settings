@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -2393,6 +2394,72 @@ class NamedExcerptTests(unittest.TestCase):
     def test_a_file_with_no_name_or_empty_text_gives_none(self):
         self.assertIsNone(self.stale.named_excerpt(["target"], ""), "empty text gives an excerpt, want None")
         self.assertIsNone(self.stale.named_excerpt(["target"], "a = 1\nb = 2\n"), "a file with no name gives an excerpt, want None")
+
+    def run_def_file(self):
+        """-> (text, rows). `run` is called on row 5 (subprocess.run) and defined on row 60, with a 45-row body on rows 61 to 105."""
+        lines = (["import subprocess", "", "", "def check(tool):", "    result = subprocess.run(tool)"]
+                 + ["    pad_%02d = tool" % n for n in range(1, 54)] + [""]
+                 + ["def run(tool):"] + ["    step_%02d = tool" % n for n in range(1, 45)] + ["    return tool"])
+        return "\n".join(lines) + "\n", lines
+
+    def owner_file(self):
+        """-> (text, rows). class A defines run on row 2 with a two-row body; class B defines run on row 51 with a body on rows 52 to 60."""
+        lines = (["class A:", "    def run(self):", "        a_one = 1", "        a_two = 2"]
+                 + ["pad_%02d = %d" % (n, n) for n in range(5, 50)]
+                 + ["class B:", "    def run(self):"] + ["        b_%02d = %d" % (n, n) for n in range(1, 10)])
+        return "\n".join(lines) + "\n", lines
+
+    def test_the_def_rows_do_not_crowd_out_a_call_rows_window_when_the_cap_binds(self):
+        text, lines = self.run_def_file()
+        self.assertEqual(self.stale.defined_line(text, "run"), 60, "scope: run is not defined on row 60")
+        self.assertIn("subprocess.run", lines[4], "scope: row 5 is not the call of run")
+        rows = self.excerpt_rows(["run"], text)
+        self.assertIn("5: " + lines[4], rows, "row 5, the call of run, is cut from the excerpt: the def body of run took the cap")
+        self.assertIn("60: def run(tool):", rows, "the def row of run is not in the excerpt")
+
+    def test_a_dotted_name_shows_the_body_of_the_class_it_names(self):
+        text, lines = self.owner_file()
+        self.assertEqual(lines[50], "    def run(self):", "scope: row 51 is not the def of run in class B")
+        self.assertEqual(lines[1], "    def run(self):", "scope: row 2 is not the def of run in class A")
+        rows = self.excerpt_rows(["B.run"], text)
+        self.assertIn("55: " + lines[54], rows, "row 55, in the body of B.run, is not in the excerpt: the excerpt is not the body of B.run")
+        self.assertNotIn("2: " + lines[1], rows, "the def of A.run is in the excerpt of B.run: the earliest def of run was used")
+
+    def test_a_bare_name_with_two_defs_shows_the_earliest_def_body(self):
+        # The pin: a bare name takes its earliest def. The later def's body, far from its own window, stays out.
+        text, lines = self.owner_file()
+        self.assertEqual(self.stale.defined_line(text, "run"), 2, "scope: the earliest def of run is not on row 2")
+        rows = self.excerpt_rows(["run"], text)
+        self.assertIn("3: " + lines[2], rows, "row 3, in the body of the earliest run, is not in the excerpt")
+        self.assertNotIn("55: " + lines[54], rows, "row 55, deep in the body of the later run, is in the excerpt: a bare name took the later def")
+
+    def test_a_call_span_with_parentheses_gets_the_def_body_of_its_name(self):
+        text, lines = self.run_def_file()
+        self.assertIn("70: " + lines[69], self.excerpt_rows(["run"], text), "scope: row 70, in the body of run, is not in the excerpt of run")
+        self.assertIn("70: " + lines[69], self.excerpt_rows(["run()"], text),
+                      "row 70, in the body of run, is not in the excerpt of run(): the call span did not take the def body")
+
+    def test_one_ast_parse_per_file_per_excerpt_call_whatever_the_name_count(self):
+        text = "def alpha():\n    return 1\n\n\ndef beta():\n    return 2\n\n\ndef gamma():\n    return 3\n"
+        parses, real_parse = [], ast.parse
+
+        def counting_parse(*args, **kwargs):
+            parses.append(1)
+            return real_parse(*args, **kwargs)
+        with unittest.mock.patch.object(ast, "parse", counting_parse):
+            shown = self.stale.named_excerpt(["alpha", "beta", "gamma"], text)
+        self.assertIsNotNone(shown, "scope: no excerpt for three names that the file defines")
+        self.assertEqual(len(parses), 1, "named_excerpt parsed the file %d times for three names, want one parse" % len(parses))
+
+    def test_an_unparseable_named_file_keeps_its_three_row_windows_and_does_not_crash(self):
+        # Control: a file that does not parse has no def rows, and its windows are the old ones. Nothing raises.
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 21)]
+        lines[9] = "value = run("
+        text = "\n".join(lines) + "\n"
+        self.assertIsNone(self.stale.defined_line(text, "run"), "scope: the fixture parses, so it is not an unparseable file")
+        got = [row for row in self.excerpt_rows(["run"], text) if re.match(r"\d+: ", row)]
+        self.assertEqual(got, ["%d: %s" % (n, lines[n - 1]) for n in range(7, 14)],
+                         "an unparseable file does not show the three rows around the line that holds run")
 
 
 if __name__ == "__main__":
