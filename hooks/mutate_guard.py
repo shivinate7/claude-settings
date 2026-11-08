@@ -385,7 +385,7 @@ MUTATIONS = [
      '            dest = merge or None',
      '            dest = None', "guard", 'a branch tracking main asks'),
     ("push-main: a bare push under simple ignores git's own refusal",
-     '            dest = cur if merge == cur else None',
+     '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur', "guard", 'a bare push on main with no upstream is git'),
     ("push-stray-branch: a stray destination no longer asks",
      '    return "stray" if merge != current() and not upstream else ""',
