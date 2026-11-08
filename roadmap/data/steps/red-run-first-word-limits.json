@@ -1,11 +1,11 @@
 {
   "title": "The red-run check reads past the first word of a line",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 60.01,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
   "why": "A misspelt or quoted mutant line passes the red-run check today, so a test commit can carry no real red run.",
-  "note": "After #1691 lands. Three limits from #1691's round 3 reviewer (sonnet): (1) lint/check_red_run.py lines 107-125 read only the first word, so `(mutant A) ...`, `\"mutant A\" ...` and `mutnat A (x) python3 ...` pass. (2) `mutate=x` and `mutan=x` pass under the NAME=value exemption. (3) docs/decisions/red-run-trailer-on-test-commits.md line 25 (Known limits) leaves out that a real command starting mutat or mutan, such as `mutatest run`, is refused (use `./` or `env`). Filed from lane notes-fix-large-3, 19:45 CST Nov 7 (decision cull-rules).",
-  "updatedAt": "2026-11-07T19:45:00-06:00"
+  "note": "After #1691 lands. Three limits from #1691's round 3 reviewer (sonnet): (1) lint/check_red_run.py lines 107-125 read only the first word, so `(mutant A) ...`, `\"mutant A\" ...` and `mutnat A (x) python3 ...` pass. (2) `mutate=x` and `mutan=x` pass under the NAME=value exemption. (3) docs/decisions/red-run-trailer-on-test-commits.md line 25 (Known limits) leaves out that a real command starting mutat or mutan, such as `mutatest run`, is refused (use `./` or `env`). Filed from lane notes-fix-large-3, 19:45 CST Nov 7 (decision cull-rules). Doing in lane notes-fix-large-3, stacked on #1691 (coordinator 19:45 CST).",
+  "updatedAt": "2026-11-07T19:46:00-06:00"
 }
