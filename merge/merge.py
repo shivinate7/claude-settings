@@ -2094,7 +2094,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
                       "Instead, rebuild the integration branch from main without the lane, then run again. " + DROP_CITE)
 
 def owed_round(num, bodies, sha):
-    """-> (kind, why) when pull request `num` owes its third round for lane tip `sha`, else None. `kind` picks the remedy: "held" (net value negative: the
+    """-> (kind, clause) when pull request `num` owes its third round for lane tip `sha`, else None. `clause` finishes the sentence "#N (head ...)". `kind` picks the remedy: "held" (net value negative: the
     owner decides, no more rounds), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed, or the record is bad). `bodies`: its record bodies,
     oldest first. The newest one whose Head line is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha`
     and fails to parse, or whose PR line is not `num`, is bad and refuses: its Guard or check value is unknown, never read as no."""
@@ -2106,16 +2106,18 @@ def owed_round(num, bodies, sha):
     if rec and rec["guard"] == "no":
         return None
     state, why = review_state(rec, sha)
-    if rec and state == "done":
+    if state == "done":
         return None
-    if parsed and not rec:
-        why = f"the newest record says PR #{parsed['n']}, and it was posted on #{num}"
+    if not rec:  # its Guard or check value is unknown, so the clause does not say the change touches a guard or check
+        if parsed:
+            return "round", f"has a record for another PR (the newest record says PR #{parsed['n']}, and it was posted on #{num})"
+        return "round", "has a newest record that does not parse"
     if state == "held":
-        return "held", f"is held for the owner ({why})"
+        return "held", f"changes a guard or check and is held for the owner ({why})"
     fix = rec["fix"] if rec else None
     if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND and not (fix and fix[3] != "PASS"):
-        return "net", f"has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
-    return "round", f"round {REVIEW_LAST_ROUND} is owed ({why})"
+        return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
+    return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})"
 
 def head_in_history(root, head, tip):
     """True when commit `head` is `tip` or an ancestor of it, False when it is a commit of the clone that is not, and False when the clone does not hold `head`
@@ -2127,17 +2129,18 @@ def head_in_history(root, head, tip):
         return c == 0
     raise RuntimeError(f"git merge-base failed on {head[:9]} (exit {c}): {(out.splitlines() or ['no output'])[-1]}")
 
-def stale_guard_round(num, bodies, live, new_to_batch):
+def stale_guard_round(num, bodies, live, new_to_batch, own=False):
     """-> the why when pull request `num` has records that name none of the `live` heads (the lane tips and the pull request's own head), its newest record has Guard or
-    check yes, and that record's head is new to the batch (`new_to_batch(head)`: in the history of the pull request's own head and not on its base), else None. A push
-    after the review made that record stale, and a stale yes does not shed the guard or check owing: the third round is owed on the new head. A record for a head outside that
-    history belongs to a pull request that is no part of this batch, and one for a head on the base belongs to a pull request merged earlier: neither owes anything here.
-    A stale Guard or check no passes. A newest record that does not parse owes nothing here, as a lane with no record does (decision pr-review-record, Q1).
-    `new_to_batch` raises when git cannot tell; the caller refuses as unknown."""
+    check yes, and that record is not done, else None. A push after the review made that record stale, and a stale yes does not shed the guard or check owing: the third round is
+    owed on the new head. For another pull request's record the head must also be new to the batch (`new_to_batch(head)`: in the history of the pull request's own head and not on
+    its base): a head outside that history belongs to a pull request that is no part of this batch, and one on the base to a pull request merged earlier. `own`: `num` is the pull
+    request being merged. Its record is its own whatever its history, because an amend and a force push leave the reviewed head outside it, so the history test is skipped.
+    A stale Guard or check no passes, and so does a record whose third round is done (review_state, as owed_round reads it). A newest record that does not parse owes nothing
+    here, as a lane with no record does (decision pr-review-record, Q1). `new_to_batch` raises when git cannot tell; the caller refuses as unknown."""
     if not bodies or any(re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M) for b in bodies for sha in live):
         return None
     rec = parse_review(bodies[-1])
-    if rec and rec["n"] == num and rec["guard"] == "yes" and new_to_batch(rec["head"]):
+    if rec and rec["n"] == num and rec["guard"] == "yes" and review_state(rec, rec["head"])[0] != "done" and (own or new_to_batch(rec["head"])):
         return f"round {REVIEW_LAST_ROUND} is owed on the new head (its newest record is for head {rec['head'][:9]})"
 
 def oldest_new_since(root, base_ref, head):
@@ -2193,13 +2196,13 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
                        f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
     heads = list(dict.fromkeys([*tips, info["head"]]))
     lanes = [(info["head"], n)] + [(t, num) for t in tips for num in sorted(records)]
-    found = [(kind, f"#{num} (tip {sha[:9]}) changes a guard or check and {why}.") for sha, num in dict.fromkeys(lanes)
+    found = [(kind, f"#{num} ({'head' if sha == info['head'] and num == n else 'tip'} {sha[:9]}) {why}.") for sha, num in dict.fromkeys(lanes)
              for kind, why in [owed_round(num, records.get(num, []), sha) or (None, None)] if kind]
     def new_to_batch(h):  # the own head's history first: once it holds `h`, the clone holds `h`, so an exit 128 on the base read is a bad base and refuses
         return head_in_history(root, h, info["head"]) and not head_in_history(root, h, base_ref)
     try:
         found += [("round", f"#{num} changes a guard or check and {why}.") for num in sorted(records)
-                  for why in [stale_guard_round(num, records[num], heads, new_to_batch)] if why]
+                  for why in [stale_guard_round(num, records[num], heads, new_to_batch, own=num == n)] if why]
     except Exception as e:
         if not unknown_ok.strip():
             raise Liftable(f"the round-3 check could not read the history of a stale record's head ({type(e).__name__}: {e}).\n"
