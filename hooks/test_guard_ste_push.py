@@ -880,6 +880,11 @@ CASES = [
     ("ste-push: the control, `git --work-tree=<B> commit -am m && git push` from B, with B's note dirty, is denied "
      "to push in its own call",
      folder_chain_case("git --work-tree=%(b)s commit -am m && git push origin topic", ("b",), "b")),
+    # `git -C "$X"` names no folder the guard can read, so the commit may land in B, the pushed tree, where B's
+    # in-scope note is dirty. The push is denied to run in its own call, as a commit of unknown folder would be.
+    ("ste-push: `git -C \"$X\" commit -am m && git push` from B, with B's note dirty, is denied to push in its own "
+     "call (an unreadable commit folder counts in the pushed tree)",
+     folder_chain_case('git -C "$X" commit -am m && git push origin topic', ("b",), "b")),
     ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
      with_case("with: fail: false", pinned_with('fail: "false"'), want_allowed_no_note)),
     ("ste-push: a pinned exclude naming the bad note is allowed with no unknown note",
