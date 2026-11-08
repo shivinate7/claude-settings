@@ -1,0 +1,11 @@
+{
+  "title": "The --reviewed cutover reads merge/merge.py from the tool's own checkout, not the caller's repo",
+  "why": "Coordinator 12:51 CST Nov 8, from #1923 round 3: the --reviewed cutover reads merge/merge.py from the caller's repo, so other repos accept every unstamped record. Read it from the tool's own checkout.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzUe9U19voH62VbCNA",
+  "status": "todo",
+  "order": 793,
+  "updatedAt": "2026-11-08T12:51:00-06:00"
+}

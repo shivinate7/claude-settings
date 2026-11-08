@@ -1,0 +1,11 @@
+{
+  "title": "Guards lane-one-topic and trust-card-in-build read an agent's own calls, and every agent-transcript path comes from one home",
+  "why": "Lane archive-guard-reads-agent-calls (#2224), 12:50 CST Nov 8: guards brief_hit (lane-one-topic) and trust_card_hit (trust-card-in-build) in hooks/guard_merge.py read only the main transcript, so an agent's own get_session record is not seen; the same gap #2224 fixes for archive_hit. #2224 adds own_session.agent_transcript_path as the one home for the path. Four other copies build it: hooks/guard_kill.py in_own_agent_worktree, hooks/stall_watch.py (~line 520), lint/report_guard.py tool_use_sources and lint/ruling_census.py agent_transcript_paths. Start after #2224 merges.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 795,
+  "updatedAt": "2026-11-08T12:51:00-06:00"
+}
