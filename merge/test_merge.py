@@ -150,6 +150,9 @@ class FakeHost:
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body}
 
+    def pages(self, rel, key=None, fields=None):  # the open pull requests the handed-lane check reads: none, unless a case sets its own pages
+        return []
+
     def required_names(self):
         return ["checks"]
 
@@ -325,6 +328,10 @@ class Env(unittest.TestCase):
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         put(os.path.join(o, "elsewhere.txt"), "main moved\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+
+    def set_pr_body(self, text):
+        """The body the pull request under merge reports (Host.pr reads it): FakeHost's attribute here, GhHalf's gh state."""
+        self.host.body = text
 
     def hook(self, fn_script):
         p = os.path.join(self.t, "hook.sh")
@@ -1785,9 +1792,14 @@ LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one lin
 LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
 LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
+def lanes_body(names):
+    """The integration PR body that lane_batch's batch needs: one merge.BATCH_LANES line naming each lane's PR (lane i is PR 20 + i)."""
+    return f"{merge.BATCH_LANES} " + " ".join(f"#{20 + i}" for i in range(len(names)))
+
 def lane_batch(env, *names):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
-    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line."""
+    -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line, and the
+    PR body that names the lanes (env.set_pr_body), so the handed-lane check reads the batch as named."""
     o, tips = env.other, {}
     for n in names:
         sh(o, "git", "fetch", "-q", "origin")
@@ -1800,6 +1812,7 @@ def lane_batch(env, *names):
         sh(o, "git", "merge", "-q", "--no-ff", "-m", f"Merge remote-tracking branch 'origin/{n}' into feat", tips[n])
     sh(o, "git", "push", "-q", "origin", "feat")
     env.tips = tips
+    env.set_pr_body(lanes_body(names))
     return tips
 
 def lane_lines(out, b):
@@ -1939,8 +1952,9 @@ class CutLanes(Env):
         self.assertTrue(any(w in lines[0] for w in LANE_MOVED), lines[0])
 
     def assert_one_lane_line(self, out, words=None):
-        """Rulings 2 and 3: the whole cleanup prints one line, and when `words` is given that line holds one of them."""
-        lines = [l for l in out.splitlines() if "lane" in l]
+        """Rulings 2 and 3: the whole cleanup prints one line, and when `words` is given that line holds one of them. The handed-lane
+        check's count line (one per passing batch, a line of its own) is not a cleanup line, so it is not counted."""
+        lines = [l for l in out.splitlines() if "lane" in l and not l.startswith("merge: handed-lane check:")]
         self.assertEqual(len(lines), 1, out)
         if words:
             self.assertTrue(any(w in lines[0] for w in words), lines[0])
@@ -3594,7 +3608,7 @@ def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=Fal
 def list_item(number, head, head_ref, base_ref):
     """An open pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state."""
     full = pull(number, head, head_ref, base_ref)
-    return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
+    return {**{k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}, "created_at": "2026-10-01T00:00:00Z"}  # GitHub's list rows carry created_at, which the review list reads
 '''
 
 FAKE_GH_PR = "#!/usr/bin/env python3\nimport os, sys\n" + GH_REST_LIB + r'''
@@ -4010,6 +4024,11 @@ class GhHalf(Env):
         s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0}
         s.update(kw)
         f.write_text(json.dumps(s))
+
+    def set_pr_body(self, text):
+        """The body gh reports for the pull request under merge, and an empty repo comment list: the handed-lane check reads the open
+        pull requests and then the repo's comments for any open row, and a comment list with none set is a 404."""
+        self.set(body=text, issue_comments=[])
 
     def calls(self):
         p = pathlib.Path(self.state, "calls.log")
