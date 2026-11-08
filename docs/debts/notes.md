@@ -1463,3 +1463,4 @@
 - stale-cites-value-span-wraps: a code span wrapped across a line break is missed, since a span is read one line at a time. Decision: stale-cites-at-merge. Step: value-cites-wrapped-span
 - kept-answer-folder-name-unpinned: no test pins which folder the `kept-answer: unknown` line names; a mutant that reverts the name still passes (skills/waiting-page/test_stale_pages.py, prefix-only assert). Lane page-grant-counts-closed, fix check. Decision: relayed-grant-read-from-page.
 - restore-staged-no-guard: a builder ran git restore --staged in its own worktree; it only unstages, nothing is lost. Fix: none — rare and harmless
+- map-alias-links-unread: `jsconfig.json`, nested tsconfigs and vitest or jest aliases are unread (skills/plain-english-map/scripts/lib/tsconfig-paths.mjs). Decision: map-tested-by-line.
