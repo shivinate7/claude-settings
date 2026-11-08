@@ -10685,6 +10685,10 @@ VARIABLE_EDIT_ROUTES = (
     ("command substitution as the repo", "repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/comments/77"),
     ("command substitution as the repo in double quotes",
      "\"repos/$(gh repo view --json nameWithOwner -q .nameWithOwner)/issues/comments/77\""),
+    ("backticks with a pipe", "repos/y/x/issues/comments/`echo 4417 | cat`"),
+    ("backticks with a semicolon", "repos/y/x/issues/comments/`echo 4417; echo 4417`"),
+    ("backticks with and", "repos/y/x/issues/comments/`true && echo 4417`"),
+    ("backticks across a line break", "repos/y/x/issues/comments/`echo\n4417`"),
 )
 VARIABLE_POST_ROUTES = (
     ("command substitution", "repos/y/x/issues/$(gh pr view --json number --jq .number)/comments"),
@@ -10701,6 +10705,9 @@ VARIABLE_POST_ROUTES = (
     ("command substitution with a semicolon", "repos/y/x/issues/$(true; echo 12)/comments"),
     ("command substitution with and", "repos/y/x/issues/$(true && echo 12)/comments"),
     ("backticks", "repos/y/x/issues/`echo 12`/comments"),
+    ("backticks with a pipe", "repos/y/x/issues/`echo 12 | cat`/comments"),
+    ("backticks with a semicolon", "repos/y/x/issues/`echo 12; echo 12`/comments"),
+    ("backticks with and", "repos/y/x/issues/`true && echo 12`/comments"),
 )
 VARIABLE_FORMS = (
     ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
@@ -10727,6 +10734,19 @@ for _label, _route in VARIABLE_EDIT_ROUTES:
 for _label, _route in VARIABLE_POST_ROUTES:
     REVIEW_LOG_CHECKS.append(("review-record:a marked post under a variable route is refused with no gh read, %s" % _label,
                              review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_route, review_record())}, "deny", 0)))
+# A COMMENT OR A QUOTE BEFORE A BACKTICK ID. Decision pr-review-record, the variable forms, and building-scanner-respects-strings. The
+# splitter drops a `#` comment whole, so a `$(`, a backtick or a lone apostrophe in it opens no substitution and no quote for the call
+# after it. Line 2 is a backtick id with a pipe: only the backtick toggle joins it, so each case goes red when the toggle is deleted.
+# A `#` inside a quoted body is text, so the call still ends at its quote.
+for _label, _comment in (("a comment holding $(", "# see $(\n"),
+                         ("a comment holding a backtick", "# see `x\n"),
+                         ("a lone apostrophe in a comment", "# don't\n")):
+    REVIEW_LOG_CHECKS.append(("review-record:a marked edit of a backtick id with a pipe, after %s, is refused with no gh read" % _label,
+                             review_reads("Bash", {"command": _comment + "gh api -X PATCH repos/y/x/issues/comments/`echo 4417 | cat` -f 'body=%s'"
+                                                   % review_record()}, "deny", 0, carries=(REVIEW_RULE,))))
+bash_post("review-record: a # inside a quoted body does not end the call, a backtick id edit is refused as a read that could not run, gh api -X PATCH",
+          "gh api -X PATCH repos/y/x/issues/comments/`echo 4417 | cat` -f 'body=Round 1 # no record yet'", "deny", rule=REVIEW_RULE,
+          carries=("could not run",))
 # Allow controls, pinning today's behaviour: an unmarked body in a variable issue-number post is not judged, and a literal route
 # whose unmarked body holds $(date) and ${N:-12} as text is not judged either.
 bash_post("review-record: an unmarked body in a variable issue-number post is allowed, gh api post, issues/$N/comments",
@@ -10818,6 +10838,13 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked pr comment on a literal number
                                       carries=(REVIEW_RULE,))))
 REVIEW_LOG_CHECKS.append(("review-record:an unmarked pr comment with a variable repo is allowed with no gh read, gh pr comment \"$PR\" -R \"$REPO\"",
                          review_reads("Bash", {"command": "gh pr comment \"$PR\" -R \"$REPO\" --body '%s'" % UNMARKED_BODY}, "allow", 0)))
+# A VARIABLE PULL REQUEST NUMBER WITH A LITERAL REPO. Decision pr-review-record, the variable forms. `gh pr comment` takes its pull request
+# from its first word, so a shell expansion there is a variable target even when `-R` names the repo, or names none. A marked body is
+# refused with no read, and the remedy writes the PR number literally.
+for _label, _command in (("$PR, no -R", "gh pr comment $PR --body '%s'" % review_record()),
+                         ("$PR, with -R y/x", "gh pr comment $PR -R y/x --body '%s'" % review_record())):
+    REVIEW_LOG_CHECKS.append(("review-record:a marked pr comment on a variable number is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": _command}, "deny", 0, carries=(REVIEW_RULE, "PR number literally"))))
 
 # CONTROLS THAT STAY ALLOWED. Decision pr-review-record, the variable forms. Each is a call the route judge must not take for a comment post or edit, so each makes no read.
 for _label, _command in (
@@ -10930,6 +10957,12 @@ REVIEW_LOG_CHECKS.append(("review-record:a refused edit whose stdin body the gua
 bash_post("review-record: an unmarked --edit-last under a variable pull request number is refused as a read that could not run, and its remedy writes the PR number literally, gh pr comment $PR --edit-last",
           "gh pr comment $PR --edit-last --body x", "deny", rule=REVIEW_RULE, carries=("could not run", "PR number"),
           lacks=("can read the comment",))
+# A VARIABLE REPO ON AN EDIT OF THE NEWEST COMMENT. Decision pr-review-record, the edit-read cost. `--edit-last` reads the newest comment in
+# the repo `-R` names. A shell expansion there cannot be read, so the unmarked edit is refused with no read, and its remedy writes the repo
+# literally.
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked --edit-last with a variable repo is refused with no gh read, and its remedy writes the repo literally, gh pr comment 12 --edit-last -R \"$REPO\"",
+                         review_reads("Bash", {"command": 'gh pr comment 12 --edit-last -R "$REPO" -b x'}, "deny", 0,
+                                      carries=("could not run", "OWNER/NAME, literally"))))
 
 # A bare edit names no pull request. This pins the count the code makes today, not a ruling: the open-PR list, then the comment listing.
 REVIEW_LOG_CHECKS.append(("review-record:a bare edit with no pull request number makes two gh reads today, the open-PR list and the listing, gh pr comment --edit-last",
