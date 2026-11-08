@@ -8202,6 +8202,61 @@ sh("env: interpreter code follow-ups: allow, uv run pytest", "uv run pytest", "a
 sh("env: interpreter code follow-ups: allow, pdm run test", "pdm run test", "allow", cwd=NOGIT)
 sh("env: interpreter code follow-ups: allow, npx eslint", "npx eslint .", "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, part two. The forms the builder fixed
+# before these cases existed: a script or a runner whose program or file name comes from a heredoc, the
+# runner subcommands and options that run code (`bun -`, `deno eval`, `uv tool run`, `npx -y node`,
+# `conda run` with its own options), and a heredoc piped from `cat` into a runner. Names start
+# "env: interpreter code follow-ups", so MUTATE_ONLY="env: interpreter code follow-ups" runs them alone.
+sh("env: interpreter code follow-ups: deny, a python script run with a heredoc that is only the file's name",
+   "python3 show.py <<'EOF'\n" + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a node script run with a heredoc that is only the file's name",
+   "node show.js <<'EOF'\n" + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c that opens the name it reads from a heredoc",
+   "python3 -c \"import sys; print(open(sys.stdin.read().strip()).read())\" <<'EOF'\n" + ENV + "\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -V chained to an ssh heredoc that cats the file",
+   "python3 -V; ssh host <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, bun - with a quoted heredoc that reads the file",
+   "bun - <<'JS'\nconsole.log(require('fs').readFileSync('" + ENV + "','utf8'))\nJS", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, deno eval, a readTextFileSync of the file",
+   "deno eval \"console.log(Deno.readTextFileSync('" + ENV + "'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, uv tool run python -c, an open of the file",
+   "uv tool run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, npx -y node -e, a readFileSync of the file",
+   "npx -y node -e \"console.log(require('fs').readFileSync('" + ENV + "','utf8'))\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, conda run --name base python -c, an open of the file",
+   "conda run --name base python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, conda run -p prefix python -c, an open of the file",
+   "conda run -p /opt/env python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a quoted node heredoc piped from cat that reads the file",
+   "cat <<'JS' | node\nconsole.log(require('fs').readFileSync('" + ENV + "','utf8'))\nJS", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a quoted python heredoc piped from cat to python3 -",
+   "cat <<'PY' | python3 -\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, an unquoted python heredoc piped from cat to python3 -",
+   "cat <<PY | python3 -\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a quoted python heredoc piped from cat to python3 with 2>&1",
+   "cat <<'PY' | python3 2>&1\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, python3 - heredoc whose body is only a comment",
+   "python3 - <<'PY'\n# only a comment\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c that exits with the name in a message",
+   "python3 -c \"raise SystemExit('" + ENV + " missing')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e that throws with the name in a message",
+   "node -e \"throw new Error('" + ENV + " missing')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, a quoted python heredoc with 2>&1 that prints the name",
+   "python3 <<'PY' 2>&1\nprint(\"" + ENV + " found\")\nPY", "allow", cwd=NOGIT)
+
+# CURRENT VERDICT, SEE NOTE. The builder reads both of these as deny. Each expected verdict below is what
+# head gives today, so a change to either one shows here. The first opens only the name 'x', never the
+# file, so its deny is a false alarm if the file is never opened. The second reads no file at all.
+sh("env: interpreter code follow-ups: current verdict, see note: python3 -c, a name bound to x, opened when not the file",
+   "python3 -c \"f='x'\nif f != '" + ENV + "': print(open(f).read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: current verdict, see note: node -e, a joined list holding the file's name",
+   "node -e \"console.log(['" + ENV + "','x'].join('\\n'))\"", "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
