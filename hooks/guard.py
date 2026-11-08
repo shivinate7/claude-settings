@@ -4759,7 +4759,10 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # sessions and writes records. Its own write goes only to a record home, its own scratchpad, or a path in no
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
-# checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it).
+# checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it). A GitHub MCP write is judged
+# by the repo the call names, not the checkout it runs in: `named_candidates` (that repo's legacy-repos path, the
+# layout's legacy spelling, the layout path) unless the checkout's origin is that repo (`coordinator_mcp_root`),
+# then the checkout's own `candidates`.
 # The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose merge role
 # is `coordinator`: read_merge_role matches the role file to the environment's session id, never to the
 # payload's. An owner override lifts the rule: it is not in never_lifted.
@@ -4772,7 +4775,8 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Cost (rule outcomes-mechanize-rules): the role file is read first, at most once per call. Nothing else is
 # read unless the session is a coordinator and the call names a repository path: then lint/layout.json, the
 # repo's extras file and git config (lint/layout.py, file reads), the settings clone pointer
-# (~/.claude/CLAUDE.md) and, for a checkout that has roadmap/data, one `git symbolic-ref`. A `git commit` adds
+# (~/.claude/CLAUDE.md) and, for a checkout that has roadmap/data, one `git symbolic-ref`. An MCP write that names
+# another repo reads the layout file only: no extras file and no child process. A `git commit` adds
 # one `git diff --cached` (plus `git diff` for `-a`) and one `git rev-parse`; each `git add` before it adds one
 # `git rev-parse` and one `git ls-files`. A git read that fails judges nothing. Not read: symlinks inside a
 # target path, python paths built at run time, a `sh -c` script.
@@ -4791,7 +4795,9 @@ COORDINATOR_SCOPE_REASON = (
 # COORDINATOR_AGENT_ROLES, compared exactly. Cost: the role file is read once per call, shared with
 # coordinator_scope_hit (_cloud_coordinator), and the transcript once per call, only when the role file is missing.
 # A shell call reads the tier only when a string scan of the command finds a merge, a write word, a commit or an
-# interpreter word; it adds no process. A spawn or Workflow call reads nothing else.
+# interpreter word; it adds no process. A spawn or Workflow call reads nothing else. A call to one of the five GitHub MCP names
+# (COORDINATOR_MCP_WRITE_TOOLS, COORDINATOR_MERGE_TOOLS) starts the guard once, in every session. A merge call adds the merge
+# tool's own gh reads under MERGE_READ_TIMEOUT: 9 for a green numbered head with no other ready PR. A test pins the count.
 COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own "
@@ -4819,6 +4825,7 @@ RECORD_BRANCH = "roadmap"
 RECORD_DATA = "roadmap/data"
 RECORD_FOLDERS = ("roadmap", "briefs", "handoffs")
 _COORDINATOR_PATHS = {}
+_COORDINATOR_NAMED_PATHS = {}
 _RECORD_CHECKOUTS = {}
 _COORDINATOR_LAYOUT = []
 
@@ -4867,6 +4874,51 @@ def coordinator_paths(root: str):
     return found
 
 
+def coordinator_named_paths(name):
+    """[(path, is_file)] of the record homes of the repo `name` (`owner/name`, lower case; None names none), from
+    `layout.named_candidates`: that repo's legacy-repos paths, the layout's legacy spellings and the layout path. It reads the
+    layout file only, never a checkout. [] when no layout is readable: then no path passes."""
+    if name in _COORDINATOR_NAMED_PATHS:
+        return _COORDINATOR_NAMED_PATHS[name]
+    found = []
+    home = coordinator_layout()
+    try:
+        for kind in COORDINATOR_KINDS:
+            try:
+                spelled = home.named_candidates(name, kind)
+            except Exception:
+                spelled = (home.layout()["kinds"][kind]["path"], home.legacy(kind))
+            for path in spelled:
+                path = norm(path).strip("/").lower()
+                entry = (path, bool(os.path.splitext(path)[1]))
+                if path and entry not in found:
+                    found.append(entry)
+    except Exception:
+        found = []
+    _COORDINATOR_NAMED_PATHS[name] = found
+    return found
+
+
+def coordinator_mcp_name(tool_input: dict):
+    """`owner/repo`, lower case, of the repo a GitHub MCP call names; None when it names none."""
+    owner, repo = tool_input.get("owner"), tool_input.get("repo")
+    return (owner + "/" + repo).lower() if isinstance(owner, str) and isinstance(repo, str) and owner and repo else None
+
+
+def coordinator_mcp_root(tool_input: dict, cwd: str):
+    """The root of the checkout a GitHub MCP call runs in, when its origin is the repo the call names; else None.
+    Reads git's config file only (layout.repo_name): no process and no extras file."""
+    name = coordinator_mcp_name(tool_input)
+    home = coordinator_layout() if name else None
+    if home is None:
+        return None
+    root = coordinator_cwd_root(cwd)
+    try:
+        return root if home.repo_name(root) == name else None
+    except Exception:
+        return None
+
+
 def coordinator_record_checkout(root: str) -> bool:
     """True when the checkout at `root` stands on the record branch and holds its data folder. The folder is
     looked for first, so a checkout without it starts no git process."""
@@ -4879,18 +4931,19 @@ def coordinator_record_checkout(root: str) -> bool:
     return _RECORD_CHECKOUTS[root]
 
 
-def coordinator_rel_ok(rel: str, root: str) -> bool:
-    """True when a path relative to the repo at `root` is a record home: a kind's file, a file inside a kind's
+def coordinator_rel_ok(rel: str, root, name=None) -> bool:
+    """True when a path relative to a repo is a record home: a kind's file, a file inside a kind's
     folder, or a record-branch folder of a checkout on the record branch. The case is folded, because the folder
-    is one folder on a case-insensitive disk."""
+    is one folder on a case-insensitive disk. With a `root`, the repo is the checkout there. With no root, it is the
+    repo `name` that a call names, judged on `coordinator_named_paths` and with no record-branch folder."""
     parts = [part for part in norm(rel).lower().split("/") if part]
     if ".." in parts:
         return False
     joined = "/".join(parts)
-    if any(joined == path or (not is_file and joined.startswith(path + "/"))
-           for path, is_file in coordinator_paths(root)):
+    homes = coordinator_paths(root) if root is not None else coordinator_named_paths(name)
+    if any(joined == path or (not is_file and joined.startswith(path + "/")) for path, is_file in homes):
         return True
-    return len(parts) > 1 and parts[0] in RECORD_FOLDERS and coordinator_record_checkout(root)
+    return root is not None and len(parts) > 1 and parts[0] in RECORD_FOLDERS and coordinator_record_checkout(root)
 
 
 def coordinator_cwd_root(cwd: str) -> str:
@@ -5281,9 +5334,9 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
                 return detail("", target)
         return ""
     if tool in COORDINATOR_MCP_WRITE_TOOLS:
-        root = coordinator_cwd_root(cwd)
+        root, named = coordinator_mcp_root(tool_input, cwd), coordinator_mcp_name(tool_input)
         for rel in coordinator_mcp_paths(tool_input):
-            if not coordinator_rel_ok(rel, root):
+            if not coordinator_rel_ok(rel, root, named):
                 return detail("mcp write: ", rel)
         return ""
     raw = str(tool_input.get("command", "") or "")
@@ -5443,6 +5496,12 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+    # The merge tool and the arming tool in a repo that uses the merge tool ask as a bare `gh pr merge` does (decision
+    # bare-merge-asks). The repo is the one the call names, and only when the cwd checkout is that repo: another repo allows.
+    if tool in COORDINATOR_MERGE_TOOLS:
+        merge_root = coordinator_mcp_root(tool_input, cwd)
+        if merge_root and uses_merge_tool(merge_root):
+            refuse(tool, "ask", "bare-merge", BARE_MERGE_REASON, "mcp " + tool.replace("mcp__github__", ""))
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:

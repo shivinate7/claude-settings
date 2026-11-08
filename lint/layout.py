@@ -196,6 +196,18 @@ def candidates(root, name):
     return (first,) if first == then else (first, then)
 
 
+def named_candidates(name, kind):
+    """Every path a call that names the repo `name` (`owner/name`, any case; None names none) may treat as kind `kind`:
+    that repo's legacy-repos path, the layout's legacy spelling, then the layout path. It reads the layout file only,
+    never a checkout's extras file, and an extras file can only narrow these (see `kinds`). Duplicates are dropped."""
+    found = []
+    kept = legacy_repos().get(name.lower(), {}).get(kind) if name else None
+    for where in (kept, legacy(kind), layout()["kinds"][kind]["path"]):
+        if where and where.strip("/") not in found:
+            found.append(where.strip("/"))
+    return tuple(found)
+
+
 def _safe(found, where):
     """`found` when it is a relative path inside the repo, else LayoutError."""
     parts = found.replace("\\", "/").split("/")

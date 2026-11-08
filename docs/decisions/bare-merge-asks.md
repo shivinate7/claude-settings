@@ -8,7 +8,8 @@ Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. Guard 
 - `uses_merge_tool` in `hooks/guard_merge.py` starts at the call's folder (a leading `cd` target, else the payload cwd). It walks up to the nearest folder that holds `.git` (folder or file) and reads `.github/stamp.json` there. A call from a subfolder reads the repo's stamp. It tries the cwd as written and with symlinks resolved.
 - No `.git` above the folder allows. A missing, unreadable, invalid or non-object file allows, silently.
 - Quoted text, heredoc bodies and comments that name a merge are text, as in merge-checks.
-- The reason names `merge <pr> --confirm` (the merge tool) and does not echo the repo path.
+- The GitHub MCP merge tool and `enable_pr_auto_merge` ask on the same terms (`gh pr merge --auto` parity). The repo is the one the call names (`owner`, `repo`): the ask fires only when the cwd checkout's origin is that repo and its stamp holds a `merge` key. A call that names another repo allows. A coordinator is refused first, and a merge-checks denial of the merge tool still wins.
+- The reason names `merge <pr> --confirm` (the merge tool) and does not echo the repo path. It names the route, not a `gh` command, so it fits both.
 
 Why ask and not refuse: a broken merge tool leaves a bare merge as the only way to merge. A refusal would stop the recovery on the day it is needed (`verification-recovery-independent-of-state`). An ask keeps the path open and still stops a bare merge made by habit. Why a rule at all: bare merges left the local main four commits behind origin.
 
