@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint picks a folder-scan suite when a new file lands in its folder",
+  "why": "Suites that scan one folder (workflows for test_ci_job, agents, hooks/guard*.py) are not picked for a new file there, so a defect in a new file passes lane lint and goes red in batch CI (debt lane-lint-folder-scans-unpicked on #2120).",
+  "note": "Filed 10:46 CST Nov 8 from lane lane-lint-cloud-time-limit (session_013NEJL1PUcS4Dxhd9Rr1sk2). Under item 386 it rides in that lane unless off topic. Related: lane-lint-tree-scan-picked (#2120).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL1PUcS4Dxhd9Rr1sk2",
+  "status": "todo",
+  "order": 742,
+  "updatedAt": "2026-11-08T10:46:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "A refusal reason stated in ordinary prose has a checked reader, or is marked unbound",
+  "why": "Lane cost-line-has-reader (session_013NEJKzSDXuw4rJESuzdw1Y) found that refusal reasons written in prose (docs, records) have no checked reader, so they drift from the code that refuses; #2152 names this step on its Fix line (coordinator 09:47 CST Nov 8).",
+  "note": "Filed 10:46 CST Nov 8 from that lane. Open: whether a machine can bind a prose refusal reason to its code; if not, #2152 turns its line into Fix: none with Until 2026-11-21. Related: cost-line-has-reader (rule verification-checked-reader-for-numbers).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 741,
+  "updatedAt": "2026-11-08T10:46:00-06:00"
+}
