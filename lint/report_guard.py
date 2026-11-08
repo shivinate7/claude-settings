@@ -723,7 +723,11 @@ CARRY_FORMS = {
     "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
                     "or `Handoff gave: none`",
 }
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+# A source word or form, matched ignoring case: git, page, digest, `commit <hex>` (a colon or a backtick pair may
+# sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `issue #<n>`, a github.com link. A bare `#<n>` is no source. The hex
+# must hold a digit, so a word such as "commit defaced" names no source.
+SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\bcommit(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                       r"|\bPR\s*#?\d+\b|\bissue\s*#\d+\b|\bgithub\.com/\S", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -797,7 +801,7 @@ def carry_present(name, text):
 
 
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no git, page or digest source, else ''.
+    """The first item of a Recovered line in `block` that names no source (see SOURCE_RE), else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
         if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
@@ -986,13 +990,13 @@ def question_problem(records, turn, text, hook):
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
-    here = None if page == "unknown" else page.rstrip("/")
+    has_page = page != "unknown"
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
-                and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
+                and (not has_page or layout.is_waiting_page_url(root, inp.get("url")))):
             return "", ""
-    if here is None:
+    if not has_page:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
     route = ("send_message to the writer " + writer if writer else
