@@ -1562,6 +1562,16 @@ def case_step_camel_verb_cmdlet_is_a_shell_line():
          entry_of(task_item(["Check the output of `docs/Read-Me`"])), None)
 
 
+def case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line():
+    # A bare Verb-Noun cmdlet is a shell line when its verb is in PS_VERBS or is any Titlecase word. `Where-Object x`,
+    # `Sort-Object` and `Tee-Object f` have verbs PS_VERBS does not list, and are refused as `ConvertTo-Json` is in
+    # case_step_camel_verb_cmdlet_is_a_shell_line. A reader that takes the verb from PS_VERBS alone passes all three.
+    refused = ("command-in-item", "shell line")
+    for span in ("Where-Object x", "Sort-Object", "Tee-Object f"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2283,6 +2293,7 @@ def main():
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
                  case_step_backslash_cmdlet_path_after_a_prefix_is_a_shell_line,
                  case_step_span_flag_after_a_prose_determiner_is_text, case_step_camel_verb_cmdlet_is_a_shell_line,
+                 case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
