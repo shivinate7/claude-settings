@@ -68,9 +68,12 @@ A claim that names no file, such as one that names a check only by pull request 
 clear it. A paren group that is no cite stays in the sentence, so "The guard (hooks/guard.py)" names its file.
 Prose lines of a paragraph are joined before sentences are split. Fenced text (stale_cites.fenced_lines), quoted text
 and inline code spans (stale_cites.MENTION, CODE_SPAN; a lone file path in them stays) and past tense pass. A forecast
-whose clause asks for the verdict (VERDICT_ASK_WORDS: whether, if, verify, confirm, prove, probe, find out, or a
-label "Unknown:"; VERDICT_WH_WORDS: which or what before the actor, as in "Which check will fail?") is a question, not
-a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
+whose clause asks for the verdict is a question, not a claim (is_ask): the clause holds an ask word (VERDICT_ASK_WORDS:
+whether, if, verify, confirm, prove, probe, find out, unknown; a "re-" prefix counts, as in "Re-verify"), unless an
+article sits directly before it, as in "The verify hook"; a label "Unknown:" opens it; or a "?" ends the question and
+the clause opens with an auxiliary or modal (VERDICT_QUESTION_OPENERS, as in "Do you think the guard will refuse it?")
+or holds a wh-word before the actor (VERDICT_WH_WORDS, as in "Which check will fail?"). An opener before an earlier
+clause end does not reach the forecast: "Should I merge, given the guard will refuse it?" is a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
 before that refusal. A send with no forecast word and verdict word exits before any import, transcript read or model
 call. The refusal goes through refuse(), so the owner override lifts it. A cite whose file cannot be read at head (no
 repo, no such file) backs nothing, so its claim is refused unless a run backs it. A transcript that cannot be read
@@ -146,10 +149,10 @@ VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "fi
 # A wh-word asks only in a sentence that ends in "?" and comes before the actor: "Which check will fail?" asks, while
 # in a statement such as "The check which fails will refuse it." the wh-word is a relative and the claim stands.
 VERDICT_WH_WORDS = ("which", "what")
-# A sentence that opens with one of these and ends in "?" is a yes/no question: "Do you think the guard will refuse it?"
-# asks, whatever sits between the opener and the forecast word.
+# A forecast's clause that opens with one of these, in a question that ends in "?", is a yes/no question: "Do you think
+# the guard will refuse it?" asks, whatever sits between the opener and the forecast word in that clause.
 VERDICT_QUESTION_OPENERS = ("do", "does", "did", "would", "could", "will", "can", "is", "are", "should")
-# The articles that open the actor phrase: an ask word after one is a modifier of the subject ("The verify hook").
+# An ask word directly after one of these articles is a modifier of the subject ("The verify hook"), not an ask.
 VERDICT_ACTOR_ARTICLES = ("the", "a", "an")
 SHORT_QUESTION_WORDS = 6  # a question this short or shorter, after a wh-clause, finishes that clause's question
 VERDICT_CLAIM_REMEDY = (
@@ -550,9 +553,11 @@ _BULLET = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SUBJECT_WORDS = {w.lower() for w in VERDICT_SUBJECT_WORDS if w != "CI"}  # CI counts only in capitals
 # A forecast in a clause that asks for the verdict is a question, not a claim: "Find out if CI will fail it".
-# A word joined by a hyphen is part of a compound noun ("The unknown-reads check"), so it is no ask word.
-_ASK_WORDS = re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS), re.I)
-_ACTOR_ARTICLE = re.compile(_any_re(VERDICT_ACTOR_ARTICLES), re.I)
+# A word joined by a hyphen is part of a compound noun ("The unknown-reads check"), so it is no ask word; the one
+# hyphen it may carry is a "re-" prefix, since "Re-verify" still asks.
+_ASK_WORDS = re.compile(r"(?<![\w-])(?:re-)?(?:%s)(?![\w-])" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS),
+                        re.I)
+_ARTICLE_BEFORE = re.compile(_any_re(VERDICT_ACTOR_ARTICLES) + r"\s+$", re.I)  # an article that ends the text
 _QUESTION_OPENER = re.compile(_any_re(VERDICT_QUESTION_OPENERS), re.I)
 _WH_WORDS = re.compile(_any_re(VERDICT_WH_WORDS), re.I)
 _UNKNOWN_LABEL = re.compile(r"\bunknown\s*$", re.I)  # "Unknown: the check will refuse it" reports a read that did not run
@@ -595,17 +600,18 @@ def split_clause(prefix):
 
 
 def is_ask(prefix, question=False):
-    """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word outside the actor
-    phrase ("Verify the check will pass it", "whether the check will refuse it"; not "The verify hook will refuse
-    it"), a label "Unknown:" opens it, or `question` (a "?" ends the sentence's question) and the sentence opens with
-    an auxiliary or modal ("Do you think the guard will refuse it?") or a wh-word sits before the actor ("Which check
-    will fail?"). This is the one home for the ask test."""
+    """True when the forecast that ends `prefix` is asked, not claimed: the forecast's own clause (split_clause) holds
+    an ask word with no article directly before it ("Verify the check will pass it", "Read the diff and verify CI will
+    fail it"; not "The verify hook will refuse it"), the text before that clause ends in a label "Unknown:", or
+    `question` (a "?" ends the sentence's question) and the clause, cut of a bullet mark and `*`, opens with an
+    auxiliary or modal ("Do you think the guard will refuse it?"; not "Should I merge, given the guard will refuse
+    it?") or holds a wh-word before the actor ("Which check will fail?"). This is the one home for the ask test."""
     head, clause = split_clause(prefix)
-    articles = list(_ACTOR_ARTICLE.finditer(clause))
-    # The actor phrase starts at the last article of the clause; an ask word before it asks, one inside it names the actor.
-    outside = clause[:articles[-1].start()] if articles else clause
-    opener = _QUESTION_OPENER.match(prefix.lstrip())
-    return _ASK_WORDS.search(outside) is not None or _UNKNOWN_LABEL.search(head) is not None \
+    # An article directly before an ask word makes it a modifier of the actor ("The verify hook"); else it asks.
+    asked = any(_ARTICLE_BEFORE.search(clause[:word.start()]) is None for word in _ASK_WORDS.finditer(clause))
+    bullet = _BULLET.match(clause)
+    opener = _QUESTION_OPENER.match(clause[bullet.end() if bullet else 0:].replace("*", "").lstrip())
+    return asked or _UNKNOWN_LABEL.search(head) is not None \
         or (question and (opener is not None
                           or any(has_subject(clause[wh.end():].split()) for wh in _WH_WORDS.finditer(clause))))
 
