@@ -104,10 +104,13 @@ except ImportError:  # the Stop check is a recovery control: it runs without not
     def until_note(description) -> str:
         return ""
 try:
-    from guard_core import strip_heredoc_bodies  # the one heredoc walk: a body is text, not a redirect
-except ImportError:  # without it a heredoc body may name a log: at worst a stall is missed there
+    from guard_core import strip_heredoc_bodies, walk_quotes  # the one heredoc walk and the one quote walk
+except ImportError:  # without them a heredoc body may name a log and a pair stays: at worst a stall is missed
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
+
+    def walk_quotes(text):
+        return iter(())
 try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
@@ -210,6 +213,25 @@ def _continues_list(prior, tokens, i, punct):
     return prior.endswith(("&&", "||", "|"))
 
 
+def _join_continuations(text):
+    """text without its backslash-newline pairs, as bash drops them before it splits words. A pair stays
+    inside single quotes and `$'...'`, in a comment (its newline ends the comment), and after a backslash
+    that is itself escaped (the quote walk reads `\\\\` as one step). Call it after the heredoc bodies are
+    gone: a body keeps its pairs."""
+    drop, comment = set(), False
+    for i, ch, quote in walk_quotes(text):
+        if ch == "\n":
+            comment = False
+        elif ch == "#" and not quote and (i == 0 or text[i - 1] in " \t\n;|&("):
+            comment = True
+        elif ch == "\\" and text[i + 1:i + 2] == "\n":  # the walk's step takes both characters
+            if comment:
+                comment = False
+            elif quote not in ("'", "$'"):
+                drop.update((i, i + 1))
+    return "".join(ch for i, ch in enumerate(text) if i not in drop) if drop else text
+
+
 def read_named_logs(command):
     """Return (paths, unresolved): the files a command names as its own log, and the relative ones
     whose directory the hook cannot read. See named_logs for the forms read.
@@ -228,7 +250,7 @@ def read_named_logs(command):
     lists of its own. Newlines are tokens. A comment stops before its newline, so that newline is a
     token too."""
     try:
-        text = strip_heredoc_bodies(command, shells_only=True)
+        text = _join_continuations(strip_heredoc_bodies(command, shells_only=True))
         lex = shlex.shlex(_KeepNewline(text), posix=True, punctuation_chars="();<>|&\n")
         lex.whitespace_split = True
         lex.whitespace = " \t\r"
@@ -238,9 +260,6 @@ def read_named_logs(command):
             if tok is None:
                 break
             end = lex.instream.tell() - len(lex._pushback_chars)  # shlex reads one char ahead of a token
-            if tok == "\n" and text[seen:end].lstrip(" \t\r").startswith("\\\n"):
-                seen = end  # a backslash-newline joins the lines: it is whitespace, not a word
-                continue
             if set(tok) <= set(lex.punctuation_chars) and not _is_operator(text[seen:end], tok):
                 tok = QUOTED_WORD + tok
             tokens.append(tok)
