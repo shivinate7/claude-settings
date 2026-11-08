@@ -379,6 +379,13 @@ WRAPPER_VALUE_FLAGS.update({
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "setsid": set(),
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
+    "strace": {"-e", "--trace", "-o", "--output", "-p", "--attach", "-s", "--string-limit", "-u", "--user",
+               "-E", "--env", "-a", "-b", "-O", "-P", "--trace-path", "-S", "--summary-sort-by", "-I",
+               "-X", "-U"},
+    "runuser": {"-u", "--user", "-g", "--group", "-G", "--supp-group", "-s", "--shell", "-w", "-c",
+                "--command", "-T"},
 })
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -1817,7 +1824,7 @@ def ssh_remote_script(tokens) -> str:
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `setsid`, `ionice`, `strace`, `runuser -u USER [--] cmd`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
@@ -1839,7 +1846,16 @@ def wrapped_commands(tokens, at: int):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word == "runuser":
+        if "--" in rest:
+            inner = rest[rest.index("--") + 1:]
+            return [shlex.join(inner)] if inner else []
+        index, found = _wrapper_flags(word, rest, 0)
+        if not any(flag in ("-u", "--user") for flag, _ in found):
+            return [rest[i + 1] for i, t in enumerate(rest[:-1]) if t in ("-c", "--command")][:1]
+        inner = rest[index:]
+        return [shlex.join(inner)] if inner else []
+    elif word not in ("stdbuf", "unbuffer", "caffeinate", "setsid", "ionice", "strace"):
         return []
     index, _ = _wrapper_flags(word, rest, 0)
     inner = rest[index + skip:]

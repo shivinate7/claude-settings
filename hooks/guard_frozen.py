@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import shlex
 
 import guard_core
 from guard_core import (
@@ -219,6 +220,14 @@ MUTATING_COMMAND = (
 )
 
 
+# Verbs that write the path they are given by themselves, and are no word of MUTATING_COMMAND. The one home:
+# `_mutates_as_command` reads it, and SHELL_WRITE_HINT (the cheap pre-check of the other-checkout and
+# session-home gates) is built from it, so a verb added here is seen by both.
+WRITE_BY_VERB = ("touch", "dd")
+SHELL_WRITE_HINT = re.compile(
+    r">|" + MUTATING_COMMAND + r"|\bsed\b|\b(?:" + "|".join(WRITE_BY_VERB) + r")\b")
+
+
 # A command that hands its arguments to another program, so a mutating word in them may run.
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
@@ -227,7 +236,12 @@ _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 # script's own calls (`shutil.copy`) write files the shell never names, so the segment is scanned
 # whole, as it was before a mutating word was read only in command position.
 _INLINE_INTERPRETER = re.compile(r"python[\d.]*|node(?:js)?|bun|deno|perl|ruby|lua|php", re.IGNORECASE)
-_INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceprE]|--eval|--print")
+_INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceprE]|--(?:eval|print)(?:=.*)?", re.DOTALL)
+# `perl -pi`, `perl -i.bak`, `ruby -i`: an in-place edit of each file named after it, as `sed -i` is. One
+# home for the sed form too: `-i`, `-Ei`, `-i.bak` or `--in-place` is a token that starts at a word start.
+_PERL_IN_PLACE = re.compile(r"-[acdfFlnpstuwWxXUC0-9]*i\S*")
+_SED_IN_PLACE_WORD = re.compile(r"-[A-Za-z]*i[\w.]*|--in-place(?:=\S*)?")
+_SED_IN_PLACE = r"(?<!\S)(?:" + _SED_IN_PLACE_WORD.pattern + r")(?=\s)"
 
 
 def _mutates_as_command(command: str, words) -> bool:
@@ -242,6 +256,8 @@ def _mutates_as_command(command: str, words) -> bool:
     if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "touch" or (command == "dd" and any(word.startswith("of=") for word in words)):
+        return True
+    if command in ("perl", "ruby") and any(_PERL_IN_PLACE.fullmatch(word) for word in words):
         return True
     if _INLINE_INTERPRETER.fullmatch(command) and any(_INLINE_FLAG.fullmatch(word) for word in words):
         return True
@@ -262,17 +278,45 @@ def _script_mutates(script: str) -> bool:
     if not script or _SCRIPT_RUNS_HIDDEN.search(script):
         return True
     for segment in split_segments(script):
-        command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
-            return True
+        for command, rest in _segment_commands([_unquoted(word) for word in _quoted_words(segment, True)]):
+            if _mutates_as_command(command, rest) or (
+                    command == "sed" and any(_SED_IN_PLACE_WORD.fullmatch(word) for word in rest)):
+                return True
     return False
 
 
-# `NAME=value` words that lead a command (at the start, or behind `(`, `$(` or a backtick) set its
-# environment. Their value is data: a write word in it (`INSTALL_SH=/x/cp/install.sh`) is no command.
-_LEADING_ENV = re.compile(r"(^|[(`]|\$\()\s*(?:[A-Za-z_]\w*\+?=\S*\s+)+")
+# `touch -r REF FILE` copies REF's time onto FILE and only reads REF; `-d` and `-t` take a time, no path.
+_TOUCH_VALUE_FLAGS = {"-r": True, "--reference": True, "-d": False, "--date": False, "-t": False}
+
+
+def _touch_reads(words):
+    """The words of a `touch` that it only reads: the REF of `-r REF`, `--reference REF`, `--reference=REF`,
+    and `-acr REF` (the last letter of a cluster takes the next word). A word that is also a file
+    operand is a write, and `writes_to` keeps it through its own pattern."""
+    reads, index = set(), 0
+    operands = []
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word.startswith("--"):
+            flag, glued, value = word.partition("=")
+            if flag in _TOUCH_VALUE_FLAGS:
+                if not glued and index < len(words):
+                    value, index = words[index], index + 1
+                if _TOUCH_VALUE_FLAGS[flag]:
+                    reads.add(value)
+        elif word.startswith("-") and len(word) > 1:
+            letter = next((c for c in word[1:] if "-" + c in _TOUCH_VALUE_FLAGS), "")
+            if letter:
+                value = word[word.index(letter) + 1:]
+                if not value and index < len(words):
+                    value, index = words[index], index + 1
+                if _TOUCH_VALUE_FLAGS["-" + letter]:
+                    reads.add(value)
+        else:
+            operands.append(word)
+    return reads - set(operands)
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -291,18 +335,18 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
+    sed_in_place = r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
-    cmd = _LEADING_ENV.sub(r"\1 ", cmd)
+        return command == "sed" and bool(re.search(sed_in_place, cmd))
     if command == "touch":
-        return bool(re.search(r"\btouch\b[^\n;|&]*" + target, cmd))
+        return path not in _touch_reads(words) and bool(re.search(r"\btouch\b[^\n;|&]*" + target, cmd))
     if command == "dd":
         return bool(re.search(r"\bof=\s*['\"]?" + target, cmd))
+    if command in ("perl", "ruby") and any(_PERL_IN_PLACE.fullmatch(word) for word in words):
+        return bool(re.search(r"\b" + command + r"\b[^\n;|&]*" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return bool(re.search(sed_in_place, cmd))
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -685,7 +729,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script, held = [], [], [], []
+        leading = True   # no command word yet: an assignment here sets the command's environment
         for index, word in enumerate(raw):
+            if leading and _ASSIGNMENT.match(word):
+                if _is_env_assignment(word):
+                    continue
+            elif word != "!" and not _is_redirect(word):
+                leading = False
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
@@ -704,11 +754,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        commands = [_segment_command(start) for start in _command_starts(words)]
+        commands = [position for start in _command_starts(words) for position in _segment_commands(start)]
         # The whole segment read with its quoted newlines kept, so a `sh -c` script is read at its own commands.
-        positions = commands + [_segment_command(script)] if command_position else commands
+        positions = commands + _segment_commands(script) if command_position else commands
         verb = commands[0][0] if predicate_command and commands else ""
-        for word in words:
+        # `dd of=PATH`: the path is glued to its operand name, so it is judged on its own too.
+        for word in words + [w[3:] for w in words if w.startswith("of=") and len(w) > 3]:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
@@ -723,8 +774,19 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 
 
 # A command that starts inside a segment: after `$(` or a backtick, and behind a leading `(` (a subshell).
-_SUBSTITUTION_OPEN = re.compile(r"\$\(|`")
+_SUBSTITUTION_OPEN = re.compile(r"\$\(|`|[<>]\(")
 _LEADING_GROUP = re.compile(r"\$?\(+|`+")
+
+
+# A leading `NAME=value` word sets the command's environment. Its value is data: a write word in it
+# (`INSTALL_SH=/x/cp/install.sh`) is no command, so the word is dropped whole, quotes read as the shell
+# reads them (`FOO="bar"` is one word). A value that holds `$(`, a backtick or a process substitution
+# outside single quotes runs a command of its own, so the word stays and `_command_starts` reads it.
+_SINGLE_QUOTED = re.compile(r"'[^']*'")
+
+
+def _is_env_assignment(word: str) -> bool:
+    return bool(_ASSIGNMENT.match(word)) and not _SUBSTITUTION_OPEN.search(_SINGLE_QUOTED.sub("", word))
 
 
 def _command_starts(words):
@@ -738,7 +800,26 @@ def _command_starts(words):
     starts = [[words[0][first.end():], *words[1:]] if first else words]
     for index, word in enumerate(words):
         starts.extend([word[opener.end():], *words[index + 1:]] for opener in _SUBSTITUTION_OPEN.finditer(word))
+        if index and word.startswith("(") and words[index - 1] in ("<", ">"):   # `>(tee P)`, spaced by the redirect split
+            starts.append([word[1:], *words[index + 1:]])
     return [[word for word in start if word] for start in starts]
+
+
+def _segment_commands(words, depth: int = 0):
+    """Every (command name, plain words after it) a segment's words run: the command itself, then each
+    command a runner it names starts (`guard_core.wrapped_commands`: `flock`, `unbuffer`, `setsid`,
+    `docker exec`, `su -c` ...), read again the same way. The one reader of wrappers, as the rules use."""
+    found = [_segment_command(words)]
+    index = resolve_command(tuple(words))
+    if index is not None and depth < 4:
+        for text in guard_core.wrapped_commands(list(words), index):
+            try:
+                inner = shlex.split(text)
+            except ValueError:
+                inner = text.split()
+            if inner:
+                found.extend(_segment_commands(inner, depth + 1))
+    return found
 
 
 def _quoted_commands(word: str):
@@ -750,7 +831,7 @@ def _quoted_commands(word: str):
         for part in split_segments(piece, []):
             words = REDIRECT.sub(r" \1 ", part).split()
             if words:
-                out.append((" ".join(words), _segment_command(words)))
+                out.extend((" ".join(words), position) for position in _segment_commands(words))
     return out
 
 
@@ -765,7 +846,10 @@ def _segment_command(words):
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
     """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen, command_position=True)
+    return (_shell_write_hit(cmd, cwd, is_frozen, _holds_frozen, command_position=True)
+            # A script on the command line (`python3 -c`, `node -e`, `node --eval=`) writes a file the
+            # shell never names, so its own calls are read, as the builder test-path gate reads them.
+            or interpreter_write_hit(cmd, cwd, is_frozen))
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
@@ -785,7 +869,7 @@ _NODE_HEADER = re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.
 _PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
 _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
-_NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
+_NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=|$)")
 _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
@@ -973,8 +1057,14 @@ def _inline_scripts(command: str):
         name = basename(tokens[index])
         kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
         flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
-        for at in range(index + 1, len(tokens) - 1):
-            if kind and flag.match(tokens[at]):
+        for at in range(index + 1, len(tokens)):
+            if not (kind and flag.match(tokens[at])):
+                continue
+            glued = str(tokens[at]).partition("=")[2] if str(tokens[at]).startswith("--") else ""
+            if glued:   # `node --eval=SCRIPT`: the script is part of the flag word
+                yield kind, glued, number, segments, ends
+                break
+            if at + 1 < len(tokens):
                 yield kind, str(tokens[at + 1]), number, segments, ends
                 break
 

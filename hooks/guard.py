@@ -388,7 +388,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, SHELL_WRITE_HINT, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -4234,10 +4234,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
-# A shell command with none of these can write no named file, so it spends no git read here. A
+# A shell command with no SHELL_WRITE_HINT (guard_frozen) can write no named file, so it spends no git read here. A
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
-SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
