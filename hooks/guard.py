@@ -128,7 +128,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
   resume-finished-reviewer
-                       deny. A built-in `SendMessage`, from the main session or from a subagent (a payload with `agent_id`, judged
+                       deny. A built-in `SendMessage`, from the main session or an agent's send (a payload with `agent_id`, judged
                        against the parent's transcript), whose `to` names an Agent or Task
                        spawn that has finished and ran in a worktree (any role), so its worktree is gone and a
                        resume runs with no tree. A spawn ran in a worktree when its `isolation` input is `worktree`
@@ -144,7 +144,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        line that is not JSON is dropped by the reader and does not ask. A send to `main`, a
                        name with no spawn or Workflow agent, a running spawn, and a finished spawn with no worktree that is not a
                        reviewer pass. A name no spawn holds is looked up as a Workflow agent (`_transcript.workflow_agent`:
-                       its agentId or label in the run journal under the transcript's own `subagents/workflows/`), whose
+                       its agentId or label in the run journal under the transcript's own `subagents/workflows/`; with
+                       only a started line, the run record `workflows/<runId>.json` beside it settles the state: status
+                       killed or completed is finished, no record is running, an unreadable one or another status asks), whose
                        role is its meta agentType: finished and a reviewer, a role that pins a worktree, or a meta with
                        spawnedWithWorktree true, is refused;
                        finished with no meta file asks. A missing or unreadable

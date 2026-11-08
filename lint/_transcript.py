@@ -397,6 +397,7 @@ def page_writer_id(records):
 
 
 # ---- the finish of a background job or agent: the one reader hooks/stall_watch.py and hooks/guard_merge.py share.
+# agent_state reads an Agent or Task spawn. A Workflow agent has no such spawn, so workflow_agent below reads its finish.
 # No watcher side effects: each function reads what it is given. The notice tag (hooks/shared_names.py
 # TASK_NOTIFICATION_TAG) is a parameter, since lint/ does not import hooks/. A tag of None reads no notice.
 TERMINAL = ("completed", "failed", "killed", "stopped")
@@ -508,44 +509,61 @@ def agent_state(records, tool_use_id, tag):
     return UNKNOWN if unclear else RUNNING
 
 
-# ---- the finish of a Workflow agent: it has no Agent or Task spawn in the transcript. Its run's journal, beside the
-# transcript at <transcript minus .jsonl>/subagents/workflows/<runId>/journal.jsonl, holds a `started` line (agentId,
-# label) and, once it finishes, a `result` line. Its role is `agentType` in agent-<agentId>.meta.json beside it; a
-# meta with `spawnedWithWorktree` true marks an agent spawned with isolation worktree (measured, run wf_19ac2aae-ebb).
+# ---- the finish of a Workflow agent: it has no Agent or Task spawn in the transcript, so agent_state cannot place it.
+# This is the one reader of a Workflow agent's finish; hooks/guard_merge.py resume_finished_hit calls agent_state for a
+# spawn and workflow_agent for a name no spawn holds. Its run's journal, beside the transcript at
+# <transcript minus .jsonl>/subagents/workflows/<runId>/journal.jsonl, holds a `started` line (agentId, label) and,
+# once the agent finishes, a `result` line. A stopped agent leaves only the `started` line (measured, run
+# wf_cc6c76b5-d5f), so the run record <transcript minus .jsonl>/workflows/<runId>.json settles it: its status is
+# `killed` for a stopped run and `completed` for a finished one (same run). Its role is `agentType` in
+# agent-<agentId>.meta.json beside the journal; a meta with `spawnedWithWorktree` true marks an agent spawned with
+# isolation worktree (measured, run wf_19ac2aae-ebb).
 WORKFLOWS_DIR = os.path.join("subagents", "workflows")
+RUN_RECORDS_DIR = "workflows"
+RUN_RECORD_FINISHED = ("killed", "completed")
 _AGENT_ID = re.compile(r"[A-Za-z0-9_.-]+")
 
 
-def _journal_agent_type(run_dir, agent_id):
-    """The agentType in the agent's meta file, or None when the file is missing, unreadable or names no role."""
+def _agent_meta(run_dir, agent_id):
+    """The agent's meta file as a dict, or {} when the id is no plain file name, or the file is missing, unreadable or
+    not an object."""
     if not _AGENT_ID.fullmatch(agent_id):
-        return None
+        return {}
     try:
         with open(os.path.join(run_dir, "agent-%s.meta.json" % agent_id), encoding="utf-8") as f:
-            kind = json.load(f).get("agentType")
+            meta = json.load(f)
     except Exception:
-        return None
-    return kind.strip() if isinstance(kind, str) and kind.strip() else None
+        return {}
+    return meta if isinstance(meta, dict) else {}
 
 
-def _journal_worktree(run_dir, agent_id):
-    """True when the agent's meta file has spawnedWithWorktree true; false when it is missing or unreadable."""
-    if not _AGENT_ID.fullmatch(agent_id):
-        return False
+def _run_record_state(transcript, run):
+    """FINISHED when the run record's status is killed or completed, RUNNING when the record is missing, UNKNOWN when
+    it is unreadable, is not an object, or holds another status."""
+    path = os.path.join(os.path.splitext(transcript)[0], RUN_RECORDS_DIR, run + ".json")
     try:
-        with open(os.path.join(run_dir, "agent-%s.meta.json" % agent_id), encoding="utf-8") as f:
-            return json.load(f).get("spawnedWithWorktree") is True
+        with open(path, encoding="utf-8") as f:
+            record = json.load(f)
+    except FileNotFoundError:
+        return RUNNING
     except Exception:
-        return False
+        return UNKNOWN
+    status = record.get("status") if isinstance(record, dict) else None
+    if isinstance(status, str) and status.strip().lower() in RUN_RECORD_FINISHED:
+        return FINISHED
+    return UNKNOWN
 
 
 def workflow_agent(transcript, target):
     """(state, agent_type, worktree) for the Workflow agent that `target` names by its agentId or its started line's label, or
     None when no journal beside `transcript` names it. The latest started line that matches wins: a later line in a
-    journal, and a run whose journal was written later. state is RUNNING (a started line, no result line for that id),
-    FINISHED (a result line), or UNKNOWN when a journal in the folder exists but cannot be read and none names the
-    target. agent_type is the meta file's agentType, or None. worktree is True when the meta shows spawnedWithWorktree true. Reads only that transcript's own workflows folder, and
-    only when called: one directory listing and one read per journal."""
+    journal, and a run whose journal was written later. state is FINISHED when the journal holds a result line for the
+    id. With only a started line, the run record settles it (_run_record_state): FINISHED when killed or completed,
+    RUNNING when there is no record, UNKNOWN when it cannot be read. State is also UNKNOWN when a journal in the folder
+    exists but cannot be read and none names the target. agent_type is the meta file's agentType, or None. worktree is
+    True when the meta shows spawnedWithWorktree true. Reads only that transcript's own folders, and only when called:
+    one directory listing and one read per journal, then for the one agent that wins, one meta read, and one run-record
+    read when it has no result line."""
     root = os.path.join(os.path.splitext(transcript)[0], WORKFLOWS_DIR)
     try:
         runs = [entry for entry in os.scandir(root) if entry.is_dir()]
@@ -559,7 +577,7 @@ def workflow_agent(transcript, target):
         except OSError:
             continue
     best, unreadable = None, False
-    for _mtime, _name, run_dir, path in sorted(journals):
+    for _mtime, name, run_dir, path in sorted(journals):
         try:
             records = read_transcript(path)
         except OSError:
@@ -570,8 +588,14 @@ def workflow_agent(transcript, target):
             agent_id = rec.get("agentId")
             if (rec.get("type") == "started" and isinstance(agent_id, str) and agent_id
                     and target in (agent_id, rec.get("label"))):
-                best = (FINISHED if agent_id in results else RUNNING, _journal_agent_type(run_dir, agent_id))
-                best += (_journal_worktree(run_dir, agent_id),)
+                best = (name, run_dir, agent_id, agent_id in results)
     if best is None and unreadable:
         return UNKNOWN, None, False
-    return best
+    if best is None:
+        return None
+    run, run_dir, agent_id, has_result = best
+    meta = _agent_meta(run_dir, agent_id)
+    kind = meta.get("agentType")
+    state = FINISHED if has_result else _run_record_state(transcript, run)
+    return (state, kind.strip() if isinstance(kind, str) and kind.strip() else None,
+            meta.get("spawnedWithWorktree") is True)

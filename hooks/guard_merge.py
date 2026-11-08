@@ -1344,7 +1344,7 @@ def _workflow_resume_hit(reader, tool, transcript, target, isolation_pin):
 
 
 def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=None):
-    """(decision, reason, matched, note): "deny" when this built-in SendMessage, from the main session or from a subagent, names a spawn
+    """(decision, reason, matched, note): "deny" when this built-in SendMessage, from the main session or an agent's send (a payload with agent_id), names a spawn
     that has finished and ran in a worktree (any role: its worktree is gone), or is a reviewer or
     design-reviewer. A spawn ran in a worktree when its effective isolation is in RESUME_ISOLATIONS: the Agent input's
     `isolation` when it is set (a value in another case reads as no worktree), else `isolation_pin(role)`, the role
@@ -1356,14 +1356,17 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
     to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, and a running spawn pass.
     A call with an agent_id is judged as the main session's is, against the parent's transcript (its `transcript_path`).
     A name no spawn in the transcript holds is then looked up as a Workflow agent (_transcript.workflow_agent: the
-    agentId or the label in the run's journal beside the transcript). Its role is its meta agentType and its isolation
+    agentId or the label in the run's journal beside the transcript; a started line with no result line is settled by the
+    run record: killed or completed is finished, no record is running). Its role is its meta agentType and its isolation
     is the role file's pin, or a worktree when its meta has spawnedWithWorktree true. It is refused when finished and a reviewer, a design-reviewer, or a role that pins a worktree
     or remote; a running one passes; a finished one with no meta file, or of unknown state, asks.
     `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
     be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
-    (it asks). The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one transcript
+    (it asks). The state read is _transcript.agent_state, the one reader of an Agent or Task spawn's finish;
+    _transcript.workflow_agent is the one reader of a Workflow agent's, which has no spawn. Cost: one transcript
     read per judged send, shared with review_record_hit (_main_records), and, only when no spawn holds the name, one
-    directory listing and one read per journal in the transcript's own workflows folder. No subprocess, no network."""
+    directory listing and one read per journal in the transcript's own workflows folder, then one meta read and, for an
+    agent with no result line, one run-record read. No subprocess, no network."""
     target = tool_input.get("to") if isinstance(tool_input, dict) else None
     if tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
         return "", "", "", ""
