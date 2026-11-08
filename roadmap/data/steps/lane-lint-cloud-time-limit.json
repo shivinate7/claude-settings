@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL1PUcS4Dxhd9Rr1sk2",
   "why": "`merge --lane-lint 1458` hit the 590 s command time limit twice in a cloud session with no verdict (lane notes-fix-large-1, 06:57 CST Nov 8).",
-  "note": "Done check: lane lint on #1458's head prints a verdict in a cloud session, or it runs in the background and a later call reads its verdict. Measure each step's time first. Watch step lane-lint-hook-suites (#1916), which adds suites. A fix for a found gap (item 410 a). Title by triage. Doing in lane session_013NEJL1PUcS4Dxhd9Rr1sk2 (07:02 CST Nov 8); it measures each lane-lint step's time on #1458's head first.",
-  "updatedAt": "2026-11-08T07:05:00-06:00"
+  "note": "Done check: lane lint on #1458's head prints a verdict in a cloud session, or it runs in the background and a later call reads its verdict. Measure each step's time first. Watch step lane-lint-hook-suites (#1916), which adds suites. A fix for a found gap (item 410 a). Title by triage. Doing in lane session_013NEJL1PUcS4Dxhd9Rr1sk2 (07:02 CST Nov 8); it measures each lane-lint step's time on #1458's head first. Owner question, page item 422 (lane-lint-record-scope, 07:36 CST Nov 8): decision lanes-run-no-full-ci-job line 5 says lane lint is fast and runs no hook suite; bin/ci-job runs every lint step, about 55 fixture suites on #1988, past the 600 s cap. Pick a rewrites the line; speed stays here.",
+  "updatedAt": "2026-11-08T07:35:00-06:00"
 }
