@@ -273,6 +273,11 @@ def windows_shaped(*parts):
     return WINDOWS_SHAPE.search(text) is not None
 
 
+# An `expected` that accepts either decision. The case then asserts only its `lacks` (and `carries`) checks, for a
+# control that must not name a rule, and whose decision another rule may own.
+ANY_DECISION = "any"
+
+
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
@@ -25535,6 +25540,47 @@ add("agent-handoff-write: an agent's Write to another session's handoff is allow
 add("agent-handoff-write: an agent's Read of its session's handoff is allowed", "allow",
     tool="Read", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, file_path=AH_HANDOFF)
 
+# THE BASH FORMS. An agent's Bash call writes the handoff with a redirect, `tee`, `sed -i`, or `cp`/`mv` onto it.
+# The guard reads the command's write target with _shell_write_hit and judges it with names_handoff. Each deny
+# names the rule and no path. The `~` spelling resolves through HOME.
+sh("agent-handoff-write: an agent's Bash echo > to its session's handoff is refused",
+   "echo x > " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash echo >> to its session's handoff is refused",
+   "echo x >> " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash tee to its session's handoff is refused",
+   "printf x | tee " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash tee -a to its session's handoff is refused",
+   "printf x | tee -a " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash sed -i on its session's handoff is refused",
+   "sed -i s/a/b/ " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash cp onto its session's handoff is refused",
+   "cp /tmp/x " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash mv onto its session's handoff is refused",
+   "mv /tmp/x " + AH_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash echo > to the handoff, spelled ~/.claude/handoffs, is refused",
+   "echo x > " + AH_TILDE, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, env={"HOME": AH_HOME}, lacks=(AH_TILDE, AH_HANDOFF))
+
+# The Bash controls: each is allowed, and the rule refuses none of them.
+sh("agent-handoff-write: the parent's Bash echo > to its own handoff, with no agent_id, is allowed",
+   "echo x > " + AH_HANDOFF, "allow", cwd=NOGIT, session=HU_SID, config=AH_CFG)
+sh("agent-handoff-write: an agent's Bash cat of its session's handoff is allowed",
+   "cat " + AH_HANDOFF, "allow", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT)
+sh("agent-handoff-write: an agent's Bash grep of its session's handoff is allowed",
+   "grep foo " + AH_HANDOFF, "allow", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT)
+sh("agent-handoff-write: an agent's Bash cp of its session's handoff to /tmp/copy is allowed (the handoff is the source)",
+   "cp " + AH_HANDOFF + " /tmp/copy", "allow", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT)
+sh("agent-handoff-write: an agent's Bash echo > to another session's handoff is not refused by this rule",
+   "echo x > " + AH_OTHER, ANY_DECISION, cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+   lacks=(AH_RULE,))
+
 # With precompact_handoff unimportable, reread_check.ph is None, and names_handoff raises on every agent's write
 # before rule 0 runs. The write is still an agent's write outside its worktree, so worktree-home must refuse it.
 AH_BROKEN_PRIMARY = os.path.join(ROOT, "ah-broken-primary")    # a checkout with one agent's worktree in it
@@ -28890,7 +28936,7 @@ def run_cases():
             continue
         ran += 1
         got, reason = decide(case)
-        ok = got == case["expected"]
+        ok = got == case["expected"] or case["expected"] == ANY_DECISION
         note = ""
         if ok and case.get("silent") and reason:
             ok = False
