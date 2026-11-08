@@ -11731,6 +11731,22 @@ sh("frozen word: grep -n mkdir naming a hook piped to awk whose print > writes t
 # frozen path after `-k copy` is an argument, as the builder's own test run is.
 sh("frozen word: python3 -m pytest -k copy naming a frozen file is allowed",
    "python3 -m pytest -k copy " + CFG_HOOK, "allow", cwd=NOGIT)
+# A TEST RUN AFTER A READ OR A PLAIN-TEXT WRITE. A runner runs only the files it loads (conftest.py and the test
+# files), so a frozen path that is read (grep, its output teed or redirected to a notes file) or echoed into a notes
+# file is no write that runs. Each ALLOWS. The two DENIES after them pin the other side: a test file written with a
+# frozen rm in its text, then run by its runner, is refused, whatever the file is named.
+sh("frozen word: grep -rn mkdir naming a hook, teed to a file, then pytest, is allowed",
+   "grep -rn mkdir " + CFG_HOOK + " | tee /tmp/out && pytest", "allow", cwd=NOGIT)
+sh("frozen word: grep mkdir naming a hook, redirected to a file, then pytest, is allowed",
+   "grep mkdir " + CFG_HOOK + " > /tmp/o && pytest", "allow", cwd=NOGIT)
+sh("frozen word: an echo of an rm of a frozen file, redirected to a notes file, then pytest, is allowed",
+   "echo \"rm " + CFG_HOOK + "\" > /tmp/notes.txt && pytest", "allow", cwd=NOGIT)
+sh("frozen word: an echo of an os.system rm of a frozen file into tests/test_x.py, then pytest, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > tests/test_x.py && pytest", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen word: an echo of an os.system rm of a frozen file into x_test.py, then python3 -m pytest, is refused",
+   "echo \"import os; os.system('rm " + CFG_HOOK + "')\" > x_test.py && python3 -m pytest", "deny", "frozen-path",
+   cwd=NOGIT)
 # CONTROLS, REFUSED. A mutating word after a `;` is read whole, and a program that runs its piped text is a
 # write. Each pins one filter or nested-command rule against a wider list.
 sh("frozen word: a grep naming a frozen file, then a mkdir into a frozen folder after a semicolon, is refused",
