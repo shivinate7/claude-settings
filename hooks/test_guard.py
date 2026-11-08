@@ -13739,6 +13739,95 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# FLAG ORDER (pwsh-c-text-mode). POWERSHELL_CALL is one global that each judge sets for its own call. A
+# caller that reads it without setting it reads the last call's tool. Each pin reads one caller on a
+# PowerShell text, with the flag set by a PowerShell call, then judges a Bash call in this process and reads
+# the caller again. The text's `\"` ends a string for PowerShell and hides a write for bash, so a caller
+# that kept the Bash flag gives a different reading, and the pin fails.
+FLAG_BUILD_TEXT = 'echo "x\\" ; Set-Content hooks/test_probe.py -Value 1 ; echo \\"D"'
+FLAG_SESSION_TEXT = 'echo "x\\" ; Set-Content notes/out.txt -Value 1 ; echo \\"D"'
+FLAG_SETTINGS_TEXT = ('echo "C:\\" ; Set-Content .claude/settings.local.json \''
+                      + json.dumps({"env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus"}, "force": "1"})
+                      + '\' ; echo \\"D"')
+
+
+def _judge_bash_here(guard, cwd):
+    """Judge one Bash call on this module, as the hook does, so POWERSHELL_CALL holds the Bash tool's value."""
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                guard.judge({"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": cwd})
+            except SystemExit:
+                pass
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+
+
+def _flag_pin(label, guard, cwd, read):
+    """`read()` is one caller's reading of a PowerShell text. Read with the PowerShell flag, it must find
+    the write; after a Bash call in this process it must read the same."""
+    guard.POWERSHELL_CALL[0] = True
+    with_flag = read()
+    if not with_flag:
+        return False, "%s: the PowerShell reading finds no write, so the pin proves nothing" % label
+    _judge_bash_here(guard, cwd)
+    if guard.POWERSHELL_CALL[0]:
+        return False, "%s: the Bash call left POWERSHELL_CALL set, so the pin proves nothing" % label
+    after_bash = read()
+    if after_bash != with_flag:
+        return False, "%s: after a Bash call the caller read the text by bash rules and saw %r, not %r" % (
+            label, after_bash, with_flag)
+    return True, "%s: the caller reads the PowerShell text the same after a Bash call" % label
+
+
+def flag_builder_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-builder")
+    make_repo(where, {"hooks/test_seed.py": "x = 1\n"})
+    stripped = guard.strip_heredoc_bodies(FLAG_BUILD_TEXT)
+    return _flag_pin("builder shell-write caller", guard, where,
+                     lambda: guard.builder_shell_test_hit(FLAG_BUILD_TEXT, stripped, where))
+
+
+def flag_session_home_case():
+    guard = _load_guard_module()
+    primary = os.path.join(ROOT, "flag-primary")
+    make_repo(primary, {"src/app.py": "print(1)\n"})
+    session = "shome-" + uuid.uuid4().hex
+    write(os.path.join(primary, ".git", "session-homes", session),
+          os.path.join(primary, ".claude", "worktrees", "gone-lane") + "\n")
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SESSION_TEXT}, "cwd": primary,
+               "session_id": session}
+    return _flag_pin("session-home caller", guard, primary,
+                     lambda: guard.session_home_hit(payload, "PowerShell", payload["tool_input"], primary))
+
+
+def flag_never_lifted_case():
+    guard = _load_guard_module()
+    where = os.path.join(ROOT, "flag-settings")
+    make_repo(where, {"README.md": "x\n"})
+    payload = {"tool_name": "PowerShell", "tool_input": {"command": FLAG_SETTINGS_TEXT}, "cwd": where}
+    return _flag_pin("never-lifted settings clause", guard, where,
+                     lambda: guard.never_lifted(payload, "PowerShell", payload["tool_input"], where))
+
+
+for _label, _check in (
+    ("frozen: a builder's shell write, read after a Bash call, is the same as with the PowerShell flag",
+     flag_builder_case),
+    ("frozen: the session-home caller, read after a Bash call, is the same as with the PowerShell flag",
+     flag_session_home_case),
+    ("frozen: the never-lifted settings clause, read after a Bash call, is the same as with the PowerShell flag",
+     flag_never_lifted_case),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "frozen"
+
+
 # The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
 # base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
