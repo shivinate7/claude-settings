@@ -28,7 +28,7 @@ ENCODED_RETRY_REASON = (
 WINDOW = timedelta(minutes=10)
 SKEW = timedelta(minutes=1)        # a row stamped slightly ahead of this hook's clock still counts
 LOG_TAIL_BYTES = 256 * 1024        # guard.log is read from its end, never whole
-LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+LINT_LEVELS = 3   # a copy install runs this file from <config>/hooks/guard.d/<id>/, three folders under <config>
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 # An escape that builds a byte: hex, octal, or a code point.
 ESCAPE = re.compile(r"\\(?:x[0-9a-fA-F]|[0-7]{1,3}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})")
@@ -324,6 +324,18 @@ def _state_refusal(session_id: str, agent_id: str, now) -> bool:
     return False
 
 
+def _lint_dir():
+    """The folder holding guard_log_report.py, or "". Walks up from this file: a repo (<root>/hooks/, <root>/lint/) finds
+    it one level up, a copy install (<config>/hooks/guard.d/<id>/, <config>/lint/) three levels up."""
+    folder = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(LINT_LEVELS):
+        folder = os.path.dirname(folder)
+        lint = os.path.join(folder, "lint")
+        if os.path.isfile(os.path.join(lint, "guard_log_report.py")):
+            return lint
+    return ""
+
+
 def _log_refusal(session_id: str, now) -> bool:
     """A guard.log deny row of this session inside the window. A row names no agent, so it counts for the session.
     Rows are read through lint/guard_log_report.py, the one reader of guard.log lines. An unimportable reader is no
@@ -336,9 +348,15 @@ def _log_refusal(session_id: str, now) -> bool:
             size = handle.tell()
             handle.seek(max(0, size - LOG_TAIL_BYTES))
             tail = handle.read().decode("utf-8", errors="replace")
-        if LINT_DIR not in sys.path:
-            sys.path.insert(0, LINT_DIR)
-        import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+        lint = _lint_dir()
+        if not lint:
+            return False
+        before = list(sys.path)
+        try:
+            sys.path.insert(0, lint)
+            import guard_log_report  # lint/guard_log_report.py, the one reader of guard.log lines
+        finally:
+            sys.path[:] = before
     except Exception:
         return False
     for line in tail.split("\n"):

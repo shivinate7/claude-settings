@@ -28,6 +28,8 @@ Passes:
 
 The state is read only after the call's shape matches, so an ordinary call costs no file read, no new file, no log and no process. The clock is `local_time.clock()`. The shape read is linear in the call's length.
 
+The guard.log rows are read through `lint/guard_log_report.py`. The rule finds `lint/` by walking up from `guard_encoded.py`, so it works in a repo (`hooks/` beside `lint/`) and in a copy install (`hooks/guard.d/<id>/`, with `lint/` beside `hooks/`).
+
 A fault in the shape read fails this rule open and no other. The guard's later rules still judge the call.
 
 The refusal tells the agent to report and does not name the form as a remedy. One line in `COMMON` in `hooks/agent_brief.py` gives the same rule to every agent brief, reviewers included.
