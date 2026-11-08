@@ -2141,8 +2141,8 @@ class CutLanes(Env):
     def lane_tips_breaks(self, effect, fail_from=0):
         """Rulings 2 and 3: the read of the lane tips fails before the merge. effect is the (rc, text) git returns, or an
         exception its read raises. The merge still lands, no lane is deleted, and one line says so.
-        c110: the same read runs first for the dropped-lane check, which refuses a failed read. fail_from=1 lets that first
-        read pass, so the cleanup's own read is the one that fails."""
+        c110: the same read runs first for the dropped-lane check, which refuses a failed read, and the batch-red check reads the
+        lanes second. fail_from=2 lets those two reads pass, so the cleanup's own read is the one that fails."""
         lane_batch(self, "lane1", "lane2")
         real, n = merge.sh, [0]
         def broken(args, *a, **k):
@@ -2255,13 +2255,13 @@ class CutLanes(Env):
         self.assert_deleted(out, "lane2")
 
     def test_a_failed_git_log_in_lane_tips_prints_one_line_and_deletes_nothing(self):
-        self.lane_tips_breaks((128, "fatal: bad revision"), fail_from=1)
+        self.lane_tips_breaks((128, "fatal: bad revision"), fail_from=2)
 
     def test_a_lane_tips_read_that_raises_oserror_still_lands_the_merge(self):
-        self.lane_tips_breaks(OSError("git could not start"), fail_from=1)
+        self.lane_tips_breaks(OSError("git could not start"), fail_from=2)
 
     def test_a_lane_tips_read_that_times_out_still_lands_the_merge(self):
-        self.lane_tips_breaks(subprocess.TimeoutExpired(["git", "log"], 5), fail_from=1)
+        self.lane_tips_breaks(subprocess.TimeoutExpired(["git", "log"], 5), fail_from=2)
 
     def test_a_merge_commit_that_cannot_be_read_says_the_proof_could_not_run(self):
         # Ruling 5: the merge lands on origin, but the local repo cannot read the commit id host.merge returns.
@@ -15163,7 +15163,7 @@ class BatchDropRed(BuildEnv):
         self.assert_ran(rc, out, err, 4)
         main, before = self.head("main"), self.refs()
         rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
-        self.assert_dropped(host, [7, 8, 10], heads, out, err)
+        self.assert_dropped(host, [7, 8, 10, INT_PR], {**heads, INT_PR: hi}, out, err)  # the integration head carries a line too
         self.assert_ran(rc, out, err, 1)
         self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], "the rebuild did not keep feat9 alone:\n" + out + err)
         self.assertEqual(self.head("int-red"), hi, "the integration branch moved: the rebuild goes to the new branch only")
@@ -15200,7 +15200,7 @@ class BatchDropRed(BuildEnv):
         rc, out, err = self.build(host)  # control: no drop, all three join
         self.assert_ran(rc, out, err, 3)
         rc, out, err = self.build(host, "--drop-red", str(INT_PR), "--push", "red-int")
-        self.assert_dropped(host, [7, 9], heads, out, err)
+        self.assert_dropped(host, [7, 9, INT_PR], {**heads, INT_PR: hi}, out, err)  # the integration head carries a line too
         for n in (7, 9):
             self.assertIn(f"#{n}", out + err, f"the output does not name #{n}, which the red job hit:\n" + out + err)
         self.assert_ran(rc, out, err, 1)
