@@ -34,7 +34,9 @@ set_override_veto and session_home_keep):
                        (precompact-handoff, item 9)
   agent-handoff-write  deny. An agent's (valid `agent_id`) Write, Edit, MultiEdit or NotebookEdit of its
                        session's own handoff, which the orchestrator owns, and its Bash or PowerShell
-                       command that writes it (redirect, tee, sed -i, cp, mv; read by `_shell_write_hit`).
+                       command that writes it (redirect, tee, sed -i, cp, mv, or a python or node script;
+                       read by `_shell_write_hit` and `interpreter_write_hit`; a variable such as
+                       `$CLAUDE_CONFIG_DIR` in the path is expanded).
                        The reason names no path. An override lifts it. A failed import allows. (precompact-handoff, item 14)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
@@ -4795,7 +4797,7 @@ def judge(payload) -> None:
     if unread:
         refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)
     # 0, agent-handoff-write. An agent carries its parent's session_id, so its write of that handoff would overwrite the parent's.
-    # A file tool names the path; a shell command's write targets come from _shell_write_hit, the one reader of them.
+    # A file tool names the path; a shell command's write targets come from _shell_write_hit and interpreter_write_hit, the readers of them.
     agent_id = payload.get("agent_id")
     if (tool in ("Write", "Edit", "MultiEdit", "NotebookEdit") or tool in SHELL_TOOLS) and isinstance(agent_id, str) and AGENT_ID.match(agent_id):
         try:
@@ -4807,12 +4809,13 @@ def judge(payload) -> None:
         try:
             if names_handoff and isinstance(sid, str) and sid:
                 if tool in SHELL_TOOLS:
-                    command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-                    target = _shell_write_hit(
-                        command, cwd,
-                        lambda path, where: bool(path) and bool(names_handoff(
-                            path if os.path.isabs(os.path.expanduser(path)) else os.path.join(where or cwd, path), sid)),
-                        follow_cd=True)
+                    raw = str(tool_input.get("command", "") or "")
+
+                    def on_handoff(path, where):
+                        return bool(path) and bool(names_handoff(_expanded(path, where or cwd), sid))
+
+                    target = (_shell_write_hit(strip_heredoc_bodies(raw), cwd, on_handoff, follow_cd=True)
+                              or interpreter_write_hit(raw, cwd, on_handoff))
                 else:
                     target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
                     if not (isinstance(target, str) and target and names_handoff(target, sid)):
