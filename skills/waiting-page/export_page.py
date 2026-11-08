@@ -94,7 +94,7 @@ EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiske
 KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
 # A credential name: a key word, then name characters up to the next key word, then `=` or `:`. Each name character is
 # read once, so a long name or a long run scans in linear time.
-CREDENTIAL_NAME = KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*[=:][ \t]*[\"']?"
+CREDENTIAL_NAME = KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?"
 VALUE_CHARS = r"[A-Za-z0-9+/_.~%=-]"  # the characters of a credential value
 # The `credential-name` shape looks for the letter and the digit of a value in its first VALUE_LOOKAHEAD_MAX + 1
 # characters: a lookahead to the end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
@@ -104,7 +104,7 @@ VALUE_LOOKAHEAD_MAX = 256
 # match takes the whole run, so finditer reads each run once. A later key word in the run starts a value that is a
 # suffix of this one, so it has a letter and a digit only if this one does.
 LONG_CREDENTIAL_VALUE = re.compile(
-    CREDENTIAL_NAME + r"(" + VALUE_CHARS + r"{" + str(VALUE_LOOKAHEAD_MAX + 1) + r",})", re.I)
+    CREDENTIAL_NAME + r"(?P<value>" + VALUE_CHARS + r"{" + str(VALUE_LOOKAHEAD_MAX + 1) + r",})", re.I)
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
@@ -140,12 +140,13 @@ SECRET_SHAPES = (
     # between, as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that
     # end the value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters
     # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
-    # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass.
+    # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass. A letters-only value that reads as
+    # words (letters_are_words) passes too, after a `:` only.
     ("credential-name", re.compile(
         CREDENTIAL_NAME + r"(?:"
         r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
         r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)" + VALUE_CHARS + r"{8,}"
-        r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))[A-Za-z_-]{12,}(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
+        r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A credential value longer than the lookaheads above read: refused when it has a letter and a digit anywhere.
     ("credential-name", LONG_CREDENTIAL_VALUE),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
@@ -272,17 +273,38 @@ def email_is_no_person(found):
 
 
 def long_value_is_no_secret(found):
-    """True when `found` is a LONG_CREDENTIAL_VALUE match whose value lacks a letter or a digit. A match of the
-    other `credential-name` shape refuses as it is."""
-    if found.re is not LONG_CREDENTIAL_VALUE:
-        return False
-    value = found.group(1)
+    """True when `found` is a LONG_CREDENTIAL_VALUE match whose value lacks a letter or a digit."""
+    value = found.group("value")
     return not (any(c.isdigit() for c in value) and any(c.isalpha() for c in value))
 
 
+WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
+CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # the words here have at most three consonants in a row; `y` counts as one
+
+
+def letters_are_words(value):
+    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form, a third or more of
+    the letters are vowels, and no run of four or more consonants. `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass.
+    Random letters in a mixed case or with few vowels do not. Random lower-case letters with enough vowels still pass."""
+    parts = [p for p in re.split(r"[_-]", value) if p]
+    letters = "".join(parts)
+    return (bool(letters) and all(WORD_SEGMENT.fullmatch(p) for p in parts)
+            and sum(c in "aeiouAEIOU" for c in letters) * 10 >= len(letters) * 3
+            and not CONSONANT_RUN.search(letters))
+
+
+def credential_is_no_secret(found):
+    """True when `found` names no secret. A LONG_CREDENTIAL_VALUE match passes when its value lacks a letter or a
+    digit. A match of the other `credential-name` shape passes when a `:` set a letters-only value that reads as
+    words; an `=` assigns, so it never passes."""
+    if found.re is LONG_CREDENTIAL_VALUE:
+        return long_value_is_no_secret(found)
+    value = found.group("letters")
+    return found.group("sep") == ":" and bool(value) and letters_are_words(value)
+
+
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
-NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person,
-                   "credential-name": long_value_is_no_secret}
+NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person, "credential-name": credential_is_no_secret}
 
 
 def kinds_in(text):

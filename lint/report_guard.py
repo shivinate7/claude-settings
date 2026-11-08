@@ -23,13 +23,17 @@ the writer made ("I broke ...", a first-person clause with a fault word and no n
 guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
 (`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
 
+Every refusal reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
+owner line from owner_line(): the check, what is wrong, and a cite of that decision. The steps to fix it live in
+that record, never in the reason.
+
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
-When the report is there, each of these blocks asks for only the corrected lines, never the report again.
+When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
@@ -95,7 +99,7 @@ transcript (the result of a Bash run of build.py) has an entry line, `stalled st
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
 number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
-it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+it lifts spends a one-act override. A build run through
 verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
 transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
@@ -117,10 +121,23 @@ must cite `(route <id>)` for a route row whose outcome on this surface is refuse
 tool in backticks that hooks/refusal_note.py recorded for this session, or `(measured <date>, <check and result>)`. A
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
 dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
-with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
+with an owner line that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
 the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
 the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
+
+Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
+that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
+"did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
+history word in another clause hides no claim. The line claims it for each PR it names, as
+`#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
+the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
+record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
+(the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
+blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
+process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
 import json
@@ -196,32 +213,80 @@ LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave))(.+?)\*
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
-BLOCK_REASON_HEAD = (
-    "Report-shape guard: this turn landed a commit, push, or merge, so the reply must end "
-    "with the report. One blockquote, bold labels Done, Deviations, Input Needed, Next in "
-    "that order, drop a label that does not apply, no code fence, nothing after it."
-)
-BLOCK_REASON_TAIL = (
-    " Prose may sit above the report. Send the report now, as the next thing you write. Keep "
-    "the reply above it as it stands. Do not write it again."
-)
-# The owner has read the report before a block lands, so a resent report doubles it. The
-# missing-report block asks for the report itself, so its reply carries every other fix. Once the
-# report is there, every other block asks for a short correction.
-# A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
-# set, so this guard stays quiet on it. The rewrite after a missing-report block is the one
-# exception: rewrite_problems() checks it once, and its own block leaves no marker.
-CORRECTION_TAIL = (
-    " Post only the corrected lines, as a short correction. Never send the report again."
-)
+REMEDY_CITE = "decision guard-remedy-not-to-owner"
 
-MODELS_REASON = (
-    "Model-name guard: a Done item that agents built or reviewed names each one's role "
-    "and model, like \"(builder sonnet, reviewer sonnet)\". Here: ")
-UNSTARTED_REASON = (
-    "Unstarted guard: this turn ran a builder, so Next holds an \"Unstarted:\" line. "
-    "Name each queued item with every question answered that you left unstarted, with "
-    "its reason, or write \"Unstarted: none\".")
+
+def owner_line(check, wrong):
+    """The one owner line that opens every refusal: the check's name, what is wrong, and the record that
+    holds the steps (the one home; no site writes its own). The owner reads each refusal in chat, so a refusal holds
+    facts only, never an instruction to the session. `wrong` may hold a %s slot for the caller to fill."""
+    return check + ": " + wrong + " (" + REMEDY_CITE + ")."
+
+
+# Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
+# `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
+SESSION_PHRASES = (
+    "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
+    "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
+    "send it now", "send the questions again",
+)
+# A unit that opens with one of these words (after a connector such as "so") is an order to the session. "Pick" is
+# left out on purpose: "Pick guard" is the check name of an owner line.
+SESSION_IMPERATIVES = frozenset((
+    "add", "send", "post", "keep", "write", "drop", "give", "name", "move", "run", "never", "do", "don't", "resend",
+    "rewrite", "mark", "resume", "pause", "fix", "ship", "wait", "reply", "put", "cite", "check", "answer", "close",
+    "open", "update", "remove", "include", "set", "make", "stop", "let", "tell", "ask", "see", "read", "dispose",
+))
+# A unit ends at a sentence mark, a clause mark (; : ,) or a line break, so an order after a clause is seen too.
+_UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
+_CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
+_WORD = re.compile(r"[a-z][a-z'-]*")
+# A list of backtick spans ("refused `Agent`, `Write` this session") ends each unit but the last in span + comma. The
+# unit after it that opens directly with a span names the next item and holds no order. A connector before the span
+# ("`Next`, so `add` it") makes it an order, so the unit must open with the backtick itself. A span never crosses a
+# comma, a sentence mark or a line, so a lone backtick cannot pair with a later one and hide an order.
+_SPAN_COMMA_END = re.compile(r"`[^`\n.!?;:,]+`,$")
+# A modal that binds the reader: "you should send it", "the reply must end with the report".
+_MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
+
+
+def session_wording(text):
+    """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
+    a clause that opens with an order word, or a modal ("must", "should")."""
+    low = text.lower()
+    for phrase in SESSION_PHRASES:
+        if phrase in low:
+            return phrase
+    previous = ""
+    for unit in _UNIT_END.split(text):
+        is_list_item = unit.lstrip().startswith("`") and bool(_SPAN_COMMA_END.search(previous))
+        previous = unit.strip()
+        if is_list_item:
+            continue
+        words = _WORD.findall(unit.lower())
+        while words and words[0] in _CONNECTORS:
+            words.pop(0)
+        if words and words[0] in SESSION_IMPERATIVES:
+            return unit.strip()
+    found = _MODAL.search(text)
+    return found.group(0) if found else ""
+
+
+BLOCK_REASON = owner_line(
+    "Report-shape guard",
+    "this turn landed a commit, push, or merge, and the reply does not end with the report in one blockquote "
+    "with the bold labels Done, Deviations, Input Needed, Next")
+# The owner has read the report before a refusal lands, so a resent report doubles it. The missing-report refusal
+# asks for the report itself; every other refusal asks for a short correction. Both asks live in the record.
+# A Stop hook cannot read a reply before it is shown. The correction runs with stop_hook_active
+# set, so this guard stays quiet on it. The rewrite after a missing-report refusal is the one
+# exception: rewrite_problems() checks it once, and its own refusal leaves no marker.
+
+MODELS_REASON = owner_line(
+    "Model-name guard",
+    "a Done item that agents built or reviewed does not name each one's role and model (%s)")
+UNSTARTED_REASON = owner_line(
+    "Unstarted guard", "this turn ran a builder, and Next holds no \"Unstarted:\" line")
 
 
 # is_last_human and tool_uses live in lint/_transcript.py, imported above.
@@ -483,10 +548,9 @@ ANSWERED_FILE_RE = re.compile(
     r"\b[\w-]+\.(?:py|md|json|jsonl|js|ts|sh|txt|ya?ml|toml|html|css|log|cfg|ini)\b")
 ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
-ANSWERED_REASON = (
-    "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
-    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
-    "inbox id, or the time), or say what is meant in other words. Lines: ")
+ANSWERED_REASON = owner_line(
+    "Answered guard (rule answered-needs-source)",
+    "each line below says \"answered\" and cites no source; a mention of the word in an inline code span is no claim") + " Lines: "
 
 
 def _has_path(line):
@@ -636,22 +700,24 @@ OPTION_NUM_RE = re.compile(r"(?:^|(?<=\s))(?:[-*+]\s+)?(\d{1,2})[.)](?=\s)", re.
 PICK_WORD_RE = re.compile(r"\b(?:pick|options?|ways?|choose|recommended)\b", re.I)
 ASK_TOOL = "AskUserQuestion"
 
-OWNER_REFUSAL = (
-    "Pick guard: every question goes to the page writer in the same turn it is asked (owner, 2026-11-01 "
-    "23:31 CST). Send it now: %s."
-)
-LANE_REFUSAL = (
-    "Lane pick guard: a lane's own chat does not reach the owner. Send this question to your parent "
-    "(send_message session_id @parent) now."
-)
+OWNER_REFUSAL = owner_line(
+    "Pick guard",
+    "a question to the owner was not sent to the page writer in the same turn it was asked (owner ruling, "
+    "2026-11-01 23:31 CST); %s")
+LANE_REFUSAL = owner_line(
+    "Lane pick guard",
+    "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
+    "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
 LANE_TAG = "cs-build:lane"
 PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
-# (Don't) cannot span to the next quote.
-QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+# (Don't) cannot span to the next quote. A word that opens with an elided apostrophe ('til, 'Cause, '25,
+# '90s) is no opening quote either: the space before it looks like one, but the apostrophe stands for dropped
+# letters or digits. Text alone cannot tell a lone opener from a real one, so the elisions are named.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'(?!(?i:til|till|cause|cos|bout|em|round|tis|twas|kay|nuff)\b|\d\d(?:s)?\b)[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
@@ -718,11 +784,6 @@ CARRY_LINES = (
     ("Recovered", re.compile(CARRY_START + r"recovered(?:\*\*)?:", re.I | re.M)),
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
 )
-CARRY_FORMS = {
-    "Recovered": "`Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`",
-    "Handoff gave": "`Handoff gave: <facts the handoff supplied that the summary did not>`, "
-                    "or `Handoff gave: none`",
-}
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
@@ -836,14 +897,12 @@ def recovered_problem(records, text):
     missing = [name for name in pending if not carry_present(name, block)]
     reasons = []
     if missing:
-        reasons.append("a compaction came before this report and no %s line has landed since. "
-                       "Under Deviations, add %s, inside the report blockquote." %
-                       (" or ".join(missing), " and ".join(CARRY_FORMS[n] for n in missing)))
+        reasons.append("a compaction came before this report and no %s line has landed since" %
+                       " or ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
-        reasons.append("the Recovered item %r names no source. End each item with git, page or "
-                       "digest; items split on \";\" outside parentheses." % bad)
-    return "Recovered guard: " + " ".join(reasons) if reasons else ""
+        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
+    return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
 
 
 def repo_root(cwd):
@@ -871,7 +930,9 @@ def departs_problem(text):
     miss = question_form.departs_hit(input_needed_section(text))
     if not miss:
         return ""
-    return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+    # DEPARTS_REASON (the steps) stays for the waiting page and the question box; a Stop refusal shows the miss.
+    miss = miss.removesuffix(question_form.PLACEHOLDER_HINT)
+    return owner_line("Departs-from guard (rule question-departs)", "the Input Needed pick has a problem (%s)" % miss)
 
 
 # building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
@@ -881,8 +942,14 @@ def departs_problem(text):
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
 # `step:<slug>` is checked for form only.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+# "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
+# parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
+# or the like, so "broke main by merging into it" still admits.
+_BROKE_INTO = (r"(?!\s+(?:(?!by\b|when\b|after\b|and\b|then\b|before\b|if\b|so\b)\w+\s+){0,3}into\s+"
+               r"(?:\d+|two|three|four|five|six|seven|eight|nine|ten|several|multiple|smaller|separate|parts?"
+               r"|chunks?|lanes?|steps?|stages?|phases?|tasks?|commits?|batch(?:es)?|prs?)\b)")
 MISTAKE_FAULT_RE = re.compile(
-    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke" + _BROKE_INTO + r"|clobbered|overwrote|"
     r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
@@ -894,10 +961,9 @@ MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
-MISTAKE_REASON = (
-    "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
-    "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
-    "(rule building-mistake-names-its-guard).")
+MISTAKE_REASON = owner_line(
+    "Mistake guard (rule building-mistake-names-its-guard)",
+    "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
 
 
 def _admitted_clause(deviations):
@@ -989,9 +1055,8 @@ def question_problem(records, turn, text, hook):
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
-    route = ("send_message to the writer " + writer if writer else
-             "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
-    return OWNER_REFUSAL % route, ""
+    return OWNER_REFUSAL % (("the page writer is session " + writer) if writer else
+                            "the page writer is not known to this session; the waiting page is " + page), ""
 
 
 # rewrite-cite-predates-ruling: a sentence that says a decision was rewritten for a ruling. See the module docstring.
@@ -1131,10 +1196,10 @@ def rewrite_stamp_problem(text, human_ts, cwd):
             d_epoch = epochs[d]
             if d_epoch is None or d_epoch >= ruling.timestamp():
                 continue
-            reason = (
-                "Rewrite-stamp guard: decision `%s` was last committed %s, on every branch and HEAD, before the "
-                "ruling %s that it is said to be rewritten for. Rewrite the record, fetch the branch that holds "
-                "the rewrite, or say it is not rewritten yet."
+            reason = owner_line(
+                "Rewrite-stamp guard (rule rewrite-cite-predates-ruling)",
+                "decision `%s` was last committed %s, on every branch and HEAD, before the ruling %s that it is "
+                "said to be rewritten for"
                 % (d, _central(datetime.fromtimestamp(d_epoch, timezone.utc)),
                    ruling.strftime("%Y-%m-%d %H:%M ") + stamp[2]))
             if reason not in reasons:
@@ -1159,7 +1224,7 @@ def says_refusal_right(text, tool):
     """True when the reply says "refusal was right" or "refusal is right" directly after `tool`'s name
     (as names_tool counts a name; an optional colon may sit between), on any line. A hedge in the same
     clause, before the name or after the phrase ("not sure", "or wrong", "?"), does not clear. The
-    guard's own block reason never clears: it puts the phrase after the placeholder `<tool_name>`. A
+    guard's own refusal never clears: it puts the phrase after the placeholder `<tool_name>`. A
     plural ("refusals were right") does not clear."""
     if "__" in tool:
         pattern = re.compile(r"(?<!\w)" + re.escape(tool) + r"(?!\w)" + PHRASE + r"(?!\w)", re.I)
@@ -1264,7 +1329,7 @@ def pending_refusals(hook, text):
 
 
 def hold_reason(entries):
-    """The block reason for the triage hold, naming its `entries` (joined)."""
+    """The refusal for the triage hold, naming its `entries` (joined)."""
     return HOLD_REASON % entries
 
 
@@ -1370,16 +1435,10 @@ CHOICE_RE = re.compile(
 WHY_YOURS_FORM_RE = re.compile(
     r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__)?Why yours(?:\*\*|__)?:(?:\*\*|__)?[ \t]*\S", re.I)
 HAND_OFF_TAIL = " (rule output-never-hand-off-doable-step)"
-CITE_FORMS = (
-    "end the line with `(route <id>)`, an id from the route rows file whose outcome on this surface is refused or "
-    "asks, name in backticks a tool the auto-mode classifier refused this session, or give `(measured <date>, <check "
-    "and result>)`")
-HAND_OFF_NO_CITE = (
-    "Hand-off guard: a Why yours line gives a capability reason with no cite. Remedy: " + CITE_FORMS + ". A check name "
-    "is no cite. If no row, refusal or measurement fits, the act may be one a session can do.")
-HAND_OFF_NO_DATE = (
-    "Hand-off guard: a Why yours line carries a measured premise with no date or no check and result. Remedy: write "
-    "`(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
+HAND_OFF_CHECK = "Hand-off guard"
+HAND_OFF_NO_CITE = owner_line(HAND_OFF_CHECK, "a Why yours line gives a capability reason with no cite")
+HAND_OFF_NO_DATE = owner_line(
+    HAND_OFF_CHECK, "a Why yours line carries a measured premise with no date, or with no check and result")
 
 
 def hand_off_lines(text, anywhere=False):
@@ -1448,14 +1507,49 @@ def _route_verdict(ids):
         elif row is None or row.get("outcome") not in ("refused", "asks", "works"):
             kinds.append(("unknown", "route row %s has no readable outcome on %s" % (rid, here)))
         elif row["outcome"] == "works":
-            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do. "
-                          "Remedy: do it through the route %s" % (rid, here, row.get("route") or "that row names")))
+            kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do; the route is %s"
+                          % (rid, here, row.get("route") or "the one that row names")))
         else:
             return "ok", ""
     for kind in ("works", "dead", "unknown"):
         for found, text in kinds:
             if found == kind:
                 return kind, text
+
+
+def cite_tokens_verdict(line):
+    """(kind, detail) for the route and measured cite tokens of `line` alone, with no capability verb needed: the page
+    reads a str_replace fragment that swaps only a cite (hooks/question_form.py). Kind is "undated" (a `(measured ...)`
+    token with no date or no check and result), "works", "dead", "unknown" as `_route_verdict` gives them, or "ok"
+    (no token, or a route token whose row says refused or asks). A line with no route token reads no file."""
+    found = MEASURED_RE.search(line)
+    if found and found.group(1).strip() and _measured(line) == "bad":  # a bare "(measured)" is a premise kind, not a cite
+        return "undated", ""
+    ids = ROUTE_CITE_RE.findall(line)
+    return _route_verdict(ids) if ids else ("ok", "")
+
+
+def why_yours_verdict(hook, line):
+    """(kind, detail) for one Why yours `line`. Kind is "ok" (a choice phrase, no capability verb, or a cite that holds),
+    "none" (a capability reason with no cite), "undated" (a `(measured ...)` cite with no date or no check and result),
+    "works" (a cited row says the act is doable), "dead" (a cited id no row holds), "unknown" (the rows file or the
+    row's outcome on this surface did not read) or "unread" (the refusals file did not read). Detail is the text of the
+    last three. A `hook` of None reads no refusals file: the waiting page (hooks/question_form.py) accepts a route cite
+    and a dated measured cite only. The refusals file is read for a capability line, the rows file only for a line
+    with a route cite."""
+    if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
+        return "ok", ""
+    refused = _cited_refusal(hook, line) if hook is not None else False
+    measured = _measured(line)
+    if refused or measured == "ok":
+        return "ok", ""
+    ids = ROUTE_CITE_RE.findall(line)
+    kind, detail = _route_verdict(ids) if ids else ("none", "")
+    if kind != "none":
+        return kind, detail
+    if measured == "bad":
+        return "undated", ""
+    return ("unread", "") if refused is None else ("none", "")
 
 
 def hand_off_problem(hook, text):
@@ -1466,45 +1560,134 @@ def hand_off_problem(hook, text):
     read only for a reply that holds a capability Why yours line, the rows file only for a line with a route cite."""
     refusals, notes = [], []
     for line in hand_off_lines(text):
-        if CHOICE_RE.search(line) or not CAPABILITY_RE.search(line):
-            continue
-        refused = _cited_refusal(hook, line)
-        measured = _measured(line)
-        if refused or measured == "ok":
-            continue
-        ids = ROUTE_CITE_RE.findall(line)
-        kind, detail = _route_verdict(ids) if ids else ("none", "")
+        kind, detail = why_yours_verdict(hook, line)
         if kind == "ok":
             continue
-        if kind == "none" and measured == "bad":
+        if kind == "undated":
             refusals.append(HAND_OFF_NO_DATE)
-        elif kind == "none" and refused is None:
+        elif kind == "unread":
             notes.append("Hand-off guard: UNKNOWN, this session's refusals file did not read, so the cite went unchecked.")
         elif kind == "none":
             refusals.append(HAND_OFF_NO_CITE)
         elif kind == "unknown":
             notes.append("Hand-off guard: UNKNOWN, " + detail + ".")
         elif kind == "works":
-            refusals.append("Hand-off guard: " + detail + ".")
+            refusals.append(owner_line(HAND_OFF_CHECK, detail))
         else:
-            refusals.append("Hand-off guard: the Why yours line cites a route id the route rows file does not hold (%s). "
-                            "Remedy: cite an id the file holds, or name a tool refused this session in backticks." % detail)
+            refusals.append(owner_line(HAND_OFF_CHECK, "the Why yours line cites a route id the route rows file "
+                                       "does not hold (%s)" % detail))
     unique = list(dict.fromkeys(refusals))
     return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
 
 
+# Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
+REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewer\b)")
+REVIEW_PASS_RE = re.compile(r"\bPASS(?:ED)?\b")
+# A PASS that a negator governs: the negator, at most one word, then PASS.
+REVIEW_NEGATED_RE = re.compile(r"(?i:(?:\b(?:not|never|nor|cannot)|n't)\s+(?:\w+\s+)?)PASS(?:ED)?\b")
+# A clause that puts its PASS in the past: stale, replaced, or "was ... before/earlier".
+REVIEW_HISTORY_RE = re.compile(
+    r"(?i:\b(?:stale|outdated|superseded|invalidated|previously|formerly|no longer)\b"
+    r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
+REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
+REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
+REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_NO_PR = (
+    "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
+    "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
+)
+REVIEW_NO_RECORD = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and that PR has no review record for its live head. "
+    "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
+    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
+)
+
+
+def review_claims(text):
+    """The reply lines that claim a review PASS, outside fences: [(line, PR numbers on it)]. Inline code spans are read as
+    their content. A negated PASS, and a PASS whose clause places it in the past, claim nothing."""
+    claims, fence = [], ""
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence:
+            continue
+        plain = CODE_SPAN.sub(lambda m: m.group(2), body)
+        if not REVIEW_TRIGGER_RE.search(plain):
+            continue
+        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", clause)) and not REVIEW_HISTORY_RE.search(clause)
+                   for clause in REVIEW_CLAUSE_SPLIT_RE.split(plain)):
+            continue
+        numbers = [int(g) for m in REVIEW_PR_RE.finditer(plain) for g in m.groups() if g]
+        claims.append((body, list(dict.fromkeys(numbers))))
+    return claims
+
+
+def _gh_json(args, cwd):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
+                        timeout=REVIEW_READ_TIMEOUT)
+    if run.returncode:
+        raise RuntimeError("gh api exited %d" % run.returncode)
+    return json.loads(run.stdout)
+
+
+def _newest_record(n, comments, merge_mod):
+    """The parsed newest review record comment of `comments` (oldest first), else None."""
+    bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
+    marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
+    return merge_mod.parse_review(marked[-1]) if marked else None
+
+
+def review_record_problem(hook, text):
+    """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
+    reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
+    review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
+    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    claims = review_claims(text)
+    if not claims:
+        return "", ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from override import remote_session_id
+    own_id = remote_session_id()
+    if not own_id or not _own_lane_read(hook.get("transcript_path"), own_id)[0]:
+        return "", ""
+    unnamed = [c for c in claims if not c[1]]
+    numbers = list(dict.fromkeys(n for _line, nums in claims for n in nums))
+    reasons, notes = ([REVIEW_NO_PR] if unnamed else []), []
+    for n in numbers:
+        try:
+            from guard_merge import merge_module  # the one home of the merge tool lookup (hooks/guard_merge.py)
+            merge_mod = merge_module()
+            if merge_mod is None:
+                raise ImportError("merge/merge.py not found")
+            cwd = hook.get("cwd")
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
+                              "--paginate", "--slurp"], cwd)
+            comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
+            rec = _newest_record(n, comments, merge_mod)
+        except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
+            notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
+            continue
+        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+            reasons.append(REVIEW_NO_RECORD % (n, n, n))
+    return " ".join(reasons), " ".join(notes)
+
+
 def refusal_reason(tools, hold=""):
-    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
+    """The refusal for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
     held = hold_reason(hold) if hold else ""
     if not tools:
         return held
     names = ", ".join("`%s`" % tool for tool in tools)
-    return (held + " " if held else "") + (
-        "Refusal guard: the auto-mode classifier refused %s this session, and the reply does not "
-        "raise it with the owner. Add an Input Needed line \"allow `<tool_name>`?\" for each tool, "
-        "and a line in the repo's debt notes file (notes.md) that names it. Or, if the refusal was "
-        "right, say \"`<tool_name>`: refusal was right\" on one line "
-        "(decision refusals-reach-the-owner)." % names)
+    return (held + " " if held else "") + owner_line(
+        "Refusal guard (decision refusals-reach-the-owner)",
+        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner" % names)
 
 
 def _marker_path(hook):
@@ -1544,7 +1727,7 @@ def rewrite_problems(hook):
         reasons = []
         models = done_models_problem(text, spawned)
         if models:
-            reasons.append(MODELS_REASON + models + ".")
+            reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
             reasons.append(UNSTARTED_REASON)
         answered = answered_problem(text)
@@ -1573,16 +1756,13 @@ def write_marker(hook, idx):
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
 # Cost: one git process and one Sonnet call (15 s) on a Stop whose reply asks something; none on any other Stop.
-RELAY_RULE_REASON = (
-    "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
-    "that names that ruling and says why the owner is asked again.")
-UNVETTED_REASON = (
-    "Unvetted guard: the past-ruling check could not run (%s), so this question would reach the owner unchecked. "
-    "Add the line `Unvetted: <why it could not be checked>` to the question and send it again.")
-KEYS_REASON = (
-    "Question-keys guard (rule question-keys): two questions to the owner use the option key(s) %s, so his answer "
-    "could mean either. Give each question its own keys, such as 1a/1b for the first and 2a/2b for the second, and "
-    "send the questions again.")
+RELAY_RULE_REASON = owner_line("Past-ruling guard (rule past-ruling)", "%s")
+UNVETTED_REASON = owner_line(
+    "Unvetted guard (rule past-ruling)",
+    "a question to the owner went out without the past-ruling check, which could not run (%s)")
+KEYS_REASON = owner_line(
+    "Question-keys guard (rule question-keys)",
+    "two questions to the owner use the option key(s) %s, so his answer could mean either")
 ASK_TEXT_MAX = 6000
 # A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
 # code span is no question.
@@ -1688,6 +1868,10 @@ def past_ruling_problem(asked, cwd):
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
+    if session_wording(reason):
+        # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
+        cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
+        reason = "a past ruling settles this (%s)." % ", ".join(cited[:3]) if cited else "a past ruling settles this."
     return RELAY_RULE_REASON % reason
 
 
@@ -1765,10 +1949,10 @@ def rewrite_relay(hook):
 
 
 HOLD_TIER = "triage"
-HOLD_REASON = (
-    "Triage hold: the newest roadmap build prints stalled step lines for %s. Dispose each (resume, pause or done), "
-    "rebuild, then end; or name them under Input Needed to escalate (decision session-tiers, the triage session)."
-)
+HOLD_REASON = owner_line(
+    "Triage hold (decision session-tiers)",
+    "the newest roadmap build prints stalled step lines for %s, and the reply does not name each one under "
+    "Input Needed")
 # A Bash command that runs the roadmap build: python, its flags, then a path that ends in build.py. A quoted or
 # piped mention (cat build.py, grep 'python3 build.py') is no run.
 BUILD_CALL_RE = re.compile(r"(?:^|[\s;&|(])python[\d.]*\s+(?:-\S+\s+)*(?:\S*/)?build\.py(?=[\s;&|)]|$)")
@@ -1899,8 +2083,7 @@ def main():
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            tail = "" if hold else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -1961,7 +2144,12 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
-    note = " ".join(filter(None, [note, hand_note]))
+    review, review_note = "", ""
+    try:
+        review, review_note = review_record_problem(hook, text)
+    except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
+        review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+    note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -1979,6 +2167,7 @@ def main():
             pass
         pick += relay
         pick.append(hand_off)
+        pick.append(review)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -1988,7 +2177,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)"
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -1997,16 +2186,17 @@ def main():
         return
 
     shape_ok = report_shape_ok(text)
-    reasons = [] if shape_ok else [BLOCK_REASON_HEAD + BLOCK_REASON_TAIL]
+    reasons = [] if shape_ok else [BLOCK_REASON]
     item = done_format_problem(text) if shape_ok else ""
     if item:
-        reasons.append(
-            "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
-            "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
+        reasons.append(owner_line(
+            "Report-shape guard",
+            "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
+            + repr(item)))
     spawned = spawn_models(after)
     models = done_models_problem(text, spawned) if shape_ok else ""
     if models:
-        reasons.append(MODELS_REASON + models + ".")
+        reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
     if pick_reason:
@@ -2027,6 +2217,8 @@ def main():
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
+    if review:
+        reasons.append(review)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
@@ -2041,13 +2233,12 @@ def main():
         pass
     cite = bare_cite(text)
     if cite:
-        reasons.append(
-            "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
-            "plus a few words, like \"D12, short titles for records\".")
+        reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                  "%r is a record id with no short gloss" % cite))
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})

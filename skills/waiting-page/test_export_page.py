@@ -61,6 +61,11 @@ LETTERS_11 = "QwErTyUi" + "OpA"  # one short of the credential length
 LETTERS_12 = LETTERS_11 + "s"  # the credential length
 LETTERS_14 = "lkjhgfds" + "amnbvc"  # lower case
 LETTERS_16 = "xKqPzLmR" + "tWbNvYcH"
+CAPS_16 = "QWRTZXLK" + "JHGFDSBN"  # sixteen random capitals, no lower-case run at all
+UNDERSCORE_16 = "xKqP_zLm" + "RtWbNvYc"  # sixteen random letters with an underscore, and no lower-case run of three
+SUPER_PASSWORD = "supersecret" + "password"  # letters that read as words: a secret after a SECRET_KEY name all the same
+FEW_VOWELS_16 = "BCDABCDABCDABCDA"  # sixteen capitals with four vowels and no run of four: fails only the vowel share
+LONG_CONSONANT_RUN_16 = "AEIOUBCD" + "FGHJKLMN"  # sixteen capitals with eleven consonants in a row: fails only the run check
 CLIENT_LETTERS_16 = "BnMvCxZl" + "KjHgFdSa"
 HUMP_AFTER_TWO_16 = "abCdefgh" + "ijklmnop"  # a capital after two lower-case letters: random, not a camelCase word
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
@@ -245,6 +250,20 @@ RED = [
     ("API_KEY of 12 letters before a CRLF", "API_KEY=" + LETTERS_12 + "\r\nOTHER=1", LETTERS_12),
     ("api_key in quotes followed by a semicolon", 'api_key = "' + LETTERS_14 + '";', LETTERS_14),
     ("api_key with a hump after only two lower-case letters", "api_key: " + HUMP_AFTER_TWO_16, HUMP_AFTER_TWO_16),
+    # Random letters after the same names and separators as the GREEN placeholder and label values stay refused. A rule
+    # keyed on the name, the separator, the case or an underscore would open these.
+    ("Key with 16 random letters", "Key: " + LETTERS_16, LETTERS_16),
+    ("api_key with 16 random capitals", "api_key: " + CAPS_16, CAPS_16),
+    ("api_key with 16 random letters and an underscore", "api_key: " + UNDERSCORE_16, UNDERSCORE_16),
+    ("--key-color with 16 random letters before a semicolon", "--key-color: " + LETTERS_16 + ";", LETTERS_16),
+    # A letters-only value after a credential name is refused unless it reads as words, and only a `:` reaches that test:
+    # an `=` is refused whatever the value. So the SECRET_KEY row, with `=`, pins no words step. The vowel row fails only
+    # the vowel share, and the run row fails only the run check. Deleting the vowel share lets the vowel row through;
+    # deleting the run check lets the run row through.
+    ("SECRET_KEY set with = to letters that read as words", "SECRET_KEY=" + SUPER_PASSWORD, SUPER_PASSWORD),
+    ("api_key of sixteen capitals with four vowels", "api_key: " + FEW_VOWELS_16, FEW_VOWELS_16),
+    ("API_KEY of sixteen capitals with an eleven-consonant run", "API_KEY: " + LONG_CONSONANT_RUN_16, LONG_CONSONANT_RUN_16),
+    ("api_key set to twelve underscores and no letter", "api_key: " + "_" * 12, "_" * 12),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -276,6 +295,13 @@ RED = [
     ("letters-only secret after a plain word and a semicolon",
      "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
+    # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
+    ("letters-only secret after a plain word and `or`", "password: none or swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `but`", "password: none but swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `is`", "password: none is swordfish", "swordfish"),
+    ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
+    ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
+    ("letters-only secret after prose and a comma", "password: none for the guest, swordfish", "swordfish"),
     # A comma does not end the prose: a letters-only secret after a comma, with prose before it, is one.
     ("letters-only secret after prose and a comma", "password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
     # The digit counts wherever it sits in the value: at 256, and at 257 and 1000 past it.
@@ -381,6 +407,8 @@ GREEN = [
     # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
     ("password word with optional and prose after it", "Set password: optional for the guest."),
     ("password word with none and prose after it", "password: none for the guest"),
+    # A function word after a comma is no second value: only a non-function word after a separator is one.
+    ("password word with none, prose, a comma and a function word", "password: none for the guest, and the"),
     ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
@@ -402,6 +430,11 @@ GREEN = [
     # 300 digits and no letter is no secret: the long-value shape refuses only a value with a letter and a digit.
     ("API_KEY of 300 digits and no letter", "API_KEY=" + DIGITS_300),
     ("prose with the word secret before a name", "the secret santa list"),
+    # A letters-only value of 12 or more characters after a credential name refuses today. These three are placeholder and
+    # label text, not secrets, so each is red on main. The RED rows above hold a random value after the same names.
+    ("api_key set to an upper-case placeholder with underscores", "api_key: REPLACE_WITH_YOUR_KEY"),
+    ("Key set to a lower-case label word", "Key: infrastructure"),
+    ("--key-color set to a CSS keyword before a semicolon", "--key-color: currentcolor;"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
     ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
