@@ -109,9 +109,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   lane-closes-after-records
                        deny. An archive_session of a lane (newest get_session record of the target, read from the
                        transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
-                       equal to its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
-                       and a read of the open list that fails (gh missing too) are refusals. A target with no lane
-                       tag passes. An override lifts it.
+                       equal to its cs-step slug, or while a branch of the record (external_metadata.current_branches)
+                       is ahead of its repo's default branch with no pull request in any state; the repos are the
+                       cs-repo tags plus the record's github sources, a 404 on a compare skips that branch in that repo, and
+                       archive/ branches are skipped. No record of the target, a lane with no cs-step or cs-repo
+                       tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
+                       An override lifts it.
   lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
                        `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
                        record (get_session, or the create_session that made it, read from the transcript) is tagged
