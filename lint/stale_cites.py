@@ -98,7 +98,9 @@ the rows file or that file's presence at head, all through the one `cat-file` th
 for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
-or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
+or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once per finder that needs it (the removed-path
+finder, and the reworded-rule finder when the range also removes or changes a rule sentence), through the same
+`cat-file`, so the second read adds no process start. A finder reads only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
