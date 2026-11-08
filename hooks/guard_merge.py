@@ -382,6 +382,8 @@ def _commit_shape(args):
 def _add_shape(args):
     """Return (whole_tree, pathspecs) of a `git add` call. Whole tree: `-A`, `--all`, `-u` or
     `--update` with no pathspec."""
+    # A redirect glued to a word (`git add .>out.txt`) is the shell's, not part of the pathspec.
+    args = [a for a in (REDIRECTION.sub("", arg) for arg in args) if a]
     flags = [a for a in args if a.startswith("-") and a != "--"]
     specs = [a for a in args if not a.startswith("-") and a != "--"]
     whole = any(f in _ADD_ALL_FLAGS or (not f.startswith("--") and set(f[1:]) & set("Au")) for f in flags)
@@ -455,6 +457,21 @@ def _generator_root(args):
     return parsed.root or ""
 
 
+def _page_redirect_root(segment):
+    """The folder above `docs/records.md` ("" for the page in the current folder) when the segment redirects
+    its stdout into a file of that name, else None. A redirect writes the page whatever the command prints, so
+    `--print > docs/records.md` writes it though `--print` alone does not. Only a plain write counts: stdout (no
+    fd, or 1), not a read, a duplicated descriptor (`>&2`) or a named descriptor (`{fd}>`)."""
+    for found in REDIRECTION.finditer(segment):
+        op, target = found.group("op"), found.group("target")
+        if ">" not in op or op[0] in "23456789{" or target.startswith("&"):
+            continue
+        path = os.path.normpath(target.replace("\\", "").strip("'\""))
+        if path == RECORDS_PAGE or path.endswith("/" + RECORDS_PAGE):
+            return os.path.dirname(os.path.dirname(path))
+    return None
+
+
 def _root_is_repo(named, ran_in, top):
     """True when the --root `named` may be the repo whose top is `top`. `ran_in` is the directory the run was
     in, None when that cannot be told. Only a root that provably names another existing repo is not this one:
@@ -515,7 +532,11 @@ def _runs_generator(segment):
         if not rest:
             return None
         word, rest = basename(rest[0]), rest[1:]
-    named = _generator_root(rest) if word == _GENERATOR else None
+    if word != _GENERATOR:
+        return None
+    named = _generator_root(rest)
+    if named is None:
+        named = _page_redirect_root(segment)
     return None if named is None else (named, tokens)
 
 

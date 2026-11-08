@@ -907,13 +907,15 @@ PATH_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,6}$")
 # against the raw command text, which this function never touches. This regex only shrinks the
 # copy that decides what a `git` call's OWN arguments are.
 #
-# Order matters: `&>file` starts with a literal `&`, which the third branch would not reach on its
-# own, so it is tried first. The other three shapes (`>file`, `>>file`, `<file`, and the fd forms
-# `2>&1`, `>&2`, `1>&2`) all share one greedy `\S+` for the target, spaced or not.
+# Order matters: `&>file` starts with a literal `&`, which the fd form would not reach on its own,
+# so it is tried first. The other shapes (`>file`, `>>file`, `<file`, the fd forms `2>&1`, `>&2`,
+# `1>&2`, the noclobber override `>|file` and the named descriptor `{fd}>file`) share one target,
+# spaced or glued to the operator, with an escaped space (`my\ out.txt`) kept inside it. Groups:
+# `op` is the operator and `target` the word it writes or reads (`&1` for `2>&1`), so a caller
+# that needs the target reads it from this one home.
 REDIRECTION = re.compile(
-    r"&>>?\s*\S+"       # &>file, &>>file
-    r"|<\s*\S+"         # <file
-    r"|\d?>>?\s*\S+"    # >file, >>file, 2>file, 2>>file, 2>&1, >&2, 1>&2
+    r"(?P<op>&>>?|(?:\{[A-Za-z_]\w*\})?<|(?:\d|\{[A-Za-z_]\w*\})?>>?\|?)"
+    r"\s*(?P<target>(?:\\.|[^\s\\])+)"
 )
 
 
