@@ -417,7 +417,9 @@ def writer_ids(writer):
         if tok.startswith("session_") or _UUID_RE.fullmatch(tok):
             ids.add(tok)
         elif tok.startswith("cse_"):
-            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+            hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+            if hooks not in sys.path:
+                sys.path.insert(0, hooks)
             from override import record_id
             mapped = record_id(tok)
             if mapped:
