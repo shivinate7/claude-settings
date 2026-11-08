@@ -22641,6 +22641,11 @@ _relesc_add("other-checkout: heredoc replay kept body unresolved word: a heredoc
             "echo hi > ../other/f, then bash run.sh, is refused",
             "deny", _kept_heredocs([("run.sh", "bash 1a=b\necho hi > ../other/f")], "bash run.sh"), "home",
             rule="other-checkout")
+# `bash 1a=b` names no file (the word is an assignment), so the kept body that holds it keeps the data body beside it.
+_relesc_add("other-checkout: heredoc replay kept body unresolved word: a heredoc run.sh whose body is bash 1a=b, beside a "
+            "heredoc data.txt that writes ../other/f, then bash run.sh, is refused",
+            "deny", _kept_heredocs([("run.sh", "bash 1a=b"), ("data.txt", "echo hi > ../other/f")], "bash run.sh"),
+            "home", rule="other-checkout")
 
 
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
