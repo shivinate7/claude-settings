@@ -16,18 +16,18 @@ Home: hooks/guard.py
 
 One function in `hooks/guard.py` judges a report's text. Two callers use it:
 
-- **PreToolUse, `SubagentHandback`.** Since Claude Code 2.1.271, an agent's report is the `message` of this call (code.claude.com/docs/en/hooks.md, SubagentStop). A missing sha refuses the call with `report-sha-missing` before the report is delivered. The agent fixes its report and hands back again.
+- **PreToolUse, `SubagentHandback`.** Where the harness delivers an agent's report by this call, the report is its `message` (code.claude.com/docs/en/hooks.md, SubagentStop). Elsewhere the stop fallback below judges it. A missing sha refuses the call with `report-sha-missing` before the report is delivered. The agent fixes its report and hands back again.
 - **SubagentStop** (`judge_stop`), the fallback, reads `last_assistant_message`. A missing sha blocks the first stop. A second stop (`stop_hook_active`) is allowed and logs `report-sha-unresolved`, so an agent never loops. A builder stop that breaks `builder-diff` too gets one block with both reasons.
 
 The payload must carry a valid `agent_id`. Every agent type is judged, reviewers and Explore included, since any role can cite a commit. The main session is not judged.
 
 ## What counts as a sha
 
-- A token of 7 to 40 lowercase hex characters, with at least one digit and one letter a-f.
-- A token that touches `-`, `_`, `/`, `#`, `.` or `@` is not one. That rules out agent ids, UUIDs, colours, URLs, file names and `owner/repo@sha`.
-- A sentence mark after the token (`.`, `,`, `;`, `:`, `)`, `]`) followed by a space or the end of the text does not count as touching, so "Fixed in 8c1f0e2a7." is judged.
-- A token inside a double-quoted span or on a `> ` quoted line is skipped, since quoted text may come from another repo. A quoted span ends at the line end. A backticked sha is checked.
-- A sha resolves when `git cat-file --batch-check` finds it as `<sha>^{commit}` in the repo of the payload's `cwd`. A short sha that matches more than one object is ambiguous, not missing, and passes.
+- A token of 7 to 12, or exactly 40, lowercase hex characters, with at least one digit and one letter a-f. That rules out agent ids (17), digests (32, 64) and other long hex.
+- A token that touches `-`, `_`, `/`, `#`, `.`, `@` or `=` is not one. That rules out UUIDs, colours, URLs, file names, `key=value` and `owner/repo@sha`.
+- Two exceptions are judged: each side of a range (`a..b`, `a...b`), and a token followed by sentence marks (`.`, `,`, `;`, `:`, `)`, `]`, `*`, `"`, a backtick) up to a space or the end of the text, so "Fixed in 8c1f0e2a7." and "(fixed in 8c1f0e2a7.)" are judged.
+- A token inside a double-quoted span or on a `> ` quoted line is skipped, since quoted text may come from another repo (coordinator brief, 2026-11-08: a sha in quoted text of another repo is a false alarm). A quoted span ends at the line end. A backticked sha is checked.
+- A sha resolves when `git cat-file --batch-check` finds it as `<sha>^{commit}` in the repo of the payload's `cwd`. A short sha that git reports as ambiguous passes.
 
 ## Fail open
 
@@ -36,7 +36,7 @@ The payload must carry a valid `agent_id`. Every agent type is judged, reviewers
 
 ## Cost
 
-One `git cat-file --batch-check` process per judged hand-back or stop that holds a sha-like token. When a sha is missing, one more `rev-parse --is-shallow-repository`. None when the report holds no such token. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+A hand-back is judged before any other guard rule reads git, so a hand-back with no sha-like token starts no git process. One that holds one starts one `git cat-file --batch-check`, and one `rev-parse --is-shallow-repository` when a sha is missing. A stop adds the same to the stop's existing diff reads. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
