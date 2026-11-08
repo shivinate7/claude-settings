@@ -25,7 +25,7 @@ Check: `lint/check_plan_refuter.py`, run in CI on pull requests.
 
 ## Limits
 
-A record that the range only modifies, such as one rewritten in place, is not judged. Only an added record is. A line that opens with a triple-backtick code span reads as a fence, so it never counts as a `Refuter:` line.
+A record that the range only modifies, such as one rewritten in place, is not judged. Only an added record is. A line that opens with a triple-backtick code span, with backticks later on the same line, opens no fence. It never counts as a `Refuter:` line.
 
 The check reads the word, not the writer. An orchestrator can type `Refuter: refuter <model>, <date>, <verdict>` with no refuter spawned, and the check passes it. The role check closes only the gap where any role word passes. Residual: a typed refuter line with no refuter behind it still passes.
 
