@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The coordinator asked for this guard rule after the incident below, under rule `building-guard-needs-incident` (a guard needs a mistake it stops). At 16:22 CST on 2026-11-07 the coordinator widened it. The merge tool's verdict calls are refused in the foreground too. A `merge --lane-lint` call piped into a filter hid the result twice that day. Roadmap step `guard-pipe-on-merge-lint` (merge verdict calls piped) holds that part. The owner may change either. The tee-then-tail form is a coordinator ruling, 2026-11-08 05:15 CST (process-only). The check reads any filter, not only `tail` and `head` (coordinator ruling, 2026-11-08 07:16 CST, process-only).
+No owner ruling yet. The coordinator asked for this guard rule after the incident below, under rule `building-guard-needs-incident` (a guard needs a mistake it stops). At 16:22 CST on 2026-11-07 the coordinator widened it. The merge tool's verdict calls are refused in the foreground too. A `merge --lane-lint` call piped into a filter hid the result twice that day. Roadmap step `guard-pipe-on-merge-lint` (merge verdict calls piped) holds that part. The owner may change either. The tee-then-tail form is a coordinator ruling, 2026-11-08 05:15 CST (process-only). The check reads any filter, not only `tail` and `head` (coordinator ruling, 2026-11-08 07:16 CST, process-only).
 
 - A pipeline that holds a named check and any later stage but a lone `tee` is refused: `tail`, `head`, `sed -n`, `grep -m1`, `awk` and the like. It reads the same pipeline walk as the narrated rule, with the filter test widened (`any_filter` in `_pipeline_hit`). The rule id is `check-tail`, in `hooks/guard_stream.py`.
 - The merge tool's verdict calls are `merge --lane-lint` and `merge --review-record`. They are refused in the foreground and in the background.
@@ -33,9 +33,9 @@ The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only
 
 ## Known gaps
 
-Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read` and `check-tail-powershell-select`. No incident has shown any of them.
+Each gap is one line in `docs/debts/notes.md`, under this decision. The lines are `check-tail-pipe-at-line-end`, `check-tail-no-nested-read`, `check-tail-powershell-select` and `check-tail-trailing-amp`. No incident has shown any of them.
 
-Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into a truncating filter hides it, and the lane must run the check again.
+Why: a merge or lane verdict is the one line the orchestrator needs. A pipe into any filter after the run hides it, and the lane must run the check again.
 
 Kind: process
 Home: hooks/guard_stream.py

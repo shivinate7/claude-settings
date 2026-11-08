@@ -132,10 +132,10 @@ NARRATED_TAIL_REASON = (
 )
 
 
-# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
-# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
-# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
-# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
+# A CHECK piped into any filter but a lone `tee` (decision background-check-through-verdict). A filter
+# after the run holds every byte until the command exits, then prints what it keeps, so the one useful
+# line, the verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the
+# verdict itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
 # (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
 # foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
@@ -205,7 +205,7 @@ def check_tail_hit(stripped: str, background: bool) -> str:
 
 
 CHECK_TAIL_REASON = (
-    "this check's output goes into a filter that keeps one end, so the filter holds everything "
+    "this check's output goes into a filter after the run, so the filter holds everything "
     "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
