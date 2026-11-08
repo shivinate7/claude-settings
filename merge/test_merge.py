@@ -1598,29 +1598,34 @@ LANE_HEADS_UNREAD = ("unreadable", "could not be read")  # ruling 2: the one lin
 LANE_MOVED = ("moved", "gone")  # ruling 2: the one line for a lane tip that no origin head sits at; it names the tip
 LANE_PROOF_NOT_RUN = "could not run"  # ruling 5: the kept line when the merge commit cannot be read, in place of WHY["unproven"]
 
-def cut_branch(o, name, older=False):
+def cut_branch(o, name, older=False, older_at=None):
     """Cut branch `name` off origin/main in clone `o` and push it: one commit, or two when `older`, the earlier one first. Nothing is merged.
+    `older_at`: an ISO 8601 date with a zone, set as the earlier commit's author and committer dates, so a case can backdate it. The tip keeps the clock.
     -> the commits pushed, oldest first, so the last one is the tip."""
     sh(o, "git", "fetch", "-q", "origin")
     sh(o, "git", "checkout", "-q", "-B", name, "origin/main")
     commits = []
     if older:
         put(os.path.join(o, name.replace("/", "-") + ".older.txt"), name + " older\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {name}, older head")
+        sh(o, "git", "add", "-A")
+        dated = {"GIT_AUTHOR_DATE": older_at, "GIT_COMMITTER_DATE": older_at} if older_at else {}
+        with unittest.mock.patch.dict(os.environ, dated):
+            sh(o, "git", "commit", "-q", "-m", f"lane {name}, older head")
         commits.append(sh(o, "git", "rev-parse", "HEAD"))
     put(os.path.join(o, name.replace("/", "-") + ".txt"), name + "\n")
     sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", f"lane {name}"); sh(o, "git", "push", "-q", "origin", name)
     commits.append(sh(o, "git", "rev-parse", "HEAD"))
     return commits
 
-def lane_batch(env, *names, older=()):
+def lane_batch(env, *names, older=(), older_at=None):
     """Cut each lane off origin/main, push it, then merge every lane into feat with a merge commit, as an integration branch does.
     -> {lane: tip}. Without --no-ff there is no merge commit, so no second parent. Also sets env.tips for lane_deleted_line. A lane named in
-    `older` gets an earlier commit first: env.older_heads[lane] is that commit, an ancestor of the lane's tip."""
+    `older` gets an earlier commit first: env.older_heads[lane] is that commit, an ancestor of the lane's tip. `older_at` dates each such
+    earlier commit (cut_branch)."""
     o, tips = env.other, {}
     env.older_heads = {}
     for n in names:
-        commits = cut_branch(o, n, older=n in older)
+        commits = cut_branch(o, n, older=n in older, older_at=older_at)
         tips[n] = commits[-1]
         if len(commits) > 1:
             env.older_heads[n] = commits[0]
@@ -12766,14 +12771,19 @@ class LanePulls(LaneHost):
     """LaneHost whose open pull requests and repo comments are scripted at `pages`. open_heads and review_comments are the real Host methods
     over those reads. Any other list read is a failed case."""
 
-    def __init__(self, *a, pulls=(), comments=(), **k):
+    def __init__(self, *a, pulls=(), comments=(), windowed=False, **k):
         super().__init__(*a, **k)
-        self.pulls, self.comments = list(pulls), list(comments)
+        self.pulls, self.comments, self.windowed = list(pulls), list(comments), windowed
+        self.since_reads = []  # each `since` the comment list was read with, in order
 
     def pages(self, rel, key=None, fields=None):
         if rel == "pulls":
             return self.pulls
         if rel == "issues/comments":
+            since = (fields or {}).get("since")
+            self.since_reads.append(since)
+            if self.windowed:  # GitHub's `since` keeps what was updated at or after it: a comment with no updated time is read by its creation
+                return [c for c in self.comments if (c.get("updated_at") or c["created_at"]) >= since]
             return self.comments
         raise AssertionError(f"unexpected list read: {rel}")
 
@@ -12795,12 +12805,12 @@ class ReviewRoundCheckEnv(Env):
     """The round-3 check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
     The assertions every case shares sit here too. No test lives here."""
 
-    def batch_host(self, tips, comments=(), others=()):
+    def batch_host(self, tips, comments=(), others=(), windowed=False):
         """Pull request 7 is feat at its live head. Each lane in `tips` ({branch: tip}) is an open pull request, numbered 8, 9, ... in the order given.
-        `others` are open pull requests that are no lane of the batch, as lane_pull rows."""
+        `others` are open pull requests that are no lane of the batch, as lane_pull rows. `windowed`: the comment list honours its `since` (LanePulls)."""
         pulls = [lane_pull(7, "feat", self.head("feat"))]
         pulls += [lane_pull(8 + i, b, tip) for i, (b, tip) in enumerate(tips.items())]
-        return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments))
+        return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments), windowed=windowed)
 
     def push_feat_commit(self):
         """Push one commit to feat on origin. -> the head it replaced, an older head of feat that is an ancestor of the new one."""
@@ -12830,6 +12840,47 @@ class ReviewRoundCheckEnv(Env):
         for tip in tips.values():
             self.assertEqual(self.history_exit(reviewed, tip), 1, "the reviewed head of pull request 20 is in the history of a lane tip")
         return tips, host, reviewed
+
+    def land_guard_pr(self):
+        """A guard PR merged earlier: its head G becomes origin/main, and feat merges main in, so G is in the history of feat. -> G."""
+        o = self.other
+        g = cut_branch(o, "agent/guard-done")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{g}:refs/heads/main")
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge main into feat", g)
+        sh(o, "git", "push", "-q", "origin", "feat")
+        self.assertEqual(self.history_exit(g, "origin/main"), 0, "the guard PR's head is not on origin/main")
+        self.assertEqual(self.history_exit(g, self.head("feat")), 0, "the guard PR's head is not in the history of feat")
+        return g
+
+    def landed_guard_batch(self, guard, rounds, net):
+        """Pull request 20 is merged, so it is no open pull request. Its one record names its head G, which is on origin/main, with Guard or check
+        `guard`. Lane agent/lane1 is the later batch. -> (tips, host, G)."""
+        g = self.land_guard_pr()
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [round_check_comment(1, 20, g, guard=guard, rounds=rounds, net=net)])
+        self.scope(tips, host)
+        return tips, host, g
+
+    def backdated_lane_batch(self, guard):
+        """Lane agent/lane1's older head A is dated LANE_OLD_AT, more than a day before its tip B, which keeps the clock. Pull request 8's one record
+        names A with Guard or check `guard` and is posted at LANE_OLD_POSTED. The comment list honours `since`. -> (tips, host, A)."""
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",), older_at=LANE_OLD_AT)
+        a = self.older_heads["agent/lane1"]
+        posted = review_comment(1, 8, record_text(n=8, head=a, guard=guard, rounds=REVIEW_PASS), created=LANE_OLD_POSTED)
+        host = self.batch_host(tips, [posted], windowed=True)
+        self.scope(tips, host)
+        self.assertEqual(self.committed_at(a), LANE_OLD_EPOCH, "the older head is not dated as the case says")
+        self.assertGreater(self.committed_at(tips["agent/lane1"]) - self.committed_at(a), 86400, "the tip is not more than a day newer than the older head")
+        self.assertEqual(self.history_exit(a, "origin/main"), 1, "the older head is on origin/main, so it is not new to the batch")
+        self.assertEqual(self.history_exit(a, tips["agent/lane1"]), 0, "the older head is not in the history of the lane tip")
+        self.assertEqual(self.history_exit(a, self.head("feat")), 0, "the older head is not in the history of feat")
+        return tips, host, a
+
+    def committed_at(self, sha):
+        """The committer time of `sha` in epoch seconds, read from the checkout, which scope() has fetched."""
+        return int(sh(self.co, "git", "log", "-1", "--format=%ct", sha))
 
     def scope(self, tips, host):
         """Scope before subject: each lane is a lane of the batch, and an open pull request at its tip, before a case probes the check on it."""
@@ -13213,6 +13264,66 @@ class ReviewRoundCheckCost(ReviewRoundCheckEnv):
         self.assertTrue(getattr(host, "merged", False), "the confirm did not reach the merge:\n" + out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
+
+LANE_OLD_AT = "2026-10-01T00:00:00+0000"  # an older lane head's author and committer date, epoch LANE_OLD_EPOCH
+LANE_OLD_EPOCH = 1790812800
+LANE_OLD_POSTED = "2026-10-01T01:00:00Z"  # the record on that older head, posted an hour after it
+LANE_OLD_WINDOW = "2026-09-30T00:00:00Z"  # the comment read's since for it: a day before it, the one-day margin the round-3 check keeps
+
+class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
+    """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
+    is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes round 3 when its
+    record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
+    batch still refuses."""
+
+    def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
+        _tips, host, _g = self.landed_guard_batch("yes", REVIEW_PASS, "not owed")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, whose head is already on origin/main:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_a_round_three_net_zero_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
+        round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        _tips, host, _g = self.landed_guard_batch("yes", round_three, "zero")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, whose head is already on origin/main:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_a_guard_no_record_on_a_head_already_on_main_is_not_refused(self):
+        _tips, host, _g = self.landed_guard_batch("no", REVIEW_PASS, "not owed")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_a_stale_guard_record_for_a_head_new_to_the_batch_still_refuses(self):
+        # the guard PR is on origin/main as well, so the rule must tell the older head, new to the batch, from a head on the base
+        self.land_guard_pr()
+        tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
+        older = self.older_heads["agent/lane1"]
+        host = self.batch_host(tips, [round_check_comment(1, 8, older, guard="yes", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(older, "origin/main"), 1, "the older head is on origin/main, so it is not new to the batch")
+        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the older head is not in the history of feat")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("owed on the new head", out, "the refusal is not the stale-record refusal:\n" + out)
+
+    def test_a_guard_record_for_an_older_head_more_than_a_day_before_its_tip_is_refused(self):
+        _tips, host, _a = self.backdated_lane_batch("yes")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("owed on the new head", out, "the refusal is not the stale-record refusal:\n" + out)
+
+    def test_the_comment_read_reaches_back_to_the_oldest_commit_new_to_the_batch_less_a_day(self):
+        # the one-day margin is the clock-skew margin oldest_tip_since keeps, so the pinned value is the older head's date less one day
+        _tips, host, _a = self.backdated_lane_batch("yes")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertEqual(host.since_reads, [LANE_OLD_WINDOW],
+                         "the comment read's since is not the oldest commit new to the batch less a day:\n" + out)
+
+    def test_a_guard_no_record_for_the_same_older_head_is_not_refused(self):
+        _tips, host, _a = self.backdated_lane_batch("no")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
