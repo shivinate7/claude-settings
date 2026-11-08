@@ -5411,6 +5411,16 @@ sh("git-after-cd: a check || an echo then && a git push -u, is refused",
    "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: an if ! check whose then body is an echo of a substitution then ; exit 1, then ; a git push -u, passes",
    'if ! pytest -q; then echo "$(date)"; exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
+# A `|| exit` before a && chain runs the exit when the check fails, so the push after the chain is never reached.
+# A file redirect in a then body is no hazard before `;`, since the exit runs whether the file opens or not. A
+# substitution the split cuts open (`$(a; exit 1)`) holds no exit that leaves the body, so the push after it runs.
+sh("git-after-cd: a check protected by || exit 1, then && a git push -u, passes",
+   "pytest -q || exit 1 && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if ! check whose then body is echo to a redirect then ; exit 1, then ; a git push -u, passes",
+   "if ! pytest -q; then echo bad > f; exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an if ! check whose then body is echo of a substitution holding exit 1, then ; a git push -u, is refused",
+   "if ! pytest -q; then echo $(a; exit 1); fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 # An fd copy (`>&2`) cannot fail on a missing folder, so the exit after its && runs whenever the check fails, and
 # the push after the if is gated. A file redirect there could fail and skip the exit, so it stays refused.
 sh("git-after-cd: an if ! check whose then body is echo to an fd copy && exit 1, then ; a git push -u, passes",
