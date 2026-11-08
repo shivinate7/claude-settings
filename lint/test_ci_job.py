@@ -2150,6 +2150,32 @@ class PinnedSettings(Job):
         self.assertTrue(self.sha_a[:9] in line and self.sha_b[:9] in line,
                         "the unknown line must name both pins, the ambiguity: " + line)
 
+    def git_shim_env(self):
+        """(env, calls): PATH with a git shim first. The shim appends each git call's arguments to `calls`, then runs the
+        real git, so a run's fetch or worktree add shows in that file."""
+        bin_dir = tempfile.mkdtemp(prefix="gitshim-", dir=RUN_FOLDER)
+        calls = os.path.join(bin_dir, "git-calls.txt")
+        stub = os.path.join(bin_dir, "git")
+        with open(stub, "w", encoding="utf-8", newline="\n") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> '%s'\nexec '%s' \"$@\"\n" % (calls, shutil.which("git")))
+        os.chmod(stub, 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}, calls
+
+    def test_lint_with_no_base_fetches_and_adds_no_worktree_for_pull_request_pins_it_skips(self):
+        self.settings(fetch_only=True)  # the clone lacks pin A: a run that needed it would fetch it
+        env, calls = self.git_shim_env()
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            step("ste lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % self.sha_a),
+            args=("--lint",), env=env)
+        self.assertIn("no base resolved", out, "precondition: no base was resolved, so the pull-request steps are skipped:\n" + out)
+        self.assertTrue(os.path.isfile(calls), "precondition: the git shim was never called:\n" + out)
+        self.assertEqual((by_step(lines).get("code check"), by_step(lines).get("ste lint")), ("skipped", "skipped"),
+                         "each pull-request lint step must print skipped with no base:\n" + out)
+        with open(calls, encoding="utf-8") as f:
+            made = [c for c in f.read().splitlines() if c.startswith(("fetch", "worktree add"))]
+        self.assertEqual(made, [], "every lint step was skipped, yet the run fetched pin A or made a pinned worktree:\n" + out)
+
 
 if __name__ == "__main__":
     try:
