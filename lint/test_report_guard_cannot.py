@@ -99,6 +99,11 @@ def failed_bash(command, tid="tu_b", error=True):
     return [use("Bash", {"command": command}, tid), done(tid, "Exit code 1\nfatal: failed", error=error)]
 
 
+def exit_bash(command, code, tid="tu_x"):
+    """A Bash call that exits with `code`, as the shell result reports it: the exit line and the error flag."""
+    return [use("Bash", {"command": command}, tid), done(tid, "Exit code %d\nerror" % code, error=True)]
+
+
 def ok_bash(command, tid="tu_o"):
     return [use("Bash", {"command": command}, tid), done(tid)]
 
@@ -953,6 +958,95 @@ class CannotClaimTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block", "the 160 KB sentence was not blocked")
         self.assertIn(HEAD, out.get("reason", ""), "the block for the 160 KB sentence is not the cannot-claim guard")
         self.assertIn(NO_TRY, out.get("reason", ""), "the 160 KB sentence has the wrong variant")
+
+    # ---- a gate word followed by a tool or connector noun is an outage, not a gate. Only a, an, the, new, draft and
+    # GitHub may sit between the verb and PR. A lock in index.lock is a file, not the lock gate. A gate in the same
+    # sentence skips the claim, before or after it. A make or npm script that pushes is a try of push. A red line is a
+    # claim the check must read.
+
+    def test_cc_red_f1_outage_checks_tool_failed_to_connect_blocks(self):
+        # Catches: the gate word "checks" followed by a tool noun read as a gate, so an outage reason passes as no claim.
+        line = "I can't open the PR because the checks tool failed to connect."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f1_outage_review_tool_timed_out_blocks(self):
+        # Catches: the gate word "review" followed by a tool noun read as a gate, so a timed-out tool passes as no claim.
+        line = "I can't open the PR because the review tool timed out."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f1_outage_batch_tool_timed_out_blocks(self):
+        # Catches: the gate words "the batch" followed by a tool noun read as a gate, so a timed-out tool passes as no claim.
+        line = "I can't open the PR because the batch tool timed out."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f1_outage_connector_on_hold_blocks(self):
+        # Catches: the gate word "hold" in "is on hold" read as a gate after a connector noun, so the outage passes.
+        line = "I can't open the PR because the connector is on hold."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f1_outage_connector_lock_expired_blocks(self):
+        # Catches: the gate word "lock" after a connector noun read as a gate, so an expired connector lock passes.
+        line = "I can't open the PR because the connector lock expired."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_read_only_parenthesis_is_a_claim_and_blocks(self):
+        # Control: "(read-only)" has one hyphen, so it is no rule id. The claim it follows stays a claim and blocks.
+        line = "I can't push to the remote (read-only)."
+        out = self.stop([trg.human("push to the remote"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f2_noun_between_the_verb_and_pr_is_no_claim(self):
+        # Catches: the pr-open window reading any noun between the verb and PR, so "open the logs for PR 12" claims pr-open.
+        for line in ("I can't open the logs for PR 12.", "I can't open the diff for PR 12.",
+                     "I can't create the tag for PR 12."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("show the logs"), trg.assistant_text(line)])
+                self.assert_passes(out, "a noun other than a, an, the, new, draft or GitHub sits before PR: %r" % line)
+
+    def test_cc_green_f2_allowed_words_before_pr_still_block(self):
+        # Control: a, an, the, new, draft and GitHub may sit between the verb and PR, so these claims still block.
+        for line in ("I can't open the new PR.", "I can't open a draft GitHub pull request."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f3_index_lock_is_no_gate(self):
+        # Catches: "lock" inside the path index.lock read as the lock gate, so a push that git's index lock stops passes.
+        line = "I can't push because index.lock is in the way."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f4_gate_before_or_after_the_clause_is_no_claim(self):
+        # Catches: a gate read only in the clause the phrase starts, so a gate before it or after a semicolon in the same
+        # sentence does not skip the claim. Both lines are claims with a gate in the sentence, so both pass.
+        for line in ("Because CI is red, I can't merge the PR.", "I can't merge the PR; CI is red."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+                self.assert_passes(out, "a gate in the same sentence: %r" % line)
+
+    def test_cc_red_f5_failed_make_push_is_a_try_of_push(self):
+        # Catches: a make target that pushes read as no try of push. The first plain argument, push, names the act.
+        line = "I could not push: `make push` exited 2."
+        out = self.stop([trg.human("push the branch"), *exit_bash("make push", 2, "tu_mk"), landed_reply(line)])
+        self.assert_passes(out, "a failed make push backs a push claim")
+
+    def test_cc_red_f5_failed_npm_run_push_docs_is_a_try_of_push(self):
+        # Catches: an npm run script whose name holds the act word read as no try of push. The first plain argument after
+        # run names the script.
+        line = "I could not push: `npm run push-docs` exited 1."
+        out = self.stop([trg.human("push the docs"), *exit_bash("npm run push-docs", 1, "tu_np"), landed_reply(line)])
+        self.assert_passes(out, "a failed npm run push-docs backs a push claim")
+
+    def test_cc_green_f5_failed_make_test_is_no_try_of_push(self):
+        # Control: a failed make target that names no act word backs no push, so the claim blocks.
+        line = "I could not push: `make test` exited 2."
+        out = self.stop([trg.human("push the branch"), *exit_bash("make test", 2, "tu_mt"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
 
 
 if __name__ == "__main__":
