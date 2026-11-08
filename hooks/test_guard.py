@@ -14967,6 +14967,77 @@ def _invalid_byte_open(w):
     _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
 
 
+# A gitlink (a submodule entry) and a mode-only change are changes to a test path, refused as on main. merge_resolved
+# keeps a path whose bytes differ at its two sides. A gitlink to a commit the clone does not hold has no bytes to read
+# at either side, and a mode-only change has the same bytes, so a merge drops both. A gitlink to a commit the clone
+# holds reads at the merge commit's side, so the path is kept (its case is a control). The fixtures read each change
+# back with git first: a change that did not land would give an allow for the wrong reason.
+GITLINK = "tests/sub_lib"
+GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
+
+
+def _head_sha(w):
+    return run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+
+
+def _require_says(where, args, want):
+    """Stop the suite unless git's answer for `args` in `where` holds `want`."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0 or want not in done.stdout:
+        sys.exit("fixture setup failed: git %s in %r does not show %r: %s"
+                 % (" ".join(args), where, want, (done.stdout + done.stderr).strip()))
+
+
+def _gitlink_stage(w, sha=GITLINK_MISSING):
+    """A gitlink under tests/ at `sha`, staged, with the empty folder a checkout would make."""
+    os.makedirs(os.path.join(w, GITLINK), exist_ok=True)
+    _must(w, "update-index", "--add", "--cacheinfo", "160000," + sha + "," + GITLINK)
+    _require_says(w, ["ls-files", "-s", "--", GITLINK], "160000 " + sha)
+
+
+def _gitlink_open(w):
+    """A clean merge left open, where the builder stages a gitlink under tests/ that git's merge does not have."""
+    _clean_merge_open(w)
+    _gitlink_stage(w)
+
+
+def _gitlink_committed(w, sha=GITLINK_MISSING):
+    """The _gitlink_open change at `sha`, committed as the builder's merge commit."""
+    _clean_merge_open(w)
+    _gitlink_stage(w, sha)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", GITLINK], "160000 commit " + sha)
+
+
+def _gitlink_committed_held(w):
+    """The _gitlink_committed change, to the commit this clone holds (the work branch's HEAD), as a control."""
+    _gitlink_committed(w, _head_sha(w))
+
+
+def _mode_exec(rel):
+    """chmod +x on a test file in the worktree: the bytes stay, and only the mode changes."""
+    def go(w):
+        os.chmod(os.path.join(w, rel), 0o755)
+        _require_says(w, ["diff", "--raw", "--", rel], "100644 100755")
+    return go
+
+
+def _mode_exec_committed(w):
+    """A clean merge, where the builder sets the exec bit on a test file and commits it as the merge commit."""
+    _clean_merge_open(w)
+    _must(w, "update-index", "--chmod=+x", TEST_A)
+    os.chmod(os.path.join(w, TEST_A), 0o755)
+    _commit_merge(w)
+    _require_says(w, ["ls-tree", "HEAD", "--", TEST_A], "100755 ")
+    _require_says(w, ["ls-tree", "HEAD^1", "--", TEST_A], "100644 ")
+
+
+def _mode_exec_open(w):
+    """A clean merge left open, where the builder sets the exec bit on a test file in the worktree."""
+    _clean_merge_open(w)
+    _mode_exec(TEST_A)(w)
+
+
 def _cost_files(w):
     """The builder's change for the cost checks: a product edit and two new test files."""
     write(os.path.join(w, "src/app.py"), "x = 4\n")
@@ -14977,6 +15048,12 @@ def _cost_files(w):
 def _cost_merge_open(w):
     _clean_merge_open(w)
     _cost_files(w)
+
+
+def _cost_merge_committed(w):
+    """The _cost_merge_open change, committed as the builder's merge commit."""
+    _cost_merge_open(w)
+    _commit_merge(w)
 
 
 def _g_lane_and_product(w):
@@ -15426,30 +15503,131 @@ _bd_m_byte = diff_repo("bd-m-invalid-byte", _invalid_byte_open)
 sh("builder-refuse: a builder's merge in progress that changes only an invalid UTF-8 byte of a test file is denied "
    "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
 
+# A gitlink under tests/, and a mode-only change to a test file, are the builder's changes in a merge, refused as on
+# main. Each red fails on the old code: merge_resolved drops the path. The plain changes are the controls: the same
+# change outside a merge is refused now and stays refused.
+_bd_m_gitlink = diff_repo("bd-m-gitlink", _gitlink_open)
+sh("builder-refuse: a builder's merge in progress that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_c = diff_repo("bd-m-gitlink-commit", _gitlink_committed)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone lacks is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_c, agent_id="bld1", agent_type="builder")
+_bd_m_gitlink_h = diff_repo("bd-m-gitlink-held", _gitlink_committed_held)
+sh("builder-refuse: a builder's merge commit that adds a gitlink under tests/ to a commit the clone holds is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_gitlink_h, agent_id="bld1", agent_type="builder")
+_bd_gitlink_plain = diff_repo("bd-gitlink-plain", _gitlink_stage)
+sh("builder-refuse: a builder's plain change that adds a gitlink under tests/ is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_gitlink_plain, agent_id="bld1", agent_type="builder")
+
+# A mode-only change is no byte change, so the exec bit needs a POSIX checkout. The committed one sets the bit in the
+# index too, so it reads the same on every platform.
+_MODE_OPEN_CASE = ("builder-refuse: a builder's merge in progress that changes only the mode of a test file (chmod +x) "
+                   "is denied at commit")
+_MODE_PLAIN_CASE = ("builder-refuse: a builder's plain change that changes only the mode of a test file (chmod +x) "
+                    "is denied at commit")
+if os.name != "nt":
+    _bd_m_mode = diff_repo("bd-m-mode", _mode_exec_open)
+    sh(_MODE_OPEN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode, agent_id="bld1", agent_type="builder")
+    _bd_mode_plain = diff_repo("bd-mode-plain", _mode_exec(TEST_A))
+    sh(_MODE_PLAIN_CASE, COMMIT, "deny", rule=BDIFF, cwd=_bd_mode_plain, agent_id="bld1", agent_type="builder")
+else:
+    skip_case(_MODE_OPEN_CASE, NO_EXEC_BIT)
+    skip_case(_MODE_PLAIN_CASE, NO_EXEC_BIT)
+_bd_m_mode_c = diff_repo("bd-m-mode-commit", _mode_exec_committed)
+sh("builder-refuse: a builder's merge commit that changes only the mode of a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_mode_c, agent_id="bld1", agent_type="builder")
+
+
+def _reaches_merge_check_case(where, rel, committed):
+    """A builder's change to `rel` in a merge reaches the merge check: own_changes answers, and git's diff of the
+    merge's old side lists `rel` before merge_resolved judges it. So a red above fails as the check's drop, and an
+    allow from an unread change fails here instead."""
+    materialize(where)
+    guard = _load_guard_module()
+    if guard.own_changes(where) is None:
+        return False, "own_changes returned None, so git could not answer for %s" % rel
+    if committed:
+        old = guard.merge_tree(where, run_vcs(where, "rev-parse", "HEAD^1").stdout.strip(),
+                               run_vcs(where, "rev-parse", "HEAD^2").stdout.strip())
+        paths = guard.changed_paths(where, old, "HEAD") if old else None
+    else:
+        old = guard.merge_tree(where, "HEAD", run_vcs(where, "rev-parse", "MERGE_HEAD").stdout.strip())
+        paths = guard.changed_paths(where, old) if old else None
+    if paths is None:
+        return False, "git could not list the change against the merge's old side"
+    if rel not in paths:
+        return False, "git's diff against the merge's old side does not list %s" % rel
+    return True, "git lists %s against the merge's old side, and own_changes answers" % rel
+
+
+# Each red above must reach the merge check and fail there, not on an unread change.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge in progress reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink, GITLINK, False)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's gitlink in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_gitlink_c, GITLINK, True)))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge commit reaches the merge check",
+                         lambda: _reaches_merge_check_case(_bd_m_mode_c, TEST_A, True)))
+if os.name != "nt":
+    LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's mode-only change in a merge in progress "
+                             "reaches the merge check", lambda: _reaches_merge_check_case(_bd_m_mode, TEST_A, False)))
+
+
+# The readers a guard call goes through. `_git` always; `_git_bytes` once a bytes read has its own reader. A name the
+# core does not have is not patched, so the counts hold before and after that move.
+COUNTED_READERS = ("_git", "_git_bytes")
+
 
 def _counted_own_changes(where):
     """own_changes(where) with every git call the guard makes counted: the changes, and the argument tuples of the
-    calls in order. The count is taken at the reader the guard calls, so it is the guard's own."""
+    calls in order. The count is taken at the readers the guard calls, so it is the guard's own. A reader that another
+    counted reader calls is not counted again: a chain of readers is one call."""
     guard = _load_guard_module()
     core = sys.modules["guard_core"]
     calls = []
-    real_git = core._git
+    depth = [0]
+    real = {name: getattr(core, name) for name in COUNTED_READERS if hasattr(core, name)}
 
-    def counting_git(root, *args):
-        calls.append(args)
-        return real_git(root, *args)
+    def counted(real_call):
+        def call(root, *args):
+            if not depth[0]:
+                calls.append(args)
+            depth[0] += 1
+            try:
+                return real_call(root, *args)
+            finally:
+                depth[0] -= 1
+        return call
 
-    core._git = counting_git
+    for name, real_call in real.items():
+        setattr(core, name, counted(real_call))
     try:
         changes = guard.own_changes(where)
     finally:
-        core._git = real_git
+        for name, real_call in real.items():
+            setattr(core, name, real_call)
     return changes, calls
 
 
 def _calls_naming(calls, rels):
     """{rel: how many git calls name rel} for each path in `rels`."""
     return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
+
+
+def _show_calls_naming(calls, rels):
+    """{rel: how many `git show` calls name rel} for each path in `rels`: the call that reads a path's bytes."""
+    return {rel: sum(1 for args in calls if "show" in args and any(rel in part for part in args)) for rel in rels}
+
+
+def _exact_shows_problem(counts, want):
+    """Why the `git show` counts are not exactly `want` for each path, or '' when they are. A zero is its own cause:
+    the counter missed the reader, or the path was not read at all."""
+    missed = sorted(rel for rel, n in counts.items() if n == 0)
+    if missed:
+        return "no git show names %r: the counter missed the reader, or the path was not read" % (missed,)
+    off = {rel: n for rel, n in counts.items() if n != want}
+    if off:
+        return "git show calls per differing path are %r, want exactly %d" % (off, want)
+    return ""
 
 
 def plain_commit_reads_case():
@@ -15468,29 +15646,40 @@ def plain_commit_reads_case():
     return True, "the plain commit's three paths are read through no git call"
 
 
-def merge_reads_case():
-    """A builder's merge in progress with three differing paths: git makes at most two calls per differing path."""
-    where = diff_repo("bd-cost-merge", _cost_merge_open)
+def _merge_shows_case(name, change, want):
+    """A builder's merge with three differing paths: git shows each path `want` times, and only those reads count."""
+    where = diff_repo(name, change)
     materialize(where)
     changes, calls = _counted_own_changes(where)
     if changes is None:
         return False, "own_changes returned None for the merge"
-    counts = _calls_naming(calls, COST_PATHS)
-    if not any(counts.values()):
-        return False, "no git call names a differing path, so the merge's reads were not counted"
     found = {path for _old, _new, paths, _kind in changes for path in paths}
     if found != set(COST_PATHS):
         return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
-    over = {rel: n for rel, n in counts.items() if n > 2}
-    if over:
-        return False, "git calls per differing path above 2: %r" % (over,)
-    return True, "git calls per differing path %r, bound 2" % (counts,)
+    counts = _show_calls_naming(calls, COST_PATHS)
+    problem = _exact_shows_problem(counts, want)
+    if problem:
+        return False, problem
+    return True, "git show calls per differing path %r, exactly %d" % (counts, want)
+
+
+def merge_reads_case():
+    """A builder's merge in progress: one git show per differing path, for the old side. The new side is the
+    working-tree file, which is read without git."""
+    return _merge_shows_case("bd-cost-merge", _cost_merge_open, 1)
+
+
+def merge_commit_reads_case():
+    """A builder's merge commit: two git shows per differing path, for the old side and for the new side."""
+    return _merge_shows_case("bd-cost-merge-commit", _cost_merge_committed, 2)
 
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
                          plain_commit_reads_case))
-LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge in progress makes at most two git calls per differing path",
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge in progress makes exactly one git show per differing path",
                          merge_reads_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit makes exactly two git shows per differing path",
+                         merge_commit_reads_case))
 
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
