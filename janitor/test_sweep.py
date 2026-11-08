@@ -4121,14 +4121,15 @@ class AgentEndLogReadTests(unittest.TestCase):
         return path
 
     @contextlib.contextmanager
-    def refused_log_reads(self, path):
+    def refused_log_reads(self, path, times=None):
         """Every read of the payload log at PATH raises PermissionError, as a log held by another process
-        would. Yields the list of refused reads, so a case can assert that the refusal happened."""
+        would. With TIMES, only the first TIMES reads are refused, as a log held for a moment is. Yields the
+        list of refused reads, so a case can assert that the refusal happened."""
         real_open = io.open
         refused = []
 
         def refuse_log_read(file, mode="r", *args, **kwargs):
-            if file == path and not set(mode) & set("wax+"):
+            if file == path and not set(mode) & set("wax+") and (times is None or len(refused) < times):
                 refused.append(file)
                 raise PermissionError(13, "payload log held by another process (stand-in)", file)
             return real_open(file, mode, *args, **kwargs)
@@ -4164,15 +4165,24 @@ class AgentEndLogReadTests(unittest.TestCase):
             self.fail("the drop row's at %r is not a log time with a UTC offset" % (row["at"],))
         return row
 
+    def seed_payload_log(self, path, runs):
+        """Writes the payload log at PATH with one done row per run in RUNS, in order."""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in runs)
+
+    def read_runs(self, path):
+        """The run ids of the payload log at PATH, in file order."""
+        with io.open(path, encoding="utf-8") as handle:
+            return [json.loads(line).get("run") for line in handle.read().splitlines()]
+
     def test_a_refused_read_of_the_payload_log_keeps_its_rows(self):
         """A read of the payload log that raises PermissionError must not make log() rewrite the log without
         the rows it could not read. The seeded log is the largest one that a rewrite with the new row keeps
         whole (MAX_LOG_LINES - 1 prior rows), so the row cap cannot drop a seed by itself."""
         path = self.scoped_log_path()
         seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with io.open(path, "w", encoding="utf-8") as handle:
-            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in seeded)
+        self.seed_payload_log(path, seeded)
         with self.refused_log_reads(path) as refused:
             self.reap.log({"raw": "{}", "run": "new-run", "state": "done"})
         with io.open(path, encoding="utf-8") as handle:
@@ -4200,6 +4210,32 @@ class AgentEndLogReadTests(unittest.TestCase):
         row = self.assert_one_drop_row(path, "refused-run")
         self.assertIn("PermissionError", row["error"],
                       "the drop row's error does not name the refused read: %r" % row["error"])
+
+    def test_a_read_refused_for_a_moment_is_retried_and_the_new_row_lands(self):
+        """A read of the payload log refused twice, then granted, is retried until it is granted, as the replace is.
+        The new row lands after every prior row, and no drop row is written. The seed is the largest log that a
+        rewrite with the new row keeps whole. give_up_at bounds a retry that never ends, so a broken fix fails fast."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        with self.refused_log_reads(path, times=2) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "new-run", "state": "done"}, give_up_at=time.monotonic() + 2)
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertEqual(self.read_runs(path), seeded + ["new-run"],
+                         "a read refused twice, then granted, did not land the new row after the prior rows")
+        self.assertFalse(os.path.exists(self.drops_file(path)), "a read refused twice, then granted, wrote a drop row")
+
+    def test_a_read_refused_past_give_up_at_drops_the_new_row_and_keeps_the_prior_rows(self):
+        """A read refused for good drops the new row once give_up_at passes, as one drop row, and every prior row
+        stays. give_up_at is a moment ahead, so the case waits at most that long."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        self.seed_payload_log(path, seeded)
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "lasting-run", "state": "done"}, give_up_at=time.monotonic() + 0.2)
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertEqual(self.read_runs(path), seeded, "a lasting refusal changed the prior rows")
+        self.assert_one_drop_row(path, "lasting-run")
 
     def test_a_forced_lock_timeout_writes_one_drop_row_with_its_run_id(self):
         """A lock wait that runs past give_up_at drops the new row as LogWaitTimeout. Another run holds the lock
