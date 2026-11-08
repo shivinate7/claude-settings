@@ -40,11 +40,11 @@ MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # a blank line or at a list, heading or table line, so one list item never joins the next.
 MODEL_NAME = re.compile(r"\b(?:haiku|sonnet|opus)\b", re.IGNORECASE)
 OWN_MODEL = re.compile(r"\byour\b(?:(?!\byour\b).)*?\bmodel\b", re.IGNORECASE | re.DOTALL)
-HEADER_WORD = re.compile(r"\b(?:PASS|FAIL|PARTIAL)\b")
+HEADER_WORD = re.compile(r"\b(?:PASS|FAIL|PARTIAL|WIDE)\b")
 MODEL_SLOT = re.compile(r"<model>|\bthe model\b", re.IGNORECASE)
 # A backtick that opens straight onto the header word, with no backtick inside: a stray backtick earlier in the text
 # opens no span here, as a pairing of backticks in order would have it.
-HEADER_SPAN = re.compile(r"`(?:PASS|FAIL|PARTIAL)\b[^`]*`")
+HEADER_SPAN = re.compile(r"`(?:PASS|FAIL|PARTIAL|WIDE)\b[^`]*`")
 SOURCE_PHRASE = re.compile(r"powered by the model named", re.IGNORECASE)
 CHUNK_START = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 SENTENCE = re.compile(r"\S.*?(?:[.!?](?=\s|\Z)|\Z)", re.DOTALL)
