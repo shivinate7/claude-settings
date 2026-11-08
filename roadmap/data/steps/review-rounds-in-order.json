@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": null,
   "why": "The timing-tests lane ran review rounds 1-3 in parallel on #1958 at one head; round 1 failed, the head moved, and the round-3 PASS no longer covered the live head. A record can then list a later round that read an older head than the fix (lane, 07:22 CST Nov 8).",
-  "note": "Done check: a red test where `merge <pr> --review-record` refuses a record whose round after a FAIL read a head older than that FAIL's fix, or where each round line must carry the head it read. Decision pr-review-record. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
-  "updatedAt": "2026-11-08T07:23:00-06:00"
+  "note": "Done check: a red test where `merge <pr> --review-record` refuses a record whose round after a FAIL read a head older than that FAIL's fix, or where each round line must carry the head it read. Decision pr-review-record. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Sighting 09:44 CST Nov 8 (lane record-claim-cites-code): on #2063 rounds 1 to 3 were posted at 4509b4f88, a revert with the same tree as the reviewed 63148258c, and `merge --review-record` accepted it with no fix check; the lane withdrew the record. Guard idea: --review-record refuses a head that differs from the last recorded head unless it carries --fix-check or a new round 1 (the coordinator's #2061 ruling, 09:08 CST). Same fix as each round line carrying the head it read.",
+  "updatedAt": "2026-11-08T09:44:00-06:00"
 }
