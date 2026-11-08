@@ -1081,6 +1081,51 @@ class ShellScan(Case):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("Traceback", out)
 
+    def test_reader_pin_comment_inside_command_substitution_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=$(\n  # fixed in round 2\n  echo a\n)\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_inside_backticks_is_flagged(self):
+        rc, out = self.scan({"x.sh": "x=`\n  # fixed in round 2\n  echo a\n`\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_in_a_case_arm_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'case "$x" in\n  a)\n    # fixed in round 2\n    echo a ;;\nesac\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_comment_in_a_function_body_is_flagged(self):
+        rc, out = self.scan({"x.sh": "f() {\n  # fixed in round 2\n  echo a\n}\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_pin_trailing_comment_after_a_closing_quote_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'x="a" # fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_line_continuation_keeps_a_comment_on_its_line(self):
+        rc, out = self.scan({"x.sh": "echo a \\\n#P60 fixed in round 2\n b\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_arithmetic_then_subshell_pipeline_does_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "((cd /tmp; ls) | wc -l)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_dollar_arithmetic_with_a_subshell_does_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "echo $((echo a) | cat)\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_reader_gap_backticks_with_a_comment_inside_do_not_hide_the_later_comment(self):
+        rc, out = self.scan({"x.sh": "x=`echo a # note`\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
 
 class Degraded(Case):
     def test_node_failure_still_prints_python_and_swift_hits_and_exits_3(self):
