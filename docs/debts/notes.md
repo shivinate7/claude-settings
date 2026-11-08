@@ -2270,3 +2270,4 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- review-record-shell-edit-head-unread: the shell edit route (`gh api -X PATCH repos/O/R/issues/comments/<id>`) is judged for form only, so a record edited in place can carry a hand-typed head (hooks/guard.py `review_post_hit`). Fix: once lane mcp-tools-in-guard-matcher (PR #1687) lands, judge the head through its comment_pull_request selector. Decision: pr-review-record.

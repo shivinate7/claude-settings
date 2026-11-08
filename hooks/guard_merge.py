@@ -480,12 +480,14 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 #
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
 # That is the form check, `review_form_hit`: the render output as it is, or with a footer after a line exactly `---` and
-# nothing between the CI line and `---`. A post, and an edit in place, are both judged for form. A post must also name the pull request it is posted
-# on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
-# posted. The remedy is the render, which fills the live head itself.
+# no text between the CI line and `---`. A post, and a shell edit in place (`gh api -X PATCH`), are both judged for form. A post,
+# and an edit through the MCP update tool, must also name the pull request they go to and name that pull request's live head
+# (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is posted. The remedy is the render, which
+# fills the live head itself.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
-# for a post with no marker and none for an edit, whose input names a comment, not a pull request. A read that fails allows the
-# post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
+# for a post with no marker and none for a shell edit, whose route names a comment, not a pull request; a marked MCP update
+# adds one comment read. A read that fails allows the post with a note on stderr: a network blip must not block every post.
+# A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
 # The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
 UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
@@ -501,7 +503,7 @@ REVIEW_FORM_REASON = (
     "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
     "`merge --reviewed` cannot read a body that does not parse. "
     "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
-    "with nothing between the CI line and `---`. "
+    "with no text between the CI line and `---`. "
     "(decision pr-review-record, a review record must parse)"
 )
 
