@@ -7184,6 +7184,8 @@ UNB_BIG_BRIEF = "Work through the stop-hook notes. " * 6000 + UNB_BRIEF_SHELL   
 UNB_BRIEF_PERIOD = "Write the shell tests for the stop hook. Push to shell-tests-2."
 UNB_BRIEF_OLD = "Write the shell tests for the stop hook. Push to shell-tests-2.old and report back."
 UNB_BRIEF_SUB = "Write the shell tests for the stop hook. Push to shell-tests-2/sub and report back."
+UNB_BRIEF_XSHELL = "Write the shell tests for the stop hook. Push to xshell-tests-2 and report back."
+UNB_BRIEF_AT_SHELL = "Write the shell tests for the stop hook. Push to a/shell-tests-2 and report back."
 
 
 def unb_id(n):
@@ -7220,6 +7222,8 @@ UNB_AGENTS = {
     unb_id(18): [unb_record(UNB_BRIEF_PERIOD)],
     unb_id(19): [unb_record(UNB_BRIEF_OLD)],
     unb_id(20): [unb_record(UNB_BRIEF_SUB)],
+    unb_id(21): [unb_record(UNB_BRIEF_XSHELL)],
+    unb_id(22): [unb_record(UNB_BRIEF_AT_SHELL)],
 }
 
 
@@ -7277,6 +7281,10 @@ unb_ask("brief names only shell-tests-2.old, push -u origin HEAD asks (a dot and
         VCS + " push -u origin HEAD", unb_id(19), "test-author")
 unb_ask("brief names only shell-tests-2/sub, push -u origin HEAD asks (a slash and letters follow)",
         VCS + " push -u origin HEAD", unb_id(20), "test-author")
+unb_ask("brief names only xshell-tests-2, push -u origin HEAD on shell-tests-2 asks (a letter before the name)",
+        VCS + " push -u origin HEAD", unb_id(21), "test-author")
+unb_ask("brief names only a/shell-tests-2, push -u origin HEAD asks (a slash before the name)",
+        VCS + " push -u origin HEAD", unb_id(22), "test-author")
 
 # SILENT allow: the brief names the branch, or the push is not this rule's push.
 unb_allow("brief names shell-tests-2, push origin HEAD:shell-tests-2 is silent",
