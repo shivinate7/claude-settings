@@ -1129,6 +1129,130 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return None
 
 
+# ---- a brief pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head)
+# Incident 2026-11-07, lane notes-fix-large-3: a brief paired #1687 with its base branch, and the reviewers read the wrong code.
+_PAIR_TOKEN = r"[A-Za-z0-9_./-]+"
+# A pull request mention: `owner/name#N`, `PR #N`, `name #N` (a short name) or a bare `#N`. The short word is judged by _short_repo.
+_PR_REF = re.compile(
+    r"(?<![\w/.-])(?:(?P<repo>[\w.-]+/[\w.-]+)|(?i:PR|pull\s+request)\s*|(?P<short>[\w.-]+)\s+)?#(?P<n>\d+)")
+# Shapes after #N (a to e) and before it (f, g). Each names the branch in group `b`; the label is what a refusal prints.
+_PAIR_AFTER = (
+    ("`PR #N, branch X`", re.compile(r",?\s+branch\s+(?P<b>" + _PAIR_TOKEN + ")")),
+    ("`#N (branch X)`", re.compile(r"\s*\(\s*branch\s+(?P<b>" + _PAIR_TOKEN + r")\s*\)")),
+    ("`#N on branch X`", re.compile(r"\s+on\s+branch\s+(?P<b>" + _PAIR_TOKEN + ")")),
+    ("`#N, head X`", re.compile(r",?\s+head\s+(?P<b>" + _PAIR_TOKEN + ")")),
+)
+_PAIR_BEFORE = (
+    ("`branch X (#N)`", re.compile(r"(?<![\w-])branch\s+(?P<b>" + _PAIR_TOKEN + r")\s*\(\s*\Z"), re.compile(r"\s*\)")),
+    ("`branch X, PR #N`", re.compile(r"(?<![\w-])branch\s+(?P<b>" + _PAIR_TOKEN + r")\s*,\s*\Z"), None),
+)
+_BASE_WORD = re.compile(r"(?<![\w-])(?:base|based\s+on|onto|stacked\s+on|into)\s+\Z", re.IGNORECASE)
+_NOT_A_BRANCH = frozenset("of is was ref commit sha at to the a an and or name with for from in on branch".split())
+_BRANCH_PREFIXES = ("refs/remotes/origin/", "refs/heads/", "origin/")
+
+
+def _branch_name(token: str) -> str:
+    """The branch a token names: trailing sentence punctuation and a `refs/heads/` or `origin/` prefix removed."""
+    name = token.rstrip(".")
+    for prefix in _BRANCH_PREFIXES:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    return name
+
+
+def _short_repo(word) -> bool:
+    """A word before #N names a repo only when it is a repo-shaped name: it holds `_`, `-` or `.` and a letter. So
+    `Review #12`, `the #12` and `issue #12` read as a bare #N, and `q_max #12` reads as <owner>/q_max."""
+    return bool(word) and re.search(r"[_.-]", word) is not None and re.search(r"[A-Za-z]", word) is not None
+
+
+def brief_pairings(text: str):
+    """Yield (repo, number, branch, shape, guessed) for each adjacent PR-and-branch pairing in one brief. `repo` is
+    owner/name, "/<name>" for a short name (its owner is the checkout's), or None for the checkout's repo; `guessed`
+    is True for a short name. Backticks are dropped first. Pure: no read, no process."""
+    if not isinstance(text, str):
+        return
+    text = text.replace("`", "")
+    for ref in _PR_REF.finditer(text):
+        repo, short, number = ref.group("repo"), ref.group("short"), int(ref.group("n"))
+        guessed = False
+        if short and _short_repo(short):
+            repo, guessed = "/" + short, True
+        found = []
+        for shape, rx in _PAIR_AFTER:
+            hit = rx.match(text, ref.end())
+            if hit:
+                found.append((shape, hit.group("b")))
+        before = text[:ref.start()]
+        for shape, rx, closer in _PAIR_BEFORE:
+            hit = rx.search(before)
+            if hit and (closer is None or closer.match(text, ref.end())) and not _BASE_WORD.search(before[:hit.start()]):
+                found.append((shape, hit.group("b")))
+        for shape, token in found:
+            branch = _branch_name(token)
+            if branch and branch.lower() not in _NOT_A_BRANCH:
+                yield repo, number, branch, shape, guessed
+
+
+BRIEF_PR_HEAD_REASON = (
+    "this brief pairs #%d with a branch that is not that pull request's head ref, in the shape %s. A brief that "
+    "names a pull request and a branch sends its reader to the branch's code, and a wrong branch sends it to the "
+    "wrong code. Read the head with `%s` and brief that branch, or name the pull request alone. "
+    "(rule brief-pr-head)"
+)
+BRIEF_PR_HEAD_UNREAD_REASON = (
+    "this brief pairs #%d with a branch in the shape %s, and the head ref of that pull request could not be read, "
+    "so whether the branch is its head is unknown. Retry once gh answers, or read the head with `%s` and brief "
+    "that branch. (rule brief-pr-head)"
+)
+
+
+def _head_read_command(repo: str, number: int) -> str:
+    return "gh api repos/%s/pulls/%d --jq .head.ref" % (repo, number)
+
+
+def brief_pr_head_hit(texts, read_repo):
+    """Return (matched, reason) when a brief in `texts` pairs a pull request with a branch that is not its head ref,
+    else None. `read_repo` returns the checkout's owner/name, or None. A pairing is judged by one `gh api
+    repos/<o>/<r>/pulls/<N>` read through the merge tool, once per (repo, N) however many pairings name it, and a
+    brief with no pairing makes no read and starts no git. A read that fails refuses as unknown, because the
+    guard-wide crash path fails open; but a pairing whose repo a short name guessed passes on a failed read, as
+    that word may be no repo. A checkout with no readable repo cannot judge a pairing and passes it. `matched`
+    names the pull request and the shape, never a branch."""
+    heads, default = {}, []
+    for text in texts:
+        for repo, number, branch, shape, guessed in brief_pairings(text):
+            if repo is None or repo.startswith("/"):
+                if not default:
+                    default.append(read_repo())
+                if not default[0]:
+                    continue
+                repo = default[0] if repo is None else default[0].split("/")[0] + repo
+            key = (repo, number)
+            if key not in heads:
+                try:  # cost: one gh REST read per distinct (repo, number)
+                    module = merge_module()
+                    if module is None:
+                        raise RuntimeError("the merge tool could not be loaded")
+                    with module.shared_deadline(MERGE_READ_TIMEOUT):
+                        code, out = module.Host(repo=repo).api("pulls/%d" % number)
+                    if code:
+                        raise ValueError(out)
+                    heads[key] = str(json.loads(out)["head"]["ref"])
+                except (Exception, SystemExit):
+                    heads[key] = None
+            head = heads[key]
+            matched = "brief pairs #%d in the shape %s" % (number, shape)
+            if head is None:
+                if guessed:
+                    continue
+                return matched + ", head unread", BRIEF_PR_HEAD_UNREAD_REASON % (number, shape, _head_read_command(repo, number))
+            if branch != head:
+                return matched, BRIEF_PR_HEAD_REASON % (number, shape, _head_read_command(repo, number))
+    return None
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"

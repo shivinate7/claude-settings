@@ -118,6 +118,23 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  brief-pr-head       deny. A brief (an Agent or Task `prompt`, a send_message `message`, or an agent() prompt of a
+                       Workflow script that reads as a literal) that pairs PR #N with a branch that is not #N's head ref.
+                       Incident 2026-11-07, lane notes-fix-large-3: a brief paired #1687 with its base branch; two false
+                       review FAILs, a false debt and a duplicate step followed. Grammar (guard_merge.brief_pairings):
+                       adjacent words only, with backticks, `origin/` and `refs/heads/` dropped: `PR #N, branch X`,
+                       `PR #N branch X`, `#N (branch X)`, `#N on branch X`, `#N, head X`, `branch X (#N)`,
+                       `branch X, PR #N`. #N may carry `owner/name#N`, or a short name that holds `_`, `-` or `.`
+                       and reads as <the checkout's owner>/<name>. A base word right before the branch (base, based
+                       on, onto, stacked on, into) is no pairing, and a branch equal to the PR's base is not allowed
+                       by that fact. The head is read once per distinct (repo, N) with `gh api repos/<o>/<r>/pulls/<N>`
+                       through the merge tool, pinned to the repo. A read that fails (gh missing too) is a refusal
+                       that says unknown, except for a short-name pairing, which passes. The refusal names #N, the
+                       shape and the read command, and neither branch. Cost: one gh read per distinct pairing, zero
+                       with no pairing, and the repo is read from the checkout's config file, so no git starts. The
+                       count_file cases prove it. Misses: a Workflow prompt held in a variable, a pairing outside the
+                       shapes above, a checkout with no readable origin, and an in-process SendMessage (another
+                       matcher). An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -381,7 +398,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, brief_pr_head_hit, BRIEF_TOOL, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -2821,6 +2838,22 @@ def spawn_inputs(tool: str, tool_input):
                    BRIEF_UNREAD: prompt is None}
 
 
+def brief_texts(tool: str, tool_input) -> list:
+    """The brief texts a call carries, for rule brief-pr-head: an Agent or Task `prompt`, a send_message `message`, and
+    each Workflow agent() prompt the script scan reads as a literal. An unread prompt is left out, so it makes no read."""
+    if not isinstance(tool_input, dict):
+        return []
+    if tool in SPAWN_TOOLS:
+        texts = [tool_input.get("prompt")]
+    elif tool == BRIEF_TOOL:
+        texts = [tool_input.get("message")]
+    elif tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        texts = [prompt for prompt, _ in script_agent_calls(tool_input["script"])]
+    else:
+        texts = []
+    return [t for t in texts if isinstance(t, str)]
+
+
 def role_model_check(tool: str, tool_input):
     """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
     first refusal, else the first unread. Cost: one table read per spawn."""
@@ -4296,6 +4329,13 @@ def _clone_origin(common: str) -> str:
     return ""
 
 
+def checkout_repo(cwd: str):
+    """The `owner/name` of the origin of the checkout that holds `cwd`, read from files alone (no git starts, so it works
+    when a narrow PATH has no git), else None."""
+    root = _checkout_root_by_stat(cwd) if cwd else ""
+    return git_reads.origin_slug(_clone_origin(_git_common_dir(root))) if root else None
+
+
 def _origin_local(url: str) -> str:
     """The realpath a local-path origin names, else '' for a network url."""
     if url.startswith("file://"):
@@ -4887,6 +4927,11 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A brief that pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head).
+    paired = brief_pr_head_hit(brief_texts(tool, tool_input), lambda: checkout_repo(cwd))
+    if paired:
+        refuse(tool, "deny", "brief-pr-head", paired[1], paired[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
