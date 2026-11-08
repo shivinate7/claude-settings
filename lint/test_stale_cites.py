@@ -19,6 +19,12 @@ report only: the exit code does not change (RouteClaimTests).
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
 nothing tracked, STALE004 for a line anchor past the file's end (TreeTests, CostTests).
 
+STALE008 (range mode) reads a Python value cite, `file.py: NAME = literal` in backticks (ValueCiteTests): a line that
+quotes the value the range changed or removed, or a line the range adds that does not match the value at head. A
+JavaScript cite prints unknown, and a JSON cite is not read. The parity rows in
+skills/plain-english-map/tests/value-cite-parity.json hold this grammar to the map's (ValueCiteTests, and F2f in
+fact-lines.test.mjs).
+
 Each case makes a temp git repo: the base commit on `main`, the head commit on `topic`. The check runs
 with the repo as cwd and the range as commit ids. The step cases run bin/ste-changed, which runs
 actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp files stay in the run folder.
@@ -43,11 +49,13 @@ STEP = os.path.join(ROOT, "bin", "ste-changed")
 STEP_SH = os.path.join(ROOT, "actions", "ste-lint", "run.sh")
 BASH = "/bin/bash" if os.path.exists("/bin/bash") else (shutil.which("bash") or "bash")
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree, for a base with no shared history
+PARITY = os.path.join(ROOT, "skills", "plain-english-map", "tests", "value-cite-parity.json")  # the rows both suites read
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  removes a fixture tree, read-only git objects included (testing/tracked_tree.py)
+import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
@@ -63,7 +71,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-4]) (?P<text>.*)$")
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]) (?P<text>.*)$")  # not STALE005: a report line
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -217,6 +225,29 @@ def binding_kind(source, name):
     return kinds[-1] if kinds else None
 
 
+def module_value(source, name):
+    """The literal the last module-level assignment of `name` binds, read with ast and never run. None when no such
+    assignment is at module level, so a name bound only inside a def gives None. Scope only: a case asserts its
+    fixture values with this before it probes the check."""
+    found = None
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            found = ast.literal_eval(node.value)
+    return found
+
+
+def whole_tree_listings(commands):
+    """The `ls-tree` commands that list the whole tree at a rev: the listing that finds every tracked Markdown file.
+    The report's Home half lists decision paths after ` -- `, so its listing is no listing of Markdown."""
+    return [command for command in commands if command.startswith("ls-tree") and " -- " not in command]
+
+
+def parity_rows():
+    """The rows of the value-cite parity fixture, which the Python suite and tests/fact-lines.test.mjs both read."""
+    with open(PARITY, encoding="utf-8") as f:
+        return json.load(f)["rows"]
+
+
 def unknown_lines(out):
     """Each line the check printed as unknown."""
     return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
@@ -241,10 +272,12 @@ class StaleCase(unittest.TestCase):
         change(repo)
         return Range(case, repo, base_sha, git(repo, "rev-parse", "HEAD"))
 
-    def run_check(self, rng, base=None, extra_env=None):
+    def run_check(self, rng, base=None, extra_env=None, spec=None):
+        """(exit code, output) of `--range`. `spec` gives the range text when a case needs another shape."""
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
         env = dict(os.environ, TMPDIR=rng.case, **(extra_env or {}))
-        spec = "%s...%s" % (rng.base if base is None else base, rng.head)
+        if spec is None:
+            spec = "%s...%s" % (rng.base if base is None else base, rng.head)
         done = subprocess.run([sys.executable, MODULE, "--range", spec],
                               cwd=rng.repo, env=env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
@@ -301,6 +334,15 @@ class StaleCase(unittest.TestCase):
         self.assertIn("stale-cites: PASS", out)
         self.assertEqual(rc, 0, out)
         self.assertEqual(parse(out), [], out)
+
+    def depth_one_clone(self, rng):
+        """A depth-1 clone of the range's repo: the head is in it and the base is cut away. Asserts the clone is
+        shallow and the base is out before a case reads it. Returns the clone's folder."""
+        clone = os.path.join(rng.case, "shallow")
+        self.assertEqual(shallow_clone.make(rng.repo, clone, rng.head), "", "scope: the depth-1 clone was made")
+        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone is shallow")
+        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
+        return clone
 
     def run_copy_of_script(self, rng, args):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
@@ -770,16 +812,21 @@ class ReadAtHeadTests(StaleCase):
 
 
 class UnknownTests(StaleCase):
-    """A base the repo cannot resolve is unknown, not a finding: the check exits 0 and says so."""
+    """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
+    does not resolve in a full clone is a read that could not run (UnreadableReadTests), except a root commit's
+    HEAD~1: a first push to the default branch reads that range by design (actions/ste-lint/run.sh), so it exits 0
+    as on main. The root commit's cases sit here for that reason."""
 
-    def test_an_unresolvable_base_prints_unknown_and_exits_zero(self):
+    def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
         rng = self.make_range(base_files(), change)
-        rc, out = self.run_check(rng, base="1" * 40)
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone))
         self.assertEqual(rc, 0, out)
-        self.assertTrue(any(line.startswith("stale-cites: unknown") for line in out.splitlines()), out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
     def test_step_with_an_unresolvable_base_exits_zero(self):
         def change(repo):
@@ -794,6 +841,22 @@ class UnknownTests(StaleCase):
         out = done.stdout + done.stderr
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
+
+    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")  # the one commit is the root: HEAD~1 names nothing
+        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        rc, out = self.run_check(rng, spec="HEAD~1..HEAD")
+        self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
+        self.assertEqual(rc, 0, "a root commit's first push in a full clone did not exit 0 as on main\n" + out)
+
+    def test_a_root_commit_range_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD")
+        self.assertEqual(rc, 0, "a depth-1 clone's root-commit range exited non-zero, the carve-out is lost\n" + out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
 
 class PinTests(unittest.TestCase):
@@ -847,6 +910,35 @@ class CostTests(StaleCase):
         self.assertEqual(len(subs), 3, subs)
         self.assertNotIn("cat-file", subs, subs)
         self.assertTrue(set(subs) <= {"diff", "merge-base", "rev-parse"}, subs)
+
+    def test_a_markdown_only_range_that_adds_a_python_value_cite_starts_exactly_four_git_processes_with_one_cat_file(self):
+        def change(repo):
+            write(repo, NOTES, cite_page(["%s: LIMIT = 4" % CONFIG]))
+            commit(repo)
+        rng = self.make_range(base_files(extra={CONFIG: LIMIT_BASE}), change)
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # The added line holds a .py value cite, so the one cat-file the check opens reads the page: the three starts
+        # of a Markdown-only range, and that cat-file, exactly.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_js_value_cite_on_an_added_markdown_line_starts_no_process_past_the_one_cat_file(self):
+        def change(repo):
+            write(repo, NOTES, cite_page(["hooks/lib.mjs: LIMIT = 4"]))
+            commit(repo)
+        rng = self.make_range(base_files(extra={"hooks/lib.mjs": MJS_BASE}), change)
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        subs = [command.split()[0] for command in commands]
+        # A .mjs value cite may read the page, but only through the one cat-file: no ls-tree, and no fifth start.
+        self.assertLessEqual(len(subs), 4, subs)
+        self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "cat-file"}, subs)
+        self.assertLessEqual(subs.count("cat-file"), 1, subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
 
     def test_a_touched_py_that_removes_nothing_starts_five_git_processes_with_one_ls_tree_of_the_decisions(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
@@ -1087,6 +1179,248 @@ class ExcludeFolderTests(StaleCase):
                     commit(repo)
                 extra = {".ste-lint-exclude": line + "\n", "vendor/a.md": "- refusal list in `hooks/lib.mjs`\n"}
                 self.assert_passes(self.make_range(base_files(extra=extra), change))
+
+
+UNRESOLVED = "3" * 40  # a commit id that no test repo holds
+
+
+def has_object(repo, spec):
+    """True when git can read the object `spec` names in `repo`."""
+    return subprocess.run(["git", "cat-file", "-e", spec], cwd=repo, capture_output=True).returncode == 0
+
+
+def drop_loose_object(repo, spec):
+    """Remove the loose object `spec` names, so a read of it cannot run. A packed object stays readable, so a case
+    that dropped one would break nothing: this refuses that case instead of passing it."""
+    sha = git(repo, "rev-parse", spec)
+    path = os.path.join(repo, ".git", "objects", sha[:2], sha[2:])
+    if not os.path.isfile(path):
+        raise AssertionError("scope: %s is not a loose object, so dropping it breaks no read" % spec)
+    os.chmod(path, 0o644)  # git writes objects read-only, and Windows removes no read-only file
+    os.remove(path)
+
+
+class UnreadableReadTests(StaleCase):
+    """A read the check makes that cannot run exits 2 and says unknown beside the read's name. It never exits 0 and
+    never prints PASS. Each case breaks one read on a fixture; its control runs the same fixture with nothing broken."""
+
+    def moved_lib(self, cited):
+        """A range that moves hooks/lib.mjs. NOTES names it on line 3 when `cited`, and names no path otherwise."""
+        notes = "# Notes\n\n- refusal list in `hooks/lib.mjs`\n" if cited else "# Notes\n\n- no path cite here\n"
+
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, notes)
+            commit(repo)
+        return self.make_range(base_files(), change)
+
+    def assert_healthy_moved_lib(self):
+        """The same fixture read whole: a clean range exits 0, and a real stale cite exits 1."""
+        self.assert_passes(self.moved_lib(cited=False))
+        self.assert_flags(self.moved_lib(cited=True), [(NOTES, 3, "STALE001")])
+
+    def assert_read_failed(self, rc, out, read):
+        """Exit 2, no PASS verdict, the output says unknown and names `read`."""
+        self.assertEqual(rc, 2, "a read that could not run did not exit 2\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a read that could not run printed a PASS verdict\n" + out)
+        self.assertRegex(out, "(?i)unknown", "the output does not say unknown\n" + out)
+        self.assertIn(read, out, "the output does not name the read that failed (%s)\n%s" % (read, out))
+
+    def test_a_head_that_does_not_resolve_exits_two_and_names_the_merge_base(self):
+        rng = self.moved_lib(cited=True)
+        self.assertTrue(has_object(rng.repo, rng.base), "scope: the base resolves")
+        self.assertFalse(has_object(rng.repo, UNRESOLVED), "scope: the head does not resolve")
+        rc, out = self.run_check(rng, spec="%s...%s" % (rng.base, UNRESOLVED))
+        self.assert_read_failed(rc, out, "merge-base")
+        self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
+
+    def test_a_three_dot_range_with_a_resolving_head_is_read_whole(self):
+        self.assert_healthy_moved_lib()
+
+    def test_a_two_dot_range_whose_head_does_not_resolve_exits_two_and_names_the_diff(self):
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, UNRESOLVED), "scope: the head does not resolve")
+        rc, out = self.run_check(rng, spec="%s..%s" % (rng.base, UNRESOLVED))
+        self.assert_read_failed(rc, out, "git diff")
+        self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
+
+    def assert_base_missing_from_full_clone(self, spec):
+        """A base that names nothing in a full clone is a read that could not run, in either range form: exit 2, and
+        the output names the base and does not blame a shallow clone."""
+        rng = self.moved_lib(cited=True)
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+        self.assertFalse(has_object(rng.repo, "nosuchbase"), "scope: the base does not resolve")
+        self.assertTrue(has_object(rng.repo, "HEAD"), "scope: the head resolves")
+        rc, out = self.run_check(rng, spec=spec)
+        self.assert_read_failed(rc, out, "nosuchbase")
+        self.assertNotIn("fetch-depth", out, "a base missing from a full clone was blamed on a shallow clone\n" + out)
+
+    def test_an_unresolvable_base_in_a_full_clone_exits_two_and_names_it(self):
+        self.assert_base_missing_from_full_clone("nosuchbase...HEAD")
+
+    def test_an_unresolvable_base_in_a_full_clone_two_dot_range_exits_two_and_names_it(self):
+        self.assert_base_missing_from_full_clone("nosuchbase..HEAD")
+
+    def test_an_unresolvable_base_in_a_depth_one_clone_two_dot_range_prints_unknown_and_exits_zero(self):
+        rng = self.moved_lib(cited=True)
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone), spec="%s..%s" % (rng.base, rng.head))
+        self.assertEqual(rc, 0, "a depth-1 clone's two-dot base read exited non-zero, the carve-out is lost\n" + out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
+
+    def test_a_two_dot_range_with_a_resolving_head_flags_the_stale_cite_and_passes_when_clean(self):
+        rng = self.moved_lib(cited=True)
+        rc, out = self.run_check(rng, spec="%s..%s" % (rng.base, rng.head))
+        self.assertEqual(rc, 1, "a resolving two-dot range did not flag the stale cite\n" + out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE001")], out)
+        clean = self.moved_lib(cited=False)
+        rc, out = self.run_check(clean, spec="%s..%s" % (clean.base, clean.head))
+        self.assertEqual(rc, 0, "a clean two-dot range did not exit 0\n" + out)
+
+    def test_an_exclude_file_that_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        os.mkdir(os.path.join(rng.repo, ".ste-lint-exclude"))  # a folder under the file's name: open() cannot read it
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def link_exclude(self, rng, target):
+        """Make .ste-lint-exclude in the repo a symlink to `target`. A platform that makes no symlink skips the case."""
+        link = os.path.join(rng.repo, ".ste-lint-exclude")
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest("this platform cannot make a symlink: %s" % exc)
+        self.assertTrue(os.path.islink(link), "scope: the exclude is a link")
+
+    def test_a_dangling_exclude_symlink_exits_two_and_names_it(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        target = os.path.join(rng.case, "no-such-excludes")
+        self.assertFalse(os.path.exists(target), "scope: the link's target is missing")
+        self.link_exclude(rng, target)
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def test_an_exclude_symlink_to_a_readable_file_still_passes(self):
+        rng = self.moved_lib(cited=False)
+        target = os.path.join(rng.case, "readable-excludes")
+        with open(target, "w", encoding="utf-8", newline="\n") as f:
+            f.write("# no excludes\n")
+        self.link_exclude(rng, target)
+        self.assert_passes(rng)
+
+    def test_a_non_utf8_exclude_file_exits_two_without_a_traceback(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        raw = b"\xff\xfe bad\n"
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("utf-8")  # scope: the bytes are not UTF-8
+        with open(os.path.join(rng.repo, ".ste-lint-exclude"), "wb") as f:
+            f.write(raw)
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+        self.assertNotIn("Traceback", out, "a non-UTF-8 exclude file printed a traceback, not an unknown line\n" + out)
+
+    def test_a_utf8_exclude_file_with_non_ascii_text_still_passes(self):
+        rng = self.moved_lib(cited=False)
+        write(rng.repo, ".ste-lint-exclude", "# café excludes\n")
+        self.assert_passes(rng)
+
+    def assert_only_adds_a_page(self, rng):
+        """The range adds one Markdown page and removes, renames and changes nothing else. A case asserts this before
+        it reads the result, so an add-only case has the add-only range it names."""
+        self.assertEqual(git(rng.repo, "diff", "--name-status", "-M", rng.base, rng.head).split(),
+                         ["A", "docs/added.md"], "scope: the range does not only add one page")
+
+    def add_only_range(self, unreadable):
+        """A range that adds one page with no cite and no route word. `.ste-lint-exclude` is a folder when `unreadable`
+        (open() cannot read it), and a file that leaves out nothing otherwise."""
+        def change(repo):
+            write(repo, "docs/added.md", "# Added\n\n- a plain note\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        if unreadable:
+            os.mkdir(os.path.join(rng.repo, ".ste-lint-exclude"))
+        else:
+            write(rng.repo, ".ste-lint-exclude", "# no excludes\n")
+        self.assert_only_adds_a_page(rng)
+        return rng
+
+    def test_an_add_only_range_whose_exclude_file_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.add_only_range(unreadable=True)
+        self.assertTrue(os.path.isdir(os.path.join(rng.repo, ".ste-lint-exclude")), "scope: the exclude is a folder")
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def test_an_add_only_range_with_a_readable_exclude_file_exits_zero(self):
+        self.assert_passes(self.add_only_range(unreadable=False))
+
+    def test_no_exclude_file_is_read_whole(self):
+        self.assert_healthy_moved_lib()
+
+    def test_a_line_anchor_whose_cited_file_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.tree("# Notes\n\n- `hooks/guard.py:99`\n")
+        self.assertIn("hooks/guard.py", git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the cited file is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:hooks/guard.py")
+        rc, out = self.run_tree(rng)
+        self.assert_read_failed(rc, out, "hooks/guard.py")
+
+    def test_a_readable_cited_file_flags_an_anchor_past_its_end_and_passes_one_inside(self):
+        self.assert_tree_flags(self.tree("# Notes\n\n- `hooks/guard.py:99`\n"), [(NOTES, 3, "STALE004")])
+        self.assert_tree_passes(self.tree("# Notes\n\n- `hooks/guard.py:6`\n"))
+
+    def pymod_range(self, drop_head_blob):
+        """A range whose head adds lint/pymod_probe.py, read through the branch `pymod`. With `drop_head_blob`, that
+        file's blob is removed, so `git diff` cannot read the head while the base and the history still resolve."""
+        def change(repo):
+            write(repo, "lint/pymod_probe.py", "def probe_only_here():\n    return 17\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        git(rng.repo, "branch", "pymod", rng.head)
+        if drop_head_blob:
+            drop_loose_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head)
+        return rng
+
+    def assert_head_blob_unreadable(self, spec):
+        """A head blob the diff cannot read, in a full clone whose base resolves: exit 2 and the output names the diff.
+        It never blames the base or a shallow clone."""
+        rng = self.pymod_range(drop_head_blob=True)
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+        self.assertTrue(has_object(rng.repo, "main"), "scope: the base resolves")
+        self.assertTrue(has_object(rng.repo, rng.head), "scope: the head commit resolves")
+        self.assertFalse(has_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head), "scope: the head blob is gone")
+        rc, out = self.run_check(rng, spec=spec)
+        self.assert_read_failed(rc, out, "git diff")
+        self.assertNotIn("does not resolve", out, "a head blob the diff cannot read blamed the base, which resolves\n" + out)
+        self.assertNotIn("fetch-depth", out, "a head blob the diff cannot read was blamed on a shallow clone\n" + out)
+
+    def test_a_head_blob_the_diff_cannot_read_in_a_full_clone_exits_two_for_a_three_dot_range(self):
+        self.assert_head_blob_unreadable("main...pymod")
+
+    def test_a_head_blob_the_diff_cannot_read_in_a_full_clone_exits_two_for_a_two_dot_range(self):
+        self.assert_head_blob_unreadable("main..pymod")
+
+    def test_a_full_clone_with_every_head_blob_present_passes_both_range_forms(self):
+        rng = self.pymod_range(drop_head_blob=False)
+        self.assertTrue(has_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head), "scope: the head blob is present")
+        for spec in ("main...pymod", "main..pymod"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng, spec=spec)
+                self.assertEqual(rc, 0, "a full clone with its head blob present did not exit 0\n" + out)
+                self.assertIn("stale-cites: PASS", out)
+
+    def test_a_depth_one_clone_with_an_unresolvable_base_keeps_exit_zero_for_both_range_forms(self):
+        rng = self.pymod_range(drop_head_blob=False)
+        clone = self.depth_one_clone(rng)
+        for spec in ("%s...%s", "%s..%s"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng._replace(repo=clone), spec=spec % (rng.base, rng.head))
+                self.assertEqual(rc, 0, "a depth-1 clone's unresolvable base exited non-zero, the carve-out is lost\n" + out)
+                self.assertTrue(unknown_lines(out), out)
+                self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
 
 CLAUDE = "CLAUDE.md"
@@ -1438,6 +1772,64 @@ class ReportTests(StaleCase):
         self.assertIn(record + ":3", report_prose(out, "hooks/guard.py"), out)
         self.assertIn(record + ":4", report_prose(out, "lint/test_x.py"), out)
         self.assertNotIn(record + ":5", report_prose(out, "hooks/guard.py") | report_prose(out, "lint/test_x.py"), out)
+
+
+class UnreadableReportTests(StaleCase):
+    """A report read that cannot run prints an unknown line that names it, never a silent gap. The report keeps the
+    exit code, as a malformed mechanisms file does (its case ends _and_keeps_the_exit_code), so these keep it too."""
+
+    def guard_edit(self, extra):
+        """A range that changes hooks/guard.py only. Nothing is removed, so only the report reads the repo's files."""
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        return self.make_range(base_files(extra=extra), change)
+
+    def test_a_decision_record_that_cannot_be_read_prints_an_unknown_line_naming_it(self):
+        record = "docs/decisions/guard-home-first.md"
+        rng = self.guard_edit(decisions(("guard-home-first", "hooks/guard.py")))
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        self.assertIn(record, git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the record is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:" + record)
+        rc, out = self.run_check(rng)
+        self.assertTrue([line for line in unknown_lines(out) if record in line],
+                        "a record that cannot be read printed no unknown line naming it\n" + out)
+        self.assertEqual(rc, 0, "an unreadable record changed the exit code\n" + out)
+
+    def test_a_readable_decision_record_prints_its_home_line_and_no_unknown_line(self):
+        rng = self.guard_edit(decisions(("guard-home-first", "hooks/guard.py")))
+        rc, out = self.run_check(rng)
+        self.assertIn("Home of decision guard-home-first", out, out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_readable_decision_record_beside_a_real_stale_cite_still_exits_one(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        extra = decisions(("guard-home-first", "hooks/guard.py"))
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n", extra=extra), change)
+        self.assert_flags(rng, [(NOTES, 3, "STALE001")])
+
+    def test_a_mechanisms_file_that_cannot_be_read_prints_an_unknown_line_naming_it(self):
+        rng = self.guard_edit({MECH: mechanisms({"guard-row": {"kind": "guard", "ref": "hooks/guard.py"}})})
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        self.assertIn(MECH, git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the mechanisms file is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:" + MECH)
+        rc, out = self.run_check(rng)
+        self.assertTrue([line for line in unknown_lines(out) if MECH in line],
+                        "a mechanisms file that cannot be read printed no unknown line naming it\n" + out)
+        self.assertEqual(rc, 0, "an unreadable mechanisms file changed the exit code\n" + out)
+
+    def test_a_readable_mechanisms_file_names_its_row_and_prints_no_unknown_line(self):
+        rng = self.guard_edit({MECH: mechanisms({"guard-row": {"kind": "guard", "ref": "hooks/guard.py"}})})
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-row"), "the mechanisms row does not name the changed file\n" + out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(rc, 0, out)
 
 
 # A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
@@ -2246,6 +2638,518 @@ class CitedExcerptTests(unittest.TestCase):
     def test_a_cite_that_names_no_backing_path_gives_none(self):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
+
+
+CONFIG = "hooks/config.py"  # the Python file the value cites name
+LIMIT_BASE = "LIMIT = 4\n\n\ndef keep():\n    return 1\n"
+LIMIT_HEAD = "LIMIT = 5\n\n\ndef keep():\n    return 1\n"
+REMOVED = "def keep():\n    return 1\n"  # LIMIT_BASE with LIMIT taken out
+CITE_4 = "- retry limit `hooks/config.py: LIMIT = 4`"  # quotes LIMIT_BASE's value
+DOC_BASE = 'DOC = """\nLIMIT = 9\n"""\n\nLIMIT = 4\n\n\ndef keep():\n    return 1\n'  # a string spells a binding
+DOC_HEAD = DOC_BASE.replace("LIMIT = 4", "LIMIT = 5")
+MJS_BASE, MJS_HEAD = "export const LIMIT = 4;\n", "export const LIMIT = 5;\n"
+NO_JSON_VALUES = ("'a'", "True", "None", "0x4", "1_000", ".5", "4 seconds")  # values MAP9 reads as no JSON literal
+UNTRACKED_CITES = ("hooks/confg.py", "config.py")  # a typo of a tracked path, and a bare basename no tracked file has
+NONLIT_CONFIG = "LIMIT = 30 * 86400\nGATE = compute()\n\n\ndef keep():\n    return 1\n"  # names bound to no literal
+NONLIT_CITES = ("%s: LIMIT = 4" % CONFIG, "%s: GATE = 1" % CONFIG)  # cites of those names, with JSON literals
+
+
+def cite_page(cites):
+    """A Markdown page: a heading, a blank line, then one bulleted line per cite, the first cite on line 3."""
+    return "# Notes\n\n" + "".join("- retry limit `%s`\n" % cite for cite in cites)
+
+
+def unknown_counts(out, numbers):
+    """How many `stale-cites: unknown` lines name each NOTES line in `numbers`: {number: count}."""
+    return {n: sum("%s:%d: " % (NOTES, n) in line for line in unknown_lines(out)) for n in numbers}
+
+
+def value_file(name, literal):
+    """A Python file that binds `name` to the literal text `literal` at module level, beside one def the check keeps."""
+    return "%s = %s\n\n\ndef keep():\n    return 1\n" % (name, literal)
+
+
+class ValueCiteTests(StaleCase):
+    """STALE008 (decision stale-cites-at-merge): a Python value cite `file.py: NAME = literal` in backticks quotes the
+    value the range changed or removed, or a line the range adds does not match the value at head. A JavaScript cite
+    prints unknown, and a JSON cite is not read. Each case asserts its fixture values before it probes the check."""
+
+    def value_range(self, base, head):
+        """The range from `base` ({path: text}, over base_files, so NOTES defaults) on main to `head` ({path: text},
+        written over it) on topic. NOTES is a path too, so a case that edits its prose puts NOTES in `head`."""
+        def change(repo):
+            for path, text in head.items():
+                write(repo, path, text)
+            commit(repo)
+        return self.make_range(base_files(extra=base), change)
+
+    def parity_range(self, rows):
+        """One range that changes each row's file and cites each row on its own NOTES line: row k sits on line 3 + k."""
+        base = {row["file"]: row["base"] for row in rows}
+        base[NOTES] = "# Notes\n"
+        head = {row["file"]: row["head"] for row in rows}
+        head[NOTES] = "# Notes\n\n" + "".join("- row %d: `%s`\n" % (k + 1, row["cite"]) for k, row in enumerate(rows))
+        return self.value_range(base, head)
+
+    # Fires: the range changed or removed the value a line quotes, or added a line that does not match head.
+
+    def test_a_changed_value_still_quoted_by_an_untouched_line_is_flagged(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT to 5
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: LIMIT_HEAD})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_changed_value_quoted_on_an_untouched_line_of_a_touched_page_is_flagged(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT to 5
+        notes = "# Notes\n\n%s\n" % CITE_4
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: notes}, {CONFIG: LIMIT_HEAD, NOTES: notes + "\nA new line.\n"})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_removed_value_still_quoted_by_a_line_is_flagged_and_says_removed(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertIsNone(binding_kind(REMOVED, "LIMIT"))  # scope: head no longer binds LIMIT
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: REMOVED})
+        found = self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+        self.assertIn("removed", found[0][3], "a name the range removed must say so: %s" % found[0][3])
+
+    def test_an_added_line_citing_a_value_head_does_not_hold_is_flagged_when_no_literal_changed(self):
+        head_cfg = LIMIT_BASE + "\n\ndef extra():\n    return 2\n"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), module_value(head_cfg, "LIMIT"))  # scope: the range changes no literal
+        self.assertNotEqual(module_value(head_cfg, "LIMIT"), 6)  # scope: the added cite's 6 is not the value at head
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"},
+                               {CONFIG: head_cfg, NOTES: "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 6`\n"})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_second_copy_of_a_line_already_wrong_at_base_fires_on_the_copy_only(self):
+        cite = "- retry limit `hooks/config.py: LIMIT = 6`"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4, so the cite's 6 is wrong at base
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % cite},
+                               {NOTES: "# Notes\n\n%s\n\n%s\n" % (cite, cite)})  # the range adds a second copy on line 5
+        self.assert_flags(rng, [(NOTES, 5, "STALE008")])
+
+    def test_an_added_cite_of_a_name_the_file_never_binds_is_flagged_without_saying_removed(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT, the one name the file has
+        self.assertIsNone(binding_kind(LIMIT_BASE, "NOPE"))  # scope: base never binds NOPE
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"},
+                               {NOTES: "# Notes\n\n- retry limit `hooks/config.py: NOPE = 4`\n"})
+        found = self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+        self.assertNotIn("removed", found[0][3], "a name the file never bound must not read as removed: %s" % found[0][3])
+
+    def test_a_changed_value_cited_on_the_last_line_of_a_full_page_is_flagged_on_that_line(self):
+        lines = ["# Notes", ""] + ["Filler prose line %d." % i for i in range(297)] + [CITE_4]
+        self.assertEqual(len(lines), 300)  # scope: a full page, the cite on line 300
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "\n".join(lines) + "\n"}, {CONFIG: LIMIT_HEAD})
+        self.assert_flags(rng, [(NOTES, 300, "STALE008")])
+
+    def test_a_changed_value_cited_inside_a_fenced_block_is_flagged(self):
+        notes = "# Notes\n\n```\n%s\n```\n" % CITE_4
+        self.assertEqual(notes.split("\n")[3], CITE_4)  # scope: the cite is on line 4, inside the fence
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: notes}, {CONFIG: LIMIT_HEAD})
+        self.assert_flags(rng, [(NOTES, 4, "STALE008")])
+
+    def test_a_hash_inside_a_string_value_is_part_of_the_value(self):
+        base_cfg = 'NAME = "a # b"\n\n\ndef keep():\n    return 1\n'
+        head_cfg = 'NAME = "a # c"\n\n\ndef keep():\n    return 1\n'
+        self.assertEqual(module_value(base_cfg, "NAME"), "a # b")  # scope: base binds NAME to a string that holds a hash
+        self.assertEqual(module_value(head_cfg, "NAME"), "a # c")  # scope: the range changes NAME
+        rng = self.value_range({CONFIG: base_cfg, NOTES: '# Notes\n\n- label `hooks/config.py: NAME = "a # b"`\n'},
+                               {CONFIG: head_cfg})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_name_that_a_string_also_spells_is_read_from_the_binding(self):
+        self.assertEqual(module_value(DOC_BASE, "DOC"), "\nLIMIT = 9\n")  # scope: a string holds the text LIMIT = 9
+        self.assertEqual(module_value(DOC_BASE, "LIMIT"), 4)  # scope: the binding is 4
+        self.assertEqual(module_value(DOC_HEAD, "LIMIT"), 5)  # scope: the range changes the binding to 5
+        rng = self.value_range({CONFIG: DOC_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: DOC_HEAD})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_an_added_cite_of_the_value_only_a_string_spells_is_flagged(self):
+        self.assertEqual(module_value(DOC_HEAD, "LIMIT"), 5)  # scope: head binds LIMIT to 5
+        self.assertEqual(module_value(DOC_HEAD, "DOC"), "\nLIMIT = 9\n")  # scope: a string at head holds the text LIMIT = 9
+        rng = self.value_range({CONFIG: DOC_BASE, NOTES: "# Notes\n\n"},
+                               {CONFIG: DOC_HEAD, NOTES: "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 9`\n"})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_lone_quote_in_the_prose_before_the_cite_does_not_hide_it(self):
+        notes = '# Notes\n\n- don\'t use the 5" limit, see `hooks/config.py: LIMIT = 4`\n'
+        self.assertEqual(notes.split("\n")[2].count('"'), 1)  # scope: one lone double quote in the prose
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: notes}, {CONFIG: LIMIT_HEAD})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_hash_in_the_prose_before_the_cite_does_not_hide_it(self):
+        notes = "# Notes\n\n- see issue #12 for the cap: `hooks/config.py: LIMIT = 4`\n"
+        self.assertIn("#12", notes)  # scope: the prose holds a hash mark before the cite
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: notes}, {CONFIG: LIMIT_HEAD})
+        self.assert_flags(rng, [(NOTES, 3, "STALE008")])
+
+    def test_a_js_value_cite_of_a_touched_file_prints_unknown_when_the_range_reads_markdown(self):
+        self.assertNotEqual(MJS_BASE, MJS_HEAD)  # scope: the range changes the cited JavaScript file
+        self.assertEqual(module_value("RETRIES = 2\n", "RETRIES"), 2)  # scope: a Python literal changes too, so Markdown is read
+        self.assertEqual(module_value("RETRIES = 3\n", "RETRIES"), 3)
+        rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: "RETRIES = 2\n", NOTES: "# Notes\n\n- retry limit `hooks/lib.mjs: LIMIT = 4`\n"},
+                               {"hooks/lib.mjs": MJS_HEAD, CONFIG: "RETRIES = 3\n"})
+        rc, out = self.run_check(rng)
+        named = [line for line in unknown_lines(out) if "%s:3" % NOTES in line and "hooks/lib.mjs" in line]
+        self.assertTrue(named, "a value cite of a .mjs file must print an unknown line that names %s:3 and the file\n%s" % (NOTES, out))
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_ste_disable_line_mark_leaves_a_js_value_cite_line_out_of_the_unknown(self):
+        def run(line):
+            rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: "RETRIES = 2\n", NOTES: "# Notes\n\n%s\n" % line},
+                                   {"hooks/lib.mjs": MJS_HEAD, CONFIG: "RETRIES = 3\n"})
+            return self.run_check(rng)[1]
+
+        def named(out):
+            return [line for line in unknown_lines(out) if "%s:3" % NOTES in line]
+        plain = run("- retry limit `hooks/lib.mjs: LIMIT = 4`")
+        self.assertTrue(named(plain), "scope: without the mark, the cite line prints unknown\n%s" % plain)
+        marked = run("- retry limit `hooks/lib.mjs: LIMIT = 4` <!-- ste-disable-line STALE008 -->")
+        self.assertEqual(named(marked), [], "the STALE008 mark must leave the cite line out of the unknown\n%s" % marked)
+
+    def test_a_ste_disable_line_mark_leaves_a_python_value_cite_line_out_of_the_finding(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT to 5
+        self.assert_flags(self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: LIMIT_HEAD}),
+                          [(NOTES, 3, "STALE008")])  # scope: without the mark, the cite line is flagged
+        marked = "# Notes\n\n%s <!-- ste-disable-line STALE008 -->\n" % CITE_4
+        self.assert_passes(self.value_range({CONFIG: LIMIT_BASE, NOTES: marked}, {CONFIG: LIMIT_HEAD}))
+
+    def test_a_changed_literal_reads_the_untouched_markdown_in_full(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: the range changes a module-level literal
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: LIMIT_HEAD})
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertTrue(whole_tree_listings(commands),
+                        "a changed literal must read every tracked Markdown file, so the run lists the whole tree: %s" % commands)
+
+    def test_every_fire_parity_row_is_flagged_on_its_own_line(self):
+        rows = parity_rows()
+        fire = [(row, 3 + k) for k, row in enumerate(rows) if row["expect"] == "fire"]
+        self.assertTrue(fire, "scope: the fixture holds fire rows")
+        for row, _ in fire:  # scope: the cited literal is the base value, and the range changes it
+            base_value = module_value(row["base"], row["match"]["symbol"])
+            self.assertEqual(base_value, ast.literal_eval(row["match"]["literal"]), "scope: base value of %s" % row["cite"])
+            self.assertNotEqual(module_value(row["head"], row["match"]["symbol"]), base_value, "scope: head value of %s" % row["cite"])
+        rc, out = self.run_check(self.parity_range(rows))
+        flagged = {(path, line) for path, line, code, _ in parse(out) if code == "STALE008"}
+        missing = [row["cite"] for row, line in fire if (NOTES, line) not in flagged]
+        self.assertEqual(missing, [], "STALE008 must flag each changed value on its own line:\n%s" % out)
+
+    # Fires on a value no JSON literal can hold, or on a path no tracked file has. The line is added, so each is a finding.
+
+    def test_an_added_python_cite_whose_value_is_no_json_literal_is_flagged_on_its_own_line(self):
+        for value in NO_JSON_VALUES:  # scope: each value is no JSON literal
+            self.assertRaises(ValueError, json.loads, value)
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4, so the cited name exists
+        cites = ["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: cite_page(cites)})
+        rc, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        expected = sorted((NOTES, 3 + k, "STALE008") for k in range(len(cites)))
+        self.assertEqual(found, expected, "each added cite whose value is no JSON literal must print one STALE008 on its line\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    def test_an_added_python_cite_naming_no_tracked_file_is_flagged_on_its_own_line(self):
+        for path in UNTRACKED_CITES:  # scope: no tracked file has the path
+            self.assertNotIn(path, base_files(extra={CONFIG: LIMIT_BASE}))
+        cites = ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES]
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: cite_page(cites)})
+        rc, out = self.run_check(rng)
+        found = sorted(parse(out))
+        self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3 + k, "STALE008") for k in range(len(cites))],
+                         "each added cite of a path no tracked file has must print one STALE008 on its line\n%s" % out)
+        for (_, _, _, text), path in zip(found, UNTRACKED_CITES):
+            self.assertIn(path, text, "a finding must name the path it could not find: %s" % text)
+        self.assertEqual(rc, 1, out)
+
+    def test_an_added_non_json_value_after_a_lone_quote_or_holding_a_hash_is_flagged(self):
+        notes = "# Notes\n\n- don't trust `hooks/config.py: LIMIT = 'a'`\n- label `hooks/config.py: LIMIT = 'a # b'`\n"
+        self.assertEqual(notes.split("\n")[2].split("`")[0].count("'"), 1)  # scope: one lone single quote in the prose before the cite
+        self.assertIn("'a # b'", notes.split("\n")[3])  # scope: a hash inside the non-JSON value
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: notes})
+        rc, out = self.run_check(rng)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE008"), (NOTES, 4, "STALE008")],
+                         "a lone quote in the prose and a hash in the value must not hide either added cite\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    # Unknown, never a finding: a cite the check cannot read prints one `stale-cites: unknown` line per cite, and the exit stays 0.
+
+    def test_an_untouched_non_json_or_untracked_cite_prints_one_unknown_line_on_a_whole_tree_read(self):
+        cites = (["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+                 + ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES])
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT, so the whole tree is read
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: cite_page(cites)}, {CONFIG: LIMIT_HEAD})
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, range(3, 3 + len(cites)))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each untouched cite that is no JSON literal or names no tracked file must print one unknown line\n%s" % out)
+        self.assertEqual(parse(out), [], "an untouched cite the check cannot read is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_js_value_cite_in_a_markdown_only_range_prints_one_unknown_line_naming_its_line(self):
+        rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"},
+                               {NOTES: cite_page(["hooks/lib.mjs: LIMIT = 4"])})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        named = [line for line in unknown_lines(out) if "%s:3: " % NOTES in line]
+        self.assertEqual(len(named), 1, "an added .mjs value cite must print one unknown line that names its line\n%s" % out)
+        self.assertIn("hooks/lib.mjs", named[0], out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_python_cite_of_a_name_bound_to_no_literal_at_head_prints_one_unknown_line_each(self):
+        for line in NONLIT_CONFIG.split("\n")[:2]:  # scope: each name is bound at module level to a value no literal reads
+            name, value = line.split(" = ")
+            self.assertEqual(binding_kind(NONLIT_CONFIG, name), "assign")
+            self.assertRaises(ValueError, ast.literal_eval, value)
+        rng = self.value_range({CONFIG: NONLIT_CONFIG, NOTES: "# Notes\n\n"}, {NOTES: cite_page(NONLIT_CITES)})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, (3, 4))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each added cite of a name bound to no literal must print one unknown line\n%s" % out)
+        self.assertEqual(parse(out), [], "a cite of a name bound to no literal at head is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_untouched_python_cite_of_a_name_bound_to_no_literal_at_head_prints_one_unknown_line_each(self):
+        base_cfg = "LIMIT = 30 * 86400\nGATE = compute()\nRETRIES = 2\n\n\ndef keep():\n    return 1\n"
+        head_cfg = base_cfg.replace("RETRIES = 2", "RETRIES = 3")
+        self.assertEqual(module_value(base_cfg, "RETRIES"), 2)  # scope: base binds RETRIES to 2
+        self.assertEqual(module_value(head_cfg, "RETRIES"), 3)  # scope: the range changes RETRIES, so the whole tree is read
+        for name in ("LIMIT", "GATE"):  # scope: head binds each name at module level to no literal
+            self.assertEqual(binding_kind(head_cfg, name), "assign")
+        self.assertRaises(ValueError, ast.literal_eval, "30 * 86400")
+        rng = self.value_range({CONFIG: base_cfg, NOTES: cite_page(NONLIT_CITES)}, {CONFIG: head_cfg})
+        rc, out = self.run_check(rng)
+        counts = unknown_counts(out, (3, 4))
+        self.assertEqual({n: c for n, c in counts.items() if c != 1}, {},
+                         "each untouched cite of a name bound to no literal must print one unknown line on a whole-tree read\n%s" % out)
+        self.assertEqual(parse(out), [], "an untouched cite of a name bound to no literal is no finding\n%s" % out)
+        self.assertEqual(rc, 0, out)
+
+    # Controls: no fire. Each one is green on the old code, because the old code never reads a value cite.
+
+    def test_an_untouched_non_json_or_untracked_cite_prints_no_unknown_when_no_literal_changed(self):
+        head_cfg = LIMIT_BASE + "\n\ndef extra():\n    return 2\n"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), module_value(head_cfg, "LIMIT"))  # scope: no module-level literal changes
+        cites = (["%s: LIMIT = %s" % (CONFIG, value) for value in NO_JSON_VALUES]
+                 + ["%s: LIMIT = 4" % path for path in UNTRACKED_CITES])
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: cite_page(cites)}, {CONFIG: head_cfg})
+        rc, out = self.run_check(rng)
+        self.assertEqual(unknown_lines(out), [], "an untouched cite prints unknown only when the range changes a literal\n%s" % out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_untouched_js_value_cite_in_a_markdown_only_range_prints_no_unknown_line(self):
+        base_page = cite_page(["hooks/lib.mjs: LIMIT = 4"])
+        rng = self.value_range({"hooks/lib.mjs": MJS_BASE, CONFIG: LIMIT_BASE, NOTES: base_page},
+                               {NOTES: base_page + "\nA new line.\n"})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        rc, out = self.run_check(rng)
+        self.assertEqual(unknown_lines(out), [], "an untouched .mjs cite prints unknown only on a whole-tree read\n%s" % out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unchanged_value_quoted_by_a_line_passes(self):
+        base_cfg, head_cfg = "LIMIT = 4\nRETRIES = 2\n", "LIMIT = 4\nRETRIES = 3\n"
+        self.assertEqual(module_value(base_cfg, "LIMIT"), module_value(head_cfg, "LIMIT"))  # scope: LIMIT is unchanged
+        self.assertNotEqual(module_value(base_cfg, "RETRIES"), module_value(head_cfg, "RETRIES"))  # scope: the range changes RETRIES
+        self.assert_passes(self.value_range({CONFIG: base_cfg, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: head_cfg}))
+
+    def test_a_line_wrong_at_base_and_left_alone_does_not_fire(self):
+        cite = "- retry limit `hooks/config.py: LIMIT = 3`"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4, so the cite's 3 is wrong at base
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT to 5
+        for label, head in (("page untouched", {CONFIG: LIMIT_HEAD}),
+                            ("page touched below the cite", {CONFIG: LIMIT_HEAD, NOTES: "# Notes\n\n%s\n\nA new line.\n" % cite})):
+            with self.subTest(page=label):
+                self.assert_passes(self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % cite}, head))
+
+    def test_a_wrong_line_moved_within_a_touched_page_does_not_fire(self):
+        cite = "- retry limit `hooks/config.py: LIMIT = 6`"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4, so the cite's 6 is wrong at base
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n\nA note.\n" % cite},
+                               {NOTES: "# Notes\n\nA note.\n\n%s\n" % cite})  # the same wrong line, moved from line 3 to line 5
+        self.assert_passes(rng)
+
+    def test_a_changed_value_with_no_cite_on_any_line_passes(self):
+        for label, notes in (("empty page", ""), ("prose only", "# Notes\n\nThe retry limit lives in `hooks/config.py`.\n")):
+            with self.subTest(page=label):
+                self.assertNotIn("= ", notes)  # scope: no line holds a value cite
+                self.assert_passes(self.value_range({CONFIG: LIMIT_BASE, NOTES: notes}, {CONFIG: LIMIT_HEAD}))
+
+    def test_a_cite_rewritten_to_the_head_value_in_the_same_range_passes(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base binds LIMIT to 4
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: the range changes LIMIT to 5
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4},
+                               {CONFIG: LIMIT_HEAD, NOTES: "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 5`\n"})
+        self.assert_passes(rng)
+
+    def test_an_added_cite_of_the_head_value_passes_when_no_literal_changed(self):
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), 4)  # scope: base and head bind LIMIT to 4, so no literal changes
+        self.assert_passes(self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n"}, {NOTES: "# Notes\n\n%s\n" % CITE_4}))
+
+    def test_a_literal_inside_a_def_is_no_module_value(self):
+        base_cfg = "def build():\n    LIMIT = 4\n    return LIMIT\n\n\ndef keep():\n    return 1\n"
+        head_cfg = base_cfg.replace("LIMIT = 4", "LIMIT = 5")
+        self.assertIsNone(module_value(base_cfg, "LIMIT"))  # scope: base binds LIMIT only inside a def
+        self.assertIsNone(module_value(head_cfg, "LIMIT"))  # scope: head binds it only inside a def too
+        self.assertNotEqual(base_cfg, head_cfg)  # scope: the range changes the function's literal
+        self.assert_passes(self.value_range({CONFIG: base_cfg, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: head_cfg}))
+
+    def test_a_comment_only_python_change_reads_no_markdown(self):
+        base_cfg = "LIMIT = 4  # the cap\n\n\ndef keep():\n    return 1\n"
+        head_cfg = "LIMIT = 4  # the cap, reviewed\n\n\ndef keep():\n    return 1\n"
+        self.assertEqual(ast.dump(ast.parse(base_cfg)), ast.dump(ast.parse(head_cfg)))  # scope: the trees match, so no literal changes
+        self.assertNotEqual(base_cfg, head_cfg)  # scope: the file changes, in a comment
+        rng = self.value_range({CONFIG: base_cfg, NOTES: "# Notes\n\n%s\n" % CITE_4}, {CONFIG: head_cfg})
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_range_that_changes_no_literal_and_touches_no_markdown_lists_no_markdown(self):
+        head_cfg = "LIMIT = 4\n\n\ndef keep():\n    return 2\n"
+        self.assertEqual(module_value(LIMIT_BASE, "LIMIT"), module_value(head_cfg, "LIMIT"))  # scope: no module-level literal changes
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n- retry limit `hooks/config.py: LIMIT = 3`\n"}, {CONFIG: head_cfg})
+        rc, out, commands = self.run_traced_commands(rng)  # the untouched cite is wrong at base, so it is never read
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_range_that_touches_only_markdown_lists_no_markdown_in_full(self):
+        rng = self.value_range({CONFIG: LIMIT_BASE, NOTES: "# Notes\n\n%s\n" % CITE_4},
+                               {NOTES: "# Notes\n\n%s\n\nA new line.\n" % CITE_4})
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_json_value_cite_is_not_read(self):
+        base_json, head_json = '{"retries": {"max": 4}}\n', '{"retries": {"max": 5}}\n'
+        self.assertEqual(json.loads(base_json)["retries"]["max"], 4)  # scope: base holds retries.max 4
+        self.assertEqual(json.loads(head_json)["retries"]["max"], 5)  # scope: the range changes retries.max to 5
+        self.assertEqual(module_value("RETRIES = 3\n", "RETRIES"), 3)  # scope: a Python literal changes too, so Markdown is read
+        rng = self.value_range({"config.json": base_json, CONFIG: "RETRIES = 2\n",
+                                NOTES: "# Notes\n\n- retry cap `config.json: retries.max = 4`\n"},
+                               {"config.json": head_json, CONFIG: "RETRIES = 3\n"})
+        rc, out = self.run_check(rng)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual([line for line in unknown_lines(out) if "config.json" in line], [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_range_that_touches_only_a_json_file_lists_no_markdown(self):
+        base_json, head_json = '{"retries": {"max": 4}}\n', '{"retries": {"max": 5}}\n'
+        self.assertEqual(json.loads(head_json)["retries"]["max"], 5)  # scope: the range changes retries.max to 5
+        rng = self.value_range({"config.json": base_json, NOTES: "# Notes\n\n- retry cap `config.json: retries.max = 4`\n"},
+                               {"config.json": head_json})
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_every_silent_parity_row_stays_silent(self):
+        rows = parity_rows()
+        silent = [(row, 3 + k) for k, row in enumerate(rows) if row["expect"] == "silent"]
+        self.assertTrue(silent, "scope: the fixture holds silent rows")
+        for row, _ in silent:  # scope: a row with a match keeps its value, and a row with none changes its file
+            if row["match"]:
+                self.assertEqual(module_value(row["base"], row["match"]["symbol"]), module_value(row["head"], row["match"]["symbol"]),
+                                 "scope: the value of %s is unchanged" % row["cite"])
+            else:
+                self.assertNotEqual(row["base"], row["head"], "scope: the range changes the file of %s" % row["cite"])
+        rc, out = self.run_check(self.parity_range(rows))
+        flagged = {(path, line) for path, line, _, _ in parse(out)}
+        loud = [row["cite"] for row, line in silent if (NOTES, line) in flagged]
+        self.assertEqual(loud, [], "a silent parity row must not be flagged:\n%s" % out)
+
+    # Type and set cites. A value is compared by value, a boolean is no number, 1 and 1.0 are one number as JSON reads
+    # them, and a set cite pins no member order.
+    # py-facts reads a set as a sorted list, so a set cite compares to it as a set.
+
+    def added_cite_range(self, code, cite):
+        """A Markdown-only range: CONFIG holds `code` on main and on topic, and the topic adds one line on NOTES
+        line 3 that cites `cite`. No literal changes, so the check judges the added line alone."""
+        rng = self.value_range({CONFIG: code, NOTES: "# Notes\n\n"}, {NOTES: cite_page([cite])})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        return rng
+
+    def assert_cite_flagged(self, rng, cause):
+        """Exactly one STALE008 finding, on NOTES line 3, and exit 1. A failure names `cause`."""
+        rc, out = self.run_check(rng)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE008")], "%s\n%s" % (cause, out))
+        self.assertEqual(rc, 1, out)
+
+    def assert_cite_matches(self, rng, cause):
+        """No finding and exit 0. A failure names `cause`."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(parse(out), [], "%s\n%s" % (cause, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_number_cite_of_a_true_value_is_flagged_on_its_line(self):
+        self.assertIs(module_value(value_file("LIMIT", "True"), "LIMIT"), True)  # scope: the code binds LIMIT to True
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite reads as the number 1
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "True"), "hooks/config.py: LIMIT = 1"),
+                                 "the cite 1 matched the value True: a boolean is no number, so the cite must match its type")
+
+    def test_an_added_boolean_cite_of_a_number_value_is_flagged_on_its_line(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to the int 1
+        self.assertIs(json.loads("true"), True)  # scope: the cite reads as the boolean true
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = true"),
+                                 "the cite true matched the value 1: a boolean is no number, so the cite must match its type")
+
+    def test_an_added_int_cite_of_an_int_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to an int
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite is an int too
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1"),
+                                 "the int cite 1 must match the int value 1")
+
+    def test_an_added_float_cite_of_a_float_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1.0"), "LIMIT")), float)  # scope: the code binds LIMIT to a float
+        self.assertIs(type(json.loads("1.0")), float)  # scope: the cite is a float too
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1.0"),
+                                 "the float cite 1.0 must match the float value 1.0")
+
+    def test_an_added_float_cite_of_an_int_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to the int 1
+        self.assertIs(type(json.loads("1.0")), float)  # scope: the cite reads as the float 1.0
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1.0"),
+                                 "the float cite 1.0 must match the int value 1: JSON reads both as one number")
+
+    def test_an_added_int_cite_of_a_float_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1.0"), "LIMIT")), float)  # scope: the code binds LIMIT to the float 1.0
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite reads as the int 1
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1"),
+                                 "the int cite 1 must match the float value 1.0: JSON reads both as one number")
+
+    def test_an_added_cite_of_a_float_with_a_trailing_zero_passes(self):
+        self.assertEqual(module_value(value_file("RATE", "0.9"), "RATE"), 0.9)  # scope: the code binds RATE to 0.9
+        self.assertEqual(json.loads("0.90"), 0.9)  # scope: the cite 0.90 reads as the same float
+        self.assert_cite_matches(self.added_cite_range(value_file("RATE", "0.9"), "hooks/config.py: RATE = 0.90"),
+                                 "0.90 is the float 0.9, so the cite must pass: a value is compared by value, not by text")
+
+    def test_an_added_set_cite_matches_a_set_value_in_any_member_order(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assertRaises(ValueError, json.loads, '{"b", "a"}')  # scope: a set is no JSON literal, so the cite takes the set form
+        self.assert_cite_matches(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), 'hooks/config.py: TAGS = {"b", "a"}'),
+                                 'the set {"b", "a"} has the members of {"a", "b"}, so it must pass in any member order')
+
+    def test_an_added_set_cite_with_a_wrong_member_is_flagged_on_its_line(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assert_cite_flagged(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), 'hooks/config.py: TAGS = {"a", "c"}'),
+                                 'the set {"a", "c"} holds c, which the set {"a", "b"} lacks: the cite must be flagged')
+
+    def test_an_added_set_cite_of_single_quoted_members_is_flagged_as_no_json_literal(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assertRaises(ValueError, json.loads, "['a', 'b']")  # scope: single-quoted members are no JSON
+        rc, out = self.run_check(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), "hooks/config.py: TAGS = {'a', 'b'}"))
+        found = parse(out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")], out)
+        self.assertIn("no JSON literal", found[0][3], "a set cite that is no JSON literal must print that reason: %s" % found[0][3])
+        self.assertEqual(rc, 1, out)
 
 
 if __name__ == "__main__":

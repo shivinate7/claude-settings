@@ -1306,6 +1306,24 @@ class Stale(unittest.TestCase):
         self.assertIn("the answers folder", kept[0], "the unknown line does not name the answers folder:\n" + kept[0])
         self.assert_page_word(r, "current", 0)
 
+    def test_the_unknown_kept_answer_line_names_the_folder_with_no_marker(self):
+        # The unknown line says which folder may be cut short: "items" for an items folder, "answers" for an answers folder.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        cases = (("items folder with no marker", items, self.list_file([INCIDENT_ANSWER], "answers"), "items"),
+                 ("answers folder with no marker", self.items_file([INCIDENT]), answers, "answers"))
+        for label, items_arg, answers_arg, folder in cases:
+            with self.subTest(label):
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                self.assert_page_word(r, "current", 0)
+                unknown = kept_lines(r.stdout)
+                self.assertEqual(len(unknown), 1, "want one kept-answer line:\n" + r.stdout + r.stderr)
+                self.assertIn("the %s folder" % folder, unknown[0],
+                              "the unknown line does not name the %s folder:\n%s" % (folder, unknown[0]))
+
     def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
         # export_page.docs_in keys each folder doc by its file name without .json, so the file name is the doc id.
         current, _ = self.current_and_behind()
