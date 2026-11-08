@@ -332,8 +332,8 @@ _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", 
 _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
-# PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
-_SMART_QUOTES = frozenset("\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
+# PowerShell reads the marks of SMART_QUOTES as quotes. They end or open a quote that the scanner
+# does not see.
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
@@ -358,7 +358,7 @@ def _scan(segment: str):
     `\\"` in a JSON sample there is plain text."""
     plain, quote = [], ""
     for index, char in enumerate(segment):
-        if char in _SMART_QUOTES:   # also inside single quotes: PowerShell ends a string at one
+        if char in guard_core.SMART_QUOTES:   # also inside single quotes: PowerShell ends a string at one
             return True, ""
         if quote == "'":
             quote = "" if char == "'" else quote

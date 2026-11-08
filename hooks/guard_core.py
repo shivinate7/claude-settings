@@ -156,6 +156,26 @@ def token_start(text: str, index: int) -> bool:
     return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
 
 
+# PowerShell reads these as quote marks. The first four hold a single-quoted string, the rest a
+# double-quoted one, and a string ends at any mark of its own kind. Bash reads them as text.
+SMART_SINGLE = "\u2018\u2019\u201a\u201b"
+SMART_QUOTES = frozenset(SMART_SINGLE + "\u201c\u201d\u201e")
+
+
+def smart_quote_span(text: str, index: int) -> int:
+    """In PowerShell text, the index just past the string that the smart quote at `index` opens, or
+    0 when no mark of its kind follows: a lone smart apostrophe in prose opens nothing, so it must
+    not hide the words after it. Not in PowerShell text, always 0."""
+    char = text[index]
+    if char not in SMART_QUOTES or not is_powershell(text):
+        return 0
+    marks = SMART_SINGLE if char in SMART_SINGLE else "\u201c\u201d\u201e"
+    for end in range(index + 1, len(text)):
+        if text[end] in marks:
+            return end + 1
+    return 0
+
+
 def quote_advance(text: str, index: int, quote: str):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
     pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
@@ -278,6 +298,11 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current.append(" ")   # a block comment is dropped, and it ends a word
             quote = after
             index += width
+            continue
+        span_end = smart_quote_span(cmd, index) if char in SMART_QUOTES else 0
+        if span_end:   # a smart-quoted PowerShell string is text: a `#` or `;` in it cuts nothing
+            current.append(cmd[index:span_end])
+            index = span_end
             continue
         if char == "#" and (index == 0 or cmd[index - 1] in " \t\n;|&("):
             while index < length and cmd[index] != "\n":

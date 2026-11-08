@@ -8,6 +8,7 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
+    SMART_QUOTES, SMART_SINGLE, smart_quote_span,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
     is_powershell, norm, split_segments,
 )
@@ -55,10 +56,12 @@ def names_env_file(name: str) -> bool:
 # Reading ANY backslash as a separator refuses `grep "import\.meta\.env"`, because the head
 # `import\.meta` holds a backslash. One identifier deeper than the first case, and the same defect.
 #
+# A head may hold a space, since a quoted path does (`C:\My Dir\.env`).
+#
 # The residue, stated rather than hidden: a RELATIVE Windows path whose every segment after the
 # first begins with a dot, such as `foo\.config\.env`, is no longer read as a path. Text alone
 # cannot tell it from a regex. The absolute form and the forward-slash form are unaffected.
-ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|\S*(/|\\(?![.\\]))\S*)$")
+ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|.*(/|\\(?![.\\])).*)$")
 
 # Runners that read the file into their own environment and echo nothing. `npm` and `npx` reach the
 # flag through node, so `node --env-file=.env <npm-cli.js> run x` is the npm form.
@@ -495,7 +498,8 @@ def _wrapper_name(word: str) -> str:
 def _quoted_words(segment: str):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
     The redirects are spaced into words of their own outside the quotes only. A quote with no
-    closing mate is a plain character, so a lone quote in text still leaves the words after it."""
+    closing mate is a plain character, so a lone quote in text still leaves the words after it. In
+    PowerShell a smart quote opens a string too."""
     chunks, plain, i, n = [], [], 0, len(segment)
 
     def flush():
@@ -508,6 +512,13 @@ def _quoted_words(segment: str):
         if char == "\\" and i + 1 < n:
             plain.append(segment[i:i + 2])
             i += 2
+            continue
+        span_end = smart_quote_span(segment, i) if char in SMART_QUOTES else 0
+        if span_end:   # PowerShell: the marks become ASCII ones, so the word reads as any quoted path
+            flush()
+            ascii_mark = "'" if char in SMART_SINGLE else '"'
+            chunks.append(re.sub(r"\s", "\0", ascii_mark + segment[i + 1:span_end - 1] + ascii_mark))
+            i = span_end
             continue
         if char in "'\"":
             j = i + 1
