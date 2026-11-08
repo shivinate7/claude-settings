@@ -1,0 +1,68 @@
+{
+  "about": "Value-cite parity rows. Each row is one inline cite `file: NAME = literal` in prose. tests/fact-lines.test.mjs (F2f) reads each row through factLines in scripts/map-check.mjs: a row with a match must read as that symbol and literal, and a row with no match must read as no value fact. lint/test_stale_cites.py (ValueCiteTests) reads each row through the merge check: a fire row must be flagged on its own line when the range changes its value, and a silent row must stay silent. The rows are Python only. Each row has its own file, so one range can hold them all. Representation-equivalent pairs (0x10 and 16, 'x' and \"x\") and sets are not pinned here.",
+  "rows": [
+    {
+      "id": "int-changed",
+      "cite": "hooks/parity_int.py: LIMIT = 4",
+      "file": "hooks/parity_int.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "expect": "fire",
+      "match": {"symbol": "LIMIT", "literal": "4"}
+    },
+    {
+      "id": "string-with-hash",
+      "cite": "hooks/parity_str.py: NAME = \"a # b\"",
+      "file": "hooks/parity_str.py",
+      "base": "NAME = \"a # b\"\n",
+      "head": "NAME = \"a # c\"\n",
+      "expect": "fire",
+      "match": {"symbol": "NAME", "literal": "\"a # b\""}
+    },
+    {
+      "id": "list-changed",
+      "cite": "hooks/parity_list.py: TAGS = [\"a\", \"b\"]",
+      "file": "hooks/parity_list.py",
+      "base": "TAGS = [\"a\", \"b\"]\n",
+      "head": "TAGS = [\"a\", \"c\"]\n",
+      "expect": "fire",
+      "match": {"symbol": "TAGS", "literal": "[\"a\", \"b\"]"}
+    },
+    {
+      "id": "float-changed",
+      "cite": "hooks/parity_float.py: RATE = 0.5",
+      "file": "hooks/parity_float.py",
+      "base": "RATE = 0.5\n",
+      "head": "RATE = 0.25\n",
+      "expect": "fire",
+      "match": {"symbol": "RATE", "literal": "0.5"}
+    },
+    {
+      "id": "unchanged",
+      "cite": "hooks/parity_same.py: ORIGIN = 7",
+      "file": "hooks/parity_same.py",
+      "base": "ORIGIN = 7\n",
+      "head": "ORIGIN = 7\n",
+      "expect": "silent",
+      "match": {"symbol": "ORIGIN", "literal": "7"}
+    },
+    {
+      "id": "no-equals",
+      "cite": "hooks/parity_none.py: LIMIT",
+      "file": "hooks/parity_none.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "expect": "silent",
+      "match": null
+    },
+    {
+      "id": "no-colon",
+      "cite": "hooks/parity_colon.py LIMIT = 4",
+      "file": "hooks/parity_colon.py",
+      "base": "LIMIT = 4\n",
+      "head": "LIMIT = 5\n",
+      "expect": "silent",
+      "match": null
+    }
+  ]
+}
