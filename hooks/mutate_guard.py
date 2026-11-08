@@ -50,8 +50,11 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 when it sits beside it, imports or loads its module, or names its basename in a path expression it copies, opens or runs
 (read from the `ast` tree, so a docstring or comment never counts).
 `--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD, and each tracked suite the diff changes: the one selector `bin/ci-job --lint` asks
-for the hooks/ and merge/ suite steps it runs. Cost: once per lane lint, one process, one `git diff`, and (when the diff holds
-a file) one `git ls-files` and one parse of each tracked `test_*.py`, once for the whole diff, never once per touched file.
+for the hooks/ and merge/ CI steps it runs. A suite also tests a `.py` file that a module it loads imports, however deep, inside
+the repository (`suites_for_paths` with `chain`). `bin/ci-job` stops the selector after 60 s and reads that as unknown; the job
+scope is the linted job only, and a suite picked for a CI step of another job prints one `not run` line there. Cost: once per
+lane lint, one process, one `git diff`, and (when the diff holds a file) one `git ls-files` and one parse of each tracked
+`test_*.py` and of each module they reach, once for the whole diff, never once per touched file.
 """
 
 import contextlib
@@ -2867,11 +2870,15 @@ def _tracked_files():
     return [item for item in done.stdout.split("\0") if item], None
 
 
-def suites_for_paths(paths, tracked, union: bool) -> set:
+def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     """The suites that test any of `paths`. Per path: each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus
     each tracked `test_*.py` whose profile (`_suite_profile`) names it: its stem imported or loaded when it is a `.py`
     file, its basename in a path expression of any file. A listed file (REPORT_TARGETS) adds its listed suites; with
-    `union` False it gets those only and no scan. Each suite is read and parsed once, whatever the number of paths."""
+    `union` False it gets those only and no scan. With `chain` True a suite also tests a `.py` path that a module it loads
+    imports, however deep: from each tracked `.py` the suite names (by stem or by basename), it follows the stems that file
+    imports (`import`, `from`, a literal `import_module`) to tracked `.py` files, each file once, so a cycle ends. A stem or
+    basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
+    whatever the number of paths or suites."""
     import re
     listed = dict(REPORT_TARGETS)
     names = set()
@@ -2881,24 +2888,48 @@ def suites_for_paths(paths, tracked, union: bool) -> set:
             names.update(listed[path])
     if not scan:
         return names
-    profiles = {}
-    for item in tracked:
-        base = os.path.basename(item)
-        if base.startswith("test_") and base.endswith(".py"):
+    profiles = {}  # a tracked path -> its profile, or None when it cannot be read or parsed; each file read once
+
+    def profile_of(item):
+        if item not in profiles:
             try:
                 with open(item, encoding="utf-8") as handle:
-                    profile = _suite_profile(handle.read())
+                    profiles[item] = _suite_profile(handle.read())
             except (OSError, ValueError):
-                continue
-            if profile is not None:
-                profiles[item] = profile
+                profiles[item] = None
+        return profiles[item]
+
+    suites = [item for item in tracked if os.path.basename(item).startswith("test_") and item.endswith(".py")]
+    suites = [item for item in suites if profile_of(item) is not None]
+    reached = {}  # a suite -> the tracked .py files its loads lead to
+    if chain:
+        by_stem = {}
+        for item in tracked:
+            if item.endswith(".py"):
+                by_stem.setdefault(os.path.splitext(os.path.basename(item))[0], []).append(item)
+        for suite in suites:
+            stems, bases = profile_of(suite)
+            todo = [file for stem in stems for file in by_stem.get(stem, [])]
+            todo += [file for base in bases if base.endswith(".py") for file in by_stem.get(base[:-3], [])
+                     if os.path.basename(file) == base]
+            seen = set()
+            while todo:
+                file = todo.pop()
+                if file in seen:
+                    continue
+                seen.add(file)
+                profile = profile_of(file)
+                if profile is not None:
+                    todo.extend(next_file for stem in profile[0] for next_file in by_stem.get(stem, []))
+            reached[suite] = seen
     for path in scan:
         folder, name = os.path.split(path)
         stem, extension = os.path.splitext(name)
         wanted = re.compile(r"test_%s(_[^/]*)?\.py" % re.escape(stem))
-        for item, (stems, bases) in profiles.items():
+        for item in suites:
+            stems, bases = profiles[item]
             if (os.path.dirname(item) == folder and wanted.fullmatch(os.path.basename(item))) \
-                    or name in bases or (extension == ".py" and stem in stems):
+                    or name in bases or (extension == ".py" and stem in stems) or path in reached.get(item, ()):
                 names.add(item)
     return names
 
@@ -2928,9 +2959,10 @@ def tests_for_main(argv) -> int:
 
 def lint_suites_main(argv) -> int:
     """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
-    one selector `bin/ci-job --lint` asks for the suite steps it runs. Unlike `--tests-for`, a listed file also gets the
-    suites its scan finds. Exit 2 with one `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`,
-    then, when the diff holds a file, one `git ls-files` and one parse of each tracked `test_*.py`, once for the whole diff."""
+    one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets the
+    suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
+    `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
+    `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --lint-suites")
     parser.add_argument("--lint-suites", required=True, metavar="BASE", help="a ref the diff BASE...HEAD starts from")
@@ -2947,7 +2979,7 @@ def lint_suites_main(argv) -> int:
         if tracked is None:
             print("ERROR %s" % reason)
             return 2
-    names = suites_for_paths(changed, tracked, union=True)
+    names = suites_for_paths(changed, tracked, union=True, chain=True)
     # A changed suite is picked itself: an edit that breaks its own suite is caught by that suite.
     on_disk = set(tracked)
     names.update(item for item in changed if item in on_disk
