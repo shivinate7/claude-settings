@@ -22617,6 +22617,31 @@ _relesc_add("other-checkout: heredoc replay kept body helper that only echoes: a
             "allow", _kept_heredocs([("helper2.sh", "echo ok"), ("run.sh", "bash helper2.sh"),
                                      ("data.txt", "echo hi > ../other/f")], "bash run.sh"), "home")
 
+# A script body reaches a helper through a name no literal word of the body shows: a bare import, a require of a path
+# built at run time, a perl `do`, a ruby `load`. Each helper writes out of the tree, and main refuses each run.
+_KEPT_LOADED_RUNS = (
+    ("import helper", [("helper.py", 'import os\nos.system("echo hi > ../other/f")'), ("run.py", "import helper")],
+     "python3 run.py"),
+    ('require("./helper")', [("helper.js", 'require("child_process").execSync("echo hi > ../other/f");'),
+                             ("run.js", 'require("./helper");')], "node run.js"),
+    ('require("./"+f) over readdirSync', [("helper.js", 'require("child_process").execSync("echo hi > ../other/f");'),
+                                          ("run.js", "const fs = require('fs');\nfor (const f of fs.readdirSync('.')) "
+                                                     "require(\"./\"+f);")], "node run.js"),
+    ("do $f over glob", [("helper.pl", 'system("echo hi > ../other/f");'),
+                         ("run.pl", 'for my $f (glob("*.pl")) { do $f; }')], "perl run.pl"),
+    ("load f over Dir.glob", [("helper.rb", 'system("echo hi > ../other/f")'),
+                              ("run.rb", 'Dir.glob("*.rb").each { |f| load f }')], "ruby run.rb"),
+)
+for _shown, _files, _cmd in _KEPT_LOADED_RUNS:
+    _relesc_add("other-checkout: heredoc replay kept body script: a helper that writes ../other/f, reached from a script "
+                "through %s, then %s, is refused" % (_shown, _cmd),
+                "deny", _kept_heredocs(_files, _cmd), "home", rule="other-checkout")
+# A command holding the word `bash 1a=b` beside a plain write out of the tree, in a kept body: the write is refused.
+_relesc_add("other-checkout: heredoc replay kept body unresolved word: a heredoc run.sh whose body holds bash 1a=b and then "
+            "echo hi > ../other/f, then bash run.sh, is refused",
+            "deny", _kept_heredocs([("run.sh", "bash 1a=b\necho hi > ../other/f")], "bash run.sh"), "home",
+            rule="other-checkout")
+
 
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
 # (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
