@@ -1,0 +1,11 @@
+{
+  "title": "A guard reads an agent brief for destructive git, as the Bash guard reads the command",
+  "why": "Lane reviewed-sends-back (session_013NEJKzBfRycskE32T2Pj9F), 11:34 CST Nov 8: its brief told a builder to run `git reset --hard` in its worktree, against rule shared-trees-no-destructive-git. The builder refused and fast-forwarded. No guard reads the Agent prompt for destructive git, so a brief can order what the Bash guard would refuse. Harm: a builder that obeys could lose work in a shared tree. The guard hook matcher already includes Agent (settings.json line 237); whether a brief rule exists there is unread. Related: step guard-git-reset-path.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 759,
+  "updatedAt": "2026-11-08T11:35:00-06:00"
+}
