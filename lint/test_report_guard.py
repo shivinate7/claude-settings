@@ -1087,6 +1087,57 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "a running reviewer named with a wrong model passed")
         self.assertIn("'reviewer sonnet' matches no reviewer spawn, which ran haiku", out["reason"])
 
+    REVIEWER_R3 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 3 of 3"}
+    ROUND1_NO_MODEL = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # runs its file pin, haiku
+
+    def turn_records(self, earlier=(), window=()):
+        """The turn's records: `earlier` spawns from before the owner's second message, then `window` spawns
+        after it. Each spawn carries its tool_use id and a real result, as a finished spawn does. With no
+        earlier spawn there is no second message: the window is the whole transcript."""
+        records = [human("do the task")]
+        n = 0
+        for spawn in earlier:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        if earlier:
+            records.append(human("the owner's next message"))
+        for spawn in window:
+            records += keyed_spawn(spawn, n)
+            n += 1
+        return records
+
+    ROUNDS_DONE = ("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku round 1, "
+                   "reviewer sonnet rounds 2 and 3)\n> **Next** Unstarted: none")
+
+    def test_dm_false_alarm_earlier_round_pin_named_passes(self):
+        # Round 1 ran before the owner's second message, on its file pin, haiku. Rounds 2 and 3 ran after it.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, self.ROUNDS_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_earlier_round_named_with_unspawned_model_blocks(self):
+        # Control: no spawn of any turn ran opus, so naming reviewer opus blocks.
+        records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
+                                    window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer opus)\n"
+                                 "> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer opus, which no spawn ran, and passed")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
+    def test_dm_false_alarm_earlier_unnamed_builder_passes(self):
+        # Control: the missing-role check stays window-only. An earlier builder Done does not name is no refusal.
+        records = self.turn_records(earlier=[self.BUILDER], window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none")
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_same_window_mismatch_blocks(self):
+        # Control: a mismatch inside the window still blocks, with no earlier spawn.
+        records = self.turn_records(window=[self.REVIEWER_R2])
+        out = self.stop(records, "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none")
+        self.assertIsNotNone(out, "Done named reviewer haiku against a window reviewer that ran sonnet, and passed")
+        self.assertIn("'reviewer haiku' matches no reviewer spawn, which ran sonnet", out["reason"])
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
