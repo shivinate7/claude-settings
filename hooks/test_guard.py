@@ -5577,6 +5577,23 @@ sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tai
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
+# Forms the roster does not yet read: a `uv run` that runs a script by its path, a script run by its
+# path, and an argparse prefix of --lane-lint or --review-record. argparse takes a prefix that matches
+# one option alone, so `merge --lane 7` runs --lane-lint. It refuses an ambiguous prefix and runs no
+# check, so `merge --l 7` (--lane-lint, --lint-unknown-ok, --live) is allowed.
+sh("check-tail: uv run runs the merge script piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a merge script run by its path piped to tail in the foreground is refused",
+   "./merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail in the foreground is refused",
+   "merge --lane-l 7 2>&1 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is refused",
+   "merge --review-r 12 --head 0123456789abcdef0123456789abcdef01234567 | head -5", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: merge --l, an ambiguous prefix that argparse refuses, piped to tail is allowed",
+   "merge --l 7 | tail -3", "allow", cwd=NOGIT)
 
 # --- a verdict call piped into a later stage, then && or || (rule verdict-pipe-exit)
 #
@@ -5693,6 +5710,26 @@ sh("verdict-pipe-exit: a lint command inside quotes is text, not a call",
 sh("verdict-pipe-exit: a lint name inside a multi-line quote is text, not a call",
    'echo "start\npython3 lint/ste_lint.py docs/x.md | tail -3 && git push\nend"', "allow",
    cwd=NOGIT)
+
+# The same lint forms read through `uv run`, a script run by its path, and the module form
+# `python3 -m lint.ste_lint`. A lint script named only as an argument (`cat`) runs nothing, so it is
+# allowed, and so is a non-lint script run by `uv run` or by its path.
+sh("verdict-pipe-exit: uv run runs the lint script piped to tail, then && push, is refused",
+   "uv run lint/ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: a lint script run by its path piped to tail, then && push, is refused",
+   "./lint/ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: a merge script run by its path with --lane-lint, piped to grep, is refused",
+   "./merge/merge.py --lane-lint 7 | grep FAIL && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: the lint module run by python3 -m, piped to tail, then && push, is refused",
+   "python3 -m lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: uv run pytest.py piped to tail, then && echo, is allowed",
+   "uv run pytest.py | tail -3 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: python3 -m pytest piped to tail, then && echo, is allowed",
+   "python3 -m pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: a build script run by its path piped to tail, then && echo, is allowed",
+   "./scripts/build.py | tail -3 && echo ok", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: cat of the lint script piped to tail, then && echo, is allowed",
+   "cat ./lint/ste_lint.py | tail -3 && echo ok", "allow", cwd=NOGIT)
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
