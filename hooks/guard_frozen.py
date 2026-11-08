@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import fnmatch
 import os
 import re
 
@@ -591,27 +592,56 @@ def _glued_cp_target(word):
     return ("-t", found.group(1)) if found else None
 
 
-def _first_test_under(path: str, cwd: str, predicate) -> str:
+_TOO_LARGE = "\0too-large"   # `_first_test_under`'s answer for a folder it could not finish
+_TOO_LARGE_NOTE = " (the folder is too large to check for a test; name a narrower path)"
+
+
+def _name_matches(names, base: str) -> bool:
+    """True when a `find` name filter, a tuple of (ignore case, pattern), accepts the file name `base`."""
+    return any(fnmatch.fnmatchcase(base.lower(), pattern.lower()) if fold else fnmatch.fnmatchcase(base, pattern)
+               for fold, pattern in names)
+
+
+def _first_test_under(path: str, cwd: str, predicate, names=None) -> str:
     """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
     folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
-    bytecode folders are not entered, and the walk stops after `_WALK_LIMIT` entries.
-    ponytail: a test past that many entries is missed; the walk costs one pass over the tree, once per
-    fed writer word that is a folder."""
+    bytecode folders are not entered. An empty path names no folder. Past `_WALK_LIMIT` entries with
+    folders left to enter, the answer is `_TOO_LARGE`: a walk that stops there would let a test past it
+    through.
+    `names` is the name filter of the `find` that feeds the path (`_find_name_filter`): only a file whose
+    name it accepts is judged, and a folder whose name it accepts is walked whole, as the writer takes
+    it whole. A root the filter accepts is walked whole too.
+    ponytail: the walk costs one pass over the tree, once per fed writer word that is a folder."""
+    if not _unquoted(path).strip():
+        return ""
     try:
         top = _expanded(path, cwd)
         if not os.path.isdir(top):
             return ""
     except (OSError, ValueError):
         return ""
+    if names and _name_matches(names, os.path.basename(os.path.normpath(_unquoted(path)))
+                               or _unquoted(path)):
+        names = None
     seen = 0
-    for folder, folders, files in os.walk(top):
+    walk = os.walk(top)
+    for folder, folders, files in walk:
         folders[:] = [name for name in folders if name not in _WALK_SKIP]
-        for found in [os.path.join(folder, "_")] + [os.path.join(folder, name) for name in files]:
+        if names is None:
+            found_in = [os.path.join(folder, "_")] + [os.path.join(folder, name) for name in files]
+        else:
+            found_in = [os.path.join(folder, name) for name in files if _name_matches(names, name)]
+            for name in folders:
+                if _name_matches(names, name):
+                    whole = _first_test_under(os.path.join(folder, name), cwd, predicate)
+                    if whole:
+                        return whole
+        for found in found_in:
             if predicate(found, cwd):
                 return found
         seen += len(folders) + len(files)
-        if seen > _WALK_LIMIT:
-            break
+        if seen > _WALK_LIMIT and next(walk, None) is not None:
+            return _TOO_LARGE
     return ""
 
 
@@ -699,10 +729,30 @@ _GREP_VALUE_FLAGS = _GREP_PATTERN_FLAGS | frozenset((
     "--max-depth", "--threads", "--replace", "--devices", "--directories", "--binary-files"))
 
 
-def _roots(words) -> list:
+def _recursive_search(name, args) -> bool:
+    """True when a grep-like command with no path searches the working folder: `rg`, `ag` and `ack` always
+    do, `grep` with `-r`, `-R` or a long form of them."""
+    if name in ("rg", "ag", "ack"):
+        return True
+    for word in args:
+        if word.startswith("--"):
+            if word.split("=")[0] in ("--recursive", "--dereference-recursive"):
+                return True
+        elif word.startswith("-") and len(word) > 1:
+            for letter in word[1:]:
+                if letter in "rR":
+                    return True
+                if letter in _GREP_VALUE_LETTERS:
+                    break
+    return False
+
+
+def _roots(words, search_cwd=False) -> list:
     """The words of a segment that name where its command reads: for `find`, the words before the
     first `-`, `(` or `!` (`.` when there are none); for grep and rg, the words after the pattern;
-    for any other command, its words that are not a flag, a redirect or a redirect's target."""
+    for any other command, its words that are not a flag, a redirect or a redirect's target.
+    `search_cwd` reads a recursive grep or rg with no path as `.`: it searches the working folder when
+    nothing is piped into it."""
     index = resolve_command(tuple(words))
     if index is None:
         return []
@@ -738,7 +788,85 @@ def _roots(words) -> list:
                         break
         else:
             roots.append(word)
-    return roots[1:] if grep and not has_pattern else roots
+    roots = roots[1:] if grep and not has_pattern else roots
+    return roots or (["."] if search_cwd and grep and _recursive_search(name, args) else [])
+
+
+_FIND_PLAIN = ("-print", "-print0", "-depth", "-xdev", "-mount", "-a", "-and", "-noleaf")
+_FIND_VALUED = ("-type", "-maxdepth", "-mindepth")
+
+
+def _find_name_filter(words):
+    """The name filter of a `find` segment as a tuple of (ignore case, pattern), else None. Only a
+    plain expression is read: `-name`, `-iname`, an implied and, `-type`, the depth limits, `-print` and
+    an `-exec` command. Any other word (`-o`, `!`, `(`, `-regex`, `-path`, `-delete`, a pattern that
+    holds a `$`, a backtick, a backslash or a `/`) leaves the walk plain, which fails closed. Several
+    names are read as any of them, a superset of the files the find lists."""
+    index = resolve_command(tuple(words))
+    if index is None or _name(words[index]) != "find":
+        return None
+    args = list(words[index + 1:])
+    while args and (args[0] in ("-H", "-L", "-P") or re.fullmatch(r"-O\d", args[0])):
+        args.pop(0)
+    at = 0
+    while at < len(args) and not (args[at].startswith("-") or args[at] in _FIND_TEST_STARTS):
+        at += 1
+    names = []
+    while at < len(args):
+        word = _unquoted(args[at])
+        if word in ("-name", "-iname"):
+            pattern = _unquoted(args[at + 1]) if at + 1 < len(args) else ""
+            if not pattern or re.search(r"[$`\\/]", pattern):
+                return None
+            names.append((word == "-iname", pattern))
+            at += 2
+        elif word in _FIND_VALUED:
+            at += 2
+        elif word in _FIND_PLAIN:
+            at += 1
+        elif word in _FIND_EXEC:
+            at += 1
+            while at < len(args) and _unquoted(args[at]) not in _FIND_END:
+                at += 1
+            if at >= len(args):
+                return None
+            at += 1
+        else:
+            return None
+    return tuple(names) or None
+
+
+def _walk_filters(texts) -> dict:
+    """{root word: name filter} for the roots that a name filter may narrow the walk of. A word has a
+    filter only when every place the command text uses it is the root of a `find` that has one (the
+    union of their filters); any other use of the word, such as a root of another command, a loop item or
+    a word of an `-exec` command, leaves it out, so its walk stays plain."""
+    table = {}
+
+    def note(word, names):
+        word = _unquoted(word)
+        if word in table and table[word] is None or names is None:
+            table[word] = None
+        else:
+            table[word] = tuple(dict.fromkeys(table.get(word, ()) + names))
+
+    for text in texts:
+        segments = split_segments(_resolve_vars(text), [])
+        for segment in segments:
+            words = _quoted_words(segment)
+            index = resolve_command(tuple(words))
+            if index is not None and _name(words[index]) == "find":
+                names = _find_name_filter(words)
+                roots = _roots(words)
+                for word in roots:
+                    note(word, names)
+                for word in words[index + 1 + len(roots):]:
+                    if word != "{}":
+                        note(word, None)
+            else:
+                for word in [*_roots(words, True), *words]:
+                    note(word, None)
+    return {word: names for word, names in table.items() if names}
 
 
 def _piped_into(ends, parsed, at):
@@ -776,7 +904,7 @@ def _text_roots(text: str) -> list:
             continue   # empty, not the last of its pipeline, or a count
         chain, stage = [], at
         while stage is not None:
-            chain = _roots(parsed[stage]) + chain
+            chain = _roots(parsed[stage], fed_by[stage] is None) + chain
             stage = fed_by[stage]
         roots.extend(word for word in chain if word not in roots)
     return roots
@@ -833,8 +961,9 @@ def _piped_roots(ends, parsed, at) -> list:
     if back is not None and _prints_a_count(parsed[back]):
         back = None
     while back is not None:
-        roots = _roots(parsed[back]) + roots
-        back = _piped_into(ends, parsed, back)
+        before = _piped_into(ends, parsed, back)
+        roots = _roots(parsed[back], before is None) + roots
+        back = before
     return roots
 
 
@@ -943,9 +1072,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     substitution (`cp $(find tests -name x) /tmp/`): that is a read (`_copy_outer`). The builder test
     check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`), so
     no other caller's verdict moves."""
-    def scan(text, fed=None, copy_outer=False):
+    def scan(text, fed=None, copy_outer=False, filters=None):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
-                                 predicate_command, fed, copy_outer)
+                                 predicate_command, fed, copy_outer, filters)
 
     if not read_fed:
         return scan(cmd)
@@ -956,7 +1085,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     if hit:
         return hit
     fed = _fed_command(cmd)
-    return scan(fed[0], fed[1:]) if fed else ""
+    return scan(fed[0], fed[1:], filters=_walk_filters([text for text, _in_message in texts] or [cmd])) \
+        if fed else ""
 
 
 def _copy_outer(segment):
@@ -991,8 +1121,9 @@ def _takes_target(word) -> bool:
 
 
 def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, predicate_command,
-                      fed=None, copy_outer=False):
-    """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it."""
+                      fed=None, copy_outer=False, filters=None):
+    """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it.
+    `filters` is `_walk_filters` of the command: the name filter of each fed root's find."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     if fed:
         segments, ends = fed
@@ -1063,10 +1194,17 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if not word or word in (">", ">>"):
                 continue
             # A fed writer's word that is a folder writes each test under it: `find . | xargs sed -i`.
-            hit = predicate(word, at, verb) if predicate_command else (
-                predicate(word, at) or bool(fed) and _first_test_under(word, at, predicate))
+            # A data word's `""` stand-in names no folder.
+            walked = ""
+            if predicate_command:
+                hit = predicate(word, at, verb)
+            else:
+                hit = predicate(word, at)
+                if not hit and fed and word != '""':
+                    walked = _first_test_under(word, at, predicate, (filters or {}).get(_unquoted(word)))
+                    hit = bool(walked)
             if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
-                return word
+                return word + _TOO_LARGE_NOTE if walked == _TOO_LARGE else word
     return ""
 
 
