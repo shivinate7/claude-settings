@@ -88,6 +88,7 @@ FAMILIES = {
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
+    "scratchpad-owner": "rule scratchpad-owner: an agent that runs a script another agent of its session wrote into the shared scratchpad is asked; the write-time record, the run forms, the passes, the reads and the cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
@@ -22676,6 +22677,307 @@ LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, whi
                          "never_lifted", session_home_owner_override_lifts_case))
 LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
                          "with no session", session_home_spawn_cost_case))
+
+
+# =========================================================================== scratchpad-owner
+# Rule scratchpad-owner (decision an-agent-outside-its-home-tree-must-stop, the own-scratchpad
+# exemption). Every agent of one session shares that session's scratchpad (note
+# scratchpad-shared-per-session), so an agent can run a script that another agent of the session left
+# there. At write time the guard records the agent_id that wrote each file under THIS session's
+# scratchpad. At run time it asks when an agent runs such a file that a different agent recorded. The
+# writer, a top-level call, a file with no record and a read all pass. Each case makes its guard calls
+# in its own temp folder and its own session, so one case's record never reaches another case.
+FAMILY = "scratchpad-owner"
+SPO_RULE = "scratchpad-owner"
+SPO_WRITER = "spo-writer-01"   # an agent id in the shape AGENT_ID accepts
+SPO_OTHER = "spo-other-02"
+SPO_SLUG = "-home-user-claude-settings"   # the project folder the scratchpad sits under
+PY_TEXT = "print(1)\n"
+SH_TEXT = "echo hi\n"
+SPO_NT = "skipped: these cases use POSIX shell forms and POSIX paths"
+
+
+def spo_fixture(tag):
+    """One case's folders under this run's folder: a temp folder the guard reads as TMPDIR, this
+    session's scratchpad inside it (`<tmp>/<slug>/<session>/scratchpad`), and a working folder that
+    sits in no checkout. The session id is new for each case."""
+    folder = os.path.join(ROOT, "spo", tag)
+    fx = {"tmp": os.path.join(folder, "tmp"), "sid": "spo-" + uuid.uuid4().hex,
+          "work": os.path.join(folder, "work")}
+    fx["scratch"] = os.path.join(fx["tmp"], SPO_SLUG, fx["sid"], "scratchpad")
+    os.makedirs(fx["scratch"], exist_ok=True)
+    os.makedirs(fx["work"], exist_ok=True)
+    return fx
+
+
+def spo_call(fx, tool, agent, **tool_input):
+    """One guard call, as the harness sends it in this case: its session, its temp folder and its
+    working folder. `agent` is None for the top-level session."""
+    return _decide_full(tool, fx["work"], agent_id=agent, session=fx["sid"], temp=fx["tmp"],
+                        **tool_input)
+
+
+def spo_run(fx, agent, command):
+    """One Bash call from `agent`, by its command text."""
+    return spo_call(fx, "Bash", agent, command=command)
+
+
+def spo_scope(fx, name, path):
+    """Scope before subject: `path` lies inside this case's session scratchpad, by its real path."""
+    if os.path.realpath(path).startswith(os.path.realpath(fx["scratch"]) + os.sep):
+        return ""
+    return "%s: scope, the fixture is not under this session's scratchpad" % name
+
+
+def spo_wrote(fx, name, agent, path, text, tool="Write", command=None):
+    """Agent `agent` makes `path`: its guard call first, then the file lands on disk, as the tool
+    would write it. A refused call is a problem, since the record needs an allowed write."""
+    if tool == "Write":
+        got, reason = spo_call(fx, "Write", agent, file_path=path, content=text)
+    else:
+        got, reason = spo_call(fx, "Bash", agent, command=command)
+    if got != "allow":
+        return ["%s: setup, agent %s's write is %s, want allow (%s)"
+                % (name, agent, got, reason[:100])]
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return []
+
+
+def spo_allowed(name, got, reason):
+    """A call the rule passes: the decision is allow."""
+    if got == "allow":
+        return ""
+    return "%s: want allow, got %s (%s)" % (name, got, reason[:100])
+
+
+def spo_asked(name, got, reason, banned):
+    """A run the rule asks about: decision ask, the rule's id in the reason, and no path in it. The
+    `banned` fragments are the scratchpad folder and the script's name, which the refusal never names."""
+    if got != "ask":
+        return "%s: want ask naming %s, got %s (%s)" % (name, SPO_RULE, got, reason[:100])
+    if SPO_RULE not in reason:
+        return "%s: the ask does not name %s (%s)" % (name, SPO_RULE, reason[:100])
+    if names_the_target(reason, SPO_RULE) or any(item in reason for item in banned):
+        return "%s: the ask names the scratchpad or the script" % name
+    return ""
+
+
+def spo_result(problems, passed):
+    """(True, `passed`) when no problem holds, else (False, the problems joined)."""
+    found = [p for p in problems if p]
+    return (False, "; ".join(found)) if found else (True, passed)
+
+
+def spo_snapshot(folder):
+    """Every entry under `folder`, dotfiles included, with its size and mtime: any write shows."""
+    seen = {}
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            info = os.lstat(path)
+            seen[os.path.relpath(path, folder)] = (info.st_size, info.st_mtime_ns)
+    info = os.lstat(folder)
+    seen["."] = (info.st_size, info.st_mtime_ns)
+    return seen
+
+
+def spo_case_1():
+    """Agent A writes probe2.py with Write; agent B runs it with python3: asked."""
+    fx = spo_fixture("c1")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "1", probe)] + spo_wrote(fx, "1", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_asked("1", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's python3 run of agent A's script is asked")
+
+
+def spo_case_2():
+    """Agent A writes probe2.py with Write; agent B runs it after a cd into the scratchpad: asked."""
+    fx = spo_fixture("c2")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "2", probe)] + spo_wrote(fx, "2", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "cd %s && python3 probe2.py" % fx["scratch"])
+    problems.append(spo_asked("2", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's cd and python3 run of agent A's script is asked")
+
+
+def spo_case_3():
+    """Agent A writes p.sh by a bash heredoc; agent B runs it through bash: asked."""
+    fx = spo_fixture("c3")
+    script = os.path.join(fx["scratch"], "p.sh")
+    heredoc = "cat > %s <<'EOF'\n%sEOF" % (script, SH_TEXT)
+    problems = [spo_scope(fx, "3", script)] + spo_wrote(
+        fx, "3", SPO_WRITER, script, SH_TEXT, tool="Bash", command=heredoc)
+    got, reason = spo_run(fx, SPO_OTHER, "bash %s" % script)
+    problems.append(spo_asked("3", got, reason, (fx["scratch"], "p.sh")))
+    return spo_result(problems, "agent B's bash run of agent A's heredoc script is asked")
+
+
+def spo_case_4():
+    """Agent A writes p.sh with Write; agent B runs it as the command word: asked."""
+    fx = spo_fixture("c4")
+    script = os.path.join(fx["scratch"], "p.sh")
+    problems = [spo_scope(fx, "4", script)] + spo_wrote(fx, "4", SPO_WRITER, script, SH_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, script)
+    problems.append(spo_asked("4", got, reason, (fx["scratch"], "p.sh")))
+    return spo_result(problems, "agent B's run of agent A's script by its path is asked")
+
+
+def spo_case_5():
+    """Agent A writes probe2.py with Write, then runs it itself: allowed."""
+    fx = spo_fixture("c5")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "5", probe)] + spo_wrote(fx, "5", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % probe)
+    problems.append(spo_allowed("5", got, reason))
+    return spo_result(problems, "agent A runs its own script and is allowed")
+
+
+def spo_case_6():
+    """probe2.py is made outside the guard, so no record names it; agent B runs it: allowed."""
+    fx = spo_fixture("c6")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    with open(probe, "w", encoding="utf-8") as handle:
+        handle.write(PY_TEXT)
+    problems = [spo_scope(fx, "6", probe)]
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_allowed("6", got, reason))
+    return spo_result(problems, "agent B runs a script with no record and is allowed")
+
+
+def spo_case_7():
+    """Agent A writes probe2.py with Write; a top-level call with no agent_id runs it: allowed."""
+    fx = spo_fixture("c7")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "7", probe)] + spo_wrote(fx, "7", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, None, "python3 %s" % probe)
+    problems.append(spo_allowed("7", got, reason))
+    return spo_result(problems, "the top-level session runs agent A's script and is allowed")
+
+
+def spo_case_8():
+    """Agent A writes probe2.py with Write; agent B reads it with cat: allowed."""
+    fx = spo_fixture("c8")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "8", probe)] + spo_wrote(fx, "8", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "cat %s" % probe)
+    problems.append(spo_allowed("8", got, reason))
+    return spo_result(problems, "agent B reads agent A's script with cat and is allowed")
+
+
+def spo_case_9():
+    """Agent A's Write and its Bash redirect, both outside any scratchpad, create no file under this
+    session's scratchpad: the scratchpad's entries, sizes and times are unchanged."""
+    fx = spo_fixture("c9")
+    seed = os.path.join(fx["scratch"], "notes.txt")
+    with open(seed, "w", encoding="utf-8") as handle:
+        handle.write("seed\n")
+    before = spo_snapshot(fx["scratch"])
+    outside = os.path.join(fx["work"], "outside")   # a folder in no scratchpad
+    os.makedirs(outside, exist_ok=True)
+    got, reason = spo_call(fx, "Write", SPO_WRITER,
+                           file_path=os.path.join(outside, "out.txt"), content="x\n")
+    problems = [spo_allowed("9a", got, reason)]
+    got, reason = spo_run(fx, SPO_WRITER, "echo x > %s" % os.path.join(outside, "y.txt"))
+    problems.append(spo_allowed("9b", got, reason))
+    if spo_snapshot(fx["scratch"]) != before:
+        problems.append("9: a write outside the scratchpad changed the scratchpad")
+    return spo_result(problems, "agent writes outside any scratchpad leave the scratchpad unchanged")
+
+
+def spo_case_10():
+    """Full size: agent A writes forty scripts with Write, then agent B runs the oldest one: asked.
+    The record must hold the early files as well as the late ones."""
+    fx = spo_fixture("c10")
+    problems = []
+    for index in range(40):
+        path = os.path.join(fx["scratch"], "part%02d.py" % index)
+        problems += spo_wrote(fx, "10", SPO_WRITER, path, PY_TEXT)
+        if problems:
+            break
+    oldest = os.path.join(fx["scratch"], "part00.py")
+    problems.append(spo_scope(fx, "10", oldest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % oldest)
+    problems.append(spo_asked("10", got, reason, (fx["scratch"], "part00.py")))
+    return spo_result(problems, "agent B's run of the oldest of forty agent A scripts is asked")
+
+
+def spo_text_case(tag, name, command_of, passed):
+    """Agent A writes probe2.py; agent B's call holds the run's text as quoted text, a comment, a heredoc
+    body or a multi-line string, and runs nothing: allowed. `command_of(probe, outside)` builds the call."""
+    fx = spo_fixture(tag)
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, name, probe)] + spo_wrote(fx, name, SPO_WRITER, probe, PY_TEXT)
+    outside = os.path.join(fx["work"], "notes.txt")
+    got, reason = spo_run(fx, SPO_OTHER, command_of(probe, outside))
+    problems.append(spo_allowed(name, got, reason))
+    return spo_result(problems, passed)
+
+
+def spo_extra_quoted():
+    return spo_text_case("x1", "extra-quoted", lambda probe, outside: "echo 'python3 %s'" % probe,
+                         "a run inside single quotes is text and is allowed")
+
+
+def spo_extra_comment():
+    return spo_text_case("x2", "extra-comment", lambda probe, outside: "echo hi # python3 %s" % probe,
+                         "a run after a comment mark is text and is allowed")
+
+
+def spo_extra_heredoc():
+    return spo_text_case("x3", "extra-heredoc",
+                         lambda probe, outside: "cat > %s <<'EOF'\npython3 %s\nEOF" % (outside, probe),
+                         "a run in a heredoc body is text and is allowed")
+
+
+def spo_extra_apostrophe():
+    return spo_text_case("x4", "extra-apostrophe",
+                         lambda probe, outside: 'echo "don\'t" && cat %s' % probe,
+                         "a lone apostrophe in double quotes does not hide the read and is allowed")
+
+
+def spo_extra_multiline():
+    return spo_text_case("x5", "extra-multiline",
+                         lambda probe, outside: 'echo "first line\npython3 %s"' % probe,
+                         "a run on the second line of a double-quoted string is text and is allowed")
+
+
+def spo_register(label, check):
+    """Register one scratchpad-owner check. Each check builds only its own folders, so a family run
+    skips the fixture build. POSIX only: the cases use shell forms and POSIX paths."""
+    def run():
+        if os.name == "nt":
+            return SKIP, SPO_NT
+        return check()
+    FIXTURELESS_CHECKS.add(run)
+    LOG_CHECKS_EXTRA.append((label, run))
+
+
+spo_register("scratchpad-owner: 1 agent B runs agent A's script with python3, after A wrote it with Write: asked",
+             spo_case_1)
+spo_register("scratchpad-owner: 2 agent B runs agent A's script after cd into the scratchpad: asked",
+             spo_case_2)
+spo_register("scratchpad-owner: 3 agent B runs agent A's script through bash, after A wrote it by a heredoc: asked",
+             spo_case_3)
+spo_register("scratchpad-owner: 4 agent B runs agent A's script as the command word: asked", spo_case_4)
+spo_register("scratchpad-owner: 5 agent A runs its own script: allowed", spo_case_5)
+spo_register("scratchpad-owner: 6 agent B runs a script with no record, made outside the guard: allowed",
+             spo_case_6)
+spo_register("scratchpad-owner: 7 a top-level call with no agent_id runs agent A's script: allowed",
+             spo_case_7)
+spo_register("scratchpad-owner: 8 agent B reads agent A's script with cat: allowed", spo_case_8)
+spo_register("scratchpad-owner: 9 agent writes outside any scratchpad create no file under this session's "
+             "scratchpad: allowed", spo_case_9)
+spo_register("scratchpad-owner: 10 agent B runs the oldest of forty scripts agent A wrote: asked",
+             spo_case_10)
+spo_register("scratchpad-owner: extra, a run inside single quotes is text: allowed", spo_extra_quoted)
+spo_register("scratchpad-owner: extra, a run after a comment mark is text: allowed", spo_extra_comment)
+spo_register("scratchpad-owner: extra, a run in a heredoc body is text: allowed", spo_extra_heredoc)
+spo_register("scratchpad-owner: extra, a lone apostrophe in double quotes does not hide a read: allowed",
+             spo_extra_apostrophe)
+spo_register("scratchpad-owner: extra, a run on the second line of a double-quoted string is text: allowed",
+             spo_extra_multiline)
 
 
 # =========================================================================== mask_script lexemes
