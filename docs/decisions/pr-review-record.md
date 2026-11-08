@@ -65,14 +65,16 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- `--review-record` also parses `hooks/guard.py` and its local import closure once per call (`merge/merge.py` `guard_import_closure`): about 40 files, about 300 ms, no process start, no file written, no cache.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
 ## The limits
 
 - `--review-record` reads the PR's changed files. A moved file counts at its old path too.
-  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
+  - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. It also refuses a path in the import closure of the merge tool's own `hooks/guard.py` (`guard_import_closure`, beside `GUARD_PATHS` in `merge/merge.py`, the one home of the list), such as `janitor/sweep.py` and `skills/waiting-page/stale_pages.py`. The closure is derived at each call, so a new import is never missed. If `hooks/guard.py` or a module in its closure cannot be read or parsed, the tool stops: the list is unknown. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
   - It refuses a files list shorter than the PR's changed-file count, and a PR read that gives no count. GitHub lists at most 3000 files.
+  - Data files a guard reads, such as `skills/waiting-page/page.html` and `skills/impeccable/SKILL.md`, are not on the list. An import scan cannot find them, and listing them would make each page design edit a guard change.
   - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
   - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
