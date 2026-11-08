@@ -2013,6 +2013,9 @@ ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
 ENTRY_AMEND = re.compile(r"^commit \(amend\):")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
+# A HEAD move that writes a commit: the commit it lands may be the agent's own change under a new sha. A
+# fast-forward writes none, and a reset, checkout, clone or branch creation only moves HEAD.
+ENTRY_WRITES = re.compile(r"^(?:commit|cherry-pick|revert|am|merge|pull|rebase)\b(?!.*: Fast-forward$)")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
 # A git-dir entry that shows a replay in progress: its staged change is git's copy plus what the agent
 # resolved. A MERGE_MSG without MERGE_HEAD is a `cherry-pick -n` or `revert -n`.
@@ -2112,7 +2115,7 @@ def own_changes(root: str):
         if kind in (OWN, NOTED):
             kinds.setdefault(sha, kind)
             if index and ENTRY_AMEND.match(subject):
-                replaced.setdefault(sha, entries[index - 1][0])
+                replaced.setdefault(sha, entries[index - 1])
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
@@ -2125,11 +2128,12 @@ def own_changes(root: str):
     for sha, kind in kinds.items():
         if sha in lost:
             continue
-        before = replaced.get(sha)
-        if before and (kinds.get(before) != OWN or before in inherited):
-            # An amend of a commit the agent did not make. With the same tree it is a message-only
-            # amend, and the test lines in it are the other author's. An amend of the agent's own
-            # commit is read in full.
+        before, how = replaced.get(sha, ("", ""))
+        if before and (before in inherited or not ENTRY_WRITES.match(how)):
+            # An amend of a commit HEAD reached by a move that writes none (checkout, reset, clone). With
+            # the same tree it is a message-only amend, and the test lines in it are the other author's.
+            # An amend of a commit the agent made, or one a replay (rebase, cherry-pick, pull) copied
+            # from it, is read in full.
             trees = [guard_core._git(root, "rev-parse", c + "^{tree}") for c in (sha, before)]
             if any(t is None or t.returncode != 0 for t in trees):
                 return None
