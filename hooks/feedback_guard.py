@@ -429,7 +429,7 @@ class Homes:
     def _held(self, path, closed=False):
         """(error, held, skipped) for a repo-relative or absolute path: `held` is true when some branch's tree
         holds it in one of the repos, or when the check stood down. `error` is set when an absolute path is in
-        no repo. `skipped` lists the repo tops git or its layout could not read, for the reason text
+        no repo. `skipped` lists the repo tops git could not read, for the reason text
         (unread_note). The one read behind a task's or a closed note's `step:<slug>` home and a closed note's file
         home. Raises ruling_home._GitFailure when no repo could be read."""
         places, err = self._locate(path, closed)
