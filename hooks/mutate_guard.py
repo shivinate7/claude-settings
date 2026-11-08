@@ -953,8 +953,8 @@ MUTATIONS = [
     # trailing-dot quirk). The required field names the TAG both cases carry for exactly this
     # reason, not either case's own name: see the comment beside the trailing-dot case in
     # hooks/test_guard.py.
-    ("cap: the resolved-basename branch is gone, so a symlink to a settings file walks past",
-     '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+    ("cap: the resolved-place branch is gone, so a symlink to a settings file walks past",
+     '        return _settings_place(_resolved(path, cwd), cwd)\n'
      '    except Exception:\n        return False',
      '        return False\n'
      '    except Exception:\n        return False', "guard", '[resolve-branch proof]'),
@@ -1383,11 +1383,11 @@ MUTATIONS = [
     # the one that turns red here. Only a case whose literal spelling fails the direct test needs
     # the resolve this raise disables, which is exactly what the tag names (see the comment beside
     # the trailing-dot case in hooks/test_guard.py).
-    ("fail-open: is_settings_file's resolve is forced to raise, degrading to a basename-only match",
-     '    try:\n        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+    ("fail-open: is_settings_file's resolve is forced to raise, degrading to a spelling-only match",
+     '        return _settings_place(_resolved(path, cwd), cwd)\n'
      '    except Exception:\n        return False',
-     '    try:\n        raise Exception("mutant")\n'
-     '        return basename(_resolved(path, cwd)) in SETTINGS_BASENAMES\n'
+     '        raise Exception("mutant")\n'
+     '        return _settings_place(_resolved(path, cwd), cwd)\n'
      '    except Exception:\n        return False',
      "guard", "[resolve-branch proof]"),
     ("fail-open: pointer_checkout's read is forced to raise, silencing the whole pointer-head rule",
