@@ -45,21 +45,40 @@ class DatedText:
 
 
 class ReviewRound:
-    """The `review round` group. A round number is narration whatever follows "in", "after" or "from", and a bare
-    one is narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic. A line that cites
-    an id holding `round-N` (hold-unsafe-after-round-3) quotes a rule, so its "round N" with the same N is not
-    history; an id holding another number does not clear it."""
+    """The pattern group for round numbers, kept as a class for its exemption. A round number is narration whatever
+    follows "in", "after" or "from", and a bare one is narration unless a numeric unit follows it, as in "2 decimals",
+    which is arithmetic. A comment that quotes a rule cites an id holding `round-N` (hold-unsafe-after-round-N).
+    A bare "round N" with the same N on that line is the rule's wording, so it passes. An "in", "after" or "from"
+    form passes only inside the same parentheses as such an id, as in a quoted "(decision <id>, net-value hold
+    after round N)". Anything else stays flagged, and so does an id holding another number."""
     ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
     CITED = re.compile(r"[\w-]*\bround-(\d+)(?!\d)", re.I)
+    FORM = re.compile(r"(?:in|after|from)\s", re.I)
+
+    @staticmethod
+    def paren_spans(text):
+        spans, stack = [], []
+        for k, c in enumerate(text):
+            if c == "(":
+                stack.append(k)
+            elif c == ")" and stack:
+                spans.append((stack.pop(), k))
+        return spans
 
     def finditer(self, text):
-        cited = {m.group(1) for m in self.CITED.finditer(text)}
+        cited = [(m.start(), m.group(1)) for m in self.CITED.finditer(text)]
+        spans = self.paren_spans(text)
         for m in self.ROUND.finditer(text):
             n = re.search(r"round\s*(\d+)", m.group(0), re.I)
-            if not (n and n.group(1) in cited):
-                yield m
+            same = [at for at, num in cited if n and num == n.group(1)]
+            if self.FORM.match(m.group(0)):
+                if any(lo < m.start() < hi and lo < at < hi for lo, hi in spans for at in same):
+                    continue
+            elif same:
+                continue
+            yield m
 
 
 class HistoryPhrase:
@@ -480,10 +499,10 @@ def sh_code_end(src, i, spans, pending, close=None):
     the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
     comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. A paren
     inside `[[ ]]` (a regex group) or right after `?*+@!` (an extglob group) does not end a word either, so `)#b`
-    there holds none. `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` and in `let` arguments;
-    `((` and `$((` are read by sh_try_arith."""
+    there holds none. `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]`; `((` and `$((` are read
+    by sh_try_arith."""
     kinds, ws = [], True  # kinds: one entry per open paren, True when the paren is part of a word
-    dbl = sub = let = False  # inside [[ ]]; array subscript depth; inside a `let` command
+    dbl = sub = False  # inside [[ ]]; array subscript depth
     while i < len(src):
         c = src[i]
         if c == "\\":
@@ -514,11 +533,11 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws, sub, let = True, 0, False
+            ws, sub = True, 0
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
             ws = True
-        elif (sub or let) and src.startswith("<<", i):
+        elif sub and src.startswith("<<", i):
             i += 2
             ws = True
         elif src.startswith("<<", i):
@@ -552,13 +571,8 @@ def sh_code_end(src, i, spans, pending, close=None):
             if close == ")" and not kinds:
                 return i + 1
             ws = not (kinds.pop() if kinds else dbl)
-            let = False
             i += 1
         else:
-            if ws and src[i:i + 4] in ("let ", "let\t"):
-                let = True
-            elif c in ";&|":
-                let = False
             i += 1
             ws = c in " \t;&|<>"
     if close:
