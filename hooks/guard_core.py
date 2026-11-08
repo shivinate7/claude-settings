@@ -263,8 +263,24 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     powershell = is_powershell(cmd)
     index = 0
     length = len(cmd)
+    # A body in view is walked as shell text, so a lone quote in it would leak past its delimiter line.
+    # Each delimiter line takes back the quote state the walk had at the end of its header line.
+    head_ends, restores = _heredoc_restores(cmd, contractions_are_text) if "<<" in cmd and not powershell else ([], [])
+    saved = {}
+    leaked = False
     while index < length:
         char = cmd[index]
+        while head_ends and index >= head_ends[0]:
+            saved[head_ends.pop(0)] = quote
+        if restores and index >= restores[0][0]:
+            at, head_end = restores.pop(0)
+            if index == at and quote != saved.get(head_end, quote):
+                leaked = True
+                quote = saved[head_end]
+                if not quote:   # bash sees the newline before the delimiter: cut the segment there
+                    segments.append("".join(current))
+                    ends is None or ends.append("\n")
+                    current = []
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
             if char in ("'", '"', "`", "#", "<", "@"):
                 current.append(char)
@@ -338,7 +354,29 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
-    return segments, ("" if quote == BLIND else quote), shaped
+    # a restore that closed a quote reports open, so the second reading still runs
+    return segments, ("" if quote == BLIND else quote or ("'" if leaked else "")), shaped
+
+
+def _heredoc_restores(cmd: str, contractions_are_text: bool):
+    """([offset of each header line's end], [(offset of a delimiter line, its header line's end offset)])
+    for the closed heredocs of `cmd`, one pair per body. Both lists ascend. A body with no closer gives
+    none: it runs to the end of input, so no delimiter line follows it."""
+    spans = []
+    _, _, unclosed = _walk_heredocs(cmd, contractions_are_text, spans=spans)
+    if not spans or unclosed:
+        return [], []
+    starts = [0]
+    for line in cmd.split("\n")[:-1]:
+        starts.append(starts[-1] + len(line) + 1)
+    head_ends, restores, previous_end, head_end = [], [], None, 0
+    for first, end in spans:
+        if first != previous_end:   # the line after a delimiter is a header's second body, never a new header
+            head_end = starts[first] - 1
+            head_ends.append(head_end)
+        restores.append((starts[end], head_end))
+        previous_end = end + 1
+    return head_ends, restores
 
 
 # A leading `VAR=value` assignment, which is not a segment's command. Shared with the

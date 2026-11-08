@@ -254,6 +254,10 @@ MUTATIONS = [
      '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)\n'
      '                or not _feeds_data(header, shells_only)]',
      '        keep = []', "guard", 'frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings'),
+    ("kill: a delimiter line keeps the quote a lone ' in the body opened, so a kill after the closer goes unjudged",
+     '            if index == at and quote != saved.get(head_end, quote):',
+     '            if False:', "guard",
+     "heredoc: lone-quote leak, python, quoted delimiter, body print('it\\'s'), a kill after the closer denies"),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
