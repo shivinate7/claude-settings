@@ -186,7 +186,6 @@
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs)
 - mods-step-order-unpinned: no test pins the mod test CI step as last in the checks job (checks.yml)
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
-- mutate-tree-paths-uncollided: the `tree_` folders of ruling and decision mutants are not in the path-collision check of `main` (hooks/mutate_guard.py `lay_out`). Fix: step:mutate-tree-collision
 - nesting-risk-unrecorded: nothing prompts a risk record when a repo raises agent spawn depth (settings.json, deleted rule roles-workers-never-spawn)
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR)
 - no-start-lock-has-no-pid-check: agent lock with no start time has no pid-reuse check; a reused pid keeps the tree, the safe side (janitor/sweep.py)
