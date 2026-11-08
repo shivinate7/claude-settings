@@ -3571,8 +3571,9 @@ REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never 
 # The value of the Findings line (and of --findings): none, a count filed in this pull request, or a count filed in follow-up pull requests (decision pr-review-record).
 REVIEW_FINDINGS = r"none|[1-9][0-9]*, this PR|[1-9][0-9]*, follow-up #[1-9][0-9]*(?:, #[1-9][0-9]*)*"
 FILING_KINDS = ("debts", "debt-notes")  # the layout kinds where a finding is filed: a new debt file under the first's folder, or lines added to the second's file (lint/layout.py has the paths)
-# A review record created at or after this instant with no Findings line reads not done; an earlier one stays legacy and keeps its verdict. It is the owner's
-# ruling time (owner item 386 b, 2026-11-07 22:25 CST = 04:25:00Z on Nov 8), so the records already written when the Findings line became required are not recalled.
+# A review record created at or after this instant with no Findings line reads not done; an earlier one stays legacy and keeps its verdict. The cut-off is
+# the moment `--findings` reached main, never earlier than owner item 386 b's ruling time (2026-11-07 22:25 CST = 04:25:00Z on Nov 8); the value is set when #2070
+# merges. So a record written before a reviewer could file the Findings line is not recalled.
 FINDINGS_REQUIRED_FROM = datetime.datetime(2026, 11, 8, 4, 25, 0, tzinfo=datetime.timezone.utc).timestamp()
 FINDINGS_MISSING_CAUSE = "review record lacks Findings"  # the cause the ledger line names for such a record
 FINDINGS_UNKNOWN = "findings unknown"  # the kind of a ledger line whose Findings read could not run
