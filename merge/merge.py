@@ -14,6 +14,8 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          A head that carries a `Batch: red <head> <job>` comment for itself, or holds a lane head that does, is refused before any
+                          push (preview and --confirm alike), and no flag lifts it. Cost: one read of the repo's issue comments since the PR opened.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -3220,17 +3222,15 @@ def batch_refusal(host, n, base, head):
 BATCH_RED_CITE = "(rule git-integration-branch-merge, a red batch drops its failing lane and is rebuilt, never merged)"
 
 def comments_since(host, since):
-    """-> the repo's issue comments updated since `since` (Host.issue_comments). A 404 on the list is no comments, as merged_into reads a 404 on a pull
-    request: a repo whose comment list is not there holds no line, and every other read of this run fails first. A host with no comment read
-    (the scripted hosts of the cases that never read comments) holds none. Any other failed read is a Stop: unknown is red (READ_CITE)."""
+    """-> the repo's issue comments updated since `since` (Host.issue_comments). A failed read is a Stop that carries READ_CITE: unknown is red, so the
+    merge is refused. A host with no comment read holds none: the real Host always has one, so only a scripted host of the git-only cases lacks it
+    (a bandaid for those, until the scripted host gives one)."""
     read = getattr(host, "issue_comments", None)
     if read is None:
         return []
     try:
         return read(since)
     except Stop as e:
-        if "404" in str(e):
-            return []
         raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the comments. {READ_CITE}")
 
 def refuse_batch_red(host, wt, base_ref, info):
