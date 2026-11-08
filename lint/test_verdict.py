@@ -425,6 +425,23 @@ def plant(folder, name, age_days, header=True):
     os.utime(p, (t, t))
     return p
 
+class StdinPassesThrough(unittest.TestCase):
+    """Off Windows, a piped stdin reaches the command: `printf x | verdict cmd` feeds cmd. Only Windows swaps in an
+    empty stdin, inside hooks/_nowindow.py, because a no-window child cannot use an inherited console stdin."""
+
+    @unittest.skipIf(os.name == "nt", "Windows gives the command an empty stdin (hooks/_nowindow.py)")
+    def test_a_piped_stdin_reaches_the_command(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            script = os.path.join(d, "reads.py")
+            with open(script, "w") as f:
+                f.write("import sys\nsys.exit(0 if sys.stdin.read() == 'piped\\n' else 3)\n")
+            r = subprocess.run([sys.executable, V, sys.executable, script], input="piped\n",
+                               capture_output=True, text=True, timeout=60,
+                               env={k: v for k, v in os.environ.items() if k != "VERDICT_LOG"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+
 class Prune(unittest.TestCase):
     def setUp(self):
         self.sb = tempfile.TemporaryDirectory()
