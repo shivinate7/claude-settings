@@ -598,7 +598,8 @@ def _is_rewritten(name: str, path, rewritten) -> bool:
 
 def _script_is_text(words, at, written, rewritten) -> bool:
     """True when the script FILE of the interpreter segment WORDS has a visible source that runs no shell
-    (`guard_core.script_source_is_text`), so its quoted arguments are data. A script that a write of this
+    (`guard_core.script_source_is_text`) and writes no file (`guard_core.script_source_writes_a_file`: it may store
+    an argument for a later run), so its quoted arguments are data. A script that a write of this
     command may land on (REWRITTEN, from `_rewritten_files`) is not visible. Else the source is visible when a
     heredoc of this command writes it (WRITTEN, from `guard_core.heredoc_sources`), or it is a plain readable
     file under AT, the folder the segment runs in (None when that cannot be told), no larger than
@@ -614,9 +615,11 @@ def _script_is_text(words, at, written, rewritten) -> bool:
         return False
     if plain in written:
         source = written[plain]
-        return source is not None and guard_core.script_source_is_text(unquoted[0], source)
+        return (source is not None and guard_core.script_source_is_text(unquoted[0], source)
+                and not guard_core.script_source_writes_a_file(source))
     source = _script_source(path) if path else None
-    return source is not None and guard_core.script_source_is_text(unquoted[0], source)
+    return (source is not None and guard_core.script_source_is_text(unquoted[0], source)
+            and not guard_core.script_source_writes_a_file(source))
 
 
 def _data_words(kind: str, words):

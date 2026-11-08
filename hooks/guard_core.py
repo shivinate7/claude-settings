@@ -894,6 +894,19 @@ def script_source_is_text(interpreter: str, source: str) -> bool:
     return not _SCRIPT_SHELL(source)
 
 
+# What a script source does to write a file: python `open(.., 'w'|'a'|'x'|'+')`, `write_text`, `write_bytes`; node
+# `writeFile`, `writeFileSync`, `appendFile`, `createWriteStream`, `fs.write`. Such a script may store its argument,
+# and a later command may run the file, so the argument is not data (`script_source_writes_a_file`).
+_SCRIPT_WRITES = re.compile(r"\bopen\s*\([^)\n]*?[\"'][rbtU]*[wax+][bt+]*[\"']|\bwrite_(?:text|bytes)\b"
+                            r"|\b(?:writeFile|appendFile|createWriteStream)(?:Sync)?\b|\bfs\.write\b|\bwriteSync\b")
+
+
+def script_source_writes_a_file(source: str) -> bool:
+    """True when SOURCE, the text of a script, writes a file (`_SCRIPT_WRITES`). A quoted argument such a script
+    gets may be stored and run later, so the guard cannot see that nothing runs it."""
+    return bool(_SCRIPT_WRITES.search(source))
+
+
 def heredoc_sources(bodies) -> dict:
     """{file a heredoc writes: its body} for BODIES, as `_walk_heredocs` gives them: only a file the header
     writes from scratch whose body reaches the file as written (a quoted delimiter, or no `$`, backtick or
@@ -986,12 +999,14 @@ def _run_script_arg(words):
     return words[index] if index not in (None, PROGRAM_NOT_A_FILE) and index == len(words) - 1 else None
 
 
-def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
+def _segment_runs_nothing_unseen(segment: str, sources, data_args: bool = False) -> bool:
     """True when the command SEGMENT runs only a known reader (`KNOWN_READERS`) or a script file whose body
     SOURCES shows (that body is checked on its own, as `_kept_headers` checks every kept body). Read with the
     quote-aware tokenizer, so a word inside a quote is no command word. A command word that is a variable or
     a glob, an `xargs`, `exec`, `env`, `source` or `.`, a shell or interpreter with an inline program or data
-    arguments, a substitution anywhere, or a segment the tokenizer cannot read, may run a file."""
+    arguments, a substitution anywhere, or a segment the tokenizer cannot read, may run a file. DATA_ARGS (the
+    outer command's test) also passes a python, node, perl or ruby that runs a literal script file with arguments after
+    it, when that script's source is visible, runs no shell, writes no file and loads no code: it only reads them."""
     tokens = segment_tokens(segment)
     if tokens is None or any("`" in token or "$(" in token for token in tokens):
         return False
@@ -1011,6 +1026,14 @@ def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
     if _UNRESOLVED_WORD.search(words[0]):
         return False
     script = words[0] if len(words) == 1 else _run_script_arg(words)
+    if script is None and data_args:
+        index = interpreter_script(words)
+        name = _plain_words([words[index]]) if index not in (None, PROGRAM_NOT_A_FILE) else []
+        if (name and not _UNRESOLVED_WORD.search(words[index]) and not re.fullmatch(_SHELLS, words[0].rsplit("/", 1)[-1].lower())
+                and sources.get(name[0]) is not None and script_source_is_text(words[0], sources[name[0]])
+                and not script_source_writes_a_file(sources[name[0]])
+                and not _source_loads_code(sources[name[0]], set(sources) - {name[0]})):
+            return True
     if script is None or _UNRESOLVED_WORD.search(script):
         return False
     plain = _plain_words([script])   # empty for a word like `1a=b`, which names no file: it fails closed
@@ -1093,6 +1116,18 @@ def _kept_closure(kept: set, bodies) -> set:
     return kept
 
 
+def _outer_runs_nothing_unseen(text: str, bodies) -> bool:
+    """True when every segment of TEXT, the outer command with its heredoc bodies dropped, passes
+    `_segment_runs_nothing_unseen`. A heredoc header such as `cat > f <<'EOF'` passes, since its redirect is not a
+    command word. A `cd`, `cp` or `mv`, a variable command word, a pipe into a shell and `xargs` do not: such a
+    command may run a file a heredoc wrote under another name or in another folder. Only a command that holds a
+    heredoc writing a file needs the test; no other command has a body to run."""
+    sources = heredoc_sources(bodies)
+    if not any(_plain_words(_WRITE_TARGET.findall(header)) for _, _, header in bodies):
+        return True
+    return all(_segment_runs_nothing_unseen(segment, sources, True) for segment in split_segments(text, []))
+
+
 def _kept_headers(text: str, bodies) -> set:
     """The headers whose body stays in view: a body whose file a later command runs, and every body whose
     file a kept body names as a word (`_kept_closure`). The kept script may run the file, so the file's body is
@@ -1103,6 +1138,8 @@ def _kept_headers(text: str, bodies) -> set:
     run nothing (`_script_body_runs_nothing`), else every body stays."""
     every = {header for _, _, header in bodies}
     try:
+        if not _outer_runs_nothing_unseen(text, bodies):
+            return every   # the outer command may run a body the guard cannot name: every body stays
         first = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
         kept = _kept_closure(first, bodies)
         sources = heredoc_sources(bodies)
@@ -1161,6 +1198,12 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         # Only a body whose file is run stays in view: a file that a later command reads as data is text.
         kept = _kept_headers(text, bodies)
         return "\n".join([_drop_heredoc_bodies(cmd, lambda header: header in kept)] + runs)
+    try:
+        outer_seen = _outer_runs_nothing_unseen(text, bodies)
+    except Exception:   # an outer command the reader cannot judge fails closed
+        outer_seen = False
+    if not outer_seen:
+        return "\n".join([_drop_heredoc_bodies(cmd, lambda header: True)] + runs)   # as main: every body stays
     return "\n".join([dropped] + runs)
 
 

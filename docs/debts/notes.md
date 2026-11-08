@@ -1505,3 +1505,4 @@
 - kept-body-readers-short: `KNOWN_READERS` leaves out set, cd, mkdir, export and others, so such a kept body keeps every body, as main does (hooks/guard_core.py). Decision: an-agent-outside-its-home-tree-must-stop (the other-checkout rule).
 - quoted-args-script-wrappers: `_SCRIPT_COMMAND` misses some wrapper prefixes before a script run by its own name (hooks/guard_core.py). Decision: an-agent-outside-its-home-tree-must-stop (the other-checkout rule).
 - quoted-args-no-chain3-row: no case runs a chain of three kept scripts (hooks/test_guard.py). Decision: an-agent-outside-its-home-tree-must-stop (the other-checkout rule).
+- quoted-arg-redirect-out-false-alarm: `python3 judge.py "echo x > ../f" > out.txt` is refused while the same command without `> out.txt` allows; cause not traced (hooks/guard_frozen.py). Decision: an-agent-outside-its-home-tree-must-stop (the other-checkout rule).
