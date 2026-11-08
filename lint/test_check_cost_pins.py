@@ -7,7 +7,7 @@ A decision record's Cost sentence may name a file only when a test pins it. The 
 docs/decisions/*.md under --root and prints one line per unpinned file token:
 `<record path>:<line>: <file token> named in a Cost sentence with no pin`.
 A count claim in a Cost sentence prints `<record path>:<line>: count in a Cost sentence with no reader`.
-A count claim in a debt note (each list item of docs/debts/notes.md is one note) prints
+A count claim in a note (each list item of docs/debts/notes.md is one note) prints
 `<notes path>:<line>: count in a note with no reader`.
 The file cases compare file rows only; a count case passes counts=True to compare count rows too, and so
 does a note case.
@@ -35,7 +35,7 @@ NAMED = " named in a Cost sentence with no pin"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 # The count rule's row. The file cases leave it out, so a count the rule flags fails only the count cases.
 COUNT = "count in a Cost sentence with no reader"
-# A count claim in a debt note: its row, and the notes file the note cases build. That file is the layout's
+# A count claim in a note: its row, and the notes file the note cases build. That file is the layout's
 # debt-notes path. An unrolled tree also tries the legacy path first, which these cases leave absent.
 NOTES = "docs/debts/notes.md"
 NOTE_COUNT = "count in a note with no reader"
@@ -613,7 +613,7 @@ class CostPinTests(unittest.TestCase):
         text = self.decide("span-bound.md", "- **Cost:** one `at most` read per call.\n")
         self.assert_found([count_row("span-bound.md", text, "- **Cost:**")], counts=True)
 
-    # Debt notes: each list item is one note. A count claim in a note needs a reader: a bound, an exemption word,
+    # Notes: each list item is one note. A count claim in a note needs a reader: a bound, an exemption word,
     # a date or run id in its sentence, or a test that holds the nearest code span. The red cases fail on the old
     # code. The note_control cases read clean beside a decision row that prints, so a clean note shows the run read.
 
@@ -728,7 +728,7 @@ class CostPinTests(unittest.TestCase):
         self.assert_found([note_row(text, "is among 266")], counts=True)
 
     def test_note_lone_backtick_is_no_unbalanced_finding_and_its_count_is_still_read(self):
-        # Pinned: a lone backtick in a debt note is plain text. It prints no unbalanced-backtick finding, and a count
+        # Pinned: a lone backtick in a note is plain text. It prints no unbalanced-backtick finding, and a count
         # claim in another sentence of the same note is still read and flagged. A stray backtick that held its
         # sentence open would take the later "Unmeasured" into the same sentence, which exempts the count.
         text = self.note("- frozen-trim-quoted-backtick: a write to a file named with a trailing ` reads as the bare "
