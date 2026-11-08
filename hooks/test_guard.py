@@ -10629,10 +10629,10 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh r
                          review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
-# Ruling (coordinator, 2026-11-08 09:42 CST): any other edit makes exactly 1 read of the old body. This case moved from 0 to 1 read.
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
 REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
-# Ruling (coordinator, 2026-11-08 09:42 CST): any other edit makes exactly 1 read of the old body. This case moved from 0 to 1 read.
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
 REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused under pr-review-record even when its comment cannot be read, MCP update_issue_comment",
@@ -10674,7 +10674,7 @@ REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judg
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
 
 
-# THE ROUND 1 OLD-BODY CASES. Coordinator ruling, 2026-11-08 09:42 CST: a marked new body is refused with no read; any other edit makes
+# THE OLD-BODY CASES. Decision pr-review-record, the edit-read cost: a marked new body is refused with no read; any other edit makes
 # exactly one read of the old body, and is refused when that body holds a record or the read cannot run. An edit whose new body the
 # guard cannot see (an --input file, a body read from stdin) is judged on its old body alone. A body file that cannot be read refuses
 # the edit with "could not run". An edit through a shell variable id refuses as a read that could not run, and its remedy writes the
