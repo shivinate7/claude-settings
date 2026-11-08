@@ -594,11 +594,14 @@ def note_counts(text):
     return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
 
 
-REVIVED_MARK = ": note `"  # a revival's problem line holds this after the path; the footer finds a revival by it
+class Revived(str):
+    """A revived note's problem line. It prints and compares as its text, and its class is the marker trailer_hint reads:
+    a lost line can hold any text, so the footer never finds a revival by its words. It rides through check's
+    (problems, notes) and the merge tool's memo of that answer unchanged."""
 
 
 def revived_notes(cwd, upstream, head, named=None, kept=None):
-    """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
+    """[(notes path, Revived problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
     counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
     state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
     The slug is refused when its last event lowered the count and head holds more copies than that commit left: a merge
@@ -645,12 +648,12 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
                 if kept is not None:
                     kept.append((path, slug))
             elif present[slug] > left:
-                found.append((path, ("%s" + REVIVED_MARK + "%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
+                found.append((path, Revived(("%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
                               "an edit in place does not keep a note. Delete the extra %s to bring the count back to %d. To keep "
                               "it on purpose, delete it in one commit and add it back in a later commit, or keep the revived copy by naming its slug in a %s "
                               "trailer for %s: put `- %s` in the trailer's reason.")
                               % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
-                                 "line" if present[slug] - left == 1 else "lines", left, TRAILER, path, slug)))
+                                 "line" if present[slug] - left == 1 else "lines", left, TRAILER, path, slug))))
     return found
 
 
@@ -787,8 +790,9 @@ def history(cwd, rev, window):
 
 def trailer_hint(problems):
     """The footer's extra sentence for a refusal that holds a revived note, for the CLI and the merge tool alike: a path-only
-    trailer cannot keep a revived note, only a reason that names its slug can. Empty for any other refusal."""
-    if any(REVIVED_MARK in p for p in problems):
+    trailer cannot keep a revived note, only a reason that names its slug can. Empty for any other refusal. A revival is
+    read by its class (Revived, from revived_notes), never by its text."""
+    if any(isinstance(p, Revived) for p in problems):
         return "To keep a revived note, put `- <slug>` in the trailer's reason."
     return ""
 

@@ -328,7 +328,8 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     for n in notes:
         say("merge: " + n)
     if problems:
-        raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {" ".join(t for t in (undo.trailer_hint(problems), UNDO_CITE) if t)}")
+        tail = " ".join(t for t in (undo.trailer_hint(problems), UNDO_CITE) if t)
+        raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {tail}")
 
 def debt_check(wt, base_ref, host, info):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
