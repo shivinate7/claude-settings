@@ -1261,12 +1261,19 @@ class FlagReader:
                 continue  # a .py that does not parse is already reported as unknown by NameReader
             if before - after:
                 removed_flags[files[path]] = before - after
+        unread = {}  # script at head -> flags head still names as a string constant, in a form not read
         for script in list(removed_flags):
             # A flag another file declares at head moved there; it is not removed.
             removed_flags[script] -= self.declared_elsewhere(rng, script, files)
+            if script.endswith(".py"):
+                head_src = rng.batch.get("%s:%s" % (rng.head, script))
+                kept = removed_flags[script] & named_flags(head_src.decode("utf-8", "replace") if head_src else "")
+                if kept:
+                    unread[script] = kept
+                    removed_flags[script] -= kept
             if not removed_flags[script]:
                 del removed_flags[script]
-        return FlagState(removed_flags, rng) if removed_flags else None
+        return FlagState(removed_flags, rng, unread) if removed_flags or unread else None
 
     def declared_elsewhere(self, rng, script, files):
         """The flags the other touched .py (or .sh) files declare at head, and, for a .py, the flags of each parent
@@ -1315,10 +1322,14 @@ class FlagReader:
                 script = state.script(token)
                 for flag_token in tokens if script else ():
                     flag = LONG_FLAG.match(flag_token)
-                    if flag and flag.group(0) in state.removed[script]:
+                    if flag and flag.group(0) in state.removed.get(script, ()):
                         message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
-                        if message not in messages:
-                            messages.append(message)
+                    elif flag and flag.group(0) in state.unread.get(script, ()):
+                        message = UnknownText("%s names %s at head in a form this check does not read" % (script, flag.group(0)))
+                    else:
+                        continue
+                    if message not in messages:
+                        messages.append(message)
         return messages
 
 
