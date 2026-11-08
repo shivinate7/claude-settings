@@ -1,11 +1,11 @@
 {
   "title": "The fed-write guard reads any folder root from disk, not only the current folder",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 45,
   "owner": "coordinator",
   "lane": "session_013NEJL4DPEKRiC91yHkQV7m",
   "why": "Forms such as `grep -rl \u2026 hooks | xargs sed -i` pass, because the guard reads only `.` as a root.",
-  "note": "Coordinator pick, 18:14 CST Nov 7, can be undone. Starts when #1658 (fed-write-followups-2, round 2 passed at 244e87062) is handed to runner 8, stacked on it.",
-  "updatedAt": "2026-11-07T18:14:00-06:00"
+  "note": "Coordinator pick, 18:14 CST Nov 7, can be undone. Starts when #1658 (fed-write-followups-2, round 2 passed at 244e87062) is handed to runner 8, stacked on it. 18:27 CST: branch fed-write-followups-3 exists, stacked on #1658 at bda0a766c. Full scope: folder roots other than `.` read from disk; glob targets for tee, cp and `>`; brace and partly quoted globs; `true & sed -i`; `**` with globstar; the Cost-line range wording.",
+  "updatedAt": "2026-11-07T18:27:00-06:00"
 }
