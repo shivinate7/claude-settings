@@ -26,7 +26,9 @@
                           read from the PR's issue comments since the PR opened. A chained fix check (after a PASS) on a record whose last
                           round is 3 must carry that record's Net value.
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
-  merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
+                          A source record with a PASS Fix check stands in only when HEAD is its Head, the tree of HEAD equals the tree of
+                          SHA, and its PR is closed or this PR's body says "replaces #N"; it counts toward the chain cap of 2.
+  merge --reviewed       one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
