@@ -21984,6 +21984,33 @@ _relesc_add("worktree-home relative escape: mkdir -p <primary>/zz, an absolute t
 _relesc_add("worktree-home relative escape: cd <primary> && mkdir zz is refused by other-checkout, which still "
             "judges the cd; the relative-write clause no longer does", "deny", "cd %(primary)s && mkdir zz", "home",
             rule="other-checkout")
+# Deny, from the recorded home. The last absolute or `~` cd before a write decides its skip: a cd into the home
+# is judged as a plain relative write from there. A variable cd, a bare cd, `cd -` and popd set no skip, so
+# they keep the reading main's guard gives them (refused). The first two rows are refused by other-checkout's
+# relative-climb rule on the head, and by the relative-write clause on the old commit.
+_relesc_add("worktree-home relative escape: cd <home> && cd ../.. && mkdir x, a relative climb out of the home "
+            "after a cd into it, is refused", "deny", "cd %(home)s && cd ../.. && mkdir x", "home",
+            any_of=("worktree-home", "other-checkout"))
+_relesc_add("worktree-home relative escape: cd <home> && cd .. && mkdir x, a relative climb out of the home after "
+            "a cd into it, is refused", "deny", "cd %(home)s && cd .. && mkdir x", "home",
+            any_of=("worktree-home", "other-checkout"))
+_relesc_add("worktree-home relative escape: cd <home> && mkdir ../x, a relative write out of the home after a cd "
+            "into it, is refused", "deny", "cd %(home)s && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cd <home>/sub && mkdir ../../x, a relative write out "
+            "of the home after a cd into it, is refused", "deny",
+            "cd %(abs_scratch)s && cd %(sub)s && mkdir ../../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: pushd <scratch> && popd && mkdir ../x, a popd sets no skip, so the "
+            "write out of the home is refused", "deny", "pushd %(abs_scratch)s && popd && mkdir ../x", "home",
+            rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd $PWD && mkdir ../x, a variable cd sets no skip, so the write out of "
+            "the home is refused", "deny", "cd $PWD && mkdir ../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd && mkdir ../x, a bare cd sets no skip, so the write out of the home "
+            "is refused", "deny", "cd && mkdir ../x", "home", rule="worktree-home")
+# Allow, from the recorded home: the last absolute or `~` cd lands outside the home, so the write is not judged.
+_relesc_add("worktree-home relative escape: cd <scratch> && mkdir ../x, an absolute cd outside the home, is allowed",
+            "allow", "cd %(abs_scratch)s && mkdir ../x", "home")
+_relesc_add("worktree-home relative escape: cd ~ && mkdir ../x, a cd to the home folder, is allowed",
+            "allow", "cd ~ && mkdir ../x", "home")
 _relesc_add("worktree-home relative escape: cp t.py ../agent-" + RELESC_AGENT + "-red/, into the "
             "agent's own red-run folder, is allowed", "allow", "cp t.py ../agent-" + RELESC_AGENT + "-red/",
             "home")
