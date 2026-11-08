@@ -3,13 +3,22 @@
 
     python3 lint/find_time_pinned.py <root> [--json]
 
-Decision test-strategy-reset, point 2: no test waits on a fixed sleep or a wall-clock bound. This
-tool lists the tests that do. It fixes none, and it writes nothing. Each finding has one category:
+Lists the tests whose verdict can move with the real clock: a fixed wait, a bound on elapsed time,
+a time limit, or a read of the real date. Decision test-strategy-reset, point 2, covers the first
+three (no fixed sleep, no wall-clock bound); decision test-practices P5 covers the date read. The
+tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
-- test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard).
-  Kept apart because it may be fine. The plan decides case by case.
+- test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
+- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). A hang guard
+  (test-cap or wait-cap) is allowed (owner ruling 2026-11-07 13:00 CST, decision test-practices P5): it
+  is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
+  the run, so it only stops a hang and never decides a verdict by speed.
+- calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
+  `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.tzname`, `time.timezone`,
+  JS `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
+  or through a name that holds one, and any `Date(...)` call without `new`). `new Date(0)` and
+  `new Date(EPOCH_MS)` with a declared constant read no clock and are not listed.
 
 Scanned: test files only. Python is `test_*.py`, `*_test.py`, `conftest.py` or any `.py` under a
 `tests` or `test` folder. JS and TS (`.js .mjs .cjs .jsx .ts .tsx .mts .cts`) is a `.test.` or
@@ -42,7 +51,8 @@ hole are masked.
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
 summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: nothing found, nothing unread. Exit 1: findings. Exit 2: the root cannot be read, or nothing
+Exit 0: no time-pinned finding, nothing unread (hang-guard rows do not count). Exit 1: a finding that is
+not a hang guard. Exit 2: the root cannot be read, or nothing
 found but some file unread, so the result is unknown.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
@@ -60,7 +70,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 MAX_BYTES = 1_000_000
-CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap")
+CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap", "calendar")
+HANG_GUARDS = ("test-cap", "wait-cap")  # the one home of the allowed, uncounted kinds
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -442,6 +453,15 @@ PY_SIGNAL_CAP = {"signal.alarm", "signal.setitimer"}
 PY_PASS_THROUGH = {"round", "int", "float", "abs", "max", "min", "sum", "divmod", "math.floor", "math.ceil"}
 
 
+# A date or zone read with no time given. `time.strftime(fmt)`, `time.localtime()`, `time.gmtime()`,
+# `time.ctime()` and `time.asctime()` read the clock only when no time argument is passed, so they are
+# matched apart from the always-real forms. `time.tzname` and `time.timezone` are attribute reads.
+PY_CALENDAR_NO_ARG = {"time.localtime", "time.gmtime", "time.ctime", "time.asctime"}
+PY_CALENDAR_ATTRS = {"time.tzname", "time.timezone"}
+PY_CALENDAR_NOW = {"datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow",
+                   "date.today", "datetime.today", "datetime.date.today", "datetime.datetime.today"}
+
+
 def dotted(node):
     parts = []
     while isinstance(node, ast.Attribute):
@@ -512,7 +532,10 @@ def scan_python(text):
                 imports[a.asname or a.name] = node.module + "." + a.name
 
     def names_of(call):
-        d = dotted(call.func)
+        return names_of_node(call.func)
+
+    def names_of_node(node):
+        d = dotted(node)
         if d is None:
             return set()
         first, _, rest = d.partition(".")
@@ -583,6 +606,7 @@ def scan_python(text):
         return tainted
 
     found = set()
+    calendar_calls = []
     decorator_calls = {id(d) for n in ast.walk(tree)
                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                        for d in n.decorator_list if isinstance(d, ast.Call)}
@@ -593,6 +617,10 @@ def scan_python(text):
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
                 found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+        if names & PY_CALENDAR_NOW or (
+                not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
+                len(call.args) == 1 and not call.keywords and names & {"time.strftime"}):
+            calendar_calls.append(call)
         capped = bool(names & PY_MARK_CAP) or (id(call) in decorator_calls and bool(names & PY_DECORATOR_CAP))
         if names & PY_SIGNAL_CAP and not (
                 names & {"signal.alarm"} and isinstance(first, ast.Constant) and first.value == 0):
@@ -612,6 +640,10 @@ def scan_python(text):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
                 if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
+    found.update((c.lineno, "calendar") for c in calendar_calls)
+    found.update((n.lineno, "calendar") for n in ast.walk(tree)
+                 if isinstance(n, (ast.Attribute, ast.Name)) and isinstance(n.ctx, ast.Load)
+                 and names_of_node(n) & PY_CALENDAR_ATTRS)
     return found
 
 
@@ -906,6 +938,15 @@ def scan_js(text):
                 hits.add(mm.start(), "sleep")
 
     tainted = clock_taint(m, JS_DECL, JS_CLOCK, JS_PASS_THROUGH, js_function_returns)
+    for mm in re.finditer(r"(?<![\w$])new\s+Date\s*\(", m):
+        got = args_of(mm.end() - 1)  # `new Date(<clock>)` reads the real date as `new Date()` does
+        if got and (not m[mm.end():got[0]].strip()
+                    or reads_clock(m, mm.end(), got[0], JS_CLOCK, tainted, JS_PASS_THROUGH, False)):
+            hits.add(mm.start(), "calendar")
+    for mm in re.finditer(r"(?<![\w$.])Date\s*\(", m):  # without `new`, Date(...) ignores its arguments
+        if not re.search(r"(?<![\w$])(?:new|function)\s+$", m[max(0, mm.start() - 12):mm.start()]):
+            hits.add(mm.start(), "calendar")
+
     for mm in JS_ASSERT.finditer(m):
         got = args_of(mm.end() - 1)
         if got:
@@ -1197,11 +1238,13 @@ def main(argv=None):
             print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
         for u in unread:
             print(f"UNREAD {u['path']}: {u['reason']}")
-        nfiles = len({f["path"] for f in findings})
-        print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
-              f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread")
-    if findings:
+        pinned = [f for f in findings if f["category"] not in HANG_GUARDS]
+        nfiles = len({f["path"] for f in pinned})
+        print("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
+              "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+              % (len(pinned), nfiles, counts["sleep"], counts["elapsed-assert"],
+                 counts["calendar"], sum(counts[c] for c in HANG_GUARDS), len(unread)))
+    if any(f["category"] not in HANG_GUARDS for f in findings):
         return 1
     return 2 if unread else 0
 

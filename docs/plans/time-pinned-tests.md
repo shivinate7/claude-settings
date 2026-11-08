@@ -4,12 +4,13 @@ Working plan for roadmap step time-pinned-tests-go (tests that pass or fail on c
 
 ## The finder
 
-`lint/find_time_pinned.py` lists lines in test files, in four kinds:
+`lint/find_time_pinned.py` lists lines in test files, in five kinds:
 
 - sleep: a real wait in a test.
 - elapsed-assert: an assert that reads a clock.
-- test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed bound on a wait for a condition or a child process. Most are hang guards, which can stay. Each repo's lane judges each one.
+- test-cap: a per-test or per-suite time limit. A hang guard (decision test-practices P5).
+- wait-cap: a fixed bound on a wait for a condition or a child process. A hang guard too. Each repo's lane checks that each cap sits well above the run.
+- calendar: a read of the real date or time zone, such as `date.today()` or a `new Date(...)` fed by the clock.
 
 Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`). The repo lane decides each one.
 
@@ -17,14 +18,14 @@ Each count is a candidate, not a verdict. A sample read found a false alarm in e
 
 Each row comes from `python3 lint/find_time_pinned.py <clone> --json`, run on a shallow clone of the repo's default branch at the commit shown, on 2026-11-02. Re-run that command to check a number.
 
-| Repo | Commit | sleep | elapsed-assert | test-cap | wait-cap | Total | Files | Unread | Target (sleep, elapsed, cap) |
+| Repo | Commit | sleep | elapsed-assert | test-cap | wait-cap | Total | Files | Unread | Target (sleep, elapsed) |
 |---|---|---|---|---|---|---|---|---|---|
-| q_max | `e8f99027` | 64 | 20 | 127 | 115 | 326 | 57 | 1 | 0, 0, 0, each wait-cap judged |
-| banchi | `2e46c112` | 119 | 2 | 0 | 236 | 357 | 54 | 0 | 0, 0, 0, each wait-cap judged |
-| degen | `af1d95ac` | 251 | 20 | 0 | 1075 | 1346 | 219 | 0 | 0, 0, 0, each wait-cap judged |
-| joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, 0, each wait-cap judged |
-| mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, 0, each wait-cap judged |
-| ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, 0, each wait-cap judged |
+| q_max | `e8f99027` | 64 | 20 | 127 | 115 | 326 | 57 | 1 | 0, 0, each cap judged |
+| banchi | `2e46c112` | 119 | 2 | 0 | 236 | 357 | 54 | 0 | 0, 0, each cap judged |
+| degen | `af1d95ac` | 251 | 20 | 0 | 1075 | 1346 | 219 | 0 | 0, 0, each cap judged |
+| joyous | `de35e993` | 1 | 1 | 38 | 1 | 41 | 2 | 0 | 0, 0, each cap judged |
+| mailaudit | `9efe1bb0` | 140 | 1 | 0 | 178 | 319 | 30 | 0 | 0, 0, each cap judged |
+| ios-adblock | `4d265329` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0, 0, each cap judged |
 
 - home: not scanned. Its lane is held.
 - claude-settings: step c95 (make the timing and load asserts robust) fixed this repo's guard, install lock, stall watch, SendMessage and janitor timing cases by hand. It left 12 notes in `docs/debts/notes.md`. It built no finder and scanned no other repo. On main at 55b27ac2 the finder lists 238 here (sleep 56, elapsed-assert 8, test-cap 0, wait-cap 174, in 51 files, 1 unread). That list goes to a later claude-settings lane.
