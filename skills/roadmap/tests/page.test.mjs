@@ -112,3 +112,127 @@ test("a stalled step carries the Stalled tag and the Doing now mark at first loa
   assert.equal(await page.locator("#s-b .tag.stl").count(), 1, "step b has no live thread, but its row carries no Stalled tag at first load");
   assert.equal(await page.locator('#now li:has(button[data-go="b"]) [role="img"][aria-label="Stalled"]').count(), 1, "step b has no Stalled mark in Doing now at first load");
 });
+
+// ---------------------------------------------------------------- the where-you-are line and Latest changes: a stalled step is not in progress
+// A stalled step's status is active, so the count and the feed read its stall state, not the raw status.
+const STALLED_C1 = { why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: [], ...NO_ITEMS };
+test("the where-you-are line does not count a stalled step as in progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.doesNotMatch(sub, /in progress/, "the where-you-are line counts the stalled step as in progress: " + sub);
+});
+test("the Latest changes row of a stalled step reads Stalled, not In progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  const row = page.locator("#side .feed li", { has: page.locator('button[data-go="c1"]') });
+  assert.equal(await row.count(), 1, "step c1 has no row in Latest changes");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Latest changes row of stalled step c1 reads In progress");
+  assert.match(kind, /Stalled/, `the Latest changes row of stalled step c1 reads "${kind}", not Stalled`);
+});
+test("a live doing step still counts as in progress in the where-you-are line", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the live doing step as in progress: " + sub);
+});
+test("the Changes log row of a stalled step reads Stalled, not In progress", async (t) => {
+  const steps = { c1: stepOf("Step c1", "doing", 1) };
+  const page = await open(t, builtPage({ steps, stalled: STALLED_C1 })); if (!page) return;
+  await assertRowReads(page, "c1", "Stalled");
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="c1"]') });
+  assert.equal(await row.count(), 1, "step c1 has no row in the Changes log");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Changes log row of stalled step c1 reads In progress");
+  assert.match(kind, /Stalled/, `the Changes log row of stalled step c1 reads "${kind}", not Stalled`);
+});
+test("a live doing step still reads In progress in the Changes log", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="a"]') });
+  assert.equal(await row.count(), 1, "step a has no row in the Changes log");
+  assert.equal((await row.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
+});
+
+// ---------------------------------------------------------------- paused: a paused step is not in progress in any of the three places
+// A paused step keeps status active, as a stalled one does. Paused is its own state in the count, the feed and the log.
+const PAUSED_A3 = { why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
+test("the where-you-are line does not count a paused step as in progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.doesNotMatch(sub, /in progress/, "the where-you-are line counts the paused step as in progress: " + sub);
+});
+test("the Latest changes row of a paused step reads Paused, not In progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  const row = page.locator("#side .feed li", { has: page.locator('button[data-go="a3"]') });
+  assert.equal(await row.count(), 1, "step a3 has no row in Latest changes");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Latest changes row of paused step a3 reads In progress");
+  assert.match(kind, /Paused/, `the Latest changes row of paused step a3 reads "${kind}", not Paused`);
+});
+test("the Changes log row of a paused step reads Paused, not In progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="a3"]') });
+  assert.equal(await row.count(), 1, "step a3 has no row in the Changes log");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Changes log row of paused step a3 reads In progress");
+  assert.match(kind, /Paused/, `the Changes log row of paused step a3 reads "${kind}", not Paused`);
+});
+test("a live doing step reads In progress in all three places", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the live doing step: " + sub);
+  const feed = page.locator("#side .feed li", { has: page.locator('button[data-go="a"]') });
+  assert.equal((await feed.locator(".kind").textContent()).trim(), "In progress", "the Latest changes row of the live doing step does not read In progress");
+  const log = page.locator("#days .ev", { has: page.locator('button[data-go="a"]') });
+  assert.equal((await log.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
+});
+
+// ---------------------------------------------------------------- the phase bars: a stalled or paused step is not an active cell
+// Each bar draws one cell per step: done, then active, then blocked. A stalled or paused step keeps status active, so a bar that counts
+// the status alone draws it as active. The bars are aria-hidden, so the cells are read by their class. Step a is in progress, not stalled.
+const STALLED_C1_PAUSED_A3 = { why: "", steps: [{ id: "c1", fix: "todo" }], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
+const barSteps = () => ({ c1: stepOf("Step c1", "doing", 1), a: stepOf("Step a", "doing", 2), a3: stepOf("Step a3", "doing", 3) });
+async function barActCells(page, scope) {
+  assert.equal(await page.locator(`${scope} .bar`).count(), 1, `${scope} has no phase bar (.bar)`);
+  return page.locator(`${scope} .bar i.act`).count();
+}
+// The scope and the control, shared by both bars: c1 Stalled, a3 Paused, a In progress, and the where-you-are bar already draws one active cell.
+async function barControls(page) {
+  await assertRowReads(page, "c1", "Stalled");
+  await assertRowReads(page, "a3", "Paused");
+  assert.match(await statusLabel(page, "a"), /In progress/, "step a is not In progress, so the bar has no genuinely active step to count");
+  assert.equal(await barActCells(page, "#now"), 1, "the where-you-are bar does not draw the one step in progress as its one active cell");
+}
+test("the rail's phase bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, builtPage({ steps: barSteps(), stalled: STALLED_C1_PAUSED_A3 })); if (!page) return;
+  await barControls(page);
+  const act = await barActCells(page, '#rail button[data-phase="cleanup"]');
+  assert.equal(act, 1, `the rail's cleanup bar draws ${act} active cells for one step in progress: a stalled or paused step is drawn as active`);
+});
+test("the phase head's bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, builtPage({ steps: barSteps(), stalled: STALLED_C1_PAUSED_A3 })); if (!page) return;
+  await barControls(page);
+  const act = await barActCells(page, "#phases .ph-head");
+  assert.equal(act, 1, `the phase head's bar draws ${act} active cells for one step in progress: a stalled or paused step is drawn as active`);
+});
