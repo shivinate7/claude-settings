@@ -4,6 +4,6 @@
 
 **Where.** lint/stale_cites.py `pair_res`, the backtick form.
 
-**Decision.** claims-carry-backing (the claim-backing record).
+**Decision.** record-cites-live-code (claims about code cite live code names).
 
 **Retire.** The backtick form accepts a trailing `()`, and a case in `lint/test_stale_cites.py` shows a dead call-form cite gives STALE010.
