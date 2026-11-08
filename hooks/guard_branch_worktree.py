@@ -123,6 +123,9 @@ WORKTREE_PRUNE_ASK_REASON = (
 #   `symbolic-ref HEAD refs/heads/<name>`: refused when another worktree holds <name>, since the running tree
 #     would then hold it too. A `symbolic-ref HEAD` with no target only reads, and passes.
 # `update-ref --stdin` names its refs on stdin, which the guard cannot read, so it passes.
+# Stated gap: a call that runs in the holder's own tree passes, and `update-ref` there moves the ref alone,
+# so the holder's index stays at the old commit. That covers the holder's own shell and `git -C <holder>`,
+# which may name another session's tree.
 # Any other call, a plain `checkout x` and an unforced add included, is git's own refusal to make.
 # The list is read once, only for a refused form; a read that fails refuses.
 TWO_WORKTREES_REFUSE_REASON = (
@@ -137,7 +140,7 @@ TWO_WORKTREES_REFUSE_REASON = (
     "`git -C <dir>`. To move the branch itself, move its ref, index and files together from the tree "
     "that holds it, as `git -C <holder> merge --ff-only <commit>`. `update-ref` moves the ref alone "
     "and leaves that tree's index at the old commit. If the holder's folder is gone but the list "
-    "still shows its branch, `git worktree prune` drops that record. "
+    "still shows its branch, `git worktree prune` drops the stale records. "
     "(decision two-worktrees-one-branch, two worktrees never hold one branch)"
 )
 

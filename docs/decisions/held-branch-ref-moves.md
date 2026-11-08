@@ -9,9 +9,9 @@ The guard rule `two-worktrees-one-branch` also refuses `update-ref` and `symboli
 - `git update-ref [-m <msg>] [--no-deref] refs/heads/<branch> <value>`, and `git update-ref -d refs/heads/<branch>`. `-m` takes a value, so the branch is the first word that is not an option or an option's value.
 - `git symbolic-ref HEAD refs/heads/<branch>`. It points the running tree's HEAD at the branch, so two trees then hold one branch.
 
-Both are refused when another worktree of the clone holds `<branch>`. The family rules are the same as the parent decision's:
+Both are refused when another worktree of the clone holds `<branch>`. The family rules are the same as the parent decision's, with one change. The worktree list is read for `-B`, `-C`, a forced add, `update-ref` and `symbolic-ref`. This record supersedes the parent's list-read sentence on that point.
 
-- The worktree list is read once (`git_reads.clone_worktrees`), and only for these forms. A read that fails refuses, even for a branch no worktree holds.
+- The worktree list is read once (`git_reads.clone_worktrees`), and only for these forms and the parent's. A read that fails refuses, even for a branch no worktree holds.
 - Only a worktree other than the running tree counts as a holder. `git -C <dir>` names the running tree.
 - Each git call in a chain is judged on its own.
 
@@ -19,7 +19,7 @@ Lane decisions:
 
 - `update-ref` of a branch the running tree holds itself passes. The running tree is the holder, so no other tree is stale.
 - `git -C <holder> <write>` counts as the holder's own tree and passes, `update-ref` included. The remedy text does not offer `update-ref` as the move path: it moves the ref alone, so the holder's index and files stay at the old commit. It names `git -C <holder> merge --ff-only <commit>`, which moves ref, index and files together, and `git worktree prune` for a holder whose folder is gone while the list still shows its branch.
-- Own-tree `update-ref` of its own held branch leaves that tree's index stale, the same harm this rule stops across trees. The guard allows it as a stated gap, because the running tree is the only tree it can hurt.
+- Own-tree `update-ref` of its own held branch leaves that tree's index stale, the same harm this rule stops across trees. The guard allows it as a stated gap. The gap is wider than the own tree: `-C` may name another session's tree, so `git -C <holder> update-ref refs/heads/x HEAD` or `-d` passes and leaves that holder's index stale. Debt `update-ref-in-holder-tree` holds it.
 - Reads pass: `symbolic-ref HEAD` with no target, `update-ref` of a ref no worktree holds, and any ref outside `refs/heads/` (a remote-tracking ref).
 - `update-ref --stdin` names its refs on stdin. The guard cannot read stdin, so it passes. This is a known gap, not a decision that it is safe.
 - A plain `git push` is not refused. See the incident.
