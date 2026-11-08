@@ -46,6 +46,25 @@ def _record_json(body):
     return record
 
 
+def record_tags(body, own_id):
+    """The tags of the get_session record `body` holds when its ccr.id is own_id, else None."""
+    try:
+        ccr = _record_json(body)["ccr"]
+        if ccr["id"] == own_id and isinstance(ccr["tags"], list):
+            return {str(t) for t in ccr["tags"]}
+    except (ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def move_tags(tags, call_input):
+    """Apply one set_session_tags call's `add` and `remove` lists to the set `tags`, in place."""
+    for key, op in (("add", tags.update), ("remove", tags.difference_update)):
+        given = call_input.get(key) if isinstance(call_input, dict) else None
+        if isinstance(given, list):
+            op(str(t) for t in given)
+
+
 def own_session_read(transcript, own_id, created=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
