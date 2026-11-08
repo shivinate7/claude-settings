@@ -580,6 +580,7 @@ class Pages:
 
     def __init__(self, path):
         self.path, self.records, self.owners, self.unread, self.skip = path, None, None, None, {}
+        self.failed = set()
 
     def _load(self):
         if self.records is None:
@@ -591,6 +592,7 @@ class Pages:
             except (OSError, ValueError) as e:
                 self.unread = "the transcript cannot be read: %s" % (" ".join(str(e).split())
                                                                       or type(e).__name__)
+            self.failed = _transcript.failed_tool_use_ids(self.records)
             for i, rec in enumerate(self.records):
                 text = _transcript.owner_text(rec, MACHINE_TAGS)
                 if text is not None:
@@ -615,7 +617,9 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        return (use for r in self.records[start:] if r.get("type") == "assistant" for use in _transcript.tool_uses(r))
+        """The tool_use blocks after `start` whose result is no error; a failed send proves nothing."""
+        return (use for r in self.records[start:] if r.get("type") == "assistant"
+                for use in _transcript.tool_uses(r) if use.get("id") not in self.failed)
 
     def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
