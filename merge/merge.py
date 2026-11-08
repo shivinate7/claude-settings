@@ -24,7 +24,9 @@
                           unless the newest earlier record on the PR has no Fix check line or a PASS one, and HEAD is that record's Head
                           (or differs from it only by record or notes files; after a PASS, HEAD must also be an ancestor of the live head),
                           read from the PR's issue comments since the PR opened. A chained fix check (after a PASS) on a record whose last
-                          round is 3 must carry that record's Net value.
+                          round is 3 must carry that record's Net value. A plain write (no --fix-check) is floored too: it refuses (exit 2)
+                          a record whose last round is below n+1 when an earlier record's last round n (below 3) holds a FAIL line and no
+                          record from it on has a Fix check line, so a fresh round 1 cannot reset the round count. One read of the comments.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3214,25 +3216,36 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def floor_problem(earlier, rec):
+def floor_problem(earlier, rec, plain=False):
     """-> (why, remedy), when the newest parsed record `rec` breaks a round count set by `earlier` (the parsed records before it on the same PR, oldest first, a
     record that did not parse already dropped); else None. Counts never go down on one PR (decision pr-review-record): the floor is the highest, over
-    `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. A newest
-    record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
-    fix check floors at the record's own last round and counts no slot. The floor comes from the bodies the listing already holds."""
+    `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. It is also plus 1
+    when the record's last round n is below the final round and holds a FAIL line, and neither `rec` nor any record from that one on has a Fix check line:
+    a fresh round 1 on a new head must not reset the three-round cap. A newest record below the floor reads open. A counted FAIL slot is filled only by a
+    FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS fix check floors at the record's own last round and counts no slot. The floor
+    comes from the bodies the listing already holds. `plain` is the write of a record with no fix check: the open FAIL alone floors it, because a fresh
+    round 1 stays accepted after a fix check line or after round 3 (the fix-check write and `merge --reviewed` read the whole floor)."""
     last = max((i for i, *_ in rec["rounds"]), default=0)
-    best = None  # (floor, failed, record): the earliest record at the highest floor, a failed fix check first
-    for e in earlier:
+    best = None  # (floor, kind, record): the earliest record at the highest floor; kind 2 a failed fix check, 1 an open FAIL, 0 a plain last round
+    for k, e in enumerate(earlier):
         n = max((i for i, *_ in e["rounds"]), default=0)
         failed = bool(e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND)
-        key = (n + failed, failed)
+        open_fail = n < REVIEW_LAST_ROUND and any(i == n and v == "FAIL" for i, _, _, v in e["rounds"]) and not rec["fix"] and not any(x["fix"] for x in earlier[k:])
+        kind = 2 if failed else 1 if open_fail else 0
+        if plain and kind != 1:
+            continue
+        key = (n + bool(kind), kind)
         if best is None or key > best[:2]:
             best = (*key, e)
     if best and last < best[0]:
-        floor, failed, e = best
-        if failed:
+        floor, kind, e = best
+        if kind == 2:
             return f"a failed fix check on head {e['head'][:9]} counts as round {floor}, but this record's last round is {last}", f"Carry every round up to round {floor}, and make round {floor} a FAIL line: pass each round line with --round."
+        if kind == 1:
+            return f"the record on head {e['head'][:9]} has a FAIL in round {floor - 1} and no fix check follows it, so round {floor} is owed, but this record's last round is {last}", f"Carry every round line, then run round {floor} and add its line with --round."
         return f"the record on head {e['head'][:9]} reached round {floor}, so this record's last round {last} is below it; a new lane is a new pull request", FIX_FLOOR_REMEDY
+    if plain:
+        return None
     for e in earlier:
         n = max((i for i, *_ in e["rounds"]), default=0)
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
@@ -3261,7 +3274,8 @@ def reviewed_lines(h):
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The newest record is read against every earlier record of its pull request that parses (round_floor): it reads open when its last round is below the
-    round count any of them reached, or when a failed fix check's counted round holds no FAIL line. Same bodies, no extra call."""
+    round count any of them reached, when a failed fix check's counted round holds no FAIL line, or when an earlier record's open FAIL in round n (below 3,
+    no fix check line from it on) owes round n + 1: a plain write is floored by that last rule too (floor_problem). Same bodies, no extra call."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."]
@@ -3603,6 +3617,13 @@ def main(argv, host=None, lock=None):
                         remedy = FIX_FROZEN_REMEDY
                 if problem:
                     print(f"merge: --fix-check: {problem}. " + (remedy + " " if remedy else "") + REVIEW_CITE, file=sys.stderr)
+                    return 2
+            else:  # a plain record is floored by an earlier open FAIL, so a fresh round 1 on a new head cannot reset the round count; the same one read of the comment list as the fix path
+                recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
+                problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value)), plain=True) or (None, None)
+                if problem:
+                    print(f"merge: --review-record: {problem}. {remedy} " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
