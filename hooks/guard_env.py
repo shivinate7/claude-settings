@@ -148,7 +148,7 @@ ENV_CHILD_VALUE_FLAGS = {
     # `npm exec --help`, plus npm's own config options that most often precede the child.
     "npm": (
         "--env-file", "-w", "--workspace", "-p", "--package", "--prefix", "--loglevel", "--registry",
-        "--cache", "--userconfig", "--node-options", "--script-shell"),
+        "--cache", "--userconfig", "--node-options", "--script-shell", "--color"),
     # `pnpm help exec` and `pnpm help dlx`.
     "pnpm": (
         "--env-file", "-C", "--dir", "--loglevel", "--resume-from", "--workspace-concurrency",
@@ -197,7 +197,7 @@ ENV_CHILD_BOOL_FLAGS = {
         "-y", "--yes", "-q", "--quiet", "-s", "--silent", "-f", "--force", "-g", "--global",
         "--verbose", "--offline", "--prefer-offline", "--prefer-online", "--ignore-scripts",
         "--json", "--dry-run", "--foreground-scripts", "-ws", "--ws", "--workspaces",
-        "--include-workspace-root", "--fund", "--audit", "--color"),
+        "--include-workspace-root", "--fund", "--audit", "--no"),
     "pnpm": (
         "-r", "--recursive", "-w", "--workspace-root", "-s", "--silent", "--stream", "--parallel",
         "--aggregate-output", "--report-summary", "--use-stderr", "--fail-if-no-match", "--color"),
@@ -844,6 +844,13 @@ def _is_bool_flag(word: str, runner: str) -> bool:
     return len(word) > 1 and all("-" + c in bools for c in word[1:])
 
 
+def _owns_literal(words, i: int, runner: str) -> bool:
+    """True when words[i] is a bool flag of npm or pnpm and the next word is exactly `true` or
+    `false`: nopt reads that word as the flag's own value, so it is not the child."""
+    return (runner in ("npm", "pnpm") and i + 1 < len(words) and words[i + 1] in ("true", "false")
+            and _is_bool_flag(words[i], runner))
+
+
 def _may_own_value(word: str, runner: str) -> bool:
     """True when an option word that is not in the runner's value-flag list may still own the next
     word: it has no `=`, is not `--` and is not a known bool flag."""
@@ -853,7 +860,8 @@ def _may_own_value(word: str, runner: str) -> bool:
 
 def _child_starts(words, i: int, runner: str):
     """The indexes from `i` where a child command may start, past the runner's options. An option
-    in the runner's value list owns the next word, and one in its bool list owns none. Each
+    in the runner's value list owns the next word, and one in its bool list owns none, except that
+    an npm or pnpm bool owns a next word that is exactly `true` or `false`. Each
     positional word is a start. When it sits right after an option in neither list it may be that
     option's value, so the scan goes on past every option to the next positional word, which is a
     start too: `--foo X --bar always alpine env` starts at `X`, `always` and `alpine`. A positional
@@ -874,7 +882,7 @@ def _child_starts(words, i: int, runner: str):
         if word in flags:
             i += 2
         elif word.startswith("-"):
-            i += 1
+            i += 2 if _owns_literal(words, i, runner) else 1
         else:
             yield i
             if not (i and _may_own_value(words[i - 1], runner)):
@@ -936,7 +944,7 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
             if word in flags:
                 i += 2
             elif word.startswith("-"):
-                i += 1
+                i += 2 if _owns_literal(words, i, runner) else 1
             elif name != "npx" and (word in ("exec", "x") or (pnpm and word == "dlx")):
                 exec_at = i  # `x` may be an option value, so it never ends the walk
                 i += 1
