@@ -2946,6 +2946,23 @@ class NamedExcerptPhraseTests(unittest.TestCase):
         self.assertIn(2, shown, "scope: the rows that hold the phrase whole are not shown, so the cap is not tested: %s" % shown)
         self.assertNotIn(1, shown, "the row that only contains the phrase is shown ahead of the rows that hold it whole: %s" % shown)
 
+    def test_a_whole_literal_row_keeps_its_body_rows_under_the_cap(self):
+        # The rule: under the cap, a whole-literal title row and the rows of its body rank above the rows that only contain the title,
+        # so the cap drops the containing rows first.
+        title = "every table whose cells render Thousands has exactly one money head that carries the unit"
+        rows = ["Foo %d" % n for n in range(1, 31)]
+        rows += ["filler %d" % n for n in range(31, 103)]
+        for n in (40, 50, 60):
+            rows[n - 1] = "// %s, in this comment" % title
+        rows.append("test('%s', () => {" % title)
+        rows += ["  expect(total).toBe(%d);" % n for n in (1, 2, 3)]
+        out = self.stale.named_excerpt(("Foo",), "\n".join(rows) + "\n", phrases=(title,))
+        shown = self.numbers_in(out)
+        self.assertIn("[more lines left out at the 40-row cap]", out or "", "scope: the cap does not bind, so the body rows are not tested")
+        self.assertIn(103, shown, "scope: the whole-literal title row is not shown: %s" % shown)
+        missing = [n for n in (104, 105, 106) if n not in shown]
+        self.assertEqual([], missing, "the body rows of the whole-literal title row are cut at the cap behind rows that only contain the title: shown %s" % shown)
+
     def test_a_stray_inch_mark_before_a_quoted_title_does_not_eat_the_title(self):
         # The rule: a straight quote opens a phrase only when no word character is before it, so a stray inch mark pairs with nothing,
         # and the quoted title after it stays the phrase.
