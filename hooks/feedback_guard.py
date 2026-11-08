@@ -220,7 +220,7 @@ EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-chec
 ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
 GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
                " [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a one-shot"
-               " approval" % (NOT_A_GRANT, ONCE_HOME))
+               " grant" % (NOT_A_GRANT, ONCE_HOME))
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
