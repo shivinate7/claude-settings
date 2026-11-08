@@ -7238,6 +7238,51 @@ sh("substitution: push, an assignment from a dollar paren with a forced push",
 sh("substitution: push, a dollar paren in double quotes with a forced push",
    'echo "$(' + PUSH_SUBST_FORCE + ')"', PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
 
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A force push one shell step down, in a substitution,
+# a quoted script or a commit message's substitution, still runs. Each form denies as the plain form does.
+# The controls allow a push that is only quoted, commented or written into a heredoc body: none of them runs.
+FORCE = VCS + " push --force"
+HIDDEN_PUSH = FORCE + " origin feat"
+sh("ask-step-hidden: control, a plain force push denies",
+   HIDDEN_PUSH, "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside bash -c denies",
+   "bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside sh -c denies",
+   "sh -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push inside a quoted eval denies",
+   "eval '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a glued command substitution denies",
+   "x=$(" + HIDDEN_PUSH + ")", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in glued backticks denies",
+   "x=`" + HIDDEN_PUSH + "`", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a commit message's substitution denies",
+   VCS + ' commit -m "n $(' + HIDDEN_PUSH + ')"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push on the second line of a multi-line bash -c denies",
+   "bash -c 'echo ready\n" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a comment opener and a /* in quotes do not hide a bash -c force push, denies",
+   "echo 'a // b /* c # d'; bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("ask-step-hidden: a lone apostrophe in double quotes does not hide a bash -c force push, denies",
+   "echo \"it's\"; bash -c '" + HIDDEN_PUSH + "'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: control, a commit message single-quoting a substitution that names a force push allows",
+   VCS + " commit -m 'n $(" + FORCE + ")'", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, a comment naming a bash -c force push allows",
+   "# bash -c '" + FORCE + "'", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, a commit whose heredoc body names a bash -c force push allows",
+   VCS + " commit -F - <<'EOF'\nbash -c '" + FORCE + "'\nEOF", "allow", cwd=PUSHFEAT)
+sh("ask-step-hidden: control, an echo that quotes a bash -c force push allows",
+   'echo "use bash -c \'' + FORCE + '\' never"', "allow", cwd=PUSHFEAT)
+# ASK-STEP-HIDDEN, inside a wrapper (debt ask-step-hidden-in-script). A `bash -c` or `sh -c` script runs its
+# own `$( )` and backticks, so a force push there still runs and denies. A heredoc body in a wrapper is data.
+sh("ask-step-hidden: a force push in a bash -c substitution denies",
+   "bash -c 'x=$(" + HIDDEN_PUSH + ")'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in bash -c glued backticks denies",
+   "bash -c 'x=`" + HIDDEN_PUSH + "`'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: a force push in a sh -c double-quoted substitution denies",
+   "sh -c 'echo \"$(" + HIDDEN_PUSH + ")\"'", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-step-hidden: control, a heredoc body naming a force push inside bash -c allows",
+   "bash -c 'cat <<EOF\n" + HIDDEN_PUSH + "\nEOF'", "allow", cwd=PUSHFEAT)
+
 # ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
 # colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
 # carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
@@ -12109,6 +12154,17 @@ sh("frozen: a PowerShell call with a backslash-quote before a config write stays
    'echo "C:\\" ; Set-Content ' + CFG_SETTINGS + ' x ; echo \\"D"', "deny", "frozen-path",
    tool="PowerShell", cwd=NOGIT)
 
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A redirect glued to a `(` or a `$(` hides its path word
+# from the frozen check, so each form denies as the plain redirect does.
+sh("ask-step-hidden: control, a plain redirect onto the config settings denies",
+   "echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in a subshell onto the config settings denies",
+   "(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in a glued command substitution onto the config settings denies",
+   "x=$(echo x > " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("ask-step-hidden: a redirect in glued backticks inside bash -c onto the config settings denies",
+   "bash -c 'x=`echo x > " + CFG_SETTINGS + "`'", "deny", "frozen-path", cwd=NOGIT)
+
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
 # variable, or a read of a resolved one, stays allowed.
@@ -12631,6 +12687,20 @@ sh("cap: a redirect onto a project settings file asks",
 sh("cap: an append onto a project settings file asks",
    "echo '\"" + CAP_FORCE + "\": \"0\"' >> " + PROJ_SETTINGS,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_FORCE + " = 0",))
+
+# ASK-STEP-HIDDEN (debt ask-step-hidden-in-script). A cap write glued to a `$(`, a backtick or a `(` hides
+# its path word from the cap check, so each form asks as the plain redirect does.
+HIDDEN_CAP_WRITE = "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL
+sh("ask-step-hidden: control, the plain cap redirect asks",
+   HIDDEN_CAP_WRITE, "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a glued command substitution asks",
+   "x=$(" + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in glued backticks asks",
+   "x=`" + HIDDEN_CAP_WRITE + "`", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a bare subshell asks",
+   "(" + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("ask-step-hidden: a cap write in a subshell with a leading space asks",
+   "( " + HIDDEN_CAP_WRITE + ")", "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
 
 # A WRITE PIPED INTO A SHELL IS A WRITE. The cap text sits in double quotes and the sed runs under `sh`,
 # so it is code. The pipe chains it with the echo, so it denies (ask-alone).
