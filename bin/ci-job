@@ -51,11 +51,11 @@
 # detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names,
 # fetched from that clone's origin when it lacks the sha. A remote ste-lint, code-check or zizmor step runs from the
 # worktree of its own pin only (ste-lint as its bin/ste-changed), as CI downloads each pinned sha separately.
-# Each step's CLAUDE_SETTINGS_DIR, first that exists: the step's own env:, the step's pinned tree (CI runs the pin, so a
-# caller's dir at another sha is wrong), the caller's value, the settings clone; none of them leaves it unset.
+# Each step's CLAUDE_SETTINGS_DIR is the first one set of: the step's own env:, the step's pinned tree (CI runs the pin, so
+# a caller's dir at another sha is wrong), the caller's value, the settings clone above; with none of them it stays unset.
 # With two or more pins, a plain run step is one `unknown` line naming the shas. A ref that is no sha, a sha that cannot
 # be fetched or a failed `npm ci` makes each step that needs that tree one `unknown` line; the other steps run. With no
-# pin, a step runs as before. Each worktree is removed on every exit.
+# pin, a step runs in this repo as before. Each worktree is removed on every exit.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
