@@ -33,7 +33,7 @@ excuses its path. A trailer or line with no reason excuses nothing. A deleted de
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
 body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, built
-only when a cite is read, and judges the cite against --head. A cite that cannot be read prints `cite for <slug> not read:
+only when a cite is read, and judges the cite against --head. A cite that does not excuse its debt prints `cite for <slug> not accepted:
 <why>`, and the finding stays. Without the flag the CLI reads no body. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
@@ -602,17 +602,33 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
 
 
 def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
-    """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
-    debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
-    if run_state is None:
-        return {}
+    """({debt path: reason}, notes) for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
+    debt-close-runs-retire). Each cited debt it does not excuse gets a note `cite for <slug> not accepted: <why>`: the reader's
+    failure, or the debt-close verdict. Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import check_debt_retire  # lazy: it imports this module at its top
-        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
-    except Exception:  # ImportError, its Unknown, any failed read: a finding stays
-        return {}
-    return {p: why for p, why in got.items() if p in paths}
+        import check_debt_retire  # lazy: it imports this module at its top; the one home of cite parsing and the close judgment
+    except Exception:  # ImportError: the check is missing, so a finding stays with no reason to give
+        return {}, []
+    note = lambda slug, why: "cite for %s not accepted: %s" % (slug, why)
+    try:
+        if run_state is None:  # no judgment: a green test could excuse a close it has no reader to confirm
+            got, todo = check_debt_retire.cited_deletes(cwd, upstream, head, pr_body, paths)
+            cited = check_debt_retire.cites(pr_body)
+            return {}, [note(slug, check_debt_retire.judge_run(cwd, head, cited[slug], None)[1]) for _, _, slug in todo]
+        res = check_debt_retire.judged(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
+    except Exception as e:  # its Unknown, any failed read: a finding stays, and says the read failed
+        why = " ".join(str(e).split()) or type(e).__name__
+        try:
+            debt, cited = check_debt_retire.records.debt_file(cwd), check_debt_retire.cites(pr_body)
+            return {}, [note(os.path.basename(p)[:-3], "the debt read failed: " + why) for p in sorted(paths)
+                        if debt(p) and os.path.basename(p)[:-3] in cited]
+        except Exception:
+            return {}, []
+    cited = check_debt_retire.cites(pr_body)
+    why = {p: check_debt_retire.reason(f) for p, f in res.items() if f is not None and p in paths}
+    ok = {p: check_debt_retire.excuse(p, cited) for p, f in res.items() if f is None and p in paths}
+    return ok, [note(os.path.basename(p)[:-3], w) for p, w in sorted(why.items())]
 
 
 def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
@@ -649,10 +665,12 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
     open_paths = {p for p, _ in items if p not in ok}
+    cite_notes = []
     if open_paths:
-        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
+        excused, cite_notes = retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths)
+        ok = dict(excused, **ok)
     bad, notes = judge(items, ok)
-    return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
+    return bad, notes + cite_notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
 def history(cwd, rev, window):
@@ -703,12 +721,6 @@ class RunReader:
             raise
 
 
-def unread_cites(reader, pr_body):
-    """One line per debt slug whose cited run the reader failed to read."""
-    import check_debt_retire  # lazy: it imports this module at its top; the one home of cite parsing
-    return ["cite for %s not read: %s" % (slug, reader.failed[url]) for slug, url in check_debt_retire.cites(pr_body).items() if url in reader.failed]
-
-
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -728,7 +740,6 @@ def main(argv):
         if a.pr_body_env:
             body, reader = os.environ.get(a.pr_body_env) or "", RunReader(a.repo)
             problems, notes = check(a.repo, a.upstream, a.head, pr_body=body, run_state=reader, retire_head=a.head)
-            notes += unread_cites(reader, body)
         else:
             problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:

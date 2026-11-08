@@ -23,7 +23,8 @@ A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in 
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
 another file, and only a whole delete, not a rename out of `docs/debts/`. The merge tool, CI and the
 shared action all pass the PR body and a run reader. In a batch, CI reads the integration PR's body. A body
-edit alone does not re-run CI. With no run reader, or a read that fails, the finding stays. The CLI, which CI and the shared action run, prints why the cite was not read. The merge tool prints no reason. Cost: it runs only
+edit alone does not re-run CI. With no run reader, or a read that fails, the finding stays. Both the CLI, which CI and the shared action run, and the merge tool print
+`cite for <slug> not accepted: <why>` for each cite that fails. Cost: it runs only
 when the scan has an unexcused finding and the body holds a cite. Only then does CI import merge.py and build the Host. For each flagged cited debt, it runs the debt-close
 judgment: git reads, each Retire test in a temporary worktree, and at most one run read. A test proves that
 an unflagged close gets no run read. It starts no long-lived process.

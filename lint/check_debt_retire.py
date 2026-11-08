@@ -208,22 +208,50 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     return found
 
 
-def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
-    """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
-    silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
-    path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
-    Raises Unknown."""
+def cited_deletes(wt, base_ref, head, pr_body, paths=None):
+    """(closes() result, [(path at base, new path, slug)]) for each whole delete of a debt whose slug the PR body cites. paths, when
+    given, limits it to those paths: an unflagged or uncited close is never judged, so its run is never read. A rename out of the
+    folder is no delete: the file's lines live on at the new path. Raises Unknown."""
     cited = cites(pr_body)
     got = closes(wt, base_ref, head) if cited else None
     if not got:
+        return None, []
+    return got, [(old, new, os.path.basename(old)[:-3]) for old, new in got[1]
+                 if new == old and os.path.basename(old)[:-3] in cited and (paths is None or old in paths)]
+
+
+def judged(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+    """{debt path at base: Finding or None} for each cited whole delete (see cited_deletes): None when its judgment holds, else the
+    Finding. Raises Unknown."""
+    got, todo = cited_deletes(wt, base_ref, head, pr_body, paths)
+    if not todo:
         return {}
-    debt, closed, head, mb, tracked = got
-    res = {}
-    for old, new in closed:
-        slug = os.path.basename(old)[:-3]
-        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
-            res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
+    debt, _, head, mb, tracked = got
+    cited, res = cites(pr_body), {}
+    for old, new, slug in todo:
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout)
+        res[old] = one if isinstance(one, Finding) else None
     return res
+
+
+def excuse(old, cited):
+    """The ALLOWED reason for a debt path whose cite holds."""
+    slug = os.path.basename(old)[:-3]
+    return "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
+
+
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+    """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
+    silent-undo check excuses that path's delete). See judged. Raises Unknown."""
+    cited = cites(pr_body)
+    return {old: excuse(old, cited) for old, f in judged(wt, base_ref, head, pr_body, run_state, isolate, timeout, paths).items() if f is None}
+
+
+def reason(finding):
+    """Why a Finding refused a cite: its first line, without the `debt <slug>: ` lead (the caller names the slug itself)."""
+    text = finding.text.split("\n")[0]
+    lead = "debt %s: " % finding.slug
+    return text[len(lead):] if text.startswith(lead) else text
 
 
 def say(line):

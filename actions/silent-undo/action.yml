@@ -6,7 +6,9 @@ description: >
   (a shallow clone, a base that cannot be read) is UNKNOWN and red, never green. A run with no
   pull request base is skipped. The escape is a `Drops-lines: <path> -- <reason>` trailer in a
   commit message of the branch. The escape also reads Drops-lines and Retire-run lines in the
-  pull request body. The caller needs actions/checkout with fetch-depth 0 so the
+  pull request body. A Retire-run cite is read through the Actions API, so the caller needs
+  `permissions: actions: read`; without it the cite is unread and the finding stays, with the
+  reason printed as `cite for <slug> not accepted: <why>`. The caller also needs actions/checkout with fetch-depth 0 so the
   history reaches the base. The step uses the local origin/<base> when it exists and fetches
   only when it is missing.
 runs:
