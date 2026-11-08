@@ -5,8 +5,8 @@
 Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked
 link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands).
 
-The shared-tree rule asks before a discarding git command runs: `git reset --hard`,
-`git checkout -- <path>`, `git restore`.
+The shared-tree rule refuses a discarding git command in the shared checkout, and asks in a
+hand-made worktree: `git reset --hard`, `git checkout -- <path>`, `git restore`.
 
 ### Agent-owned worktree
 
