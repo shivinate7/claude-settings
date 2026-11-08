@@ -8092,14 +8092,19 @@ for _file, _run in (("f.ts", "timeout 30 npx ts-node f.ts"), ("f.ts", "env X=1 n
        "cat > %s <<'EOF'\ncat " % _file + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
 # A heredoc file whose body reads the env file, then run as a module by a runner that starts it: streamlit, coverage,
 # flask, ipython, dotenv and a package's own tool each run the file, so the body stays in view and the env read denies.
+# tox (its config's commands) and timeit (its statement text) run code too, so they keep the body in view as well:
+# a module that is not in _READ_ONLY_MODULES (guard_core) is a run.
 for _file, _run in (("f.py", "python3 -m streamlit run f.py"), ("f.py", "python3 -m coverage run f.py"),
                     ("f.py", "python3 -m flask --app f.py run"), ("f.py", "python3 -m ipython f.py"),
-                    ("f", "python3 -m dotenv run f"), ("f", "python3 -m mypkg.tool f")):
+                    ("f", "python3 -m dotenv run f"), ("f", "python3 -m mypkg.tool f"),
+                    ("f", "python3 -m tox f"), ("f", "python3 -m timeit f")):
     sh("trim: env: a heredoc file %s with an env read, run as %r, denies" % (_file, _run),
        "cat > %s <<'EOF'\ncat " % _file + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
-# Controls: a module that only reads its file (json.tool, py_compile, pip's requirements read) runs nothing in it, so
-# the same write and run is allowed.
-for _run in ("python3 -m json.tool f", "python3 -m py_compile f", "python3 -m pip install -r f"):
+# Controls: a module that only reads, checks or serves its file (json.tool, py_compile, pip's requirements read,
+# http.server, black, mypy, ruff: the rest of _READ_ONLY_MODULES in guard_core) runs nothing in it, so the same write
+# and run is allowed.
+for _run in ("python3 -m json.tool f", "python3 -m py_compile f", "python3 -m pip install -r f",
+             "python3 -m http.server f", "python3 -m black f", "python3 -m mypy f", "python3 -m ruff f"):
     sh("trim: env: a heredoc file with an env read, checked by %r, is allowed" % _run,
        "cat > f <<'EOF'\ncat " + ENV + "\nEOF\n" + _run, "allow", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
