@@ -13281,6 +13281,33 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
+# Other spellings that keep a test step green while its test fails, or that disable the step, are refused: a
+# trailing `|| true`, `; true` or `|| exit 0`, and an `if:` that is quoted, capitalised or `${{ false }}`. The
+# `${{ false }}` row is already refused (a control). A respelling that still runs the same test is allowed.
+TEST_OR_TRUE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || true\n")
+TEST_SEMI_TRUE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py ; true\n")
+TEST_OR_EXIT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || exit 0\n")
+RESPELL_WORKDIR = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
+RESPELL_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
+for _name, _new in (
+    ("a trailing || true on a test run", TEST_OR_TRUE),
+    ("a trailing ; true on a test run", TEST_SEMI_TRUE),
+    ("a trailing || exit 0 on a test run", TEST_OR_EXIT),
+):
+    add("builder-test: %s in checks.yml is refused" % _name, "deny", rule=BT, tool="Edit",
+        file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + _new, carries=("test-author", "Report"), **B)
+for _name, _new in (
+    ('if: "false" (double-quoted) added under a test step', IF_FALSE.replace("if: false", 'if: "false"')),
+    ("if: 'false' (single-quoted) added under a test step", IF_FALSE.replace("if: false", "if: 'false'")),
+    ("if: False (capitalised) added under a test step", IF_FALSE.replace("if: false", "if: False")),
+    ("if: ${{ false }} added under a test step (control)", IF_FALSE.replace("if: false", "if: ${{ false }}")),
+):
+    add("builder-test: %s is refused" % _name, "deny", rule=BT, tool="Edit",
+        file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + _new, carries=("test-author", "Report"), **B)
+add("builder-test: a test run respelled with working-directory: hooks and a bare test_guard.py is allowed",
+    "allow", tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + RESPELL_WORKDIR, **B)
+add("builder-test: a test run respelled as cd hooks && python3 test_guard.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + RESPELL_CD, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
