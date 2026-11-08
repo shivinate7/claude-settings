@@ -13,16 +13,35 @@ The contract these cases pin (the builder implements it):
 
 Sentences marked "constructed" are not in test_report_guard_cannot.py. The others are from it.
 """
+import ast
 import importlib.util
 import os
 import re
 import sys
+import types
 import unittest
 
 import _clause as clause
 import report_guard
 
 REPORT_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_guard.py")
+CLAUSE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_clause.py")
+
+
+def clause_with(name, value):
+    """A fresh module built from lint/_clause.py with its top-level `name` set to `value`, so every list built from `name`
+    is built again. The source is parsed and its one assignment swapped, so the shared _clause module is not touched."""
+    with open(CLAUSE_PATH, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), CLAUSE_PATH)
+    assigns = [node for node in tree.body if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+    if len(assigns) != 1:
+        raise AssertionError("scope: _clause.py assigns %s %d times, not once" % (name, len(assigns)))
+    assigns[0].value = ast.parse(repr(value), mode="eval").body
+    ast.fix_missing_locations(tree)
+    probe = types.ModuleType("_clause_probe")
+    exec(compile(tree, CLAUSE_PATH, "exec"), probe.__dict__)
+    return probe
 
 
 def none(text):
@@ -439,6 +458,32 @@ class LinearTests(unittest.TestCase):
         self.assertGreater(small_calls, 0, "the probe counted no calls")
         ratio = work(big) / small_calls
         self.assertLess(ratio, 6, "work grew %.1fx for 4x the clauses; linear is near 4x, quadratic near 16x" % ratio)
+
+
+class DerivationTests(unittest.TestCase):
+    # The lists below are built from one home each. A literal copy of a list keeps the value pins in LexiconTests green,
+    # because the copy holds the same words, so each case swaps the source list for a sentinel and reads the built list.
+
+    def test_cannot_forms_are_derived_from_cant_forms(self):
+        # Catches: CANNOT_FORMS held as a literal copy of the can't forms, so a form changed in CANT_FORMS (the list the
+        # hand-off cite reads) does not reach the claim check. test_cannot_forms_begins_with_the_cant_forms stays green on it.
+        probe = clause_with("CANT_FORMS", ("zqxvcant",))
+        self.assertEqual(probe.CANT_FORMS, ("zqxvcant",), "scope: the probe does not read the sentinel list")
+        self.assertIn("zqxvcant", probe.CANNOT_FORMS, "CANNOT_FORMS is a copy of the can't forms, not built from CANT_FORMS")
+
+    def test_verbs_are_derived_from_be_nt_forms(self):
+        # Catches: VERBS held as a literal copy of the be-forms with n't, so a form changed in _BE_NT_FORMS does not reach
+        # the verbs that a reason reads (is_reason).
+        probe = clause_with("_BE_NT_FORMS", ("zqxvbe",))
+        self.assertEqual(probe._BE_NT_FORMS, ("zqxvbe",), "scope: the probe does not read the sentinel list")
+        self.assertIn("zqxvbe", probe.VERBS, "VERBS is a copy of the be-forms with n't, not built from _BE_NT_FORMS")
+
+    def test_cannot_forms_be_forms_are_derived_from_be_nt_forms(self):
+        # Catches: the be-forms of CANNOT_FORMS ("wasn't able to" and its kin) held as a literal copy of the be-forms with
+        # n't, so a form changed in _BE_NT_FORMS does not reach the claim check.
+        probe = clause_with("_BE_NT_FORMS", ("zqxvbe",))
+        self.assertIn("zqxvbe able to", probe.CANNOT_FORMS,
+                      "CANNOT_FORMS holds a copy of the be-forms with n't, not the forms built from _BE_NT_FORMS")
 
 
 if __name__ == "__main__":
