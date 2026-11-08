@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,6 +20,14 @@ Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
+  revived     A note the branch deleted is back at head. The notes file merges by union (decision
+              notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
+              its slug (`- <slug>:` at line start), so a reworded copy counts. The branch's own non-merge
+              commits (upstream..head) are read oldest first: a slug whose last event is a delete, and that head
+              holds, is refused. A note re-added by a non-merge commit passes. Cost, per run: when the repo's
+              notes file (lint/layout.py, kind debt-notes) exists at head and holds a note, two git reads, one
+              `git show head:<file>` and one `git log -p` of that file over upstream..head. With no notes file
+              at head or no note in it, one read or none; no process stays running.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -552,6 +560,56 @@ def fmt_lost(m, path, p, lost):
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
 
 
+# --------------------------------------------------------------------- revived
+
+NOTE = re.compile(r"^- ([^\s:]+):")
+
+
+def note_slugs(text):
+    return {m.group(1) for m in map(NOTE.match, text.splitlines()) if m}
+
+
+def revived_notes(cwd, upstream, head):
+    """[(notes path, problem line)] for each note the branch deleted that head holds again. The branch's non-merge commits
+    are replayed oldest first: a delete sets the slug's last event to that commit, a line added under the slug (a re-add, or a
+    reword that removes and adds it) clears it. A slug still deleted at head, and present there, came back through a merge."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import layout  # lazy, as retire_excuses loads check_debt_retire
+    try:
+        paths = layout.candidates(cwd, "debt-notes")
+    except layout.LayoutError as e:
+        raise Unknown("the notes file is not known: %s" % e)
+    found = []
+    for path in paths:
+        present = note_slugs(blob(cwd, head, path))
+        if not present:
+            continue
+        # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
+        # simplification would then drop the branch's own delete commit from the walk.
+        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-renames",
+                     "--format=%x00%H", "%s..%s" % (upstream, head), "--", path)
+        deleted = {}  # slug -> the commit whose delete is the slug's last event
+        for chunk in out.split("\0")[1:]:
+            sha, _, body = chunk.partition("\n")
+            gone, added, in_hunk = set(), set(), False
+            for l in body.split("\n"):  # not splitlines: a form feed inside a line is no line break
+                if l.startswith("diff --git "):
+                    in_hunk = False
+                elif l.startswith("@@"):
+                    in_hunk = True
+                elif in_hunk and l[:1] in ("+", "-") and (m := NOTE.match(l[1:])):
+                    (added if l[0] == "+" else gone).add(m.group(1))
+            for slug in added:
+                deleted.pop(slug, None)
+            for slug in gone - added:
+                deleted[slug] = sha.strip()
+        for slug in sorted(present & set(deleted)):
+            found.append((path, "%s: note `%s` is back at the head. Commit %s deleted it, and a merge put it back. "
+                          "Delete the note line again, or, if the re-add is wanted, re-add it in a non-merge commit."
+                          % (path, slug, deleted[slug][:9])))
+    return found
+
+
 # ----------------------------------------------------------------------- modes
 
 
@@ -628,6 +686,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+    items += revived_notes(cwd, upstream, h)
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
