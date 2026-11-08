@@ -625,6 +625,15 @@ class SettingsPins(unittest.TestCase):
         step = "      - run: |\n          echo %s\n" % self.USES
         self.assertEqual(settings_pins(self.HEAD + step), [], "a run: | block's script line was read as a pin")
 
+    def test_a_pin_after_a_run_block_with_a_comment_header_is_read_at_its_line(self):
+        block = "      - run: | # c\n          echo %s\n" % self.USES
+        self.assertEqual(run_body(block), "echo %s\n" % self.USES,
+                         "precondition: run_body did not read run: | # c as a block")
+        # The lines: 1-6 the head, 7 the run: | # c line, 8 its script, 9 the step after it, 10 its uses: line.
+        found = settings_pins(self.HEAD + block + "      - name: Lint\n        uses: %s\n" % self.USES)
+        self.assertNotIn(("ste-lint", self.SHA, 8), found, "the run block's script line was read as a pin")
+        self.assertIn(("ste-lint", self.SHA, 10), found, "the pin after the run block was not read at its line 10")
+
 
 def run_as_yaml_reads_it(step):
     """(kind, text) of a step's run: as YAML reads it. A literal `run: |` body is its lines indented 10 or more, or
