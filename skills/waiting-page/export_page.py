@@ -172,8 +172,9 @@ SECRET_SHAPES = (
 )
 # A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path,
 # after trailing `.,;`, a closing backtick, a `)` or `]` that closes a wrapper opened before the match, and one pair of
-# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST: a function word,
-# then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
+# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (rest_is_prose: a function word,
+# then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another
+# word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.

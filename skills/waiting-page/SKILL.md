@@ -324,10 +324,11 @@ passwords, URL query secrets and credentials in a URL. It reads secret, token, k
 (`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
 A password word with a placeholder, a mask or a plain word as its value, and only blanks or plain prose after it on
-its line, passes. Prose is a function word, then letter words; a word that is no function word later in the line after a `,`
-`;` or and/or/but/is/are refuses, and the `,` `;` or `.` that ends the value does not count (`none, then swordfish` passes, `none and swordfish` does not). So do `PWD=<path>`, a no-reply address, the ssh remote of a public
-git host, and a `key` that ends one of nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey, hockey,
-lackey) when the word starts at a non-letter or the string start: `turnkey=` passes, `superturnkey=` refuses.
+its line, passes. Prose is a function word, then letter words. After a `,` `;` or and/or/but/is/are, a later word on the
+line that is no function word refuses. The `,` `;` or `.` that ends the value does not count. So `none, then swordfish`
+passes, and `none and swordfish` does not. `PWD=<path>`, a no-reply address and the ssh remote of a public git host pass
+too. So does a `key` that ends one of nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey,
+hockey, lackey), when the word starts at a non-letter or the string start: `turnkey=` passes, `superturnkey=` refuses.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
