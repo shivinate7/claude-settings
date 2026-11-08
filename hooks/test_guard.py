@@ -13512,7 +13512,6 @@ WORKFLOW_SHELL_REFUSED = (
      "sed -i 's/pytest/pytest --deselect tests\\/test_a.py/' .github/workflows/checks.yml"),
     ("perl -pi on ci.yml", "perl -pi -e 's/a/b/' .github/workflows/ci.yml"),
     ("echo appends to checks.yml", "echo x >> .github/workflows/checks.yml"),
-    ("cd into .github/workflows, then sed -i on checks.yml", "cd .github/workflows && sed -i s/a/b/ checks.yml"),
     # The shell reader must not let quoted text hide the target: a comment opener in a script, a lone quote
     # in echo text, and a script that runs on to a second line.
     ("scanner: a # in a quoted script before a pytest delete",
@@ -13525,6 +13524,19 @@ WORKFLOW_SHELL_REFUSED = (
 for _name, _command in WORKFLOW_SHELL_REFUSED:
     sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries="Edit tool", **BR)
+# A `cd` into a folder is judged only when the folder is there, so this case runs in a checkout that holds
+# .github/workflows/checks.yml. BR's checkout holds no such folder.
+WFGIT = os.path.join(ROOT, "wfgit")  # a checkout that holds one workflow file
+
+
+def _build_wfgit():
+    make_repo(WFGIT, {".github/workflows/checks.yml": "name: checks\n"})
+
+
+lazy_fixture([WFGIT], _build_wfgit)
+sh("builder-test: workflow shell write, cd into .github/workflows, then sed -i on checks.yml, is refused",
+   "cd .github/workflows && sed -i s/a/b/ checks.yml", "deny", rule=BT, carries="Edit tool",
+   **dict(B, cwd=WFGIT))
 WORKFLOW_SHELL_ALLOWED = (
     ("grep reads pytest from checks.yml", "grep pytest .github/workflows/checks.yml"),
     ("cat reads checks.yml", "cat .github/workflows/checks.yml"),
