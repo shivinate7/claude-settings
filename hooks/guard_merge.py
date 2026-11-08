@@ -276,7 +276,10 @@ def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> str
     if scope is None:
         return ""
     try:
-        if push_remote(args, where, overrides) != "origin":
+        remote = push_remote(args, where, overrides)
+        if remote is None:
+            raise RuntimeError("the push remote could not be read")
+        if remote != "origin":
             return ""
         module = merge_module()
         if module is None:

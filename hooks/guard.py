@@ -3830,8 +3830,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # destination as its head. Limit: every destination the push names is checked, globs and unresolved
                 # names skipped, never `--all`, `--mirror` or a remote other than origin. Only a push that is the first
                 # command may count as sending nothing: a commit chained before it has not run when the guard reads HEAD.
+                # A single `&` keeps a backgrounded commit in the same segment, so the segment must hold one command.
                 elif uses_merge_tool(where) and (held_kind := reviewed_head_push_hit(
-                        args, where, overrides, first=leads and call_number < direct)):
+                        args, where, overrides,
+                        first=leads and call_number < direct and background_commands(segment) == 1)):
                     ask_command("reviewed-head-push",
                                 REVIEWED_HEAD_HELD_REASON if held_kind == "held" else REVIEWED_HEAD_PUSH_REASON,
                                 "git push " + " ".join(args), "push onto a reviewed head")
