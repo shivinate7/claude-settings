@@ -138,8 +138,9 @@ ENV_ADVICE = (
 )
 
 # Runners that start a child command. Their option words that take the next word as a value, by
-# runner family. The docker and uv scans do not rely on the list being closed (`_child_starts`).
-# `-c` of npm is the child, so it is never a value flag.
+# runner family. DESIGN: the uv, docker and npm scans read an option off the list as a possible
+# value owner (`_child_starts`), so a missing flag costs a false alarm at most; only the node scan
+# keeps a closed list. `-c` of npm is the child, so it is never a value flag.
 ENV_NPM_RUNNERS = tuple(c for c in ENV_LOADER_COMMANDS if c.startswith(("npm", "npx", "pnpm")))
 _CONTAINER_FLAGS = (
     "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
@@ -531,10 +532,12 @@ def _wrapper_name(word: str) -> str:
     return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
 
 
-def _quoted_words(segment: str):
+def _quoted_words(segment: str, keep_newline: bool = False):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
     The redirects are spaced into words of their own outside the quotes only. A quote with no
-    closing mate is a plain character, so a lone quote in text still leaves the words after it."""
+    closing mate is a plain character, so a lone quote in text still leaves the words after it.
+    With `keep_newline` a line break inside quotes stays a line break (the env reader splits a
+    shell string there); by default it is a space, as guard_frozen reads it."""
     chunks, plain, i, n = [], [], 0, len(segment)
 
     def flush():
@@ -554,9 +557,8 @@ def _quoted_words(segment: str):
                 j += 2 if char == '"' and segment[j] == "\\" else 1
             if j < n:
                 flush()
-                # A line break inside the quotes stays one (`\1`), so a shell string reads it as a
-                # segment break; every other blank is joined to the word.
-                chunks.append(re.sub(r"[^\S\n]", "\0", segment[i:j + 1]).replace("\n", "\1"))
+                blank = r"[^\S\n]" if keep_newline else r"\s"
+                chunks.append(re.sub(blank, "\0", segment[i:j + 1]).replace("\n", "\1"))
                 i = j + 1
                 continue
         plain.append(char)
@@ -567,7 +569,7 @@ def _quoted_words(segment: str):
 
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
-    words = _quoted_words(_blank_messages(segment))
+    words = _quoted_words(_blank_messages(segment), True)
     # The command is the first word that is not a `VAR=value` assignment.
     # A `(` glued to the first assignment is a subshell paren, not part of the name.
     if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
@@ -745,7 +747,7 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
             while position < len(words) and _base(words[position]) in ENV_COMMAND_PREFIXES:
                 position += 1
             if position < len(words):
-                words[position] = words[position].lstrip("({").rstrip(")};")  # `(env)`, `{ env; }`
+                words[position] = words[position].lstrip("({").rstrip(")};")  # glued `(env)`, `{env;}` only
                 if _child_prints(words, position, False, depth + 1):
                     return True
     return False
@@ -776,29 +778,36 @@ ENV_CHILD_BOOL_FLAG = re.compile(
     r"|offline|all-extras|no-[a-z-]+))$")
 
 
+def _may_own_value(word: str) -> bool:
+    """True when an option word that is not in the runner's value-flag list may still own the next
+    word: it has no `=` and is not a known bool flag."""
+    return word.startswith("-") and "=" not in word and not ENV_CHILD_BOOL_FLAG.match(word)
+
+
 def _child_starts(words, i: int, flags):
     """The indexes from `i` where a child command may start, past the runner's options. An option
-    in `flags` owns the next word. Any other option may own it too, so a word right after one is a
-    start AND the scan goes on to the next positional word: `--pull always alpine env` starts at
-    `always` and at `alpine`. FEWEST FALSE ALARMS: a start that is no child costs nothing, since
-    `_child_prints` reads only env, printenv, shells, python and inline runners, and the scan stops
-    at the first positional word that follows no unlisted option, so a program's own arguments
-    (`docker run myimage serve env`) are never starts. The list of value flags is then no closed
-    list: an unlisted one is read as a possible value."""
-    maybe_value = False
+    in `flags` owns the next word. The first positional word is a start. When it sits right after
+    an unlisted option it may be that option's value, so the scan goes on past the listed options
+    to the next positional word, which is a start too: `--pull always --env-file F alpine env` starts at
+    `always` and `alpine`. An unlisted option there ends the scan, so a program's own arguments
+    (`docker run myimage serve env`, `uv run -q pytest -k env`) are never starts. FEWEST FALSE
+    ALARMS: a start that is no child costs nothing, since `_child_prints` reads only env, printenv,
+    shells, python and inline runners. The value-flag list is no closed list: an unlisted option
+    is read as a possible value owner."""
+    value = False
     while i < len(words):
         word = words[i]
         if word in flags:
             i += 2
-            maybe_value = False
         elif word.startswith("-"):
+            if value:
+                return
             i += 1
-            maybe_value = "=" not in word and not ENV_CHILD_BOOL_FLAG.match(word)
         else:
             yield i
-            if not maybe_value:
+            if value or not (i and _may_own_value(words[i - 1])):
                 return
-            maybe_value = False
+            value = True
             i += 1
 
 
@@ -843,8 +852,10 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
                 i += 2
             elif word.startswith("-"):
                 i += 1
-            elif word in ("exec", "x") and not seen_exec:
+            elif word in ("exec", "x"):  # `x` may be an option value, so it never ends the walk
                 seen_exec = True
+                i += 1
+            elif _may_own_value(words[i - 1]):  # may be an unlisted option's value
                 i += 1
             else:
                 return name.startswith("pnpm") and seen_exec and _child_prints(words, i, fed)
