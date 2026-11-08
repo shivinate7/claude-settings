@@ -1,0 +1,308 @@
+// A screen that shows an amount in thousands says so once for the table. [[money-shows-in-thousands]].
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { walkFiles } from '../walk.mjs';
+import { stripComments } from '../skill-readers.mjs';
+import ts from 'typescript';
+
+const walk = walkFiles;
+
+test('every file that shows a Thousands cell also carries the marker', () => {
+  const files = walk('src/components').filter((f) => f.endsWith('.tsx') && !f.endsWith('Thousands.tsx'));
+  const users = files.filter((f) => /<Thousands\s/.test(readFileSync(f, 'utf8')));
+  assert.ok(users.length >= 10, `expected the money screens to use Thousands, found ${users.length}`);
+  const bare = users.filter((f) => !/<ThousandsNote\s*\/>|IN_THOUSANDS/.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(bare, [], 'a file shows amounts in thousands with no marker');
+});
+
+test('the export code never uses the thousands form', () => {
+  const exports = walk('src/utils').filter((f) => /export/i.test(f) && f.endsWith('.ts'));
+  const leaking = exports.filter((f) => /formatMoneyThousands|IN_THOUSANDS/.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(leaking, [], 'an export file uses the thousands form');
+});
+
+test('the marker is a paragraph, so it never sits inside another paragraph', () => {
+  const files = walk('src/components').filter((f) => f.endsWith('.tsx') && !f.endsWith('Thousands.tsx'));
+  const nested = files.filter((f) => /<p\b[^>]*>(?:(?!<\/p>)[\s\S])*<ThousandsNote\b/.test(readFileSync(f, 'utf8')));
+  assert.deepEqual(nested, [], 'a ThousandsNote is inside a <p>');
+});
+
+test('a screen of amounts writes no cents of its own', () => {
+  const src = readFileSync('src/components/BidRevisions.tsx', 'utf8');
+  assert.ok(!/minimumFractionDigits/.test(src), 'BidRevisions formats its own cents');
+});
+
+test('the dashboard puts the marker where its money is: the Cost head and the breakdown card', () => {
+  // D-632. A match anywhere in the file is not a match in the right place, so this reads the two places.
+  const src = readFileSync('src/components/Dashboard.tsx', 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+  // The line table's money head names the unit, from the one constant.
+  assert.match(src, /const COST_HEAD = `Cost \$\{IN_THOUSANDS\}`;/, 'the Cost head does not carry IN_THOUSANDS');
+  assert.match(src, /\[COST_HEAD,/, 'the line table does not use the Cost head');
+  // The breakdown card states its unit once, in the Cost head of its review panel, and holds no note above that
+  // panel. The note sat above the panel and repeated the head (hub ruling, class c, 2026-10-12).
+  const card = src.slice(src.indexOf('const breakdownCard = ('), src.indexOf('const hostZones = ('));
+  assert.ok(card.length > 0, 'the breakdown card is not found in Dashboard.tsx, so nothing was read');
+  assert.match(card, /\{tabView\}/, 'the breakdown card does not render the review panel that holds the Cost head');
+  assert.doesNotMatch(card, /<ThousandsNote\b/, 'the breakdown card holds a ThousandsNote above its review panel, which already states the unit in its Cost head');
+});
+
+test('the Compare lines pane has no note above its list, and its one unit marker sits in the money head', () => {
+  // D-632, the owner's ruling of 2026-10-11, and the hub ruling on round 2: the note goes, and the pane's money
+  // head line holds the one marker. A match anywhere in the file is not a match in the right place, so this reads
+  // the lines pane's own block: from its `const linesPane` to the next sibling `const`, with comments removed.
+  const src = stripComments(readFileSync('src/components/screens/ComparisonScreen.tsx', 'utf8'), 'src/components/screens/ComparisonScreen.tsx');
+  const start = src.indexOf('const linesPane = ');
+  assert.ok(start >= 0, 'the lines pane is not found in ComparisonScreen.tsx, so nothing was read');
+  const end = src.indexOf('\n  const ', start + 1);
+  const pane = src.slice(start, end);
+  const list = pane.indexOf('<ul');
+  assert.ok(list > 0, 'the lines pane block is not the lines pane: no list in it, so nothing was read');
+  assert.doesNotMatch(pane, /<ThousandsNote\b/, 'the lines pane renders a ThousandsNote paragraph above its list');
+  // Exactly one marker in the pane. A second one, in a cell or a note, fails here.
+  const markers = pane.match(/IN_THOUSANDS|\(in thousands\)/g) ?? [];
+  assert.equal(markers.length, 1, `the lines pane should carry one unit marker, in its money head, and it carries ${markers.length}`);
+  // The head is the element directly above the amounts. From the marker to the list, the source holds only the
+  // marker's own text, the braces that close its expression, and closing tags. So no sentence, in either view,
+  // sits between the money head and its amounts (the series sentence fails this, in the series view and the codes view).
+  const head = pane.slice(0, list);
+  const markerAt = head.search(/IN_THOUSANDS|\(in thousands\)/);
+  assert.ok(markerAt >= 0, 'the one unit marker sits below the list, not in the money head above it');
+  assert.match(head.slice(markerAt), /^[^<]*(<\/[A-Za-z]+>\s*)+$/,
+    'a sentence or an element sits between the money head and the amounts below it. The head must be the element directly above the list');
+  const line = head.slice(head.lastIndexOf('\n', markerAt) + 1, head.indexOf('\n', markerAt) === -1 ? head.length : head.indexOf('\n', markerAt));
+  assert.doesNotMatch(line, /<p\b/, 'the unit marker sits in a paragraph above the list, which is a note, not a money head');
+});
+
+test('a ThousandsNote is never followed by a table in the chat cards and the Level pane', () => {
+  // D-632, the owner's ruling of 2026-10-11: the unit sits in a money column head, so a note above a table is a finding.
+  // These three files draw their tables in chat and in the Level pane, which the browser tier does not reach. So this
+  // reads the source: each ThousandsNote, with comments removed, must have no DataTable or table after it before the
+  // next note. A note followed by a table is the note the lane removes.
+  for (const file of ['src/components/PreconCard.tsx', 'src/components/LinesCard.tsx', 'src/components/ItbBidCompare.tsx']) {
+    const src = stripComments(readFileSync(file, 'utf8'), file);
+    const notes = [...src.matchAll(/<ThousandsNote\s*\/>/g)].map((m) => m.index);
+    const found = notes.filter((at, i) => {
+      const next = i + 1 < notes.length ? notes[i + 1] : src.length;
+      return /<(DataTable|table)\b/.test(src.slice(at, next));
+    }).map((at) => src.slice(0, at).split('\n').length);
+    assert.deepEqual(found, [], `${file}: a ThousandsNote sits above a table at line(s) ${found.join(', ')}. Move the unit into the table's money head`);
+  }
+});
+
+test('the Dashboard review panel draws no note above its table: the Cost head states the unit', () => {
+  // The review panel's table holds a "Cost (in thousands)" head (`COST_HEAD`), so a note above the panel repeats it.
+  // The note sits in the same JSX as the panel, so this reads the source between them, with comments removed.
+  const src = stripComments(readFileSync('src/components/Dashboard.tsx', 'utf8'), 'src/components/Dashboard.tsx');
+  assert.match(src, /const COST_HEAD = `Cost \$\{IN_THOUSANDS\}`;/, 'the Cost head no longer carries the unit, so this check reads nothing');
+  assert.doesNotMatch(src, /<ThousandsNote\s*\/>[\s\S]{0,200}?tabPanel\(reviewPanel/,
+    'a ThousandsNote sits above the review panel, which holds the Cost head that already states the unit');
+});
+
+test('every table whose cells render Thousands has exactly one money head that carries the unit', () => {
+  // D-632, the owner's ruling of 2026-10-11: one unit marker for each table, in its money column head. A table
+  // of Thousands cells is read through the TypeScript parser, not by text match: each DataTable (or table) that
+  // holds a <Thousands> cell must have exactly one head that names IN_THOUSANDS or "(in thousands)".
+  // Heads are read from the `columns` expression, through `names(...)`, a const in the same file, and `?:` / `&&`.
+  const bad = [];
+  for (const file of walk('src/components').filter((f) => f.endsWith('.tsx'))) {
+    const src = readFileSync(file, 'utf8');
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const consts = new Map();
+    const collectConsts = (node) => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) consts.set(node.name.text, node.initializer);
+      ts.forEachChild(node, collectConsts);
+    };
+    collectConsts(sf);
+    const containsThousands = (node) => {
+      let found = false;
+      const visit = (n) => {
+        if (found) return;
+        if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText() === 'Thousands') { found = true; return; }
+        ts.forEachChild(n, visit);
+      };
+      visit(node);
+      return found;
+    };
+    // Head texts of a `columns` expression. An unreadable part is recorded as null, so it fails the check.
+    const headsOf = (expr) => {
+      if (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr)) return headsOf(expr.expression);
+      if (ts.isIdentifier(expr)) return consts.has(expr.text) ? headsOf(consts.get(expr.text)) : [null];
+      if (ts.isCallExpression(expr)) return expr.arguments.length > 0 ? headsOf(expr.arguments[0]) : [null];
+      if (ts.isConditionalExpression(expr)) return [...headsOf(expr.whenTrue), ...headsOf(expr.whenFalse)];
+      if (ts.isBinaryExpression(expr) && expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) return headsOf(expr.right);
+      if (ts.isArrayLiteralExpression(expr)) {
+        return expr.elements.flatMap((el) => {
+          if (ts.isSpreadElement(el)) return headsOf(el.expression);
+          if (!ts.isObjectLiteralExpression(el)) return [null];
+          const head = el.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'head');
+          return head ? [head.initializer.getText()] : [null];
+        });
+      }
+      return [null];
+    };
+    const line = (node) => sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+    // The unit in a head: the thousands marker, or Compare's "(K)" money head (`moneyHead`), which marks a money column.
+    const UNIT_IN_HEAD = /IN_THOUSANDS|\(in thousands\)|moneyHead\(/g;
+    const check = (node, label, heads, columnsText) => {
+      if (heads.includes(null)) {
+        // A head the parser cannot read (a head built in a map or an import): count the marker in the columns text.
+        const marked = (columnsText.match(UNIT_IN_HEAD) ?? []).length;
+        if (marked !== 1) bad.push(`${file}:${line(node)} ${label}: a head cannot be read, and its columns carry ${marked} unit mark(s), need exactly one`);
+        return;
+      }
+      const marked = heads.filter((h) => /IN_THOUSANDS|\(in thousands\)|moneyHead\(/.test(h)).length;
+      if (marked !== 1) { bad.push(`${file}:${line(node)} ${label}: ${marked} money head(s) carry the unit, need exactly one. Heads: ${heads.join(' | ')}`); return; }
+      // Head over money: the unit head is the column whose cells hold a Thousands figure. A head over a vendor or a
+      // name column (its cells hold no amount) states the unit over the wrong column.
+      const at = heads.findIndex((h) => /IN_THOUSANDS|\(in thousands\)|moneyHead\(/.test(h));
+      const money = moneyColumnsOf(node);
+      // A column list with a spread of a condition (`...(on ? [...] : [])`) has columns that may not render, so the head
+      // index cannot be read from the list alone. Those tables are read by the browser tier.
+      const conditional = /\.\.\.\(/.test(columnsText);
+      if (!conditional && money.size > 0 && !money.has(at)) {
+        bad.push(`${file}:${line(node)} ${label}: the unit head is column ${at + 1}, but the Thousands cells sit in column ${[...money].map((i) => i + 1).join(', ')}. The marker sits over a column with no amount`);
+      }
+    };
+    // The indexes of the td cells that hold a Thousands figure, read from each row of the table.
+    const moneyColumnsOf = (node) => {
+      const cols = new Set();
+      const visit = (n) => {
+        if (ts.isJsxElement(n) && n.openingElement.tagName.getText() === 'tr') {
+          // A row's cells are its td and th children, in order: a row header is a th, and it takes a column.
+          n.children.filter((c) => ts.isJsxElement(c) && ['td', 'th'].includes(c.openingElement.tagName.getText()))
+            .forEach((cell, i) => { if (containsThousands(cell)) cols.add(i); });
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(node);
+      return cols;
+    };
+    const visit = (node) => {
+      if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === 'DataTable' && containsThousands(node)) {
+        const props = node.openingElement.attributes.properties;
+        const attr = props.find((p) => ts.isJsxAttribute(p) && p.name.getText() === 'columns');
+        const expr = attr && attr.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : null;
+        const label = props.find((p) => ts.isJsxAttribute(p) && p.name.getText() === 'label');
+        // A `columns` identifier is read through its const, so the fallback counts the marker in the array itself.
+        const resolved = expr && ts.isIdentifier(expr) && consts.has(expr.text) ? consts.get(expr.text) : expr;
+        // LOOSENING. The Precon campus table builds its columns in a same-file helper, `campusColumns(side)`, then slices it and
+        // adds a head. The head reader cannot follow a slice or an index into a call, so the fallback counts the unit marks in
+        // the columns text. That text holds only the call, so the fallback also reads the body of each same-file const the
+        // columns call. The outcome it keeps: exactly ONE unit head in such a table. It no longer checks that the head sits
+        // over the money column, for a table read this way. The browser tier reads that table's rendered head.
+        const called = (text) => [text, ...[...new Set([...text.matchAll(/\b([A-Za-z_$][\w$]*)\(/g)].map((m) => m[1]))]
+          .filter((name) => consts.has(name)).map((name) => consts.get(name).getText())].join('\n');
+        check(node, `DataTable ${label && label.initializer ? label.initializer.getText() : ''}`, expr ? headsOf(expr) : [null], resolved ? called(resolved.getText()) : '');
+      }
+      if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === 'table' && containsThousands(node)) {
+        const heads = [];
+        const collectTh = (n) => {
+          if (ts.isJsxElement(n) && n.openingElement.tagName.getText() === 'th') heads.push(n.getText());
+          ts.forEachChild(n, collectTh);
+        };
+        collectTh(node);
+        check(node, 'table', heads.length > 0 ? heads : [null], node.getText());
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  assert.deepEqual(bad, [], `money tables without exactly one unit head:\n  ${bad.join('\n  ')}`);
+});
+
+test('the CostGroups alert says its unit once for the group, not once per untied scope', () => {
+  // Runtime, not source: two untied scopes make two sentences in one alert. The owner's ruling (2026-10-12): the alert
+  // group says the unit once, so the alert holds exactly one unit mention across all its scopes.
+  const html = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
+    import { createElement } from 'react';
+    import { renderToStaticMarkup } from 'react-dom/server';
+    import CostGroups from './src/components/CostGroups.tsx';
+    const row = (id, cost) => ({ id, item: 'Item ' + id, cost, code: '3130', codeName: 'Concrete' });
+    const scopes = [
+      { key: 'a', label: 'Scope A', rows: [row('1', 100)], expectedTotal: 200 },
+      { key: 'b', label: 'Scope B', rows: [row('2', 50)], expectedTotal: 90 },
+    ];
+    console.log(renderToStaticMarkup(createElement(CostGroups, { scopes, grandTotal: 290, offered: [], axes: [], chips: [], onAxes: () => {} })));
+  `], { encoding: 'utf8' });
+  const alert = /role="alert"[^>]*>([\s\S]*?)<\/p>/.exec(html);
+  assert.ok(alert, 'the untied alert is not rendered for two untied scopes, so nothing was read');
+  const text = alert[1].replace(/<[^>]+>/g, ' ');
+  const once = (text.match(/in thousands/gi) ?? []).length;
+  assert.equal(once, 1, `the alert says its unit ${once} time(s), need once for the group: ${text.trim()}`);
+});
+
+test('the PaneBasis line does not repeat the unit a money table already states', () => {
+  // PaneBasis sits above the money tables of PreconCard (its callers at 170, 196 and 405). The table's head states the
+  // unit once, so the line above it says the basis only. Read from the component's own block, comments removed.
+  const src = stripComments(readFileSync('src/components/PreconCard.tsx', 'utf8'), 'src/components/PreconCard.tsx');
+  const start = src.indexOf('const PaneBasis = ');
+  assert.ok(start >= 0, 'PaneBasis is not found in PreconCard.tsx, so nothing was read');
+  const end = src.indexOf('\nconst ', start + 1);
+  const block = src.slice(start, end);
+  assert.doesNotMatch(block, /IN_THOUSANDS|\(in thousands\)/, 'PaneBasis repeats the unit that its table head already states');
+});
+
+test('History states its unit once, in its money column head, and its key basis does not repeat it', () => {
+  // Class c re-point (2026-10-12, hub ruling). D-632, A table of amounts shows them in thousands: the unit lives in the
+  // table head, said once. The key basis sentence does not repeat it. The head calls `unitHead`
+  // since the ux-chunk-5 money-head change, so the assert reads that call.
+  const src = stripComments(readFileSync('src/components/History.tsx', 'utf8'), 'src/components/History.tsx');
+  const mentions = (src.match(/IN_THOUSANDS|\(in thousands\)/g) ?? []).length - 1;
+  assert.equal(mentions, 1, `History states its unit ${mentions} time(s) outside its import, need once (its money head)`);
+  assert.match(src, /head:\s*unitHead\(\s*'Amount',\s*IN_THOUSANDS\s*\)/, 'History money column head "Amount" does not carry the unit through unitHead');
+  assert.doesNotMatch(src, /keyBasis=\{[^\n]*(IN_THOUSANDS|\(in thousands\))/, 'History key basis repeats the unit its money head states');
+});
+
+// The Compare codes table (the owner, 2026-10-12: "let it scroll away"). One unit head, on its first money column.
+// The per-job columns scroll away, so none of them carries a unit. Returns the problems, empty when it holds.
+const unitRuleForCompareCodes = (src) => {
+  const start = src.indexOf('const codeColumns = [');
+  if (start < 0) return ['the Compare codes column list (codeColumns) was not found'];
+  const block = src.slice(start, src.indexOf('\n  ];', start));
+  const jobs = block.indexOf('comparison.labels.map');
+  if (jobs < 0) return ['the Compare codes job columns (comparison.labels.map) were not found'];
+  const units = (text) => (text.match(/moneyHead\(|\(in thousands\)|IN_THOUSANDS|\(K\)/g) ?? []).length;
+  const problems = [];
+  if (units(block.slice(0, jobs)) !== 1) problems.push(`the Compare codes table states its unit ${units(block.slice(0, jobs))} time(s) before its job columns, need one (its first money head)`);
+  if (units(block.slice(jobs)) !== 0) problems.push('a scrolled job column of the Compare codes table states the unit, need none');
+  return problems;
+};
+test('Compare codes states one unit, on its first money head, and no scrolled job column carries one', () => {
+  const src = stripComments(readFileSync('src/components/screens/ComparisonScreen.tsx', 'utf8'), 'src/components/screens/ComparisonScreen.tsx');
+  assert.deepEqual(unitRuleForCompareCodes(src), []);
+});
+test('the Compare codes unit rule goes red on a planted unit head in a job column', () => {
+  const src = stripComments(readFileSync('src/components/screens/ComparisonScreen.tsx', 'utf8'), 'src/components/screens/ComparisonScreen.tsx');
+  const planted = src.replace('<span className="min-w-0 truncate">{label}</span>', "<span className=\"min-w-0 truncate\">{label} {moneyHead('x')}</span>");
+  assert.notEqual(planted, src, 'the plant did not land in the job column, so the red proof is void');
+  assert.notDeepEqual(unitRuleForCompareCodes(planted), [], 'the rule does not catch a unit head in a scrolled job column');
+});
+
+test('a Compare tie-out line for one job states no unit: the unit is said once for the group, not per job', () => {
+  // ComparisonScreen.tsx: each untied job gets a "does not tie out" line. The owner's ruling (2026-10-12): the group says
+  // the unit once, so no per-job line carries it. Read from the line to its Open Job control.
+  const src = stripComments(readFileSync('src/components/screens/ComparisonScreen.tsx', 'utf8'), 'src/components/screens/ComparisonScreen.tsx');
+  const at = src.indexOf('does not tie out');
+  assert.ok(at >= 0, 'the tie-out line is not found in ComparisonScreen.tsx, so nothing was read');
+  const end = src.indexOf('WordButton', at);
+  const line = src.slice(at, end);
+  assert.doesNotMatch(line, /IN_THOUSANDS|\(in thousands\)/, 'a per-job tie-out line states the unit: it is said once for the group');
+});
+
+test('PreconCard states the unit once in the history and What-If columns, and PaneBasis states none', () => {
+  // The owner's ruling (2026-10-12): one unit per table. Read from PreconCard's own columns: the history columns
+  // (const historyColumns) and the What-If table's columns, each one unit mention. PaneBasis sits above a table and
+  // states none (its own test). Comments removed, so a commented-out mention does not count.
+  const src = stripComments(readFileSync('src/components/PreconCard.tsx', 'utf8'), 'src/components/PreconCard.tsx');
+  const history = src.slice(src.indexOf('const historyColumns = '), src.indexOf('\n', src.indexOf('const historyColumns = ')));
+  assert.ok(history.includes('historyColumns'), 'historyColumns is not found in PreconCard.tsx, so nothing was read');
+  const historyMarks = (history.match(/IN_THOUSANDS|\(in thousands\)/g) ?? []).length;
+  assert.equal(historyMarks, 1, `the history columns state the unit ${historyMarks} time(s), need once`);
+  const whatIfAt = src.indexOf('label="What-If" exportAudience');
+  assert.ok(whatIfAt >= 0, 'the What-If table is not found in PreconCard.tsx, so nothing was read');
+  const whatIfCols = src.slice(src.indexOf('columns={', whatIfAt), src.indexOf('}>', src.indexOf('columns={', whatIfAt)) + 2);
+  const whatIfMarks = (whatIfCols.match(/IN_THOUSANDS|\(in thousands\)/g) ?? []).length;
+  assert.equal(whatIfMarks, 1, `the What-If columns state the unit ${whatIfMarks} time(s), need once`);
+});
