@@ -118,13 +118,15 @@ def label_word(line):
     to a fixed point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`,
     `_(none)_`). A leading underscore is stripped only when the word closes with an underscore too, or its core is bare
     letters once wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word
-    that strips to nothing (`-`, `>`, `1)`) is skipped. upper_env is True when the same stripped word, before it is
+    that strips to nothing (`-`, `>`, `1)`) is skipped, and a colon it held (`:`, `-:`) goes on to the next word, so
+    the label still ends in a colon. upper_env is True when the same stripped word, before it is
     folded to lower case, is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True). The key is cut by its
     own match, so a near-miss key of any width (`Red-run :`, `Red-runs:`, `Red run`) does not shift the word. No key or
     no word: ("", False, False). Pure."""
     key = RED_KEY.match(line) or RED_KEY_WORD.match(line)
     if not key:
         return "", False, False
+    skipped_colon = False
     for token in line[key.end():].split():
         if LIST_NUMBER.match(token):
             continue
@@ -141,7 +143,8 @@ def label_word(line):
             if token == before:
                 break
         if token:
-            return token.casefold(), colon, bool(UPPER_ENV_WORD.match(token))
+            return token.casefold(), colon or skipped_colon, bool(UPPER_ENV_WORD.match(token))
+        skipped_colon = skipped_colon or colon
     return "", False, False
 
 
@@ -199,9 +202,14 @@ def refused_word(line):
     return colon and not ENV_WORD.match(word)
 
 
+def red_lines(message):
+    """The Red-run lines of a message: the one home of what counts as one, read by the validity check and the hint. Pure."""
+    return [line for line in message.splitlines() if RED_KEY.match(line) or RED_KEY_NO_COLON.match(line)]
+
+
 def has_valid_trailer(message):
     """True when the message has a Red-run line and every Red-run line is valid. Pure: it reads no repo."""
-    lines = [line for line in message.splitlines() if RED_KEY.match(line) or RED_KEY_NO_COLON.match(line)]
+    lines = red_lines(message)
     return bool(lines) and all(valid_line(line) for line in lines)
 
 
@@ -247,7 +255,7 @@ def gaps(root, base):
             continue
         if not has_valid_trailer(message):
             hint = ""
-            if any(mutant_like(l) and not valid_line(l) for l in message.splitlines() if RED_KEY.match(l)):
+            if any(mutant_like(l) and not valid_line(l) for l in red_lines(message)):
                 hint = "; a mutant line reads `Red-run: mutant: <mutation> -> <N> failed on <sha>`"
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
             lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer%s" % (sha[:7], subject, shown, hint))
