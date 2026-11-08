@@ -681,11 +681,11 @@ class ReportGuardTests(unittest.TestCase):
 
     def test_73_peer_reply_does_not_move_the_turn_start_in_either_direction(self):
         rows = [
-            # Pin (green before the fix): a peer record before the commit never hides the commit.
+            # Pin: a peer record before the commit never hides the commit.
             ("peer before commit", [human("go"), peer_msg("Answer: ok."),
                                     tool_use_msg("Bash", {"command": "git commit -m x"}),
                                     tool_result_msg(), assistant_text("done")], "block"),
-            # Pin (green before the fix): a commit from an earlier turn never counts because a peer
+            # Pin: a commit from an earlier turn never counts because a peer
             # reply came after the new human message.
             ("earlier turn commit", [human("land it"), tool_use_msg("Bash", {"command": "git commit -m a"}),
                                      tool_result_msg(), human("what is the log"),

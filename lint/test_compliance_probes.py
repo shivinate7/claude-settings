@@ -2208,7 +2208,7 @@ class Restates(unittest.TestCase):
 
 
 class RestatesFixtures(unittest.TestCase):
-    """Green controls: the record text the restates cases read is there, in the shape they need. They pass on main."""
+    """Controls: the record text the restates cases read is there, in the shape they need."""
 
     def test_the_records_are_the_checkouts_decisions_folder(self):
         self.assertTrue(os.path.isdir(RECORDS), RECORDS)
