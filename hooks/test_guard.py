@@ -14868,6 +14868,15 @@ def rpush_newer_repo():
     return rpush_repo("newer-local", branch=RPUSH_BRANCH, git=((*IDENT, "commit", "--allow-empty", "-q", "-m", "newer"),))
 
 
+def rpush_broken_config_repo():
+    """The lane checked out, then its .git/config replaced with a line git cannot parse. Every config read the push makes
+    fails, as an unreadable file would. A mode change would not do it for root, which reads any file."""
+    where = rpush_repo("broken-config", branch=RPUSH_BRANCH)
+    with open(os.path.join(where, ".git", "config"), "w", encoding="utf-8") as handle:
+        handle.write("[remote\n")  # an unclosed section header
+    return where
+
+
 def rpush_sha(build, rev="HEAD"):
     """The full sha `rev` names in the checkout `build` returns, read when a case runs, after its checkout is built."""
     return run_vcs(build(), "rev-parse", rev).stdout.strip()
@@ -14893,6 +14902,10 @@ rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane 
            "ask", RPUSH_BOTH, repo=rpush_newer_repo, command=VCS + " push -u origin " + RPUSH_BRANCH,
            others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_newer_repo, "HEAD~1"))],
            comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_newer_repo, "HEAD~1"), fix=RPUSH_FIX))])
+rpush_case("reviewed-head-push: a bare push with a git config that cannot be read allows, "
+           "with one stderr line naming the rule",
+           "allow", (), repo=rpush_broken_config_repo, command=VCS + " push", lines=1,
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
 
 # A commit chained before the push. The guard judges the push before the chain runs, so local HEAD still equals the
 # pull request's live head, and the push would send the commit the chain makes. The ask is held, and an ask command
@@ -14908,6 +14921,14 @@ rpush_case("reviewed-head-push: a commit chained before a bare push on an origin
            "deny", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " commit -am x && " + VCS + " push",
            others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_origin_branch_repo))],
            comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_origin_branch_repo), fix=RPUSH_FIX))])
+# A single `&` backgrounds the commit, so the shell runs it beside the push. The push is not first, as with `&&`.
+# A bare background job with no pid captured is refused by another rule before this one, so `echo $!` names a pid.
+rpush_case("reviewed-head-push: a commit backgrounded before a push to the lane denies, "
+           "because a chained ask runs alone, after both reads",
+           "deny", RPUSH_BOTH, repo=rpush_up_to_date_repo,
+           command=VCS + " commit --allow-empty -m x & " + RPUSH_PUSH + " & echo $!",
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_up_to_date_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_up_to_date_repo), fix=RPUSH_FIX))])
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
