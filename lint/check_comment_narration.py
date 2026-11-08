@@ -59,11 +59,19 @@ class HistoryPhrase:
         r"|\badded\s+after\s+(?:code\s+)?review\b"
         r"|\bformerly\b"
         r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I)
-    RESULT = r"(?:red|green|pass(?:es|ed|ing)?|fail(?:s|ed|ing)?)"
+    # A pass or fail verb also names code: "fails on the main thread", "pass on the base class", "passes on the
+    # head of the list", "fails on main()", "fails on HEAD~1". So after head, main or base a pass or fail verb
+    # refuses `(`, a git ref suffix, "of" and a code noun. "was passed before the loop" is code too, so the
+    # bare before-form takes a colour or an -ing result only.
+    COLOUR = r"(?:red|green)"
+    VERB = r"(?:pass(?:es|ed|ing)?|fail(?:s|ed|ing)?)"
+    PLACE = r"\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
+    CODE_AFTER = r"(?![(~^]|\s+(?:of|thread|queue|class|node)s?\b)"
     RUN = re.compile(
-        r"\b" + RESULT + r"\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
-        r"|\b(?:was|were|went|been|turned|stayed)\s+" + RESULT + r"\s+before\b"
-        r"|\b" + RESULT + r"\s+before\s+(?:this|the)\s+(?:change|fix)\b", re.I)
+        r"\b" + COLOUR + PLACE
+        + r"|\b" + VERB + PLACE + CODE_AFTER
+        + r"|\b(?:was|were|went|been|turned|stayed)\s+(?:red|green|passing|failing)\s+before\b"
+        r"|\b(?:" + COLOUR + "|" + VERB + r")\s+before\s+(?:this|the)\s+(?:change|fix)\b", re.I)
     CONDITION = re.compile(r"\b(?:when|if|unless|until|while|once)\b", re.I)
 
     def finditer(self, text):
