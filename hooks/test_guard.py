@@ -8249,13 +8249,47 @@ sh("env: interpreter code follow-ups: allow, node -e that throws with the name i
 sh("env: interpreter code follow-ups: allow, a quoted python heredoc with 2>&1 that prints the name",
    "python3 <<'PY' 2>&1\nprint(\"" + ENV + " found\")\nPY", "allow", cwd=NOGIT)
 
-# CURRENT VERDICT, SEE NOTE. The builder reads both of these as deny. Each expected verdict below is what
-# head gives today, so a change to either one shows here. The first opens only the name 'x', never the
-# file, so its deny is a false alarm if the file is never opened. The second reads no file at all.
+# CURRENT VERDICT, SEE NOTE. The first expected verdict is allow: it opens only the name 'x', never the
+# file, so head's deny is a false alarm, and the case stays red until the guard allows it. The second
+# reads no file at all, and head allows it, so its expected verdict is what head gives.
 sh("env: interpreter code follow-ups: current verdict, see note: python3 -c, a name bound to x, opened when not the file",
-   "python3 -c \"f='x'\nif f != '" + ENV + "': print(open(f).read())\"", "deny", "env-file", cwd=NOGIT)
+   "python3 -c \"f='x'\nif f != '" + ENV + "': print(open(f).read())\"", "allow", cwd=NOGIT)
 sh("env: interpreter code follow-ups: current verdict, see note: node -e, a joined list holding the file's name",
    "node -e \"console.log(['" + ENV + "','x'].join('\\n'))\"", "allow", cwd=NOGIT)
+
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, next set. The file's name built from parts
+# (a join, a concatenation, a template literal, a stripped string), a listing filtered by startswith or
+# endswith and then opened, and a name bound to the file and read under a strict compare. Each is a deny.
+# The filter idioms that open every other file, skipping the file's name, are allows.
+sh("env: interpreter code follow-ups: deny, python3 -c, an open of a join of config and the name",
+   "python3 -c \"print(open('/'.join(['config', '" + ENV + "'])).read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, an open of a join of the name alone",
+   "python3 -c \"print(open(''.join(['" + ENV + "'])).read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a listing filtered by startswith of the name, opened",
+   "python3 -c \"import os; print([open(f).read() for f in os.listdir('.') if f.startswith('" + ENV + "')])\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a listing filtered by endswith of the name, opened",
+   "python3 -c \"import os; print([open(f).read() for f in os.listdir('.') if f.endswith('" + ENV + "')])\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a readdirSync filtered by startsWith of the name, read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (f.startsWith('" + ENV + "')) "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a const name equal to the file, read through path.join",
+   "node -e \"const fs=require('fs'),path=require('path'); const name='" + ENV + "'; if (name === '" + ENV + "') "
+   "console.log(fs.readFileSync(path.join('.', name),'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a const name equal to the file, read through a template literal",
+   "node -e \"const fs=require('fs'),path=require('path'); const name='" + ENV + "'; if (name === '" + ENV + "') "
+   "console.log(fs.readFileSync(`./${name}`,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a stripped name equal to the file, opened, raw newline",
+   "python3 -c \"name='" + ENV + " '\nif name.strip() == '" + ENV + "': print(open(name.strip()).read())\"",
+   "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, python3 -c, an argv loop that skips the file's name, opens the rest",
+   "python3 -c \"import sys\nfor p in sys.argv[1:]:\n    if p == '" + ENV + "': continue\n    print(open(p).read())\"",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a listing that drops the file's name, opens the rest",
+   "python3 -c \"import os\nfor f in os.listdir('.'):\n    if f != '" + ENV + "': print(open(f).read())\"",
+   "allow", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
