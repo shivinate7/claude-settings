@@ -3797,7 +3797,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 2d. A decode-and-run call, or an ANSI-C escape command word, in the ten minutes after a refusal in this
     # session (decision encoded-retry-after-refusal). The refusal state is read only when the shape matches.
-    matched = "" if POWERSHELL_CALL[0] else encoded_retry_hit(raw, stripped, session_id, agent_id)
+    matched = "" if POWERSHELL_CALL[0] else encoded_retry_hit(stripped, session_id, agent_id)
     if matched:
         refuse(tool, "deny", "encoded-retry-after-refusal", ENCODED_RETRY_REASON, matched)
 

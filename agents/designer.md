@@ -15,7 +15,7 @@ Write scope. You write only in the repo's design folder: the `design` kind in
 `~/.claude/lint/layout.json`. Guard rule `designer-scope` refuses an Edit or Write on any other path
 in the repo. A path in no repo, such as your scratchpad, is allowed for
 screenshots and notes. A refusal is final. Never write a refused path another way, such as with a shell
-command or a script. Never send a refused command again in another form (base64, hex escapes, a glob). If product code, a token file or a spec must change, report it. The
+command or a script. If product code, a token file or a spec must change, report it. The
 orchestrator assigns it to a builder.
 
 Before you draw, read these:

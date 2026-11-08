@@ -9,13 +9,12 @@ when the shape matches.
 import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import local_time
 import shared_names
-from guard_core import (basename, resolve_command, segment_tokens, session_log_field, split_segments,
-                        walk_quotes, nested_script)
-from guard_env import substitution_commands
+from guard_core import (basename, nested_script, resolve_command, segment_tokens, session_log_field, split_segments,
+                        walk_quotes)
 
 ENCODED_RETRY_REASON = (
     "a refusal is final, and this call is the refused act in another form: it decodes text and runs it, or "
@@ -36,32 +35,58 @@ ECHO_E = re.compile(r"-[neE]*e[neE]*")
 DEPTH = 3   # script text handed to `sh -c`, read as a command of its own, this many levels down
 
 
-def _decodes(tokens) -> bool:
-    """True when one segment turns text into other text: `base64 -d`, or `printf` or `echo -e` with an escape."""
-    at = resolve_command(tokens) if tokens else None
-    if at is None:
-        return False
-    word, args = basename(tokens[at]), tokens[at + 1:]
-    if word == "base64":
-        return any(BASE64_DECODE.fullmatch(arg) for arg in args)
-    if word == "printf":
-        return any(ESCAPE.search(arg) for arg in args)
-    if word == "echo":
-        return any(ECHO_E.fullmatch(arg) for arg in args) and any(ESCAPE.search(arg) for arg in args)
-    return False
+MARK = re.compile("\x00(\\d+)\x00")
+ASSIGN = re.compile(r"[A-Za-z_]\w*=")
 
 
-def _reads_stdin_as_script(tokens) -> bool:
-    """True for a shell with no `-c`: it runs what a pipe hands it."""
+def _clean(tokens):
+    """The tokens with the glued `(` of a subshell and `)` that closes it taken off the first and last word."""
+    out = list(tokens)
+    if out and len(out[0]) > 1 and out[0].startswith("("):
+        out[0] = out[0].lstrip("(")
+    if out and len(out[-1]) > 1 and out[-1].endswith(")"):
+        out[-1] = out[-1].rstrip(")")
+    return out
+
+
+def _mark(text: str):
+    """(text, spans): each outermost `$(...)`, `<(...)`, `>(...)` or backtick pair outside single quotes becomes one
+    marker word, and spans[n] holds the text inside it. A pipe or a space inside a substitution then cuts no segment."""
+    states = {index: quote for index, _, quote in walk_quotes(text)}
+    out, spans, i, n = [], [], 0, len(text)
+    while i < n:
+        quote = states.get(i)
+        closes = -1
+        if quote not in ("'", "$'"):
+            if text.startswith("$(", i) or (quote in ("", None) and text.startswith(("<(", ">("), i)):
+                depth, j = 1, i + 2
+                while j < n:
+                    if states.get(j) not in ("'", "$'"):
+                        depth += text[j] == "("
+                        depth -= text[j] == ")"
+                        if not depth:
+                            break
+                    j += 1
+                closes, inner = (j if j < n else -1), text[i + 2:j]
+            elif text[i] == "`":
+                j = i + 1
+                while j < n and text[j] != "`":
+                    j += 2 if text[j] == "\\" else 1
+                closes, inner = (j if j < n else -1), text[i + 1:j].replace("\\`", "`")
+        if closes < 0:
+            out.append(text[i])
+            i += 1
+            continue
+        out.append("\x00%d\x00" % len(spans))
+        spans.append(inner)
+        i = closes + 1
+    return "".join(out), spans
+
+
+def _command(tokens):
+    """(command word without its path, its index), or ("", None)."""
     at = resolve_command(tokens) if tokens else None
-    if at is None or basename(tokens[at]) not in SHELLS:
-        return False
-    flags = []
-    for arg in tokens[at + 1:]:
-        if not arg.startswith("-") or arg == "--":
-            break
-        flags.append(arg)
-    return not any(not flag.startswith("--") and "c" in flag for flag in flags)
+    return ("", None) if at is None else (basename(tokens[at]), at)
 
 
 def _raw_words(segment: str):
@@ -84,67 +109,128 @@ def _ansi_c_escape(word: str) -> bool:
     return any(quote == "$'" for _, _, quote in walk_quotes(word)) and bool(ESCAPE.search(word))
 
 
-def _scan_text(text: str, inner_decodes, depth: int) -> str:
-    """The matched text of one command text, else ''. `inner_decodes` is a function that says whether any
-    command substitution of the whole call decodes."""
+def _ansi_args(words, tokens, at: int) -> bool:
+    """True when an argument of the command at `at` is written as an ANSI-C escape word."""
+    return any(map(_ansi_c_escape, words[at + 1:] if len(words) == len(tokens) else words[1:]))
+
+
+def _decodes(tokens, words) -> bool:
+    """True when one segment turns text into other text: `base64 -d`, `printf` or `echo -e` with an escape, or
+    `echo` or `printf` of an ANSI-C escape word."""
+    word, at = _command(tokens)
+    if at is None:
+        return False
+    args = tokens[at + 1:]
+    if word == "base64":
+        return any(BASE64_DECODE.fullmatch(arg) for arg in args)
+    if word == "printf":
+        return any(ESCAPE.search(arg) for arg in args)
+    if word == "echo":
+        return (any(ECHO_E.fullmatch(arg) for arg in args) and any(ESCAPE.search(arg) for arg in args)
+                or _ansi_args(words, tokens, at))
+    return False
+
+
+def _text_decodes(text: str, depth: int = 0) -> bool:
+    """True when a command text, a substitution's inside, has a segment that decodes, at any substitution depth."""
+    marked, spans = _mark(text)
+    for segment in split_segments(marked):
+        tokens = segment_tokens(segment) if segment.strip() else None
+        if tokens and _decodes(_clean(tokens), _raw_words(segment)):
+            return True
+    return depth < DEPTH and any(_text_decodes(inner, depth + 1) for inner in spans)
+
+
+def _stdin_shell(tokens) -> bool:
+    """True for a shell that runs what a pipe hands it: no `-c`."""
+    word, at = _command(tokens)
+    if word not in SHELLS:
+        return False
+    flags = []
+    for arg in tokens[at + 1:]:
+        if not arg.startswith("-") or arg == "--":
+            break
+        flags.append(arg)
+    return not any(not flag.startswith("--") and "c" in flag for flag in flags)
+
+
+def _shell_sinks(tokens, at: int):
+    """The words a shell takes as a script: the word after `-c`, else the first non-flag word, and a herestring's."""
+    args, sinks, flags = tokens[at + 1:], [], True
+    for index, arg in enumerate(args):
+        if arg.startswith("<<<"):
+            sinks.append(arg[3:] or (args[index + 1] if index + 1 < len(args) else ""))
+        elif flags and arg.startswith("-") and arg != "--":
+            if not arg.startswith("--") and "c" in arg and index + 1 < len(args):
+                sinks.append(args[index + 1])
+                flags = False
+        elif flags:
+            sinks.append(arg)
+            flags = False
+    return sinks
+
+
+def _scan_text(text: str, depth: int = 0) -> str:
+    """The matched text of one command text, else ''."""
+    marked, spans = _mark(text)
+    tainted = set()   # names assigned from a substitution that decodes
+
+    def decoded(word: str) -> bool:
+        if any(_text_decodes(spans[int(n)], 1) for n in MARK.findall(word)):
+            return True
+        return any(re.search(r"\$\{?%s\b" % name, word) for name in tainted)
+
     ends = []
-    segments = split_segments(text, ends)
-    parsed = [segment_tokens(segment) for segment in segments]
+    segments = split_segments(marked, ends)
+    parsed = [segment_tokens(segment) if segment.strip() else None for segment in segments]
     for number, segment in enumerate(segments):
         tokens = parsed[number]
-        if tokens is None:
+        if not tokens:
             continue
-        # a pipeline that decodes into a shell
-        if _reads_stdin_as_script(tokens):
-            back = number - 1
-            while back >= 0 and back < len(ends) and ends[back] == "|":
-                if parsed[back] and _decodes(parsed[back]):
-                    return segment.strip()
-                back -= 1
-        at = resolve_command(tokens)
+        tokens = _clean(tokens)
+        for token in tokens:   # `NAME=$(... decode ...)` taints NAME for the rest of the call
+            if not ASSIGN.match(token):
+                break
+            if decoded(token):
+                tainted.add(token.split("=", 1)[0])
+        word, at = _command(tokens)
         if at is None:
             continue
-        # a command word spelled as an ANSI-C escape word
         words = _raw_words(segment)
+        if word in SHELLS:
+            if _stdin_shell(tokens):   # a pipeline that decodes into a shell
+                back = number - 1
+                while back >= 0 and back < len(ends) and ends[back] == "|":
+                    if parsed[back] and _decodes(_clean(parsed[back]), _raw_words(segments[back])):
+                        return segment.strip()
+                    back -= 1
+            if any(decoded(sink) for sink in _shell_sinks(tokens, at)):
+                return segment.strip()
+            if "<<<" in tokens[:-1] and _ansi_args(words, tokens, at):
+                return segment.strip()
+        # a command word spelled as an ANSI-C escape word, or a substitution that decodes
         spelled = words[at] if len(words) == len(tokens) else (words[0] if words else "")
         if _ansi_c_escape(spelled):
             return spelled
-        # a command word that is a substitution which decodes, or eval or source of one
-        word, args = tokens[at], tokens[at + 1:]
-        if word.startswith(("$(", "`")) and inner_decodes():
+        if tokens[at].startswith("\x00") and decoded(tokens[at]):
             return segment.strip()
-        if basename(word) in ("eval", "source", ".") and any(
-                "$(" in arg or "`" in arg or "<(" in arg for arg in args) and inner_decodes():
+        if word in ("eval", "source", ".") and any(decoded(arg) for arg in tokens[at + 1:]):
             return segment.strip()
         if depth < DEPTH:
             script = nested_script(tokens)
             if script and not script.isspace():
-                found = _scan_text(script, lambda: False, depth + 1)
+                found = _scan_text(script, depth + 1)
                 if found:
                     return found
     return ""
 
 
-def encoded_form_hit(raw: str, stripped: str) -> str:
+def encoded_form_hit(stripped: str) -> str:
     """The matched text when the call decodes text and runs it, or has an ANSI-C escape command word, else ''.
-    Reads the text only. `raw` and `stripped` are the command with and without its heredoc bodies."""
+    Reads the text only. `stripped` is the command without its heredoc bodies."""
     if "base64" not in stripped and "\\" not in stripped and "$'" not in stripped:
-        return ""   # none of the three shapes can be here
-    inners = substitution_commands(raw, stripped)
-    state = []
-
-    def inner_decodes() -> bool:
-        if not state:
-            state.append(any(_decodes(segment_tokens(segment))
-                             for text in inners for segment in split_segments(text)
-                             if segment.strip() and segment_tokens(segment) is not None))
-        return state[0]
-
-    for text in [stripped, *inners]:
-        found = _scan_text(text, inner_decodes, 0)
-        if found:
-            return found
-    return ""
+        return ""   # none of the shapes can be here
+    return _scan_text(stripped)
 
 
 def _stamp(text):
@@ -216,9 +302,9 @@ def recent_refusal(session_id: str, agent_id: str = "") -> bool:
         return False
 
 
-def encoded_retry_hit(raw: str, stripped: str, session_id: str, agent_id: str = "") -> str:
+def encoded_retry_hit(stripped: str, session_id: str, agent_id: str = "") -> str:
     """The matched text of an encoded retry, else ''. The refusal state is read only once the shape matches."""
-    matched = encoded_form_hit(raw, stripped)
+    matched = encoded_form_hit(stripped)
     if matched and recent_refusal(session_id, agent_id):
         return matched
     return ""
