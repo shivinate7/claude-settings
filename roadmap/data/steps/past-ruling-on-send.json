@@ -5,7 +5,7 @@
   "order": 0.21,
   "owner": "coordinator",
   "why": "Triage 6, 14:29 CST Nov 7: the coordinator sent and then withdrew two page questions (items 357 and 370) that a standing ruling already answered.",
-  "note": "",
+  "note": "Coordinator 14:56 CST Nov 8: #2195 held after round 3 with a negative net value: its prompt skips undated owner rulings (probe 4/4 before, 0/4 after). Waits on owner item 445 (past-ruling-undated-hold).",
   "lane": "session_013NEJL3ZtjRrvWWB5nAzQiv",
-  "updatedAt": "2026-11-07T14:29:00-06:00"
+  "updatedAt": "2026-11-08T14:57:00-06:00"
 }
