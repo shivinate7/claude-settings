@@ -156,6 +156,13 @@ class RecordSlugsTests(unittest.TestCase):
                              capture_output=True, text=True, check=True).stdout.strip()
         return os.path.join(self.tree, ".git", "objects", sha[:2], sha[2:])
 
+    def break_git_show(self, ref_path):
+        """Makes `git show origin/main:<ref_path>` fail. A packed blob would survive the removal, and git show
+        would not fail, so the case would prove nothing."""
+        loose = self.loose_blob(ref_path)
+        self.assertTrue(os.path.isfile(loose), loose)
+        os.remove(loose)
+
     # Positive controls first: a red case means nothing if the clean case fails.
 
     def test_default_passes_a_short_slug_in_decisions(self):
@@ -337,16 +344,28 @@ class RecordSlugsTests(unittest.TestCase):
     def test_failed_git_show_prints_unknown(self):
         self.put(FEEL_DEBT, FEEL_TEXT)
         self.commit_base()
-        loose = self.loose_blob(FEEL_DEBT)
-        # A packed blob would survive the removal, and git show would not fail, so the case would prove nothing.
-        self.assertTrue(os.path.isfile(loose), loose)
-        os.remove(loose)
+        self.break_git_show(FEEL_DEBT)
         self.delete(FEEL_DEBT)
         self.commit_change()
         rc, out = self.lint()
         self.assertIn("check_record_slugs: UNKNOWN", out, out)
         self.assertEqual(rc, 0, out)  # locally an unknown is not red; CI reads it as red
         self.assertNotIn("feel-fix debt deleted", out)
+
+    def test_duplicate_note_slug_still_fails_when_git_cannot_say(self):
+        # The added files are unknown, but a duplicate note is a verdict of its own, so the exit is red.
+        self.assertEqual(NOTE_DUP_TEXT.count("- alpha-slug:"), 2)  # scope: the notes hold the duplicate
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.put(self.notes_path(), NOTE_DUP_TEXT)
+        self.commit_base()
+        self.break_git_show(FEEL_DEBT)
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertNotEqual(rc, 0, "a duplicate notes slug exits 0 when git cannot say: " + out)
+        self.assertIn("check_record_slugs: UNKNOWN", out, "git cannot say, but no UNKNOWN line: " + out)
+        named = [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+        self.assertTrue(any("alpha-slug" in line for line in named), "no FAIL line names the duplicate: " + out)
 
     def test_debt_readme_edited_to_drop_a_feel_line_passes(self):
         self.put(DEBT_README, README_FEEL_TEXT)
