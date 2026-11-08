@@ -103,6 +103,11 @@ class CostPinTests(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
+    def assert_exists(self, *rels):
+        """Each test file the case names is on disk, so a miss below is the pin check, not a missing file."""
+        for rel in rels:
+            self.assertTrue(os.path.isfile(os.path.join(self.tree, *rel.split("/"))), rel)
+
     def decide(self, name, body):
         """Write a decision record: a title, a status line, then the body. Returns the whole text."""
         text = "# Record\n\nStatus: accepted.\n\n" + body
@@ -481,11 +486,9 @@ class CostPinTests(unittest.TestCase):
         self.assert_found([count_row("bound.md", text, CONTROL_NEEDLE)], counts=True)
 
     def test_count_pinned_only_by_a_test_that_holds_the_span(self):
-        # Both tests exist, so a miss below is the span check, not a missing file.
         self.put("lint/test_x.py", "# x cases\n\nthe `simctl list` read is stubbed\n")
         self.put("lint/test_y.py", "# y cases\n\nthe status file is read\n")
-        for rel in ("lint/test_x.py", "lint/test_y.py"):
-            self.assertTrue(os.path.isfile(os.path.join(self.tree, *rel.split("/"))), rel)
+        self.assert_exists("lint/test_x.py", "lint/test_y.py")
         text = self.decide("pin.md",
                            "- **Cost:** one `simctl list` read per call, pinned by `lint/test_x.py`.\n"
                            "- **Cost:** one `simctl list` read per call, pinned by `lint/test_y.py`.\n")
@@ -552,6 +555,39 @@ class CostPinTests(unittest.TestCase):
                            "- **Cost:** it's read by the `#` pass, once a run.\n")
         self.assert_found([count_row("scan-marks.md", text, "it's read twice"),
                            count_row("scan-marks.md", text, "once a run.")], counts=True)
+
+    def test_pin_is_the_nearest_span_not_any_span(self):
+        # The nearest span to the count is `near`. A test that holds only the far span pins nothing here.
+        self.put("lint/test_x.py", "# x cases\n\nfar is stubbed\n")
+        self.put("lint/test_y.py", "# y cases\n\nnear is stubbed\n")
+        self.assert_exists("lint/test_x.py", "lint/test_y.py")
+        text = self.decide("nearest.md",
+                           "- **Cost:** `far` helper runs one `near` read, pinned by `lint/test_x.py`.\n"
+                           "- **Cost:** `far` helper runs one `near` read, pinned by `lint/test_y.py`.\n")
+        self.assert_found([count_row("nearest.md", text, "pinned by `lint/test_x.py`")], counts=True)
+
+    def test_test_name_span_is_never_the_nearest_span(self):
+        # `lint/test_x.py` is nearer the count than `far`, but a test-name span is never the nearest, so the
+        # count is pinned only by a test that holds `far`. test_x holds its own name and not `far`, so it pins nothing.
+        self.put("lint/test_x.py", "# x cases\n\ntest_x.py is run\n")
+        self.put("lint/test_y.py", "# y cases\n\nfar is stubbed\n")
+        self.assert_exists("lint/test_x.py", "lint/test_y.py")
+        text = self.decide("test-span.md",
+                           "- **Cost:** one read per call, in `lint/test_x.py`, for `far`.\n"
+                           "- **Cost:** one read per call, in `lint/test_y.py`, for `far`.\n")
+        self.assert_found([count_row("test-span.md", text, "in `lint/test_x.py`")], counts=True)
+
+    def test_word_gap_is_three_words_not_four(self):
+        # Three words sit between the count and `read`, so the count is read. Four words sit between, so it is not.
+        text = self.decide("gap.md",
+                           "- **Cost:** one pass over ledger read.\n"
+                           "- **Cost:** one pass over the ledger read.\n")
+        self.assert_found([count_row("gap.md", text, "one pass over ledger read.")], counts=True)
+
+    def test_bound_inside_a_code_span_does_not_pass_a_count(self):
+        # `at most` inside a code span is code, not a bound, so the count has no reader and is flagged.
+        text = self.decide("span-bound.md", "- **Cost:** one `at most` read per call.\n")
+        self.assert_found([count_row("span-bound.md", text, "- **Cost:**")], counts=True)
 
 
 class CorpusTests(unittest.TestCase):
