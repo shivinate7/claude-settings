@@ -13322,6 +13322,17 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
+    def test_a_newest_earlier_record_with_text_after_its_ci_line_is_named_as_unreadable(self):
+        # Control: the same record without the paragraph is the base. The paragraph after the CI line makes the newest record not parse, so
+        # the refusal must name that record, not blame the base head, which is the Head that record names.
+        clean = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, clean)))
+        self.assertEqual(rc, 0, "the control base was refused:\n" + out + err)
+        prose = clean.rstrip("\n") + "\n\nLane context: the fix covers the notes.\n"
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, prose)))
+        self.assert_refused(rc, out, err)
+        self.assertIn("does not parse", err, "the refusal blames the base head, not the newest record that does not parse:\n" + err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
