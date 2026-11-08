@@ -380,7 +380,8 @@ _SED_ADDRESS = r"(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/|\+\d+))?!?"
 _SED_COMMAND = (r"\s*(?:" + _SED_ADDRESS + r")?\s*(?:[pdq=]"
                 r"|s(?P<d>[^\s\\;])(?:(?!(?P=d)).)*(?P=d)(?:(?!(?P=d)).)*(?P=d)[gpiIm\d]*)\s*")
 _SED_COMMAND = re.compile(_SED_COMMAND)
-_AWK_UNSAFE = re.compile(r"\bsystem\b|\bgetline\b|\||\bclose\b")
+# `>` in an awk program writes a file (`print > f`); a compare such as `$1 > 5` is refused with it.
+_AWK_UNSAFE = re.compile(r"\bsystem\b|\bgetline\b|\||>|\bclose\b")
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
 # A descriptor dup or close after a redirect (`&1`, `&2-`, `&-`) names a descriptor, not a file.
@@ -432,8 +433,8 @@ def _kind(words, plain: str) -> str:
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
-    if name in _PRINTERS and re.search(r"[/\\]", words[0]):
-        return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
+    if (name in _PRINTERS or name in _FILTERS) and re.search(r"[/\\]", words[0]):
+        return ""   # `./cat`, `b/echo` or `./sed` is a local program, not the printer or filter (review r2 H3)
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
     if name in _FILTERS and _is_filter(name, [_unquoted(word) for word in words[1:]]):
@@ -449,7 +450,8 @@ def _kind(words, plain: str) -> str:
 
 
 def _sed_program_safe(script: str) -> bool:
-    """True when every `;`-separated command of the sed program is one `_SED_COMMAND` accepts."""
+    """True when every command of the sed program, split by `;` or a newline, is one `_SED_COMMAND`
+    accepts."""
     position = 0
     while True:
         found = _SED_COMMAND.match(script, position)
@@ -458,9 +460,10 @@ def _sed_program_safe(script: str) -> bool:
         position = found.end()
         if position >= len(script):
             return True
-        if script[position] != ";":
+        # The command's trailing whitespace ends at a newline, which separates like `;`.
+        if script[position] != ";" and "\n" not in found.group()[len(found.group().rstrip()):]:
             return False
-        position += 1
+        position += script[position] == ";"
         if position >= len(script):
             return True
 
