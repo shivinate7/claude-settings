@@ -5530,7 +5530,8 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
 # `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
 # `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
-# and tail or head does not hide it. A `tee` stage ends the check's reach. A pipe out of `verdict` is
+# and tail or head does not hide it. A `tee` stage does not end the check's reach: a tee before tail or
+# head is refused, since tail still cuts what the agent reads. A tee with nothing after it is allowed. A pipe out of `verdict` is
 # refused by rule verdict-pipe (decision verdict-pipe-refused), so those rows name that rule. A verdict
 # call with no pipe after it is allowed here.
 # Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
@@ -5589,9 +5590,18 @@ add("check-tail: output kept in a file, then grep piped to tail, backgrounded, i
 add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee run.out")
-add("check-tail: a tee between the check and grep and tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
+add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log | tail -5")
+add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
+add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='grep -n "--lane-lint" merge/merge.py | tail -20')
