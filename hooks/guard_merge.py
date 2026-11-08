@@ -1077,46 +1077,84 @@ _BRIEF_LINE = re.compile(
     re.IGNORECASE)
 ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role's session id, so the lane can reach it
 ROLE_GAP_MAX = 80  # characters that may sit between a role label and its id, on one line
-ROLE_GAP_WORDS = ("is", "id", "session")  # the only words the gap may hold outside a quoted or parenthetical span
+ROLE_GAP_WORDS = ("is", "id", "session")  # the only words the text after the gap's last colon may hold outside a span
 # A label starts and ends at a word boundary, but `_` and markdown around it do not break one (`_Triage_`).
 _ROLE_LABEL = {label: re.compile("(?<![A-Za-z0-9])" + re.escape(label) + "(?![A-Za-z0-9])", re.IGNORECASE)
                for label in ROLE_LABELS}
 # An id holds a digit, so a placeholder such as session_TBD or session_id is no id.
 _ROLE_ID = re.compile("session_(?=[A-Za-z0-9]*\\d)[A-Za-z0-9]+", re.IGNORECASE)
 _SESSION_PREFIX = "session_"
-_GAP_SPAN_CLOSERS = {'"': '"', "(": ")"}  # a quote or a paren opens a span only when its closer follows in the gap
+# Searched on the window itself, not on a lowered copy: `İ` lowers to two characters and would shift every offset after it.
+_SESSION_PREFIX_RE = re.compile(re.escape(_SESSION_PREFIX), re.IGNORECASE)
+# A quote or a paren opens a span only when its closer follows on the line. Curly quotes pair as straight ones do.
+_GAP_SPAN_CLOSERS = {'"': '"', "\u201c": "\u201d", "(": ")"}
 _GAP_WORD = re.compile(r"[^\W\d_]+")  # a run of letters: digits, spaces, punctuation and markdown are no words
 
 
-def _gap_ok(gap: str) -> bool:
-    """True when a label's gap holds, outside each closed quoted or parenthetical span, no word but ROLE_GAP_WORDS.
-    An unclosed quote or paren is no span, so its text is judged as plain gap text. Linear: the caller caps the gap
-    at ROLE_GAP_MAX characters."""
-    plain = []
-    i = 0
-    while i < len(gap):
-        closer = _GAP_SPAN_CLOSERS.get(gap[i])
-        end = gap.find(closer, i + 1) if closer else -1
+def _closed_spans(text: str):
+    """The closed quoted or parenthetical spans of one line, as (start, end) pairs, end exclusive. An unclosed opener
+    is no span. Linear: a closer search is kept while it still holds, and a failed search stays failed."""
+    spans = []
+    cached = {}  # closer -> index of its last find, or -1 when none follows
+    i, n = 0, len(text)
+    while i < n:
+        closer = _GAP_SPAN_CLOSERS.get(text[i])
+        if closer is None:
+            i += 1
+            continue
+        end = cached.get(closer)
+        if end is None or (end >= 0 and end <= i):
+            end = text.find(closer, i + 1)
+            cached[closer] = end
         if end >= 0:
-            plain.append(" ")
+            spans.append((i, end + 1))
             i = end + 1
         else:
-            plain.append(gap[i])
             i += 1
-    return all(word.lower() in ROLE_GAP_WORDS for word in _GAP_WORD.findall("".join(plain)))
+    return spans
+
+
+def _gap_ok(gap: str, label: str) -> bool:
+    """True when a label's gap lets its id stand. Closed spans are skipped. Outside them no other role's label may
+    sit in the gap. The text before the gap's last colon is free; the text after it, or all of the gap when it holds no
+    colon, holds no word but ROLE_GAP_WORDS. An unclosed quote or paren is no span, so its text is judged as plain
+    gap text. Linear: the caller caps the gap at ROLE_GAP_MAX characters."""
+    plain = []
+    last = 0
+    for start, end in _closed_spans(gap):
+        plain.append(gap[last:start])
+        plain.append(" ")
+        last = end
+    plain.append(gap[last:])
+    plain = "".join(plain)
+    if any(_ROLE_LABEL[other].search(plain) for other in ROLE_LABELS if other != label):
+        return False
+    tail = plain[plain.rfind(":") + 1:]
+    return all(word.lower() in ROLE_GAP_WORDS for word in _GAP_WORD.findall(tail))
 
 
 def _names_role_id(message: str, label: str) -> bool:
-    """True when some occurrence of the role's label is followed on its line by a gap that clears _gap_ok, then an
-    id. The gap holds no `session_`, so the first `session_` after the label is the id's start, and it sits within
-    ROLE_GAP_MAX characters. Each occurrence reads at most ROLE_GAP_MAX plus the prefix length, so the scan is linear."""
-    for found in _ROLE_LABEL[label].finditer(message):
-        window = message[found.end():found.end() + ROLE_GAP_MAX + len(_SESSION_PREFIX)].split("\n", 1)[0]
-        start = window.lower().find(_SESSION_PREFIX)
-        if start < 0 or start > ROLE_GAP_MAX:
+    """True when some occurrence of the role's label, outside a closed quoted or parenthetical span, is followed on its
+    line by a gap that clears _gap_ok, then an id. The gap holds no `session_`, so the first `session_` after the label
+    is the id's start, and it sits within ROLE_GAP_MAX characters. Each occurrence reads at most ROLE_GAP_MAX plus the
+    prefix length, and each line's spans are found once, so the scan is linear."""
+    for line in message.split("\n"):
+        occurrences = list(_ROLE_LABEL[label].finditer(line))
+        if not occurrences:
             continue
-        if _ROLE_ID.match(message, found.end() + start) and _gap_ok(window[:start]):
-            return True
+        spans = _closed_spans(line)
+        at = 0
+        for found in occurrences:
+            while at < len(spans) and spans[at][1] <= found.start():
+                at += 1
+            if at < len(spans) and spans[at][0] <= found.start():
+                continue
+            window = line[found.end():found.end() + ROLE_GAP_MAX + len(_SESSION_PREFIX)]
+            prefix = _SESSION_PREFIX_RE.search(window)
+            if prefix is None or prefix.start() > ROLE_GAP_MAX:
+                continue
+            if _ROLE_ID.match(line, found.end() + prefix.start()) and _gap_ok(window[:prefix.start()], label):
+                return True
     return False
 
 
@@ -1144,9 +1182,11 @@ BRIEF_IDS_REASON = (
     "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
     "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
     "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no "
-    "`session_`. Outside a closed quoted or parenthetical span the gap holds only digits, spaces, punctuation, markdown "
-    "and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose before an id is no role id; an id holds a digit. "
-    "(decision session-tiers, a lane holds one topic)"
+    "`session_`. Closed quoted (straight or curly) and parenthetical spans in the gap are skipped, and a role label inside one "
+    "is no label. Outside them no other role's label may sit in the gap. The text before the gap's last colon is free, a "
+    "field name for one; the text after it, or all of the gap when it holds no colon, holds only digits, spaces, punctuation, "
+    "markdown and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose before an id is no role id; an id holds a digit. "
+    "(lane rulings 2026-11-08 10:03 and 10:15 CST, decision session-tiers, a lane holds one topic)"
 )
 
 

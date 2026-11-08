@@ -123,9 +123,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        Triage and Batch runner (guard_merge.ROLE_LABELS): per label, without case, a word boundary
                        before and after, then on the same line a gap of up to guard_merge.ROLE_GAP_MAX characters
                        (spans included) with no `session_`, then `session_` and an id that holds a digit (anywhere in
-                       the message; form only, no roster match). A closed "..." or (...) span in the gap is skipped;
-                       outside such spans the gap holds only digits, whitespace, punctuation, markdown and the words
-                       in guard_merge.ROLE_GAP_WORDS (is, id, session), in any case. An unclosed quote or paren is no
+                       the message; form only, no roster match). A closed "...", curly-quote or (...) span in the gap is
+                       skipped, and a label inside such a span is no label occurrence. Outside the spans no other role's
+                       label may sit in the gap. The text before the gap's last colon is free (a field name); the text
+                       after it, or all of the gap with no colon, holds only digits, whitespace, punctuation, markdown
+                       and the words in guard_merge.ROLE_GAP_WORDS (is, id, session), in any case (lane rulings
+                       2026-11-08 10:03 and 10:15 CST). An unclosed quote or paren is no
                        span. So prose such as `Triage the failing test in session_01Q.` names no Triage id, and a
                        roster title such as "cs coordinator, triage backup" still passes. cost: message text only.
                        A message without the marker reads no transcript. An override lifts it.
