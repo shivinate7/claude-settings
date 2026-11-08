@@ -15263,11 +15263,14 @@ def _product_commit(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _test_author_lane(w, rel=TEST_A, text=LANE_TEXT):
-    """The test-author's commit on branch `lane`, cut from main. Main's checkout ends on main."""
+def _test_author_lane(w, rel=TEST_A, text=LANE_TEXT, more=()):
+    """The test-author's commit on branch `lane`, cut from main. Main's checkout ends on main. `more` holds
+    (path, text) pairs written into the same commit."""
     main = w + "-main"
     _must(main, "checkout", "-q", "-b", "lane")
     write(os.path.join(main, rel), text)
+    for other, other_text in more:
+        write(os.path.join(main, other), other_text)
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "test-author cases")
     _must(main, "checkout", "-q", "main")
@@ -15814,32 +15817,259 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's conflicted merge of a prod
                          "is allowed and logs no builder-diff line", clean_builder_case("bd-product-conflict")))
 
 
-def author_conflict_case():
-    """A test-author's conflicted merge of a test file is never refused, and logs nothing: a test file is the
-    test-author's own work, so the conflict is no offence for it."""
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-author-conflict"), _bd_f2, "test-author", "auth1")
-    hits = [r for r in rows if len(r) > 3 and r[3] in (BDIFF, "author-diff")]
-    if out or hits:
-        return False, "a test-author's conflicted test file was judged: %r and %d line(s)" % (out[:60], len(hits))
-    return True, "allowed at commit, push and stop; no builder-diff or author-diff line"
+def author_silent_case(repo, label):
+    """A test-author's change in `repo` is never refused, and writes no author-diff or builder-diff line."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), repo, "test-author", "auth1")
+        hits = [r for r in rows if len(r) > 3 and r[3] in (BDIFF, "author-diff")]
+        if out:
+            return False, "a test-author's change was refused: %r" % out[:60]
+        if hits:
+            return False, "a test-author's change was logged: %d line(s)" % len(hits)
+        return True, "allowed at commit, push and stop; no builder-diff or author-diff line"
+    return case
+
+
+# A test-author's conflicted merge of a test file is never refused, and logs nothing: a test file is the
+# test-author's own work, so the conflict is no offence for it.
+author_conflict_case = author_silent_case(_bd_f2, "author-conflict")
 
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing",
                          author_conflict_case))
 
 
-def logged_builder_case(label):
-    """Log-only: nothing is refused at commit, push or stop, and at least one builder-diff line is written."""
+def logged_case(label, agent_type, agent_id, rule):
+    """Log-only: nothing is refused at commit, push or stop, and at least one `rule` line is written. The repo
+    is the diff repo named `label`."""
     def case():
         out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
-                                  "builder", "bld1")
-        hits = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == BDIFF]
+                                  agent_type, agent_id)
+        hits = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == rule]
         if out:
             return False, "expected no refusal, got %r" % out[:60]
         if not hits:
-            return False, "expected a builder-diff line, found none"
-        return True, "not refused at commit, push or stop; %d builder-diff line(s)" % len(hits)
+            return False, "expected a %s line, found none" % rule
+        return True, "not refused at commit, push or stop; %d %s line(s)" % (len(hits), rule)
     return case
+
+
+def logged_builder_case(label):
+    """Log-only for a builder: nothing is refused, and at least one builder-diff line is written."""
+    return logged_case(label, "builder", "bld1", BDIFF)
+
+
+# ---- the mixed merge: one merge that conflicts in a test file AND a product file (decision
+# builders-cannot-edit-tests, "What the builder wrote"). The test-author owns a product path its merge left
+# conflicted, since git's own merge left it conflicted. A builder keeps every test path it resolved, here too.
+# `src/clean.py` merges clean, so it is no test-author's to change. `src/other.py` is in no merge at all.
+MIXED_FILES = {**BASE_FILES, "src/clean.py": "z = 0\n"}
+
+
+def _put_commit(where, files, message):
+    """Write each (path, text) of `files` under `where`, and commit them in one commit."""
+    for rel, text in files:
+        write(os.path.join(where, rel), text)
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", message)
+
+
+def _mixed_mid_merge(w):
+    """Cut at main. The lane changes the test file and src/app.py. Main changes the same lines in both (a conflict
+    in each) and src/clean.py, which the lane never touches (a clean merge). Main is merged in and the merge is
+    left in progress: MERGE_HEAD is set, and the two conflicts are unmerged."""
+    main = w + "-main"
+    _test_author_lane(w, TEST_A, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
+    _must(w, "reset", "-q", "--hard", "lane")
+    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
+                       ("src/clean.py", "z = 1\n")], "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TEST_A)
+    _require_conflict(w, "src/app.py")
+    with open(os.path.join(w, "src/clean.py"), encoding="utf-8") as handle:
+        clean = handle.read()
+    if clean != "z = 1\n":
+        sys.exit("fixture setup failed: src/clean.py did not merge clean in %r: %r" % (w, clean))
+
+
+def _mixed_merge_commit(w, clean=None):
+    """`_mixed_mid_merge`, resolved by hand and committed. The test file takes the lane's text, and src/app.py takes
+    a text neither side holds. `clean`, when given, is the text the merge commit also gives src/clean.py."""
+    _mixed_mid_merge(w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    if clean is not None:
+        write(os.path.join(w, "src/clean.py"), clean)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _mixed_ours_commit(w):
+    """`_mixed_mid_merge`, then a builder keeps its own side of the test file whole (`git checkout --ours`),
+    resolves src/app.py by hand, and commits the merge."""
+    _mixed_mid_merge(w)
+    _must(w, "checkout", "--ours", "--", TEST_A)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _merge_adds_test(w):
+    """Cut at main. Main changes src/clean.py, a clean merge. The builder merges with --no-commit, adds a test
+    function that neither side holds, and commits: the merge commit itself holds the builder's test text."""
+    _put_commit(w + "-main", [("src/clean.py", "z = 1\n")], "main moves")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_builder_added():\n    assert 4\n\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+MIXED_MID = diff_repo("ta-mixed-mid", _mixed_mid_merge, files=MIXED_FILES)
+MIXED_DONE = diff_repo("ta-mixed-done", _mixed_merge_commit, files=MIXED_FILES)
+MIXED_CLEAN = diff_repo("ta-mixed-clean", lambda w: _mixed_merge_commit(w, clean="z = 2\n"), files=MIXED_FILES)
+MIXED_OURS = diff_repo("bd-mixed-ours", _mixed_ours_commit, files=MIXED_FILES)
+MERGE_ADDS = diff_repo("bd-merge-adds-test", _merge_adds_test, files=MIXED_FILES)
+
+AUTH_MIXED = dict(agent_id="auth1", agent_type="test-author", cwd=MIXED_MID)
+# Case 1 (red today): a test-author may write a product path its merge conflicts, because git's own merge left
+# it conflicted. The write tool refuses it today (test-author-scope).
+add("test-author: Edit of a product file its merge conflicts is allowed", "allow", tool="Edit",
+    file_path=os.path.join(MIXED_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MIXED)
+add("test-author: Write of a product file its merge conflicts is allowed", "allow", tool="Write",
+    file_path=os.path.join(MIXED_MID, "src/app.py"), content="x = 7\n", **AUTH_MIXED)
+# Case 2 (green pin): a product path the merge merged clean, or that no merge holds, stays refused.
+add("test-author: Edit of a product file the merge merged clean is refused", "deny", rule=TA, tool="Edit",
+    file_path=os.path.join(MIXED_MID, "src/clean.py"), new_string="z = 2\n", carries=("builder", "Report"),
+    **AUTH_MIXED)
+add("test-author: Edit of a product file outside the merge is refused", "deny", rule=TA, tool="Edit",
+    file_path=os.path.join(MIXED_MID, "src/other.py"), new_string="w = 1\n", carries=("builder", "Report"),
+    **AUTH_MIXED)
+# Case 3 (red today): a test-author's merge commit resolves a conflicted test file and a conflicted product
+# file. The product path is the test-author's, so no author-diff line is written.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted test file and a "
+                         "conflicted product file is never refused and logs no author-diff line",
+                         author_silent_case(MIXED_DONE, "ta-mixed-done")))
+# Case 4 (green pin): the same merge commit also changes a product file that merged clean. That path is no
+# test-author's, so its author-diff line stays.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that also changes a product file that merged "
+                         "clean is still logged as author-diff",
+                         logged_case("ta-mixed-clean", "test-author", "auth1", "author-diff")))
+# Case 5 (green pin): a builder keeps its own side of a test conflict with `git checkout --ours`, in a merge that
+# also conflicts a product file. A builder keeps the rule, so the test path is refused at commit, push and stop.
+# The same outcome without the product conflict is pinned by `bd-f2-conflict`, which resolves by a write.
+sh("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder's merge that keeps its own side of a test conflict with checkout --ours is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=MIXED_OURS, agent_id="bld1", agent_type="builder")
+# Case 6 (green pin): a merge commit that adds a test function neither parent holds. No other case pins this:
+# `_c1_committed` commits main's test text, and `_merge_main_in` leaves the builder's text uncommitted.
+sh("builder-refuse: a builder's merge commit that adds a new test function is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=MERGE_ADDS, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge commit that adds a new test function is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=MERGE_ADDS, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder's merge commit that adds a new test function is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=MERGE_ADDS, agent_id="bld1", agent_type="builder")
+
+
+def _author_test_commit(w):
+    """Cut at main. The test-author edits its test file and commits: an ordinary commit, no merge."""
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_author_ordinary():\n    assert 6\n\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "test-author case")
+
+
+def _author_merge_test_edit(w):
+    """Cut at main. Main adds a test file the lane never touches, so the merge brings it in clean. The test-author
+    merges with --no-commit, edits that clean-merged test file, and commits: the merge commit changes a test file."""
+    _put_commit(w + "-main", [("tests/test_main_new.py", "def test_m():\n    assert 1\n")], "main adds a test")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+    write(os.path.join(w, "tests/test_main_new.py"), "def test_m():\n    assert 2\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+TA_TEST_COMMIT = diff_repo("ta-test-commit", _author_test_commit)
+TA_MERGE_TEST = diff_repo("ta-merge-test-edit", _author_merge_test_edit)
+# Case 7 (green pin; red on the role-diff mutant that judges a test-author as a builder): a test-author's ordinary
+# commit of a test file, with no merge, logs no author-diff line.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's ordinary commit of a test file is never refused and logs "
+                         "no author-diff line",
+                         author_silent_case(TA_TEST_COMMIT, "ta-test-commit")))
+# Case 8 (green pin; red on the same mutant): a test file that merged clean, which the test-author edits in its merge
+# commit, logs no author-diff line. A merge the test file only came in by changes nothing here, so the edit is the case.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that edits a test file that merged clean logs "
+                         "no author-diff line",
+                         author_silent_case(TA_MERGE_TEST, "ta-merge-test-edit")))
+
+
+# ---- the test-author's merge route covers the product paths a merge left conflicted, in a merge that has a test
+# conflict (decision builders-cannot-edit-tests). A merge with no test path conflicted gives no path that route, and
+# a conflicted workflow keeps its content check. `src/app.py` is the only conflict in the product-only merge.
+def _product_mid_merge(w):
+    """Cut at main. The lane changes src/app.py, and main changes the same line. No test path is in the merge.
+    Main is merged in and the merge is left in progress with src/app.py conflicted."""
+    main = w + "-main"
+    _test_author_lane(w, "src/app.py", "x = 6\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    _put_commit(main, [("src/app.py", "x = 9\n")], "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, "src/app.py")
+
+
+def _product_merge_commit(w):
+    """`_product_mid_merge`, resolved by hand and committed: src/app.py takes a text neither side holds."""
+    _product_mid_merge(w)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+CI = ".github/workflows/ci.yml"
+CI_LINT = "      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+CI_BASE = "on: push\njobs:\n  check:\n    steps:\n" + CI_LINT
+CI_FILES = {**MIXED_FILES, CI: CI_BASE}
+
+
+def _mixed_workflow_mid_merge(w):
+    """Cut at main. The lane changes the test file and the lint step's run line in ci.yml. Main changes the same two
+    (a conflict in each). The merge is left in progress with both conflicted."""
+    main = w + "-main"
+    _test_author_lane(w, TEST_A, LANE_TEXT, more=((CI, CI_BASE.replace("ste_lint.py", "lane_lint.py")),))
+    _must(w, "reset", "-q", "--hard", "lane")
+    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"),
+                       (CI, CI_BASE.replace("ste_lint.py", "main_lint.py"))], "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TEST_A)
+    _require_conflict(w, CI)
+
+
+PROD_MID = diff_repo("ta-prod-mid", _product_mid_merge, files=MIXED_FILES)
+PROD_DONE = diff_repo("ta-prod-done", _product_merge_commit, files=MIXED_FILES)
+CI_MID = diff_repo("ta-ci-mixed-mid", _mixed_workflow_mid_merge, files=CI_FILES)
+AUTH_PROD = dict(agent_id="auth1", agent_type="test-author", cwd=PROD_MID)
+AUTH_CI = dict(agent_id="auth1", agent_type="test-author", cwd=CI_MID)
+# Case 9: a product-only conflict merge. The test-author's Edit of the conflicted product file is refused,
+# because no test path is conflicted and the merge route has no product path to give.
+add("test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(PROD_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_PROD)
+# Case 10: that product-only conflict merge's commit logs author-diff for the product path.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a product-only conflict logs "
+                         "author-diff",
+                         logged_case("ta-prod-done", "test-author", "auth1", "author-diff")))
+# Case 11: a mixed merge that conflicts a test file and ci.yml. An Edit of ci.yml that changes a non-test step is
+# refused. The merge route covers product paths only: a workflow keeps its content check.
+add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
+    new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
 
 
 def refused_push_and_stop_case(label):
