@@ -13408,6 +13408,22 @@ add("test-author: a whole new test step with if: false is refused", "deny", rule
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+# A mutation test's whole step is a test run too. A sharded mutate job copies that step, so a test author may add one.
+# It is judged by its script's file name, as the builder check judges it (MUTATION_TEST_NAMES). A step that runs any
+# other script, or carries continue-on-error, stays refused.
+SHARD_GUARD = "      - name: Guard mutation test, shard 2/3\n        run: python3 hooks/mutate_guard.py\n"
+SHARD_SWEEP = "      - name: Mutate sweep, shard 2/3\n        run: python3 janitor/mutate_sweep.py\n"
+SHARD_GUARD_CONTINUE = ("      - name: Guard mutation test, shard 2/3\n        continue-on-error: true\n"
+                        "        run: python3 hooks/mutate_guard.py\n")
+add("test-author: a whole mutate_guard shard step added to checks.yml is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + SHARD_GUARD, **A)
+add("test-author: a whole mutate_sweep shard step added to checks.yml is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + SHARD_SWEEP, **A)
+add("test-author: a whole step running hooks/some_tool.py added to checks.yml is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + SOME_TOOL, carries=("builder", "Report"), **A)
+add("test-author: a mutate_guard shard step with continue-on-error added to checks.yml is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=LINT, new_string=LINT + SHARD_GUARD_CONTINUE,
+    carries=("builder", "Report"), **A)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
