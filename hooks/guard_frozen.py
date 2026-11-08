@@ -220,6 +220,13 @@ MUTATING_COMMAND = (
 )
 
 
+# Writers that only a command-position reading knows (`writes_to` with `command`, the builder test
+# check's). They stay out of MUTATING_COMMAND, which the frozen-path rules and `SHELL_WRITE_HINT` also
+# search as plain text: a `touch` or `rsync` of a frozen path would start to be refused there, and no
+# ruling asks for it. `dd` writes its `of=` file only and `rsync` its last operand (`_rsync_reads`), so
+# each is judged by that word, and the words it only reads stay reads.
+COMMAND_POSITION_WRITERS = {"touch", "dd", "rsync"}
+
 # A command that hands its arguments to another program, so a mutating word in them may run.
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
@@ -242,6 +249,8 @@ def _mutates_as_command(command: str, words) -> bool:
 # `-ibak`: letters that take no value, then `i`. `e`, `f` and `l` take one, so `-ei` is a script, not `-i`.
 _SED_IN_PLACE = r"\bsed\b[^\n;|&]*(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)[^\n;|&]*"
 _PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
+# `yq` rewrites its file with `-i` (or `--inplace`), alone or in a cluster of flags that take no value (`-Pi`).
+_YQ_IN_PLACE = r"\byq\b[^\n;|&]*(?<!\S)(?:-[A-Za-z]*i|--inplace)[^\n;|&]*"
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -261,7 +270,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        in_place = {"sed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE}.get(command)
+        if command in COMMAND_POSITION_WRITERS:
+            return bool(re.search(r"\b" + command + r"\b[^\n;|&]*" + target, cmd))
+        in_place = {"sed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE, "yq": _YQ_IN_PLACE}.get(command)
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
@@ -503,13 +514,60 @@ def _fixed_prefix_outside(prefix: str, stop: str, predicate, cwd) -> bool:
     return not (predicate(prefix + "x", cwd) or predicate(prefix.rstrip("/\\") + "/_", cwd))
 
 
-def _cp_start(raw, keywords=False):
-    """The index of the `cp` word of a segment, past its `VAR=value` words (and past `do`, `then` and
-    the other loop keywords when `keywords`), else None when the command is not `cp`."""
+def literal_prefix(word: str):
+    """(prefix, stop) of a word that holds a `$`, a backtick, a glob or a brace character: the text up
+    to the first one and that character, else None. The one reading of a word by its literal prefix, for a
+    `cp` destination (`_copy_reads`) and a glob that a builder's shell write names (`builder_shell_path`)."""
+    unsafe = _CP_DEST_UNSAFE.search(word)
+    return (word[:unsafe.start()], unsafe.group()) if unsafe else None
+
+
+def _cp_start(raw, keywords=False, command="cp"):
+    """The index of the `cp` word of a segment (the `command` word, for another command), past its
+    `VAR=value` words (and past `do`, `then` and the other loop keywords when `keywords`), else None when
+    the command is not `command`."""
     start = 0
     while start < len(raw) and (_ASSIGNMENT.match(raw[start]) or keywords and raw[start] in LOOP_KEYWORDS):
         start += 1
-    return start if _name(raw[start] if start < len(raw) else "") == "cp" else None
+    return start if _name(raw[start] if start < len(raw) else "") == command else None
+
+
+# The `rsync` flags that take their value as the next word, so it is no source or destination.
+_RSYNC_VALUE_FLAGS = {"-e", "-f", "-B", "-T", "-M", "--rsh", "--exclude", "--include", "--filter",
+                      "--exclude-from", "--include-from", "--files-from", "--rsync-path", "--temp-dir",
+                      "--partial-dir", "--backup-dir", "--suffix", "--compare-dest", "--copy-dest",
+                      "--link-dest", "--log-file", "--port", "--bwlimit", "--chmod", "--chown"}
+
+
+def _rsync_reads(raw, predicate, cwd, keywords=False):
+    """The indexes of the sources of an `rsync` segment when its destination (the last operand) is no
+    path `predicate` accepts, else an empty set: a source is only read, so `rsync tests/ /tmp/t/` stays
+    a read, while a destination that `predicate` accepts leaves every word judged. A destination that
+    holds a `$` or a backtick, a redirect, `--remove-source-files` (it deletes the sources) and a segment
+    with one operand leave every word judged too, which fails closed. A glob destination is the
+    predicate's to read (`builder_shell_path`)."""
+    start = _cp_start(raw, keywords, "rsync")
+    if start is None:
+        return set()
+    words = [_unquoted(word) for word in raw]
+    operands, index, flags_over = [], start + 1, False
+    while index < len(words):
+        word = words[index]
+        if not flags_over and word == "--":
+            flags_over = True
+        elif word == "--remove-source-files" or ">" in word or "<" in word:
+            return set()
+        elif not flags_over and word.startswith("-") and word != "-":
+            index += 1 if word in _RSYNC_VALUE_FLAGS else 0
+        else:
+            operands.append(index)
+        index += 1
+    if len(operands) < 2:
+        return set()
+    target = words[operands[-1]]
+    if re.search(r"[$`]", target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
+        return set()
+    return set(operands[:-1])
 
 
 def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
@@ -554,10 +612,9 @@ def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
         target = words[operands.pop()]
     if not operands or not target:
         return set()
-    unsafe = _CP_DEST_UNSAFE.search(target)
-    if unsafe:
-        return set(operands) if prefix and _fixed_prefix_outside(
-            target[:unsafe.start()], unsafe.group(), predicate, cwd) else set()
+    cut = literal_prefix(target)
+    if cut:
+        return set(operands) if prefix and _fixed_prefix_outside(cut[0], cut[1], predicate, cwd) else set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
     return set(operands)
@@ -1012,7 +1069,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         scripts = {}
         if command_position and not closed:
             scripts = _sed_script_words(raw)   # the builder test check only: a script names no file but w, W, e
-            data = data | set(scripts)
+            data = data | set(scripts) | _rsync_reads(raw, predicate, cwd, bool(fed))
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1041,6 +1098,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        is_dd = command_position and _segment_command(words)[0] == "dd"
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -1048,6 +1106,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 continue
             if follow_cd and word == '""':
                 continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
+            if is_dd and word.startswith("of="):
+                word = word[3:]   # `dd` writes the file its `of=` names; `if=` is read
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
                 return _from_cwd(word, at, cwd) if follow_cd else word
     return ""

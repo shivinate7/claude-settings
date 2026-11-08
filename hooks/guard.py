@@ -389,7 +389,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            is_project_config, literal_prefix, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -1637,7 +1637,8 @@ def author_path_ok(rel: str) -> bool:
 # verdicts that share the step and run readers below. A test-author changes a workflow only by adding, removing or
 # moving whole test-run steps, so a new suite gets its CI step. A builder changes any workflow line, except one
 # that disables tests or drops a test run.
-WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
+WORKFLOW_FOLDER = ".github/workflows"
+WORKFLOW_REL = re.compile("^" + re.escape(WORKFLOW_FOLDER) + r"/[^/]+\.ya?ml$")
 # The only keys a test-run step holds. `continue-on-error`, `env`, `uses`, `with` are no test-run key.
 WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
 WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
@@ -1982,7 +1983,27 @@ def builder_shell_path(path: str, cwd: str) -> bool:
     # A folder is judged by the file a writer could put in it, as a test folder holds any name: the
     # workflow folder holds `*.yml`, so the folder and the probe `<folder>/_` (`_holds`) read as `_.yml` in it.
     return (is_test_rel(rel) or is_workflow_rel(rel)
-            or is_workflow_rel((rel[:-2] if basename(rel) == "_" else rel).rstrip("/") + "/_.yml"))
+            or is_workflow_rel((rel[:-2] if basename(rel) == "_" else rel).rstrip("/") + "/_.yml")
+            or workflow_glob_prefix(path, cwd))
+
+
+def workflow_glob_prefix(word: str, cwd: str) -> bool:
+    """True when a word with a glob, `$`, backtick or brace character names workflow files by its literal
+    prefix (`literal_prefix`): a prefix inside the workflow folder (`.github/workflows/c*`) or one that
+    starts the folder's path (`.github/work*/x.yml`, `.github/*`), as the shell expands the rest of the
+    word to every name that fits. A write through it may hit a workflow file, so it counts as one. A prefix
+    that stops short of `.github/` (`*`, `.g*`) is no workflow path: it would refuse every `sed -i *`."""
+    cut = literal_prefix(word)
+    if not cut:
+        return False
+    rel = builder_repo_rel(cut[0] or ".", cwd)   # an empty prefix is the folder the command runs in
+    if rel is None:
+        return False
+    rel = norm(rel).lstrip("/").lower()
+    if rel == ".github" or rel.startswith(".github/") and (WORKFLOW_FOLDER + "/").startswith(rel):
+        return True
+    # A prefix that ends in `/` is a folder, and any other ends inside a name, as `c` of `c*.yml` does.
+    return is_workflow_rel(rel + ("/_.yml" if cut[0].endswith(("/", "\\")) else "_.yml"))
 
 
 def builder_shell_hit(raw: str, stripped: str, cwd: str):
