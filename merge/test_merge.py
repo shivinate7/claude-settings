@@ -938,6 +938,42 @@ class LockRetake(Env):
         self.assertIn(self.PUSH_REFUSAL, str(cm.exception), "the Stop drops the push output")
         self.assertIn(merge.LOCK_CITE, str(cm.exception), "the Stop drops the lock cite")
 
+    NET_DROP = "fatal: unable to access 'https://example.invalid/origin.git/': Failed to connect to example.invalid port 443 after 21 ms"
+
+    def drop_lock_pushes(self):
+        """Every push of the lock ref fails as a dropped network call: the origin never sees it, so the ref stays as it was.
+        Other git calls run for real. -> (the patch, the list that receives each faked push)."""
+        self.assertTrue(merge.is_net(128, self.NET_DROP), "scope: the faked push output is no network error line")
+        real, pushes = merge.git, []
+        def git(cwd, *args, input=None):
+            if args[:1] == ("push",):
+                pushes.append(args)
+                return 128, self.NET_DROP
+            return real(cwd, *args, input=input)
+        return unittest.mock.patch.object(merge, "git", side_effect=git), pushes
+
+    def assert_dropped_push_is_net_stop(self, pushes):
+        """acquire on a push the network drops: a NetStop, which says the network failed, never that the remote refused."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.acquire("main", 600)
+        self.assertTrue(pushes, "the lock push never ran, so the case proves nothing")
+        self.assertIsInstance(cm.exception, merge.NetStop, "a dropped lock push reads as a refusal, not as a network stop")
+        self.assertNotIn("the remote refused", str(cm.exception), "a dropped lock push says the remote refused")
+
+    def test_a_lock_push_the_network_drops_is_a_net_stop_when_no_lock_exists(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        patch, pushes = self.drop_lock_pushes()
+        with patch:
+            self.assert_dropped_push_is_net_stop(pushes)
+        self.assertFalse(self.lock_ref(), "the dropped push created a lock ref")
+
+    def test_a_lock_push_the_network_drops_is_a_net_stop_over_a_released_lock(self):
+        released = self.released_lock()  # scope: the released lock is on origin before the take
+        patch, pushes = self.drop_lock_pushes()
+        with patch:
+            self.assert_dropped_push_is_net_stop(pushes)
+        self.assertEqual(self.head("merge-lock/main"), released, "the dropped push moved the released lock")
+
     def test_a_released_lock_the_remote_refuses_stops_and_names_the_push(self):
         released = self.released_lock()
         self.refuse_pushes()
