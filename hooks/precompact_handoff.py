@@ -783,7 +783,7 @@ def _context_nudge(payload):
             return (
                 "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
                 "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue. (decision precompact-handoff)"
+                "Then continue."
                 % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
@@ -918,7 +918,7 @@ def _owner_section(text):
 
 def owner_waits_gap(payload):
     """The block reason when a coordinator's handoff does not keep what waits on the owner, else "".
-    "" for a subagent, a session that is not a coordinator, no handoff, and any read that fails."""
+    "" for an agent's call, a session that is not a coordinator, no handoff, and any read that fails."""
     try:
         if payload.get("agent_id"):
             return ""
@@ -948,7 +948,7 @@ def owner_waits_gap(payload):
         if not problems:
             return ""
         return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
-                "under step 4 of %s, one line per item, then continue. (decision precompact-handoff)"
+                "under step 4 of %s, one line per item, then continue."
                 % (path, " ".join(problems), prompt_path()))
     except Exception as e:
         sys.stderr.write("precompact_handoff: owner waits error: %s\n" % e)
@@ -964,7 +964,7 @@ def run_nudge(payload):
         return 0
     reasons = [r for r in (_context_nudge(payload), owner_waits_gap(payload)) if r]
     if reasons:
-        print(json.dumps({"decision": "block", "reason": " ".join(reasons)}))
+        print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (decision precompact-handoff)"}))
     return 0
 
 
