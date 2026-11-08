@@ -12137,8 +12137,9 @@ add("frozen mirror: Write of a sibling folder named with the mirror's name as a 
     "allow", tool="Write", cwd=NOGIT, file_path=MAINLINE_IN_HOME, content="rules\n", env=MIRROR_ENV)
 
 # A SCRIPT THAT ONLY NAMES A FROZEN PATH IS NOT A WRITE. Each row prints, reads, checks or names the
-# frozen path in its `~/` form, and none writes it, so each is allowed. The deny row last is the control:
-# the same path opened for write in that form is still denied. Each case runs with HOME set to
+# frozen path in its `~/` form, and none writes it, so each is allowed. The deny rows are the control:
+# the same path opened or written for write in that form is still denied. The last four rows use the
+# method form, `Path(...).expanduser()`, in the same `~/` form. Each case runs with HOME set to
 # MIRROR_HOME and CLAUDE_CONFIG_DIR unset, so the guard reads `~/.claude` as the frozen config dir. The
 # fixture otherwise points the config dir at CFG, where `~` is not a frozen path.
 TILDE_ENV = dict(MIRROR_ENV, CLAUDE_CONFIG_DIR=None)
@@ -12159,6 +12160,18 @@ sh("frozen: a cat heredoc whose text names a frozen hook in ~ form, written to s
 sh("frozen: python -c that opens a frozen hook in ~ form for write is denied",
    "python3 -c 'open(os.path.expanduser(\"" + TILDE_HOOK + "\"),\"w\")'", "deny", "frozen-path",
    cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: python -c that checks a frozen bin path via pathlib expanduser in ~ form is allowed",
+   "python3 -c 'from pathlib import Path; print(Path(\"" + TILDE_VERDICT + "\").expanduser().exists())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: python -c that reads a frozen hook via pathlib expanduser in ~ form is allowed",
+   "python3 -c 'from pathlib import Path; Path(\"" + TILDE_HOOK + "\").expanduser().read_text()'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: python -c that writes a frozen hook via pathlib expanduser write_text in ~ form is denied",
+   "python3 -c 'from pathlib import Path; Path(\"" + TILDE_HOOK + "\").expanduser().write_text(\"x\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: python -c that opens a frozen hook via pathlib expanduser for write in ~ form is denied",
+   "python3 -c 'from pathlib import Path; open(Path(\"" + TILDE_HOOK + "\").expanduser(), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
