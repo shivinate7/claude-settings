@@ -848,7 +848,7 @@ MUTATIONS = [
     ("per-file: the allow ignores a second distinct -C target in the command",
      '    return len(targets) <= 1',
      '    return True', "guard",
-     'per-file ask: two -C targets, lane then a second linked worktree, both per-file restores'),
+     'per-file ask: two -C targets in one checkout'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
