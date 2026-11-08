@@ -24628,7 +24628,7 @@ def gs_runner_id_check():
     return (not problem), (problem or "refused: the runner's own lane id did not reach the case")
 
 
-# THE JUDGE MARKER ON A STEP GRANT (owner ruling 2026-11-06 13:51 CST). A grant may carry "marker": "Judge:", and
+# THE JUDGE MARKER ON A STEP GRANT (decision agent-model-cap). A grant may carry "marker": "Judge:", and
 # then it covers only an Opus spawn whose brief's first non-blank line carries Judge:, read as the Audit: marker is.
 # A marker only narrows: a grant with no marker covers every spawn of its role, as before. A marker that is present
 # but is not a known marker string is a wrong-shape grant, so the step is unread and the spawn is refused.
