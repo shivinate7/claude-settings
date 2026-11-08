@@ -58,12 +58,14 @@ BLIND_KIND_ONLY = re.compile(r"^" + re.escape(KIND_HEADER) + r"\s*blind\s*$", re
 LEADING_MARK_CHARS = r"[\s>*#-]"
 LEADING_MARKS = re.compile(r"^" + LEADING_MARK_CHARS + r"+")
 LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
-# Leading marks and bold are read as in KIND_LINE and LEADING_MARKS: `- Blind designers: 2`, `**Blind designers:** 2`.
-_COUNT_TAIL = re.escape(COUNT_HEADER) + r"\**\s*(.*?)\s*\**\s*$"
-BLIND_COUNT = re.compile(r"^" + LEADING_MARK_CHARS + r"*" + _COUNT_TAIL, re.I | re.M)
-# A count line at column 0 with no mark. It outranks a marked line: a bulleted line is often a template or
-# an example the brief quotes, while the plain line is the one the brief states as its own count.
-PLAIN_BLIND_COUNT = re.compile(r"^" + _COUNT_TAIL, re.I | re.M)
+# The plain count line: column 0, no mark. It is exact about marks, so `Blind designers: 2**` and
+# `Blind designers:** 2` read as values no count matches. It outranks a marked line: a bulleted line is often a
+# template or an example the brief quotes, while the plain line is the one the brief states as its own count.
+BLIND_COUNT = re.compile(r"^" + re.escape(COUNT_HEADER) + r"\s*(.*?)\s*$", re.I | re.M)
+# A marked count line, read as in KIND_LINE and LEADING_MARKS: `- Blind designers: 2`, `**Blind designers:** 2`.
+# A stray `**` after the value stays in the value. It counts only when it is the brief's only count line.
+MARKED_BLIND_COUNT = re.compile(r"^" + LEADING_MARK_CHARS + r"*" + re.escape(COUNT_HEADER) + r"\**[^\S\n]*(.*?)[^\S\n]*$",
+                                re.I | re.M)
 # The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
 OLD_KIND_LINE = re.compile(r"^lane\s+kind\s*:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
@@ -371,10 +373,14 @@ def brief_faults(text, current=(), template=None, devices=None):
 def blind_designers_ok(text):
     """True when an informed or directed brief says its run has a blind designer, or carries the owner's
     words for none."""
-    m = PLAIN_BLIND_COUNT.search(text) or BLIND_COUNT.search(text)
-    if not m:
-        return False
-    value = m.group(1)
+    plain = BLIND_COUNT.search(text)
+    if plain:
+        value = plain.group(1)
+    else:
+        marked = MARKED_BLIND_COUNT.findall(text)
+        if len(marked) != 1:
+            return False
+        value = marked[0]
     if value.isdigit():
         return int(value) >= 1
     return bool(OWNER_NONE.match(value))
