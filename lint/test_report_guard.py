@@ -1462,6 +1462,33 @@ class CompactionCarryTests(unittest.TestCase):
         reply = report_lines("Recovered: ruling X from issue #2 of the plan", "Handoff gave: none")
         self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced issue #<n> blocks")
 
+    def test_cc_green_pull_hash_with_no_space_is_a_source(self):
+        # Catches: "pull#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from pull#978", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'pull#978' is refused as a source")
+
+    def test_cc_green_issue_hash_with_no_space_is_a_source(self):
+        # Catches: "issue#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from issue#5", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'issue#5' is refused as a source")
+
+    def test_cc_green_pull_request_hash_with_no_space_is_a_source(self):
+        # Catches: "pull request#<n>", with no space before the "#", refused as sourceless.
+        reply = report_lines("Recovered: ruling X from pull request#978", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'pull request#978' is refused as a source")
+
+    def test_cc_green_upper_case_github_link_is_a_source(self):
+        # Catches: an upper-case github.com link refused as sourceless. The link matches without regard to case.
+        reply = report_lines("Recovered: ruling X from https://GITHUB.COM/shivinate7/claude-settings/pull/978",
+                             "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'GITHUB.COM' link is refused as a source")
+
+    def test_cc_green_spaced_pr_hash_is_a_source(self):
+        # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
+        # only the no-space forms must leave it a source.
+        reply = report_lines("Recovered: ruling X from PR #3", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'PR #3' is refused as a source")
+
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
         items = ["ruling X from #3 of my notes", "ruling X (#1 priority)", "ruling X from memory (#2)"]
