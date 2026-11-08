@@ -1,11 +1,11 @@
 {
   "title": "Find which push keeps raising the stray-branch ask, and make it name its destination",
   "why": "Owner ask ask-mw8321blnx (11:05 CST Nov 8): the push-stray-branch ask reached him on \"Push the merged lane head\", and he asks why it keeps coming up in the past 36 h. Decision plain-push-asks (rulings 206 a and 207 a, 2026-11-03) asks on an implied push (`git push origin HEAD`, a bare push) whose name differs from the branch's upstream; an explicit `HEAD:<branch>` is silent. The rate and the sessions are unmeasured: guard.log on the Mac holds them.",
-  "note": "",
+  "note": "Coordinator 11:07 CST Nov 8: sent to lane push-head-upstream-name. Not new: push-stray-branch has been on main since item 206 a (Nov 3); #1814 changed no guard. The lane's likely cause, unmeasured until it sees the command: it asks when the destination differs from the upstream even when that destination is the lane's existing PR branch. Planned fix, red first: ask only when the destination does not exist on the remote yet. The ask text holds only the description \"Push the merged lane head\" and rule id push-stray-branch; no command or session. Narrowing changes what decision plain-push-asks says ruling 206 a asks on, so the record edit needs the owner's word (outcomes-stale-decision-protocol).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "status": "todo",
+  "lane": "push-head-upstream-name (session_013NEJL1YxsYqim39RK6JeZP)",
+  "status": "doing",
   "order": 747,
-  "updatedAt": "2026-11-08T11:06:00-06:00"
+  "updatedAt": "2026-11-08T11:08:00-06:00"
 }
