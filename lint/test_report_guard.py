@@ -4558,6 +4558,43 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         # Catches: a fence hides every line after it, not only the lines inside it.
         self.assert_blocked("```\nkeep the log\n```\nThe failure is pre-existing.", "The failure is pre-existing.")
 
+    def test_pe_red_failure_claims_with_no_run_are_refused(self):
+        # Ruling (coordinator, round 2): a failure claim names a run on the base branch's tip on the same line.
+        rows = [
+            # Catches: "already fails on main" with no run passes, since only "already red" is read.
+            "The lint check already fails on main.",
+            # Catches: "as well" in place of "too" or "also" passes.
+            "Lint fails on 32b5f8b8e as well, so it is not from this step.",
+            # Catches: a negator before "so" exempts a claim in the next clause.
+            "Nothing in this PR touches lint so the failure is pre-existing.",
+            # Catches: "fails on main too" with no sha passes.
+            "Lint fails on main too.",
+            # Catches: an all-digit sha is not read as a sha, so "fails on <sha> too" passes.
+            "Lint fails on 1234567 too.",
+            # Catches: "pre existing" with no hyphen passes.
+            "Lint has a pre existing failure.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_claim_before_a_question_is_refused(self):
+        # Catches: a line that ends in "?" passes whole, so a claim before its question is never judged.
+        self.assert_blocked("The failure is pre-existing. Want me to fix it?",
+                            "The failure is pre-existing.", "pre-existing-needs-main-run")
+
+    def test_pe_red_bare_base_ref_is_no_run_and_is_refused(self):
+        # Ruling (coordinator, round 2): a bare "on origin/main" with no sha or run URL is not a run.
+        rows = [
+            # Catches: a bare ref with no sha passes as proof the failure was already there.
+            "The failure was already there, verified on origin/main.",
+            # Catches: a bare "on origin/main" passes as a run (the round-1 green row, re-pointed).
+            "Pre-existing: the same lint check fails on origin/main.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_pe_green_brief_control_on_main_at_sha_passes(self):
@@ -4568,8 +4605,6 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         rows = [
             # Catches: "on main at <sha>" is not read as a run on main.
             "The failure is pre-existing: it fails on main at 174b005c1 too.",
-            # Catches: "on origin/main" is not read as a run on main.
-            "Pre-existing: the same lint check fails on origin/main.",
             # Catches: a CI run URL that says it is on main is not read as a run on main.
             "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 on main.",
             # Catches: a sha in a code span is not read as the sha.
@@ -4620,6 +4655,50 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         lines = ["Line %d of the report: the suite ran and is green." % n for n in range(40)]
         lines.append("The failure is pre-existing: it fails on main at 174b005c1 too.")
         self.assert_allowed("\n".join(lines))
+
+
+    def test_pe_green_claim_words_without_a_failure_pass(self):
+        rows = [
+            # Catches: "pre-existing" with no failure word in its sentence is read as a failure claim.
+            "The 12 pre-existing tests pass.",
+            # Catches: a build note that names the guard is read as a failure claim.
+            "BUILT pre-existing guard in lint/report_guard.py (builder sonnet, reviewer haiku)",
+            # Catches: a negated claim with the noun "failure" is read as a claim.
+            "not a pre-existing failure",
+            # Catches: "no" before a plural claim is read as a claim.
+            "no pre-existing failures",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_failure_on_a_sha_without_too_or_also_passes(self):
+        rows = [
+            # Catches: "too" that closes a later clause is read as "fails on <sha> too".
+            "Lint fails on 9f8e7d6c and the unit job fails too.",
+            # Catches: "also" in a later clause is read as "fails on <sha> also".
+            "CI fails on 9f8e7d6c, and I also pushed a fix.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_each_base_with_a_run_passes(self):
+        rows = [
+            # Catches: "on master at <sha>" is refused as no run on main.
+            "The failure is pre-existing on master at 174b005c1.",
+            # Catches: "on origin/main at <sha>" with no "on main" word is refused.
+            "pre-existing on origin/main at 174b005c1",
+            # Catches: "on origin/<branch> at <sha>" is refused as no run on main.
+            "The failure is pre-existing on origin/silent-undo-ci-body at 174b005c1.",
+            # Catches: a run URL on a line that says "on main" is refused.
+            "already red on main, run https://github.com/o/r/actions/runs/123",
+            # Catches: a run URL on a line that says "on master" is refused.
+            "The failure is pre-existing on master, run https://github.com/o/r/actions/runs/123.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
 
 class PendingRefusalTests(unittest.TestCase):
