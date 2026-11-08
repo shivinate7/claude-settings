@@ -27574,10 +27574,10 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
-# ---- round 3: the guard judges each form, and never crashes on it. A crash fails open, so a crash on a shell
-# substitution is a hole. Each check runs the guard on one command in a folder of its own, after a fresh refusal row or
-# after none, and reads that folder's guard.log. It asserts the decision and the rule where one is named, then that no
-# row is a crash (decision crash, rule guard-crash) and no row holds a NUL: the marker NULs of a masked command never
+# ---- Each form is judged, and the guard never crashes on it. A crash fails open, so a crash on a shell substitution
+# lets the command through. Each check runs the guard on one command in a folder of its own, after a fresh refusal row
+# or after none, and reads that folder's guard.log. It asserts the decision and the rule where one is named, then that
+# no row is a crash (decision crash, rule guard-crash) and no row holds a NUL: the marker NULs of a masked command never
 # reach the log.
 R3_SERIAL = [0]
 
@@ -27638,7 +27638,7 @@ def r3_add(label, command, state, want, rule=None):
     LOG_CHECKS_EXTRA.append(("encoded retry r3: %s, %s, %s" % (label, state, want), check))
 
 
-# F1: forms that crashed the guard, or that main denies. Each must match main: the same decision and rule, no crash row.
+# Forms the guard must judge as the default branch does: the same decision and rule, and no crash row.
 R3_F1 = (
     ("live-stream after ssh-agent eval", 'eval "$(ssh-agent -s)"; tail -f app.log | grep "a\\|b"', "deny", "live-stream"),
     ("bash -c of a cat, then grep", 'bash -c "$(cat f)" && grep "a\\.b" f', "allow", None),
@@ -27654,8 +27654,8 @@ r3_add("ssh-agent eval, then a decoded command piped to sh", 'eval "$(ssh-agent 
 r3_add("ssh-agent eval, then a decoded command piped to sh", 'eval "$(ssh-agent -s)"; echo ZWNobyBoaQ== | base64 -d | sh',
        "fresh", "deny", ENC_RULE)
 
-# F2 and F3: decode-and-run forms that the guard allowed after a fresh refusal row. Each is refused after one and
-# allowed with none.
+# Decode-and-run forms inside an assignment, a substitution, a process substitution, or a run of a variable. Each is
+# refused after a fresh refusal row and allowed with none.
 R3_F2_F3 = (
     ("a decode piped to sh inside a variable assignment", "OUT=$(echo ZWNobyBoaQ== | base64 -d | sh)"),
     ("a decode piped to bash inside an echoed substitution", 'echo "$(echo ZWNobyBoaQ== | base64 -d | bash)"'),
