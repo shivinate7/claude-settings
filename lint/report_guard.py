@@ -1544,12 +1544,22 @@ CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\
 CANNOT_SKIP_NEXT_RE = re.compile(
     r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
 CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re.I)
-# A gate is a true reason, not a hand-off: the act waits on CI, a review, a hold or a lock, or a rule id follows the act.
-# A connect failure is no gate. A rule id has two hyphens or more, so "(read-only)" is a capability and stays a claim.
-CANNOT_GATE_RE = re.compile(
-    r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?"
-    r"\b(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?|review|hold|grant|lock|freeze|main\s+is\s+protected)\b"
-    r"|\(\s*[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\s*\)", re.I)
+# A gate is a true reason, not a hand-off: the act waits on a gate in a state (CI is red, the batch run is in progress, a
+# hold is on). A gate noun followed by a tool noun (the checks tool, the review tool, a connector on hold) is an outage and
+# stays a claim, and so does the lock in index.lock. A reason word (because, while) opens the gate in the phrase's sentence
+# part, before or after it; the part after the next semicolon may state the gate bare ("I can't merge the PR; CI is red.").
+_GATE_STATE = (
+    r"(?<![\w.])CI\s+(?:is|was)\s+(?:red|failing|running|pending|in\s+progress)"
+    r"|(?<![\w.])checks?\s+(?:are|is|were|was)\s+(?:red|failing|running|pending)"
+    r"|(?<![\w.])(?:the\s+)?batch(?:\s+run)?\s+is\s+(?:in\s+progress|running)"
+    r"|(?<![\w.])review\s+is\s+pending"
+    r"|(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"
+    r"|(?<![\w.])main\s+is\s+protected|\bno\s+grant\b")
+CANNOT_GATE_STATE_RE = re.compile(r"(?:%s)\b" % _GATE_STATE, re.I)  # a gate in a state, with no reason word before it
+CANNOT_GATE_RE = re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % _GATE_STATE, re.I)
+# A rule id in parentheses after the act names the rule that stops it. It has two hyphens or more, so "(read-only)" is a
+# capability and stays a claim.
+CANNOT_RULE_ID_RE = re.compile(r"\(\s*[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\s*\)", re.I)
 # A sentence that names a rule states the rule, so it is not the session's claim. A semicolon ends that sentence: the
 # clause after it is judged on its own.
 CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
@@ -1563,7 +1573,7 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?:a|an|the|new|draft|GitHub))*\s+%s\b" % _PR, re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -1601,6 +1611,7 @@ CANNOT_SCRIPT_ACTS = (
     ("push", re.compile(r"(?:^|[-_.])push(?:[-_.]|$)")),
 )
 CANNOT_INTERPRETERS = {"bash", "sh", "zsh", "python", "python3", "node"}  # a script runs as the word after these
+CANNOT_RUNNERS = {"make", "gmake", "npm", "yarn", "pnpm"}  # the first plain argument (after run) names the script
 # The input fields that name a GitHub MCP call's target, read in this order.
 CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 # A failed try: the result's error flag, an exit code above zero as the shell result reports it, or an HTTP 4xx or 5xx.
@@ -1649,8 +1660,8 @@ def _claim(body, mask, hit, floor):
     sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
     one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
     subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
-    before, without your) or a gate (CANNOT_GATE_RE) in its clause, a sentence that names a rule, or a verb that names no
-    table act."""
+    before, without your) or a rule id (CANNOT_RULE_ID_RE) in its clause, a gate (CANNOT_GATE_RE) in its sentence part or a
+    gate state (CANNOT_GATE_STATE_RE) in the part after the next semicolon, a sentence that names a rule, or a verb that names no table act."""
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
     end = brk.start() if brk else len(mask)
@@ -1659,7 +1670,7 @@ def _claim(body, mask, hit, floor):
     if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
         return None
     words = after.split()
-    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after) or CANNOT_GATE_RE.search(after):
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after) or CANNOT_RULE_ID_RE.search(after):
         return None
     if not CANNOT_SUBJECT_RE.search(CANNOT_LEAD_RE.sub("", before)) and not (
             after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
@@ -1669,6 +1680,12 @@ def _claim(body, mask, hit, floor):
     right = len(mask) if right < 0 else right
     if CANNOT_RULE_RE.search(body[left:right]):
         return None
+    if CANNOT_GATE_RE.search(body[left:right]):
+        return None
+    if right < len(mask):
+        reach = mask.find(";", right + 1)
+        if CANNOT_GATE_STATE_RE.search(body[right + 1:len(mask) if reach < 0 else reach]):
+            return None
     window = " ".join(words[:CANNOT_WINDOW])
     act = _window_act(window, before + " " + after)
     return (act, window) if act else None
@@ -1730,7 +1747,13 @@ def _script_tries(tokens):
         if index is None:
             return set()
     name = os.path.basename(tokens[index]).lower()
-    target = next((t for t in tokens[index + 1:] if not t.startswith("-")), "")
+    plain = [t for t in tokens[index + 1:] if not t.startswith("-")]
+    if name in CANNOT_RUNNERS:
+        plain = plain[1:] if name != "make" and plain[:1] in (["run"], ["run-script"]) else plain
+        if not plain:
+            return set()
+        name, plain = os.path.basename(plain[0]).lower(), plain[1:]
+    target = plain[0] if plain else ""
     return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
 
 
