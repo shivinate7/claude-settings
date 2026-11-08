@@ -659,6 +659,8 @@ def spawn_models(records):
 def done_models_problem(text, spawned, session=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
+    A spawned role also counts as named when Next names it with a model.
+
     `spawned` is the in-turn spawns: they set which roles Done must name. `session` is every spawn
     of the session, and sets which models a name may match, since a reviewer that ran in an
     earlier turn is still a reviewer this report names. It defaults to `spawned`.
@@ -668,7 +670,10 @@ def done_models_problem(text, spawned, session=None):
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
-    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    # A model under Next plans a later spawn: it excuses a missing name but is never matched to a spawn.
+    planned = {r.lower() for roles, _ in ROLE_MODEL_RE.findall(report_section(text, "Next"))
+               for r in ROLE_RE.findall(roles)}
+    missing = sorted(r for r in spawned if r not in planned and not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
