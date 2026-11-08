@@ -27922,6 +27922,14 @@ role_model_allow("role-model: reviewer on sonnet as a Task with the guard marker
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.", tool="Task")
 role_model_allow("role-model: reviewer on haiku with the guard marker is allowed (its own row)", "reviewer", "haiku",
                  REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
+# A marker line may start with leading blanks: the brief table's line-start rows allow them, and a brief indents its
+# template line. The first-pass brief is the case, since only the marker lifts Sonnet there.
+role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after two spaces is allowed", "reviewer",
+                 "sonnet", "Round 1 of 3. Check the guard diff.\n  " + REVIEW_GUARD_MARKER)
+role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after four spaces is allowed", "reviewer",
+                 "sonnet", "Round 1 of 3. Check the guard diff.\n    " + REVIEW_GUARD_MARKER)
+role_model_allow("role-model: reviewer on sonnet on Round 1 with the guard marker after a tab is allowed", "reviewer",
+                 "sonnet", "Round 1 of 3. Check the guard diff.\n\t" + REVIEW_GUARD_MARKER)
 
 # A reviewer on Sonnet is refused with no marker, with `no` as the value, with the marker mid-line, or in lowercase.
 role_model_refuse("role-model: reviewer on sonnet with Guard or check: no is denied", "reviewer", "sonnet",
@@ -27966,6 +27974,15 @@ role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a
 # A CRLF brief ends every line `\r\n`, so its marker line ends `yes\r`. The CR after yes is a line end, not text after it.
 role_model_allow("role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\r\n" + REVIEW_GUARD_MARKER + "\r\nThe lane is c204.\r\n")
+# The blanks allowance does not make an indented template line a value: `yes|no` after the blanks is not yes.
+role_model_refuse("role-model: reviewer on sonnet with the indented template line Guard or check: yes|no is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\n    Guard or check: yes|no")
+# The blanks allowance does not reach into a fence: an indented marker line inside one is quoted text, as before.
+role_model_refuse("role-model: reviewer on sonnet whose only indented guard marker line sits inside a ``` fence is denied",
+                  "reviewer", "sonnet", "Check the docs diff.\n" + MD_FENCE + "\n  " + REVIEW_GUARD_MARKER + "\n" + MD_FENCE)
+# A bulleted marker does not start its line: the allowance is for blanks only, so the `-` ahead of the marker still refuses.
+role_model_refuse("role-model: reviewer on sonnet with a bulleted Guard or check: yes is denied", "reviewer", "sonnet",
+                  "Check the docs diff.\n- " + REVIEW_GUARD_MARKER)
 # The refusal names the marker beside the Round N of 3 remedy, as a reviewer's second way past its row.
 role_model_refuse("role-model: reviewer on sonnet with no marker is denied, and names the guard marker beside the "
                   "Round N of 3 remedy", "reviewer", "sonnet", "Check the guard diff.",
