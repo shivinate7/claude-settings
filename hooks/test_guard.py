@@ -13553,6 +13553,42 @@ sendto_allow("a run of a test, then a fix of guard.py, is allowed to a builder",
 sendto_refuse("a product fix whose goal is a test passing, to a test-author, is refused, naming builder",
               SENDTO_AUTHOR, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_AUTHOR, "builder",
               lacks=("guard.py",))
+# Review round 4. A path in a clause that names a reference (`the case in X`, `as X says`, `agree with X`), or a read
+# path carried only to an anaphor (`it`, `that`, `them`, `the/that assert|case|test`), and a negated edit clause.
+sendto_allow("make guard.py handle a case that a test path holds is allowed to a builder",
+             SENDTO_BUILDER, "Make guard.py handle the case in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("make guard.py agree with a test path is allowed to a builder",
+             SENDTO_BUILDER, "Make guard.py agree with tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("make a note of failures in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Make a note of the failures in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("fix guard.py for a failure in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py for the failure in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("update guard.py to satisfy a case in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Update guard.py to satisfy the case in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("fix guard.py as a test line says is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py as tests/x.py:40 says.", T_SENDTO_BUILDER)
+sendto_allow("read a test path, then add a note to the report, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Add a note to your report.", T_SENDTO_BUILDER)
+sendto_allow("read a test line, then fix the cause, is allowed to a builder",
+             SENDTO_BUILDER, "Read the case at tests/x.py:40. Fix the cause.", T_SENDTO_BUILDER)
+sendto_allow("look at a test line, then fix the cause, is allowed to a builder",
+             SENDTO_BUILDER, "Look at tests/x.py:40, then fix the cause.", T_SENDTO_BUILDER)
+sendto_allow("a case added to a test file for a product path is allowed to a test-author",
+             SENDTO_AUTHOR, "Add a case to hooks/test_guard.py for hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_allow("red cases for a brief, placed in a product path, are allowed to a test-author",
+             SENDTO_AUTHOR, "Add red cases for the empty brief in hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_refuse("a test line replaced after a negated clause is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "The assertion at tests/x.py:40 is not specific, replace it with an exact one.",
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a test path updated after a negated fix of product code is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Don't just fix guard.py, also update tests/x.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a test path updated after Don't forget is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Don't forget to update tests/x.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a read of a test line, then Replace that assert, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py:40. Replace that assert.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
