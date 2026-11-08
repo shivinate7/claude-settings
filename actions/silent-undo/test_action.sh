@@ -19,6 +19,8 @@
 #  - unpersisted-local-base-red: origin/main is local and origin is unreachable. The run uses the
 #    local ref and names the file. A check.sh that fetches first goes UNKNOWN.
 #  - shallow-unknown-red: a depth-1 clone is UNKNOWN, exit 1.
+#  - single-branch-fetches-base: a single-branch clone of topic-revert holds no origin/main. check.sh
+#    fetches the base and reads the real verdict, exit 1 and the file named.
 # Without a check.sh every case fails with "not built": that is the red on the old code.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -68,6 +70,7 @@ quiet git clone -q -b topic-noreason "$remote" "$work/noreason"
 quiet git clone -q -b topic-otherpath "$remote" "$work/otherpath"
 quiet git clone -q -b main "$remote" "$work/base"
 quiet git clone -q --no-local --depth 1 -b topic-revert "$remote" "$work/shallow"
+quiet git clone -q --single-branch -b topic-revert "$remote" "$work/single"
 # The fixture must hold what each case claims, or the verdicts below prove nothing.
 [ "$(git -C "$work/revert" diff --name-only origin/main...HEAD)" = rules.md ] ||
   { echo "fixture setup failed: topic-revert must change only rules.md"; exit 1; }
@@ -81,6 +84,8 @@ quiet git clone -q --no-local --depth 1 -b topic-revert "$remote" "$work/shallow
   { echo "fixture setup failed: the shallow clone is not shallow"; exit 1; }
 [ -n "$(git -C "$work/unpersisted" rev-parse --verify -q origin/main)" ] ||
   { echo "fixture setup failed: the unpersisted clone has no local origin/main"; exit 1; }
+[ -z "$(git -C "$work/single" rev-parse --verify -q refs/remotes/origin/main)" ] ||
+  { echo "fixture setup failed: the single-branch clone holds origin/main, so the base fetch is not exercised"; exit 1; }
 quiet git -C "$work/unpersisted" remote set-url origin "$work/unreachable.git"
 head_rev="$(git -C "$work/revert" rev-parse HEAD)"
 fails=0
@@ -106,5 +111,6 @@ expect pr-head-sha-read-red 1 "$work/base" main "FAIL: rules.md" "$head_rev"
 expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
+expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))
