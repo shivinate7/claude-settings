@@ -9491,6 +9491,24 @@ sh("env: heredoc-prose-refuse: an unquoted node body with a // comment and a cat
 sh("env: heredoc-prose-refuse: an unquoted node body with a // inside a string and a cat substitution, denies",
    'node - <<EOF\nconst u = "http://x"; const s = "$(cat ' + ENV + ')";\nEOF', "deny", "env-file", cwd=NOGIT)
 
+# A triple-quoted string that IS the path is code, not prose, so the prose blanker must keep it.
+sh("env: heredoc-prose-refuse: a python triple-quoted string that is the env path, then an open read of it, denies",
+   "python3 - <<'EOF'\np = '''" + ENV + "'''\nopen(p).read()\nEOF", "deny", "env-file", cwd=NOGIT)
+
+# Each form below denies on main and on head. It pins the tokenizer: a blanker that reads a `//`, `/*` or `#`
+# inside a string as a comment, or that misreads where a template literal ends, lets the read through.
+sh("env: heredoc-prose-refuse: a node body with a // in a string, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst u = \"http://x\"; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a /* in a string, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst s = \"/*\"; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal holds a // line that closes on that line, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst s = `one\n// x`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python body with a # in a string, then an open read of an env file, denies",
+   "python3 - <<'EOF'\ns = \"#\"; p = '" + ENV + "'\nopen(p).read()\nEOF", "deny", "env-file", cwd=NOGIT)
+
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
