@@ -10,6 +10,9 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
 in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
 (merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
+The load cases (a lane lint waits while the load is high) set a fake load reader, a fake clock and the lints running in that
+subprocess (LOAD_SEAMS), so no case reads the real load. HARNESS sets no real reader by default (NO_LOAD); LaneLint and
+BatchLintFlags patch merge.read_cpu_load in process (no_load_reading).
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
@@ -69,8 +72,11 @@ HARNESS = '''import sys
 sys.path.insert(0, __HERE__)
 import merge
 merge.CI_JOB = __STUB__
+__LOAD__
 sys.exit(merge.main(sys.argv[1:]))
 '''
+
+NO_LOAD = "merge.read_cpu_load = lambda: None  # merge reads no real load: a case that tests the wait sets its own reader after this line\n"
 
 # Added to STUB before its verdict lines: one `start:` line per step on stderr, then a wait for the GO file. The wait is
 # a bound only (20 s): the case creates GO once it has read the first announcement from merge's stderr, so the lint
@@ -116,16 +122,96 @@ def most_running(events):
         most = max(most, len(running))
     return most
 
-def harness_text(stub, slots=None, bound=None):
-    """HARNESS, with the seams a case gives set before main runs: merge.lint_slots (the slot count) and merge.LINT_SECONDS (the bound).
+def seam_lines(slots=None, bound=None):
+    """The plain assignments a case gives before main runs: merge.lint_slots (the slot count) and merge.LINT_SECONDS (the bound).
     Both are plain assignments, so a name the code lacks still takes the value: a case reads the behaviour, never a missing name."""
     seams = ""
     if slots is not None:
         seams += "merge.lint_slots = lambda: %d\n" % slots
     if bound is not None:
         seams += "merge.LINT_SECONDS = %d\n" % bound
-    text = HARNESS.replace("merge.CI_JOB = __STUB__\n", "merge.CI_JOB = __STUB__\n" + seams)
-    return text.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(stub))
+    return seams
+
+def harness_for(stub, seams="", load=NO_LOAD):
+    """HARNESS for the stub at `stub`: `load` is its reader line (NO_LOAD, or "" to keep merge's own reader), then `seams`."""
+    return HARNESS.replace("__LOAD__\n", load + seams).replace("__HERE__", repr(HERE)).replace("__STUB__", repr(stub))
+
+def harness_text(stub, slots=None, bound=None):
+    """HARNESS with the seams of seam_lines set before main runs."""
+    return harness_for(stub, seam_lines(slots, bound))
+
+# The seams of a load case: plain assignments, like the slot seams. The clock is fake, on merge's own `time` name only (never the
+# global module, which subprocess reads): a sleep moves it on, and a read of it moves it on a millisecond, so a loop that only
+# reads the clock still ends. Each sleep, reading and bound is logged in order, next to the stub's starts and ends.
+LOAD_SEAMS = '''import json as _json, time as _real_time
+_LOG = __LOG__
+def _note(rec):
+    with open(_LOG, "a", encoding="utf-8") as f:
+        print(_json.dumps(rec), file=f)
+class _FakeClock:
+    now = 0.0
+    def monotonic(self):
+        _FakeClock.now += 0.001
+        return _FakeClock.now
+    def sleep(self, seconds):
+        _FakeClock.now += seconds
+        _note({"slept": seconds})
+    def __getattr__(self, name):
+        return getattr(_real_time, name)
+merge.time = _FakeClock()
+merge.LOAD_WAIT_SECONDS = __WAIT__
+merge.lints_running = lambda: __RUNNING__
+_real_sh = merge.sh
+def _sh(args, *rest, **kwargs):
+    if "--lint" in args:  # a ci-job lint run: the bound it is given
+        _note({"bound": kwargs.get("timeout")})
+    return _real_sh(args, *rest, **kwargs)
+merge.sh = _sh
+'''
+
+# The readings (load1, cpus) in order, the last one repeating. Each reading logs whether the lint's slot lock is held, tested on a
+# fresh fd: a second open file description conflicts with a flock held in this process too.
+LOAD_READS = '''import fcntl, os
+_READS = __READS__
+_seen = [0]
+def _read_cpu_load():
+    i = min(_seen[0], len(_READS) - 1)
+    _seen[0] += 1
+    path = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "state", "lane-lint-slots", "slot-0.lock")
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o666)
+    held = False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except BlockingIOError:
+        held = True
+    finally:
+        os.close(fd)
+    _note({"read": list(_READS[i]), "slot_held": held})
+    return _READS[i]
+merge.read_cpu_load = _read_cpu_load
+'''
+
+def load_seams(log, reads, running, wait, no_getloadavg):
+    """The seam text of a load run: LOAD_SEAMS; LOAD_READS when `reads` names readings; and, with `no_getloadavg`, os.getloadavg
+    deleted, as on Windows, so merge's own reader must find no load."""
+    text = LOAD_SEAMS.replace("__LOG__", repr(log)).replace("__WAIT__", repr(wait)).replace("__RUNNING__", repr(running))
+    if reads is not None:
+        text += LOAD_READS.replace("__READS__", repr([tuple(r) for r in reads]))
+    if no_getloadavg:
+        text += "import os\ndel os.getloadavg\n"
+    return text
+
+def high_load(read, running):
+    """A reading holds a lint back while the 1-minute load, less the lints running, is at or above the CPU count the reader gave."""
+    return read["load"] - running >= read["cpus"]
+
+def no_load_reading(case):
+    """merge's own reader gives no reading in this process, so no case here waits for the real load. create=True: the patch also
+    holds on a merge with no reader yet, and its stop removes what it made."""
+    patch = unittest.mock.patch.object(merge, "read_cpu_load", lambda: None, create=True)
+    patch.start()
+    case.addCleanup(patch.stop)
 
 
 class NoLock:
@@ -189,9 +275,10 @@ class CiJobStub:
             calls = [json.loads(line) for line in f if line.strip()]
         return [c for c in calls if "argv" in c and "--plan" not in c["argv"]]
 
-    def lint_events(self):
-        """The stub's lint runs in the order they were written: {"kind": "start", ...the start record} when a run's ci-job starts,
-        {"kind": "end", "pid": pid} when it ends. A run killed before its end has no end event. The plan is no run."""
+    def run_events(self):
+        """This case's log in the order it was written. The stub's runs: {"kind": "start", ...the start record} when a run's ci-job
+        starts, {"kind": "end", "pid": pid} when it ends (a run killed before its end has no end event; the plan is no run). A load run
+        adds {"kind": "read", "load", "cpus", "slot_held"}, {"kind": "sleep", "seconds"} and {"kind": "bound", "seconds"} (LOAD_SEAMS)."""
         events = []
         if not os.path.exists(self.log):
             return events
@@ -204,7 +291,17 @@ class CiJobStub:
                     events.append({"kind": "start", **rec})
                 elif "end" in rec:
                     events.append({"kind": "end", "pid": rec["pid"]})
+                elif "read" in rec:
+                    events.append({"kind": "read", "load": rec["read"][0], "cpus": rec["read"][1], "slot_held": rec["slot_held"]})
+                elif "slept" in rec:
+                    events.append({"kind": "sleep", "seconds": rec["slept"]})
+                elif "bound" in rec:
+                    events.append({"kind": "bound", "seconds": rec["bound"]})
         return events
+
+    def lint_events(self):
+        """The stub's runs only, in the order written: run_events without the load records."""
+        return [e for e in self.run_events() if e["kind"] in ("start", "end")]
 
 
 class LaneLint(CiJobStub, tm.CloudSession):
@@ -218,6 +315,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
             super().setUp()
         self.lock = NoLock()
         self.init_stub()
+        no_load_reading(self)
 
     def run_lane(self, *argv, cloud=False):
         """-> (rc, stdout and stderr together) of merge in the lane checkout. A refused command line fails the case with its reason."""
@@ -261,7 +359,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         text = self.stub_text(steps, rc)
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
-        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        tm.put(harness, harness_for(self.stub))
         env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg}
         env.pop("CLAUDE_CODE_REMOTE", None)
         proc = subprocess.Popen([sys.executable, harness, *argv], cwd=self.co, env=env,
@@ -422,7 +520,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_a_sigterm_during_the_lint_removes_the_lint_tree_and_its_temp_dir(self):
         self.write_stub(PASSING, 0, sleep=120)
         harness = os.path.join(self.t, "lane_lint_run.py")
-        tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
+        tm.put(harness, harness_for(self.stub))
         tmp_root = tempfile.mkdtemp(dir=self.run_dir, prefix="sigterm-")  # the lint tree's temp dir lands here, not in the system temp dir
         env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp_root, "TMP": tmp_root, "TEMP": tmp_root}
         env.pop("CLAUDE_CODE_REMOTE", None)
@@ -542,11 +640,12 @@ class LaneLint(CiJobStub, tm.CloudSession):
         tm.sh(self.t, "git", "clone", "-q", self.bare, path)
         return path
 
-    def start_lane(self, stub, *argv, checkout=None, slots=None, bound=None):
+    def start_lane(self, stub, *argv, checkout=None, slots=None, bound=None, text=None):
         """Start `merge <argv>` in `checkout` (default: the lane checkout), in a process of its own, with the ci-job stub at `stub` and
-        the seams of harness_text. Its temp files land in this case's folder. -> the Popen; finish() reads its result."""
+        the seams of harness_text, or the harness `text` a case gives (load_run). Its temp files land in this case's folder. -> the Popen;
+        finish() reads its result."""
         harness = os.path.join(self.t, "lane-lint-%s.py" % uuid.uuid4().hex)
-        tm.put(harness, harness_text(stub, slots, bound))
+        tm.put(harness, text if text is not None else harness_text(stub, slots, bound))
         tmp = os.path.join(self.t, "tmp")
         os.makedirs(tmp, exist_ok=True)
         env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp}
@@ -699,6 +798,110 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(len(pass_lines(out)), 1, out + err)
         self.assertEqual(wait_lines(err), [], "a lint with a free slot printed a wait line: " + err)
 
+    def load_run(self, *argv, reads=None, running=0, wait=30, no_getloadavg=False, stub=None, checkout=None, bound=None):
+        """Run `merge <argv>` in a process of its own with the load seams (LOAD_SEAMS). `reads` are the (load1, cpus) readings in order,
+        the last one repeating; `running` is what lints_running reads; `wait` is LOAD_WAIT_SECONDS; `bound` is LINT_SECONDS. `reads=None`
+        keeps merge's own reader, which must then find no os.getloadavg (`no_getloadavg`, as on Windows), so no real load is read.
+        One slot, so the lint's own lock is the slot the readings check. -> (rc, stdout and stderr together, run_events())."""
+        assert reads is not None or no_getloadavg, "a load case must give readings or delete os.getloadavg: it reads no real load"
+        stub = stub or self.write_stub(PASSING, 0)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        seams = seam_lines(slots=1, bound=bound) + load_seams(self.log, reads, running, wait, no_getloadavg)
+        text = harness_for(stub, seams, load=NO_LOAD if reads is not None else "")
+        rc, out, err = self.finish(self.start_lane(stub, *argv, checkout=checkout, text=text))
+        return rc, out + err, self.run_events()
+
+    def first_start(self, events):
+        """The index of the first ci-job start in `events`, or the number of events when none started."""
+        return next((i for i, e in enumerate(events) if e["kind"] == "start"), len(events))
+
+    def sleeps_before_first_start(self, events):
+        """The load-wait sleeps that came before the first ci-job start."""
+        return [e for e in events[:self.first_start(events)] if e["kind"] == "sleep"]
+
+    def assert_waited_then_started(self, events, running):
+        """The load wait, read from the run's events: the ci-job starts after at least two readings, every reading before the last is
+        high, the last is low, and each reading was taken with the lint's slot held."""
+        self.assertLess(self.first_start(events), len(events), "the ci-job never started: " + repr(events))
+        reads = [e for e in events[:self.first_start(events)] if e["kind"] == "read"]
+        self.assertGreaterEqual(len(reads), 2, "the ci-job started after %d load reading(s), with no wait for the load to fall: %r" % (len(reads), reads))
+        self.assertTrue(all(high_load(r, running) for r in reads[:-1]), "the ci-job started while a load reading was still high: %r" % reads)
+        self.assertFalse(high_load(reads[-1], running), "the ci-job started on a high load reading: %r" % reads[-1])
+        self.assertTrue(all(r["slot_held"] for r in reads), "a load reading was taken without the lint's slot held: %r" % reads)
+
+    def test_a_lint_waits_while_the_load_is_at_or_above_the_cpu_count_then_passes_once_it_falls(self):
+        """Two high readings, then a low one: the ci-job starts after the low reading, with the lint's slot held, and its PASS is the verdict."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(10.0, 4), (10.0, 4), (1.0, 4)])
+        self.assert_waited_then_started(events, running=0)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_lint_that_waits_for_the_load_then_fails_refuses_with_the_fail_verdict(self):
+        """The same wait, then a ci-job that FAILs: the lint refuses on the FAIL line and never reads the run as a pass."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(10.0, 4), (1.0, 4)], stub=self.write_stub(FAILING, 1))
+        self.assert_waited_then_started(events, running=0)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any("comment narration" in line and "FAIL" in line for line in out.splitlines()), out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_load_that_stays_high_past_the_bound_reads_unknown_and_the_ci_job_never_starts(self):
+        """A load of 9.75 on 3 CPUs that never falls, with a 37 s bound on the wait: the ci-job never starts, the verdict is unknown and
+        never a PASS, the line names the load, the CPU count and the seconds waited, and the lint's tree is gone."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(9.75, 3)], wait=37)
+        self.assertEqual([e for e in events if e["kind"] == "start"], [], "the ci-job started under a load of 9.75 on 3 CPUs: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(pass_lines(out), [], out)
+        load_lines = [line for line in out.splitlines() if "load" in line.lower()]
+        self.assertTrue(load_lines, "no line names the load: " + out)
+        numbers = [float(n) for line in load_lines for n in re.findall(r"\d+(?:\.\d+)?", line)]
+        seconds = [float(n) for line in load_lines for n in re.findall(r"(\d+(?:\.\d+)?) s\b", line)]
+        self.assertIn(9.75, numbers, "the load line does not name the load 9.75: " + "\n".join(load_lines))
+        self.assertIn(3.0, numbers, "the load line does not name the 3 CPUs: " + "\n".join(load_lines))
+        self.assertTrue(any(s >= 37 for s in seconds), "the load line does not name 37 s or more of waiting: " + "\n".join(load_lines))
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_the_ci_job_bound_stays_lint_seconds_and_counts_from_the_ci_job_start(self):
+        """The bound on the ci-job run stays LINT_SECONDS and counts from the ci-job's start: after a load wait the run is still handed the
+        full bound. The case reads the timeout ci_job_run gives sh; the stub's run is quick and passes."""
+        self.assertEqual(merge.LINT_SECONDS, 1200)
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(10.0, 4), (1.0, 4)], bound=6)
+        self.assertTrue(self.sleeps_before_first_start(events), "no load wait came before the ci-job start: " + repr(events))
+        self.assertEqual([e["seconds"] for e in events if e["kind"] == "bound"], [6], "the ci-job run was not handed LINT_SECONDS as its bound")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_with_no_load_reading_the_lint_starts_at_once_and_never_waits(self):
+        """os.getloadavg is missing, as on Windows: merge reads no load, so the lint waits for none and starts at once."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), no_getloadavg=True)
+        self.assertEqual(self.sleeps_before_first_start(events), [], "the lint waited with no load reading: " + repr(events))
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 1, out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_low_load_starts_the_ci_job_at_once(self):
+        """The control: a load under the CPU count starts the ci-job at once, with no wait."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(0.5, 4)])
+        self.assertEqual(self.sleeps_before_first_start(events), [], "a low load still waited: " + repr(events))
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 1, out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_the_lints_that_run_come_off_the_load_before_it_is_compared(self):
+        """One lint runs its ci-job now. 5.0 less 1 is 4.0, at 4 CPUs, so the lint waits; 4.5 less 1 is 3.5, under 4, so it starts.
+        Without the subtraction, the second reading would hold the lint too."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(5.0, 4), (4.5, 4)], running=1)
+        self.assert_waited_then_started(events, running=1)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_load_exactly_at_the_cpu_count_holds_the_lint(self):
+        """At or above holds: a reading of 4.0 on 4 CPUs holds the lint, and 3.0 lets it start."""
+        rc, out, events = self.load_run("--lane-lint", self.head("feat"), reads=[(4.0, 4), (3.0, 4)])
+        self.assert_waited_then_started(events, running=0)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
 BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
@@ -796,6 +999,7 @@ class BatchLintFlags(tm.Env):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
             super().setUp()
         self.found = real_ci_steps()
+        no_load_reading(self)
         self.calls = os.path.join(self.t, "calls")
         os.makedirs(self.calls)
         self.ci_job = self.copy_ci_job()
