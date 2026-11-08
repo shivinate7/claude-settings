@@ -627,9 +627,10 @@ def case_override_fail_open():
 
 
 def case_override_notice_tags_survive_a_shared_names_without_config_dir():
-    # override.py takes MACHINE_TAGS and NOTICE_FRAMES from shared_names, and config_dir from the same import. A helper
-    # that lacks config_dir must not empty NOTICE_TAGS: the plain ask and the machine-text exclusion read it. The stub
-    # holds the real tags and no config_dir, and stands in sys.modules only while override.py loads.
+    # override.py takes MACHINE_TAGS and NOTICE_FRAMES from shared_names, and config_dir from its own import with a
+    # fallback copy. A helper that lacks config_dir must not empty NOTICE_TAGS: the plain ask and the machine-text
+    # exclusion read it. The stub holds the real tags and no config_dir, and stands in sys.modules only while
+    # override.py loads.
     hooks = os.path.dirname(MODULE_PATH)
     source_spec = importlib.util.spec_from_file_location("shared_names_tags", os.path.join(hooks, "shared_names.py"))
     source = importlib.util.module_from_spec(source_spec)
@@ -639,7 +640,7 @@ def case_override_notice_tags_survive_a_shared_names_without_config_dir():
     stub.NOTICE_FRAMES = source.NOTICE_FRAMES
     had, saved = "shared_names" in sys.modules, sys.modules.get("shared_names")
     sys.modules["shared_names"] = stub
-    got = error = None
+    got = error = module = None
     try:
         spec = importlib.util.spec_from_file_location("override_no_config_dir", os.path.join(hooks, "override.py"))
         module = importlib.util.module_from_spec(spec)
@@ -656,6 +657,25 @@ def case_override_notice_tags_survive_a_shared_names_without_config_dir():
     check("override: NOTICE_TAGS keeps every machine tag when shared_names has no config_dir",
           error is None and not lost,
           "error %r; NOTICE_TAGS %r; machine tags lost %d" % (error, got, len(lost)))
+    lost_frames = [frame for frame in source.NOTICE_FRAMES if frame not in (got or ())]
+    check("override: NOTICE_TAGS keeps every notice frame when shared_names has no config_dir",
+          error is None and not lost_frames,
+          "error %r; NOTICE_TAGS %r; notice frames lost %d" % (error, got, len(lost_frames)))
+    # With the stub's helper gone, config_dir is the fallback copy. A fixed CLAUDE_CONFIG_DIR makes its answer exact.
+    fallback = getattr(module, "config_dir", None)
+    had_dir, saved_dir = "CLAUDE_CONFIG_DIR" in os.environ, os.environ.get("CLAUDE_CONFIG_DIR")
+    fixed = os.path.join(ROOT, "fallback_config")
+    os.environ["CLAUDE_CONFIG_DIR"] = fixed
+    try:
+        path = fallback() if callable(fallback) else None
+    finally:
+        if had_dir:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved_dir
+        else:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+    check("override: config_dir falls back to the environment path when shared_names has no config_dir",
+          path == fixed,
+          "error %r; config_dir present %s; returned %r" % (error, callable(fallback), path))
 
 
 # OPUS BY PLAIN WORDS (decision owner-override, the Opus word). The owner's own prompt can grant Opus without the
