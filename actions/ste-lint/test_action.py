@@ -16,8 +16,9 @@ CLAUDE.md names, reads the pin check from it, and with no checkout prints one li
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
 Also asserts the step's exit codes when a helper misbehaves (`run.sh exit codes:` cases): with fail=false, an UNKNOWN or a
 crash from lint/stale_cites.py stays red and only a FAIL verdict is zeroed; a linter that exits non-zero or prints non-JSON
-fails the job in both scopes; a git range with no history behind it (a shallow clone, a first commit) reads as UNKNOWN and exits 0, while any other failing
-range exits 1; and the fail input says it opts out of findings only."""
+fails the job in both scopes; a git range with no history behind it is fetched first (`fetch base:` cases): a fetch that
+works lints the range, and one that fails reads as UNKNOWN, exit 0 with CI unset and exit 1 with CI set; a first commit
+reads as UNKNOWN and exits 0; any other failing range exits 1; and the fail input says it opts out of findings only."""
 import ast, atexit, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -129,19 +130,39 @@ def run_step(d, work, env, action_dir=HERE):
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, shallow=False, **over):
+def clone_facts(work, base):
+    """What the clone holds before the step runs: whether it is shallow, whether refs/remotes/origin/<base> resolves,
+    and the URL of origin. A case asserts these before its outcome, so a broken fixture cannot pass for the right reason."""
+    def git_text(*a):
+        return subprocess.run(["git", "-C", work, *a], capture_output=True, text=True).stdout.strip()
+    ref = subprocess.run(["git", "-C", work, "rev-parse", "--verify", "-q", "refs/remotes/origin/" + base],
+                         capture_output=True)
+    return {"shallow": git_text("rev-parse", "--is-shallow-repository") == "true",
+            "base_ref": ref.returncode == 0,
+            "origin": git_text("remote", "get-url", "origin")}
+
+
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, shallow=False,
+        before=None, proof=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
     on_main), apply `change(work)`, then run the step script. `over` overrides env vars. `stubs`, the keyword
     arguments of stub_tree, runs the step from a scratch tree of stub helpers instead of this repo's. `shallow` runs
-    it in a depth-1 clone (shallow_of)."""
+    it in a depth-1 clone (shallow_of). `before(work)` changes the clone before the step runs, for its remote or refs.
+    `proof`, a dict, takes clone_facts of the clone at that point. CI is unset unless `over` sets it, so the CI variable
+    of the machine that runs this file never reaches a case."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
         if shallow:
             work = shallow_of(d, work)
+        if before is not None:
+            before(work)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+        env.pop("CI", None)
         env.update(over)
+        if proof is not None:
+            proof.update(clone_facts(work, env["BASE_REF"]))
         return run_step(d, work, env, HERE if stubs is None else stub_tree(d, **stubs))
 
 
@@ -180,16 +201,16 @@ def linter_stub(stdout, code):
 
 
 def stub_tree(d, linter=LINT_OK, stale=(STALE_PASS, STALE_PASS), real_stale=False):
-    """A scratch tree <d>/tree: a copy of this folder's run.sh at actions/ste-lint, where the step looks for its helpers,
-    with lint/ste_lint.py and lint/stale_cites.py beside it. Both helpers are stubs, except that real_stale keeps the
-    real lint/stale_cites.py and the modules it imports. Returns the action folder."""
+    """A scratch tree <d>/tree: a copy of this folder's run.sh at actions/ste-lint, where the step looks for its helpers.
+    Every file git lists under lint/ and hooks/ is copied in, so the step finds the real fetch (lint/git_fetch.py) and the
+    modules it imports, whichever history gap a case builds. Then lint/ste_lint.py is a stub, and lint/stale_cites.py is
+    a stub unless real_stale keeps the real one. Returns the action folder."""
     tree = os.path.join(d, "tree")
     action = os.path.join(tree, "actions", "ste-lint")
     os.makedirs(action)
     shutil.copy2(os.path.join(HERE, "run.sh"), os.path.join(action, "run.sh"))
-    if real_stale:
-        tracked_tree.copy_tracked(tree, "lint", "hooks")
-    else:
+    tracked_tree.copy_tracked(tree, "lint", "hooks")
+    if not real_stale:
         write(tree, "lint/stale_cites.py", stale_stub(*stale))
     write(tree, "lint/ste_lint.py", linter_stub(*linter))  # after copy_tracked, which copies the real linter too
     return action
@@ -1012,8 +1033,9 @@ for scope in ("changed", "all"):
             check("run.sh exit codes: linter %s, scope %s, fail=%s → step exits non-zero" % (label, scope, fail),
                   "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
 
-# A git range with no merge base is a history gap: the step names it on a line of its own and goes on as "no
-# markdown changed", so it exits 0 for fail true and false. Stub helpers, so the only range read is the step's diff.
+# A range with no merge base has unrelated history, which a fetch does not join: the step names the failed diff on a
+# line of its own and goes on as "no markdown changed", so it exits 0 for fail true and false. Stub helpers, so the only
+# range read is the step's diff.
 for fail in ("true", "false"):
     rc, out = run("changed", fail, change=unrelated_change, stubs={})
     check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → UNKNOWN line, exits 0"
@@ -1049,14 +1071,82 @@ def root_change(work):
     git(work, "add", "-A"); git(work, "commit", "-qm", "root")
 
 
-# Two more history-gap clauses, each on its own. A real depth-1 clone with the base ref present: the shallow repo
-# clause (rev-parse --is-shallow-repository) applies. A push to the default branch whose HEAD is the first commit:
-# HEAD~1 does not resolve. Each prints the UNKNOWN line and exits 0, for fail true and false.
+# History gaps fetch the base with its history first (decision ci-unknown-is-red). A shallow clone is unshallowed,
+# and a missing base ref comes with the fetch. A fetch that works lints the real range: a finding decides the exit, and no
+# UNKNOWN line prints. A fetch that fails reads as UNKNOWN: exit 0 with CI unset, exit 1 with CI set, for fail true and false.
+HISTORY_LINE = re.compile(r"^ste-lint: UNKNOWN, could not fetch history for main \((.+)\); check out with fetch-depth 0$",
+                          re.M)
+
+
+def unknown_lines(out):
+    return [l for l in out.splitlines() if l.startswith("ste-lint: UNKNOWN")]
+
+
+def short_change(work):
+    """A short Markdown edit that no rule flags, so a clean run has no finding to hide behind."""
+    write(work, "a.md", "# T\n\nShort line.\n\nAnother short line.\n", "w")
+    git(work, "commit", "-qam", "short")
+
+
+def no_base_ref(work):
+    """The clone without refs/remotes/origin/main, so the base branch is missing from it."""
+    git(work, "update-ref", "-d", "refs/remotes/origin/main")
+
+
+def remote_missing(work):
+    """The clone's origin is a path that does not exist, so a fetch from it fails."""
+    git(work, "remote", "set-url", "origin", os.path.join(os.path.dirname(work), "no-such-remote.git"))
+
+
+# A depth-1 clone with the base ref present is shallow, so the step fetches the base first. A finding on a changed
+# line then fails the step with fail true, and only prints with fail false.
 for fail in ("true", "false"):
-    rc, out = run("changed", fail, change=default_change, shallow=True, stubs={})
-    check("run.sh exit codes: real depth-1 clone, base ref present, scope changed, fail=%s → 'ste-lint: UNKNOWN, git diff' "
-          "line, exits 0" % fail,
-          rc == 0 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines()), out)
+    proof = {}
+    rc, out = run("changed", fail, change=default_change, shallow=True, proof=proof, stubs={"linter": LINT_STE})
+    want = 1 if fail == "true" else 0
+    check("fetch base: depth-1 clone, base present: the clone is shallow and origin/main resolves before the step, fail=%s"
+          % fail, proof.get("shallow") is True and proof.get("base_ref") is True, str(proof))
+    check("fetch base: depth-1 clone, a finding on a changed line, fail=%s → finding logged, exit %d, no UNKNOWN line"
+          % (fail, want), rc == want and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+
+# The same clone with a clean change: exit 0, the real file listed in the scope header, and no UNKNOWN line.
+for fail in ("true", "false"):
+    proof = {}
+    rc, out = run("changed", fail, change=short_change, shallow=True, proof=proof, stubs={})
+    check("fetch base: depth-1 clone, clean change: the clone is shallow and origin/main resolves before the step, fail=%s"
+          % fail, proof.get("shallow") is True and proof.get("base_ref") is True, str(proof))
+    check("fetch base: depth-1 clone, clean change, fail=%s → exit 0, the changed file in scope, no UNKNOWN line" % fail,
+          rc == 0 and parts(out)["files"] == ["a.md"] and not unknown_lines(out), out)
+
+# A depth-1 clone without the base ref: the step fetches the base with its history, then lints the range.
+proof = {}
+rc, out = run("changed", "true", change=default_change, shallow=True, before=no_base_ref, proof=proof,
+              stubs={"linter": LINT_STE})
+check("fetch base: depth-1 clone, base ref missing: the clone is shallow and refs/remotes/origin/main is absent before the step",
+      proof.get("shallow") is True and proof.get("base_ref") is False, str(proof))
+check("fetch base: depth-1 clone, base ref missing → base fetched and linted: finding logged, exit 1, no UNKNOWN line",
+      rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+
+# A depth-1 clone whose remote is gone: the fetch fails, so the step names the failure. CI unset exits 0, CI set exits 1.
+for fail in ("true", "false"):
+    for ci, want in ((None, 0), ("true", 1)):
+        label = "CI unset" if ci is None else "CI=" + ci
+        over = {} if ci is None else {"CI": ci}
+        proof = {}
+        rc, out = run("changed", fail, change=default_change, shallow=True, before=remote_missing, proof=proof,
+                      stubs={"linter": LINT_STE}, **over)
+        check("fetch base: depth-1 clone, origin is a missing path before the step, fail=%s, %s" % (fail, label),
+              proof.get("shallow") is True and proof.get("origin", "").endswith("no-such-remote.git"), str(proof))
+        check("fetch base: depth-1 clone, fetch fails, fail=%s, %s → 'could not fetch history' UNKNOWN line, exit %d"
+              % (fail, label, want), rc == want and HISTORY_LINE.search(out) is not None, out)
+
+# A first commit has no HEAD~1 to fetch, so it keeps its UNKNOWN line and exits 0, the same with CI set.
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=root_change, BASE_REF="", REF_NAME="main", EVENT_NAME="push", stubs={}, CI="true")
+    check("fetch base: push to the default branch, HEAD is the first commit, CI set, fail=%s → 'no base history' UNKNOWN "
+          "line, exits 0, not a fetch failure" % fail,
+          rc == 0 and any(l.startswith("ste-lint: UNKNOWN, git diff") and "no base history" in l for l in out.splitlines())
+          and "could not fetch history" not in out, out)
 
 for fail in ("true", "false"):
     rc, out = run("changed", fail, change=root_change, BASE_REF="", REF_NAME="main", EVENT_NAME="push", stubs={})
