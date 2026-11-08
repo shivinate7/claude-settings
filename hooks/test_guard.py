@@ -1462,8 +1462,13 @@ def _build_gitmain():
     write(os.path.join(GITMAIN, "Makefile"), "base\n")
     write(os.path.join(GITMAIN, "tools", "runner"), "base\n")
     write(os.path.join(GITMAIN, "LICENSE"), "base\n")
+    # The gate rows below name two more root files, both extensionless: hotfix, which is also a
+    # branch, and staged-note, which is staged in the shared checkout only.
+    write(os.path.join(GITMAIN, "hotfix"), "base\n")
+    write(os.path.join(GITMAIN, "staged-note"), "base\n")
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
+    run_vcs(GITMAIN, "branch", "hotfix")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
     # AGENTWT: a real linked worktree whose path sits under GITMAIN's own .claude/worktrees/.
     # FARWT: a real linked worktree elsewhere, at a path that merely contains the word
@@ -1493,6 +1498,13 @@ def _build_gitmain():
                        for line in _porcelain(_tree)):
                 sys.exit("fixture setup failed in build_fixtures: %r is not modified in %r"
                          % (_name, _tree))
+    # The gate rows, in the shared checkout only. hotfix is a dirty tracked file that is also a
+    # branch. staged-note is staged, and the tree holds the same text, so no change is left
+    # unstaged. scratch is an untracked file with no extension, so it is no tracked change.
+    write(os.path.join(GITMAIN, "hotfix"), "uncommitted\n")
+    write(os.path.join(GITMAIN, "staged-note"), "staged\n")
+    run_vcs(GITMAIN, "add", "staged-note")
+    write(os.path.join(GITMAIN, "scratch"), "untracked\n")
     # DECOYMAIN: an ordinary MAIN checkout whose own folder happens to be nested under a path
     # spelled ".claude/worktrees/<name>". It is not a linked worktree of anything, so the
     # coincidence in its path must not earn it the agent-owned allowance.
@@ -2824,6 +2836,25 @@ sh("per-file bare: restore of an extensionless file in a hand-made worktree allo
    VCS + " restore Makefile", "allow", cwd=GITWT)
 sh("per-file bare: checkout of a branch name in the shared checkout keeps today's answer",
    VCS + " checkout agent-x-branch", "allow", cwd=GITMAIN)
+
+# THE GATES IN lone_operand_is_dirty_file (guard_shared_tree.py). A lone name reads as a path only
+# when it exists, is no revision, and has a tracked change. The first row pins the status gate: an
+# untracked file is no tracked change. The second pins the revision gate. The last two pin the
+# subfolder form and a staged entry.
+sh("per-file bare: checkout of an untracked extensionless file in the shared checkout allows",
+   VCS + " checkout scratch", "allow", cwd=GITMAIN)
+# A dirty file whose name is also a branch. Git reads a name that is both a branch and a file as
+# the branch: it switches and keeps the file. The guard allows it, as main does.
+sh("per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows",
+   VCS + " checkout hotfix", "allow", cwd=GITMAIN)
+# A relative path from a subfolder. Git reads `runner` against tools/, so it discards tools/runner.
+sh("per-file bare: checkout of a dirty file named from a subfolder in the shared checkout denies",
+   "cd tools && " + VCS + " checkout runner", "deny", "shared-tree", cwd=GITMAIN)
+# A staged-only change. Git keeps it ("Updated 0 paths"), since the tree holds the staged text.
+# The guard reads the staged entry as a dirty file and denies. This pins that choice.
+sh("per-file bare: checkout of a staged-only file in the shared checkout denies "
+   "(pin: staged counts as dirty, though git keeps it)",
+   VCS + " checkout staged-note", "deny", "shared-tree", cwd=GITMAIN)
 
 # THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
