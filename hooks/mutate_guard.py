@@ -50,7 +50,7 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 when it sits beside it, imports or loads its module, or names its basename in a path expression it copies, opens or runs
 (read from the `ast` tree, so a docstring or comment never counts).
 `--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD, and each tracked suite the diff changes: the one selector `bin/ci-job --lint` asks
-for the hooks/ and merge/ CI steps it runs. A suite also tests a `.py` file that a module it loads imports, however deep, inside
+for the hooks/, merge/ and lint/ CI steps it runs. A suite also tests a `.py` file that a module it loads imports, however deep, inside
 the repository (`suites_for_paths` with `chain`). `bin/ci-job` stops the selector after 60 s and reads that as unknown; the job
 scope is the linted job only, and a suite picked for a CI step of another job prints one `not run` line there. Cost: once per
 lane lint, one process, one `git diff`, and (when the diff holds a file) one `git ls-files` and one parse of each tracked
@@ -684,6 +684,10 @@ MUTATIONS = [
      '            refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)',
      "guard",
      'waiter: a while-loop with a pattern-polling condition, MEASURED wrongly allowed'),
+    ("lane-lint-foreground: a foreground merge --lane-lint is let through",
+     '    matched = lane_lint_hit(split_segments(stripped), background)\n    if matched:\n',
+     '    matched = lane_lint_hit(split_segments(stripped), background)\n    if False:\n', "guard",
+     'lane-lint-foreground: merge --lane-lint with run_in_background false is refused'),
     ("destructive-delete: blind the wide-delete patterns",
      "    for pattern in DESTRUCTIVE_DELETE:\n        found = pattern.search(cmd)",
      "    for pattern in ():\n        found = pattern.search(cmd)", "guard",
