@@ -32,7 +32,7 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
-# A step grant may carry this marker (owner ruling, owner page item 295 a). It then covers only an Opus spawn whose
+# A step grant may carry this marker (decision agent-model-cap). It then covers only an Opus spawn whose
 # brief's first non-blank line carries it, read as the audit marker is. Here, so the guard and override.py name one string.
 JUDGE_MARKER = "Judge:"
 
