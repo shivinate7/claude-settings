@@ -12522,9 +12522,9 @@ rr_allow("commit -m m, then cd /tmp and echo, with no push in the call, and a st
          VCS + " commit -m m && cd /tmp && echo x", RR_COST)
 
 
-# The commit cost. The red-run push check runs on a push only, so a lone commit makes the git spawns it made
-# before red-run: the pinned set below, and no `git diff --cached --numstat`. Pinned from the head before the
-# chain feature (8735fea), read through the stand-in git's log (see record_push_cost_case).
+# The commit cost. The red-run push check runs on a push only, so a lone commit must read nothing for red-run:
+# the pinned set below holds the guard's own git reads, and no `git diff --numstat`. The stand-in git's log
+# gives the spawns (see record_push_cost_case).
 RR_COST_LABEL = ("red-run: a lone commit with no push in its call makes the git spawns pinned before red-run, "
                  "and no git diff --cached --numstat")
 RR_COST_SPAWNS = {"diff": 1, "ls-tree": 3, "rev-parse": 4, "symbolic-ref": 1}
