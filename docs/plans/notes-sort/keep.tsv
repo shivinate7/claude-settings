@@ -1,0 +1,1360 @@
+where	slug	verdict	size	reason
+L2	ask-gain-loss-terse	keep	n/a	Unmeasured; needs real questions to test
+L3	guard-suite-red-on-unparsed	keep	n/a	Decision line 32 still says suite UNKNOWN; cause unmeasured
+L5	agent-brief-crash-silent	keep	n/a	Deliberate fail-open advisory hook (agent_brief.py:85); harmless
+L6	agent-brief-no-matcher	keep	n/a	Scope line already varies by agent_type; harmless
+L7	agent-brief-text-copy-drifts	keep	n/a	Unknown: copy drift not re-verified; harmless until a rule changes
+L9	alias-skip-misses-case-forms	keep	n/a	Theoretical; Git Bash prints canonical form
+L10	ansi-c-escape-not-decoded	keep	n/a	Attacker-only spelling, not a Claude mistake
+L14	ask-alone-sl-chdir-refuses	keep	n/a	Owner ruling names only Set-Location; needs owner's word
+L15	ask-alone-tail-args-unchecked	keep	n/a	Still true; owner still sees the whole command at the ask
+L16	ask-alone-tail-test-gap	keep	n/a	Test gap only; unknown: not re-verified
+L17	ask-step-hidden-in-script	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L18	bare-merge-reads-folder-not-repo	keep	n/a	Rare; guard_merge.py:129 does read -R
+L20	bare-merge-tool-unloadable	keep	n/a	Reproduced: refuses with unknown; fails closed, rare
+L21	bare-words-shares-env-list	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L22	base-read-midway-untested	keep	n/a	Test gap; rare; read_default_base now lives in git_reads.py
+L23	blind-git-fixtures-unaudited	keep	n/a	Test-fixture audit gap; rare and harmless
+L24	builder-fstring-path-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L26	builder-patch-format-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L27	builder-path-forms-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L29	cap-until-field-taught-late	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L30	cap-write-by-python-unseen	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L31	catalog-mode-detect-flags	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L32	cite-by-id-skips-merge-subject	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L33	cites-lack-gloss-unchecked	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L34	cmd-c-quote-count-bash-reader	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L35	debt-decision-link-unchecked	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L36	debts-no-check-reads-parts	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L37	discards-output-slow-path	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L38	dropped-bloat-phrases-silent	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L39	drops-cite-forms-unchecked	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L40	drops-dot-slash-guard-lint	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L41	drops-mixed-paragraph-exempt	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L42	drops-reads-msg-unlike-git	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L43	drops-stdin-message-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L44	drops-whole-token-no-mutant	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L45	dw-bare-stop-row-blind	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L46	dw-busy-stop-skipped	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L47	dw-log-keeps-model-text	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L48	dw-log-write-failures-silent	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L49	dw-notice-lead-space-lost	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L50	dw-slash-cache-hit-reads-clean	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L51	dw-slot-timers-unmeasured	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L52	env-flat-crash-allows	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L53	env-grep-long-abbrev-unpinned	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L54	env-node-env-file-prints	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L55	env-split-string-wsl-only	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L56	estimate-rule-may-be-checkable	keep	n/a	Needs design and owner's word; measured-time-table exists
+L57	expired-delete-net-error-stops	keep	n/a	Deliberate once=True (merge.py:654); late delete could free fresh lock
+L58	fb-inbox-append-race	keep	n/a	Windows-only stress loss; rare in normal work
+L60	guard-exit-7-unprobed	keep	n/a	Unknown: no probe run for exit 7 under onFailure
+L61	guard-own-errors-fail-open	keep	n/a	Deliberate fail-open on guard defect (guard.py:5049); decision-held
+L63	ghlock-no-compare-and-swap	keep	n/a	GitHub API has no compare-and-swap (merge.py:652)
+L64	git-env-glued-block	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L65	git-env-lower-case-fold	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L67	git-env-set-indirect-forms	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L68	git-env-set-untested-forms	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L69	git-env-warn-session-start	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L70	glued-subshell-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L71	guard-abtests-test-path	keep	n/a	Unknown: not run with builder role; ABTests not named in hooks
+L72	guard-audit-agent-stop-open	keep	n/a	Fail-open on SubagentStop is deliberate, one log line
+L73	guard-bash-c-silent-write	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L74	guard-cd-walk-extra-reading	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L75	guard-env-read-grep	keep	n/a	settings.json deny list holds Read and Grep of env files
+L76	guard-first-c-reads-wrong-tree	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L77	guard-glob-three-tools	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L78	guard-heredoc-os-system	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L79	guard-home-delete-literal	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L80	guard-interp-heredoc-lone-quote	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L81	guard-log-extra-ci	keep	n/a	ci-scope.sh:38 documents why guard_log_report selects guard suites
+L82	guard-log-install-skew	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L83	guard-log-lines-lost	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L84	guard-log-off-silent	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L85	guard-log-one-reader-gaps	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L86	guard-log-session-id-fence	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L87	guard-log-tool-field-tab	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L88	guard-lone-quote-overdeny	keep	n/a	Unknown: not reproduced; no bypass in 300k cases
+L89	guard-msg-blank-segment-split	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L90	guard-old-install-mixes-once	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L91	guard-realpath-after-flip	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L92	guard-redirect-paren-heredoc	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L93	guard-shell-wrap-discard-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L95	guard-split-ignores-backslash	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L96	guard-split-mutant-needs-git	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L97	guard-split-sibling-mutant-case	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L98	guard-substitution-in-token	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L99	guard-timing-case-flaky	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L101	guard-wrapper-lists-closed	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L102	haiku-counter-files-not-purged	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L103	haiku-counter-lost-updates	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L104	haiku-session-key-copied	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L105	haiku-stop-no-reply-uncounted	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L106	handoff-pointer-swept-compact	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L107	handoff-pointers-age-out	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L108	handoff-wake-misses-ready-forms	keep	n/a	Rare shapes of gh pr ready; unknown: not run
+L110	ci-scope-pipe-regex-quotes	keep	n/a	Still true, now in test_windows_split.py:1255; rare
+L111	here-string-scan-quadratic	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L112	heredoc-indented-close	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L113	heredoc-run-other-path	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L114	heredoc-script-then-run	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L115	hold-own-safety-hole-unrecorded	keep	n/a	Needs a real held change to observe
+L116	home-cd-escaped-space	keep	n/a	Fails closed on rare escaped-space path
+L117	home-cwd-mutant-fragment	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L118	impeccable-piped-shell-body	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L119	impeccable-python-body	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L120	in-throwaway-reads-paths-only	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L121	inbox-midturn-prompt-untested	keep	n/a	Cannot pin host behavior in a test; audit measured it
+L122	inbox-partial-write-fence	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L123	inbox-page-note-key-after-write	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L124	inbox-page-note-item-newline	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L125	inbox-page-note-other-session	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L126	inbox-path-drop-silent	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L127	inbox-unreadable-drops-ids	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L128	index-row-drop-no-finding	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L129	install-early-exit-unlogged	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L130	install-hook-path-from-checkout	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L131	install-lock-stale-by-age	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L132	install-lock-trap-no-id	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L133	install-ps1-counts-store-alias	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L134	install-reader-can-die-silent	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L135	install-sh-no-python-warning	keep	n/a	Rare: Mac without python3; every call refuses with remedy
+L136	install-sh-renames-no-retry	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L137	install-sh-retries-every-error	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L138	install-sh-retry-untested	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L139	install-skill-fail-exits-0	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L140	install-worktree-check-gaps	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L141	install-writes-in-place	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L142	janitor-loop-no-alias-skip	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L143	judgment-exits-debt-count	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L144	kept-bloat-rows-unaudited	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L145	kill-guard-word-only	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L146	lane-slug-gh-m-flag-passes	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L147	lane-slug-header-count-shift	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L148	lane-slug-heredoc-untested	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L149	lane-slug-lowercase-n-passes	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L151	lane-slug-piped-body-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L152	lane-slug-tag-messages-unchecked	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L153	late-workflow-reads-green	keep	n/a	Documented ceiling (merge.py:1074); rare
+L154	linked-nm-ancestor-link	keep	n/a	Accepted false alarm, rare ancestor link
+L155	linked-nm-bare-word-false-alarms	keep	n/a	Unknown: needs a linked node_modules checkout to reproduce
+L156	linked-nm-install-test	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L157	linked-nm-other-deletes	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L158	linked-nm-other-managers	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L159	linked-nm-shell-c-cd	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L160	live-pin-first-move-gap	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L161	liveness-windows-arm-unproven	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L162	local-time-hard-coded-dst	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L163	local-time-line-cost-unmeasured	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L164	lock-read-error-never-expires	keep	n/a	Still true (merge.py:646); rare non-network read error
+L165	marker-writeback-loses-deletion	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L166	merge-by-button-stale-page	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L167	merge-head-any-check-licenses	keep	n/a	Unknown: wait_checks not run; head_read now reads pending
+L168	merge-head-empty-reads-green	keep	n/a	Partly fixed in head_read; wait_checks ceiling documented, rare
+L169	merge-head-preview-wrong	keep	n/a	Unknown: head_state preview not run
+L170	merge-head-shared-name-slot	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L171	merge-head-wait-no-remedy	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L172	merge-net-no-retry-in-deadline	keep	n/a	Deliberate: no retry inside shared_deadline (merge.py:729)
+L175	merge-notice-unrelated-number	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L176	merge-text-allows-untested	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L177	mod-check-name-edges	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L178	model-clip-unmeasured	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L181	mods-load-needs-new-session	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L183	mods-marketplace-no-ref-pin	keep	n/a	Marketplace pin choice needs owner's word
+L184	mods-node-version-unpinned	keep	n/a	Still true: checks.yml has no setup-node; runner default
+L185	mods-refresh-cadence-unmeasured	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L186	mods-session-board-timer-margins	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L188	moved-kind-path-forgets-numbers	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L189	mutant-crash-audit-missing	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L191	net-error-colon-http-refusal	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L192	no-start-lock-has-no-pid-check	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L193	off-line-fork-reads-pre-cut	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L194	old-before-was-flags-history	keep	n/a	Unknown: lint false alarm not reproduced
+L195	one-term-per-meaning-unchecked	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L196	override-agent-text-unmeasured	keep	n/a	Needs a real session-sent message to measure
+L197	override-once-not-bound	keep	n/a	Owner ruled not a safety hole (15:34)
+L198	override-removal-unreminded	keep	n/a	Rare; only expiry reverts the cap
+L201	page-excuse-trailer-only	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L202	perl-ruby-bodies-unread	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L203	pin-switch-in-place-mix	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L204	plain-diff-4mib-unconfirmed	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L205	plain-diff-desktop-untested	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L206	plain-diff-env-innocent-name	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L207	plain-diff-keyvalue-misses	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L208	plain-diff-limiter-slot-early	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L209	plain-diff-long-line-anchor	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L210	plain-diff-model-error-note	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L211	plain-diff-quoted-path-label	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L212	plain-diff-secret-file-names	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L213	plain-diff-trimnote-regex	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L216	pr-checks-watch-unmeasured	keep	n/a	unknown: not re-verified; note says rare, no Claude-hit path
+L217	printf-quote-walk-bandaid	keep	n/a	Named bandaid in guard_core, still present; rare quote shape, harmless
+L218	process-record-dead-plan-line	keep	n/a	check_ruling_kind still ignores Plan on process kind; harmless, rare
+L219	prune-symlink-positive-unproven	keep	n/a	Needs a host with symlink privilege (Windows); still skipped in test_install_src.sh
+L220	ps-quote-forms-unread	keep	n/a	Data-text path fails closed on smart quotes now; frozen-path half unproven, rare
+L221	ps-script-block-not-read	keep	n/a	PowerShell-only rare gap in guard_env; needs Windows to prove
+L222	purge-bad-row-key-raises	keep	n/a	row_key still hashes list values; nothing writes such rows
+L223	purge-confirm-total-wrong	keep	n/a	Still true in sweep.py; cosmetic count only
+L224	purge-git-trace-missing-ref	keep	n/a	Still true; needs GIT_TRACE set, rare, harmless
+L225	purge-orphan-ref-kept	keep	n/a	Still true; keeping refs is the safe side, needs owner call
+L226	purge-realpath-per-row	keep	n/a	row_key still calls realpath per row; speed only, rare
+L227	purge-snapshot-race	keep	n/a	Still true; narrow race, harmless
+L229	pwsh-cmd-script-gaps	keep	n/a	Obscure PowerShell and cmd forms; rare, Claude unlikely to write them
+L230	quoted-script-unnamed-runner	keep	n/a	Rare shape in guard_push_delete; harmless
+L232	reader-tree-kill-unproven	keep	n/a	kill_tree exists; mutant proof missing, rare, harmless
+L233	rebase-loss-before-base-unread	keep	n/a	Documented limit of check_silent_undo; rare
+L234	receiver-state-reader-untested	keep	n/a	No test names receiver-state.mjs; needs the desktop host to prove
+L235	records-page-colon-spec-alarm	keep	n/a	Unrun, unmeasured false alarm; no test; rare form
+L236	records-page-first-adoption	keep	n/a	Stated as by design; harmless
+L237	records-page-handwritten-header	keep	n/a	Rare hand-written page; guard_merge reads only the header
+L238	records-page-reader-gaps	keep	n/a	Rare commit forms; still true
+L239	reload-missing-file-unpinned	keep	n/a	No test names guard_pointer in reload cases; low value
+L240	repo-home-backtick-then-comma	keep	n/a	Rare input shape; blocks safely
+L249	ruling-home-isabs-unproven	keep	n/a	Unmeasured on Linux, possibly redundant; harmless
+L250	safety-hole-test-is-judgment	keep	n/a	By design: the round-3 reviewer judges; needs owner call to change
+L251	safety-line-unread-at-merge	keep	n/a	Process gap; needs owner call
+L253	sb-backoff-cap	keep	n/a	Unmeasured cap in session-board mod; harmless
+L254	sb-config-folder-guess	keep	n/a	Windows Git Bash only; needs Windows
+L255	sb-filter-driver-runs	keep	n/a	Rare repo-configured filter driver; harmless
+L256	sb-ghost-row-race	keep	n/a	Narrow race; board display only
+L257	sb-glob-path-names	keep	n/a	Display-only quirk; harmless
+L258	sb-hook-order-unproven	keep	n/a	Needs the desktop host to confirm
+L259	sb-host-calls-unbounded	keep	n/a	Host calls unmeasured; needs desktop app
+L260	sb-prompt-turn-end	keep	n/a	Headless cannot test it; needs desktop app
+L261	sb-safe-stop-origin	keep	n/a	Refusal-list design; rare
+L262	sendmessage-judge-dup-names	keep	n/a	Rare duplicate names; wrong row read only
+L263	sendmessage-wording-judge-unrun	keep	n/a	Needs a logged real SendMessage run; unmeasured
+L264	sendmessage-wording-judge-clip	keep	n/a	Unmeasured 4000-char clip; rare
+L265	sendmessage-wording-judge-always	keep	n/a	Cost choice; needs owner call
+L266	shell-config-disable-unrefused	keep	n/a	Builder-role only; Edit path refuses, shell path still open; rare
+L267	shell-write-miss-dq-substitution	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L268	shell-write-miss-eval-heredoc	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L269	shell-write-miss-git-config-file	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L270	shell-write-miss-git-diff-output	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L271	shell-write-miss-noclobber	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L272	shell-write-miss-pipe-heredoc	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L273	shell-write-miss-sort-output	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L274	shell-write-miss-subshell	keep	n/a	Residual gap listed in guard_frozen.py; obscure form
+L275	mutant-load-unproven	keep	n/a	Report limit named in decision mutation-report-scores-suites; unmeasured
+L276	mutant-subprocess-throw-kill	keep	n/a	Rates are upper bound, stated in decision; harmless
+L278	skill-rows-fence-indent	keep	n/a	Rare fence shape in skill rows; unverified, harmless
+L279	skill-rows-posix-only-test	keep	n/a	Needs Windows to prove
+L280	skill-rows-test-gaps	keep	n/a	Rare test gaps; harmless
+L281	slug-lint-skips-abs-and-md	keep	n/a	CI cannot reach either form; harmless
+L282	smstate-answer-timeout-unrun	keep	n/a	Test gap; harmless
+L283	smstate-hold-deadlock-skips	keep	n/a	Test cap design; rare
+L284	smstate-hold-posix-unproven	keep	n/a	Needs a POSIX hold run; unmeasured
+L285	source-prose-scanner-cases	keep	n/a	Test gap in scanner cases; harmless
+L286	split-comment-shapes-unmeasured	keep	n/a	Unmeasured against all quoting shapes
+L287	split-paren-pkill-unpinned	keep	n/a	Test gap; harmless
+L288	split-quoted-hash-unpinned	keep	n/a	Test gap; harmless
+L289	stall-closes-on-quoted-notice	keep	n/a	Rare quoted notice; alarm only
+L290	stall-list-result-first-block	keep	n/a	Rare multi-block result; alarm only
+L291	stall-macos-no-stop-suite	keep	n/a	checks-macos runs fixture suite only; needs the Mac
+L292	stall-windows-ci-unknown	keep	n/a	unknown: Windows stop-suite step exists at checks.yml:1564; no run result read
+L293	stamp-blank-line-quote-fence	keep	n/a	Rare markdown shape in stamp scan
+L294	stamp-html-comment-hides-file	keep	n/a	Rare markdown shape in stamp scan
+L295	stamp-list-fence-not-seen	keep	n/a	Rare markdown shape in stamp scan
+L296	stale-cites-backslash	keep	n/a	Windows paths in prose; rare
+L297	stale-cites-exclude-glob	keep	n/a	Glob semantics differ; rare exclude shape
+L298	stale-cites-folders	keep	n/a	Stated scope limit in decision stale-cites-at-merge
+L299	stale-cites-ignores-paths-input	keep	n/a	Reads all tracked md; cost only
+L300	stale-cites-l1-test-gaps	keep	n/a	unknown: cited line numbers moved; needs a mutation run
+L301	stale-cites-name-call-form	keep	n/a	Pre-existing narrow form miss
+L302	stale-cites-nested-class	keep	n/a	Rare shape; harmless
+L303	stale-cites-other-forms	keep	n/a	Stated scope limit in decision
+L304	stale-cites-pass-after-unknown	keep	n/a	Rare unparseable py; unknown line still printed
+L305	stale-cites-relative-links	keep	n/a	Stated scope limit in decision
+L306	stale-cites-root-file-word	keep	n/a	Rare false alarm; ste-disable-line works
+L307	stale-cites-report-extras-untested	keep	n/a	Test gap on malformed extras file; rare
+L308	stale-cites-report-dirs-untested	keep	n/a	Test gap; mutant survives; harmless
+L309	stale-cites-unbound-targets	keep	n/a	Rare name forms; harmless
+L310	stale-cites-tree-exclude-worktree	keep	n/a	Tree mode only; claude-settings does not use it
+L311	stale-cites-tree-local-parity	keep	n/a	ste-changed line 7 documents TREE_CITES export; needs opted-in repo
+L312	stale-cites-tree-not-adopted	keep	n/a	Still true: no tree-cites in .github; adopting needs owner call
+L313	stale-cites-tree-relative-dead	keep	n/a	Tree mode only; rare
+L314	stamp-list-marker-column	keep	n/a	Rare markdown shape in stamp scan
+L315	stamp-quote-fence-closes-early	keep	n/a	Rare false alarm on a malformed quote fence
+L316	stash-all-ignored-tree-passes	keep	n/a	Rare git stash -a over ignored-only tree
+L317	stash-allow-any-linked-worktree	keep	n/a	Allow is broad by design; rare
+L318	stash-create-false-refusal	keep	n/a	create still counts as a take (guard_shared_tree:91); rare command
+L320	stash-read-to-run-race	keep	n/a	Inherent race window; rare
+L321	ste-autofix-tests-linux-only	keep	n/a	Needs macOS and Windows runs to measure
+L322	ste-eg-in-fence-reported	keep	n/a	Warning-level false alarm in fenced quotes; rare, unverified
+L323	ste-exclude-star-crosses-dir	keep	n/a	Fallback glob in run.sh still lets star cross slash; rare
+L324	stream-guard-quadratic	keep	n/a	Only a 20,000-word segment is slow; rare
+L325	supersede-share-unpinned	keep	n/a	Doc and code constants unpinned; no incident
+L326	supersede-subbullet-exemption	keep	n/a	Documented probe limit; workaround stated
+L327	supersede-wording-false-alarm	keep	n/a	Probe false alarms need an owner call on cue design
+L328	sweep-anchor-first-match	keep	n/a	Mutation tool anchor quirk; rare
+L329	sweep-no-deadline-many-trees	keep	n/a	Rare kill mid-remove; harmless
+L330	sweep-test-symlink-privilege	keep	n/a	Unguarded os.symlink at test_sweep.py:2841,5088; Windows host only
+L331	sweep-tests-sleep-bounds	keep	n/a	Slow-host test flake only
+L332	symrun-link-gap-unmeasured	keep	n/a	Needs a loaded Windows runner to measure
+L333	test-guard-posix-blocks-no-skip	keep	n/a	Missing SKIP row only; harmless
+L334	test-utils-name-refused	keep	n/a	Builder-role only name rule; needs owner call on test_utils
+L335	trigger-call-unchecked	keep	n/a	Reviewer judgment by design; needs owner call
+L336	trigger-omits-agent-caps	keep	n/a	Rule wording gap; needs owner call
+L337	undo-scan-cr-nul-false-alarm	keep	n/a	Lone CR or NUL in a line; very rare, false alarm only
+L338	unknown-reads-nonbool-skips	keep	n/a	No real member returns a non-bool; harmless
+L339	unknown-stash-word-tree-only	keep	n/a	Future git action only
+L340	until-note-unjudged	keep	n/a	guard_stream accepts any non-empty until text; rare
+L341	walk-curly-quotes-plain	keep	n/a	guard_core has no smart-quote handling; PowerShell-only, rare
+L342	win-slice-hides-skip-rows	keep	n/a	One extra SKIP row on Windows PR runs; harmless
+L343	win-split-min-jobs-untested	keep	n/a	No MIN_JOBS case; costs CI time only
+L344	wsl-bare-bash-not-refused	keep	n/a	Only a path-less bash.exe passes; Windows only
+L345	wsl-env-path-form-untested	keep	n/a	Test gap on Windows forms
+L346	wsl-wslenv-false-alarms	keep	n/a	Needs wsl in same command; rare
+L347	wsl-wslenv-no-equals-unrefused	keep	n/a	Obscure PowerShell forms; rare
+L348	xargs-list-input-refused	keep	n/a	Rare xargs rm < tests list; builder role only
+L349	frozen-copy-out-after-cd	keep	n/a	Stated deliberate narrow scope in guard_frozen.py comment
+L350	frozen-folder-name-copied-to-config	keep	n/a	Rare copy into config root; harmless
+L351	notes-file-history-check	keep	n/a	Check runs on notes at hook_catalog.py:705; no pinning test, harmless
+L352	rule-audit-row-test-field-unread	keep	n/a	Stated limit of rule_audit; rare
+L353	prune-symlink-probe-negative-only	keep	n/a	Needs a symlink-privileged host to prove
+L354	mutants-hidden-crashes	keep	n/a	Audit scope limit; harmless
+L355	merge-notice-no-report	keep	n/a	Notes it is the safe side
+L356	mod-step-unverified	keep	n/a	unknown: needs a CI run of the zizmor step
+L357	verdict-log-truncation	keep	n/a	No known runner does this; harmless
+L359	precompact-digest-60k-loses-detail	keep	n/a	Unmeasured cap; owner reads result
+L360	precompact-compaction-before-checkpoint-small-model	keep	n/a	Hook cannot see model window; stated shortcut
+L361	precompact-stop-block-skips-other-guards	keep	n/a	Design tradeoff; one-stop delay only
+L362	precompact-rewrite-vs-append-unchecked	keep	n/a	Needs owner call; owner reads handoff
+L364	precompact-date-strip-untested	keep	n/a	No test names 4-5 form; rare model id shape
+L365	silent-undo-history-window-60	keep	n/a	Audit window documented; --window 0 reads all
+L367	silent-undo-unread-shapes	keep	n/a	Documented read limits; rare
+L368	haiku-hook-model-id-prefix-only	keep	n/a	Test still checks claude- prefix only; wrong id unlikely
+L369	haiku-hook-headless-only	keep	n/a	Needs desktop app to test
+L370	install-stamp-stuck-file	keep	n/a	Remedy is stated; rare
+L371	clear-pointer-same-dir-swap	keep	n/a	Two /clear at once in one dir; rare
+L372	asyncrewake-min-version	keep	n/a	Docs-side gap; decision has no version note; harmless
+L373	foreground-timeout-unseen	keep	n/a	No hook event exists; inherent limit
+L374	feedback-untagged-relays-count	keep	n/a	Unchecked which sources carry a tag; unmeasured
+L375	feedback-turn-state-index-drift	keep	n/a	Rare edit of inbox blocks mid-turn
+L376	feedback-burst-thresholds-unmeasured	keep	n/a	Owner's ruling; needs owner call to change
+L377	feedback-inbox-selfattested	keep	n/a	By design; guard checks homes, not work done
+L378	sim-hook-gaps	keep	n/a	Several unmeasured sim gaps; needs the Mac
+L379	builders-octopus-merge-conflict	keep	n/a	Rare merge shape; logged, allowed
+L380	builders-squash-cherry-pick-n	keep	n/a	Refused at push and stop; rare
+L381	builders-tests-gaps	keep	n/a	List of rare shapes; harmless
+L382	memory-home-gaps	keep	n/a	Out-of-reach forms listed; rare
+L383	ruling-kind-gaps	keep	n/a	Rare shapes; action never run on a hosted runner
+L384	force-push-gaps	keep	n/a	Rare push forms; measured on one git version
+L385	session-board-limits	keep	n/a	Needs desktop app to measure
+L386	plain-diff-limits	keep	n/a	Not re-measured; needs owner call on note quality
+L389	guard-log-no-outcome	keep	n/a	Needs owner's hand-graded sample
+L390	daily-note-no-volume-check	keep	n/a	Measured, noisy; no fix chosen; needs owner call
+L391	guard-log-one-machine	keep	n/a	Stated lower bound; harmless
+L392	guard-denies-unjudged	keep	n/a	Needs the owner's grading
+L393	daily-note-reads-failures-only	keep	n/a	Read by hand by design
+L394	local-time-model-may-ignore	keep	n/a	Nothing can force the model; inherent
+L395	local-time-fixed-at-send	keep	n/a	By design; harmless
+L396	local-time-needs-install	keep	n/a	By design; install copies hooks
+L397	rm-shim-bypass-forms	keep	n/a	Surviving copy; bin/rm still skipped by /bin/rm and find -delete
+L398	rm-shim-no-windows-cloud	keep	n/a	bin/rm exits to real rm on Windows; guard.py judges text instead
+L399	rm-shim-glob-passes	keep	n/a	Shell expands globs first; inherent
+L400	rm-shim-flag-reading	keep	n/a	Strict flag reading is deliberate; one retry
+L401	rm-shim-symlink-refused	keep	n/a	Rare symlink case; safe side
+L402	dw-timeout-kill-unproven	keep	n/a	Needs the desktop host to prove
+L403	dw-where-exe-exit-unknown	keep	n/a	Needs Windows to measure
+L404	impeccable-guard-unread-forms	keep	n/a	Rare forms; hook still at guard.py:3378
+L405	home-tree-payload-unmeasured	keep	n/a	Needs Windows and real payloads; reopen trigger stated
+L406	bare-merge-stamp-from-worktree	keep	n/a	Reads stamp.json from tree (guard_merge.py:239); rare lane edit
+L407	bare-merge-chain-overdenies	keep	n/a	Safe side; split-command workaround stated
+L408	ci-secondary-limit-unmeasured	keep	n/a	Needs real multi-session run to measure
+L409	ci-bg-checks-watch-allowed	keep	n/a	Still allowed per test_guard.py:5489; cost unmeasured
+L410	ci-watch-wrapped-unread	keep	n/a	unknown: guard_stream reads bash -c wrappers now; capture form unverified
+L411	merge-wait-poll-rate-unmeasured	keep	n/a	Needs a real run to measure
+L412	ci-wake-skipped-only-head	keep	n/a	Related debt open; rare skipped-only head
+L413	claude-md-flag-unenforced	keep	n/a	Bare merge prints none; a crash can lose it; rare
+L414	default-base-verify-untested	keep	n/a	Fails safe; function now in git_reads.py, test gap only
+L415	awk-v-glob-cleared	keep	n/a	Pinned as an allow in test_guard.py:8303; accepted
+L416	env-wrapper-shape-reopen	keep	n/a	Reopen trigger only, not a defect
+L417	lane-number-unread-acts	keep	n/a	Reopen trigger only; LANE_NUMBER still in guard.py
+L418	merge-lock-expired-delete-race	keep	n/a	Still true (ponytail comment in GhLock.acquire); needs concurrent runs, rare
+L419	merge-unborn-workflow-green	keep	n/a	Narrow window beyond SETTLE_SECONDS; rare
+L420	purge-realpath-unverified	keep	n/a	Needs Windows mapped drives and old Python
+L422	env-unpinned-shapes	keep	n/a	Still no test for those shapes; harmless
+L423	path-identity-windows-unverified	keep	n/a	Needs Windows to verify
+L424	claude-sharables-stamp-copy	keep	n/a	Lives in another repo; needs that repo
+L425	sb-command-turn-unknown	keep	n/a	Needs desktop app to test
+L426	sb-pane-untested	keep	n/a	Needs desktop app to test
+L427	sb-process-desktop-unknown	keep	n/a	Needs desktop app to test
+L428	sb-auto-approve-unseen	keep	n/a	Display-only label; rare mode
+L429	sb-store-not-shared	keep	n/a	Needs desktop app to confirm; by design
+L430	stall-message-delivery-unproven	keep	n/a	Needs a real run showing delivery; unmeasured
+L432	guard-timeout-fails-open	keep	n/a	needs owner ruling; onFailure stays unset by decision
+L433	shell-write-miss-spaced-target	keep	n/a	rare and harmless; not individually re-verified
+L434	cmd-c-script-skips-kill	keep	n/a	rare and harmless; not individually re-verified
+L435	cp-into-frozen-dir	keep	n/a	rare and harmless; not individually re-verified
+L436	bg-end-roster-gaps	keep	n/a	rare and harmless; not individually re-verified
+L437	server-wrappers-unread	keep	n/a	rare and harmless; not individually re-verified
+L438	node-file-server-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L439	timeout-moved-server-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L440	dead-run-extended-lock-blocks	keep	n/a	rare and harmless; not individually re-verified
+L441	stdin-python-read-as-code	keep	n/a	rare and harmless; not individually re-verified
+L442	split-reader-misses-cd-forms	keep	n/a	rare and harmless; not individually re-verified
+L443	silent-undo-oracle-hides-cause	keep	n/a	rare and harmless; not individually re-verified
+L444	sendmessage-judge-blind-recvs	keep	n/a	rare and harmless; not individually re-verified
+L445	stamp-scan-frontmatter-links	keep	n/a	rare and harmless; not individually re-verified
+L446	step-up-prefix-forms	keep	n/a	rare and harmless; not individually re-verified
+L447	step-up-first-line-prose	keep	n/a	rare and harmless; not individually re-verified
+L448	step-up-plugin-types	keep	n/a	rare and harmless; not individually re-verified
+L449	step-up-sonnet-substring	keep	n/a	rare and harmless; not individually re-verified
+L450	step-up-round1-prose-line	keep	n/a	rare and harmless; not individually re-verified
+L451	step-up-workflow-hex-escape	keep	n/a	rare and harmless; not individually re-verified
+L452	floor-workflow-runtime-models	keep	n/a	rare and harmless; not individually re-verified
+L453	floor-builtin-agents	keep	n/a	rare and harmless; not individually re-verified
+L454	explore-audit-judge-misread	keep	n/a	rare and harmless; not individually re-verified
+L455	model-ceiling-fork-skill-inherit	keep	n/a	rare and harmless; not individually re-verified
+L456	model-ceiling-no-after-read	keep	n/a	rare and harmless; not individually re-verified
+L457	under-provisioning-unguarded	keep	n/a	rare and harmless; not individually re-verified
+L458	done-line-tier-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L459	detached-launch-heredoc-blind	keep	n/a	rare and harmless; not individually re-verified
+L460	agent-end-resume-fails-after-removal	keep	n/a	rare and harmless; not individually re-verified
+L461	merge-net-retry-linux-unmeasured	keep	n/a	unknown: Linux merge proof unmeasured; needs Mac
+L462	stop-guardrail-tool-block-unknown	keep	n/a	unknown: judge tool blocking unmeasurable from sandbox
+L463	stamp-banchi-adoption-step	keep	n/a	other repo (Banchi) adoption step; not verifiable here
+L464	rm-var-unseen-forms	keep	n/a	rare and harmless; not individually re-verified
+L465	sweep-accepted-risks	keep	n/a	rare and harmless; not individually re-verified
+L466	sim-owner-boot-recorded	keep	n/a	rare and harmless; not individually re-verified
+L467	unattended-sweep-branch-reap	keep	n/a	rare and harmless; not individually re-verified
+L468	merge-config-defaults	keep	n/a	rare and harmless; not individually re-verified
+L469	allow-list-constant-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L470	purge-keeps-younger-restore-ref	keep	n/a	rare and harmless; not individually re-verified
+L471	ste-lint-gloss-collapse	keep	n/a	rare and harmless; not individually re-verified
+L472	install-sh-mv-retries	keep	n/a	rare and harmless; not individually re-verified
+L475	report-on-empty-turn-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L476	slug-cite-gloss-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L477	stash-reminder-text-outside-repo	keep	n/a	reminder text lives outside this repo; needs owner or harness
+L478	token-read-accepted-risk	keep	n/a	accepted risk; needs owner's word
+L479	ruling-kind-lint-scope	keep	n/a	rare and harmless; not individually re-verified
+L480	ruling-kind-write-judge-misses	keep	n/a	rare and harmless; not individually re-verified
+L481	one-shared-record-stamp-left-out	keep	n/a	rare and harmless; not individually re-verified
+L482	stale-safe-force-push-sha-lease	keep	n/a	rare and harmless; not individually re-verified
+L483	stall-watch-windows-stop-check	keep	n/a	rare and harmless; not individually re-verified
+L484	stall-watch-quiet-job	keep	n/a	owner ruling 2026-10-18 holds this behaviour
+L485	stall-watch-log-and-child	keep	n/a	rare and harmless; not individually re-verified
+L487	stall-watch-backslash	keep	n/a	rare and harmless; not individually re-verified
+L488	build-dirs-reap-limits	keep	n/a	rare and harmless; not individually re-verified
+L489	cwd-under-checkout-realpath-error	keep	n/a	rare and harmless; not individually re-verified
+L490	build-keep-repeats-worktree-checks	keep	n/a	rare and harmless; not individually re-verified
+L491	all-cwds-drops-refused-pids	keep	n/a	rare and harmless; not individually re-verified
+L492	ignored-sources-not-edits	keep	n/a	rare and harmless; not individually re-verified
+L493	build-dirs-reopen-triggers	keep	n/a	rare and harmless; not individually re-verified
+L494	plain-diff-untracked-files	keep	n/a	rare and harmless; not individually re-verified
+L495	impeccable-guard-limits	keep	n/a	rare and harmless; not individually re-verified
+L498	waiter-monitor-failures-unmeasured	keep	n/a	unmeasured; reopen on counted Monitor failures
+L499	waiter-subshell-bodies-unparsed	keep	n/a	owner accepted; subshell bodies unparsed
+L500	waiter-sleep-multi-arg-reads-first	keep	n/a	verified: sleep 20 20 passes; rare and harmless
+L501	waiter-loop-flag-spans-command	keep	n/a	rare and harmless; not individually re-verified
+L503	main-protection-skipped-job-passes	keep	n/a	rare and harmless; not individually re-verified
+L504	main-protection-strict-false	keep	n/a	rare and harmless; not individually re-verified
+L505	frozen-var-open-value-shapes	keep	n/a	rare and harmless; not individually re-verified
+L506	frozen-var-interpreter-and-psenv	keep	n/a	rare and harmless; not individually re-verified
+L507	frozen-var-loose-token-match	keep	n/a	owner accepted this false alarm
+L508	worktree-remove-quoted-link-name	keep	n/a	rare and harmless; not individually re-verified
+L509	ci-templates-wrappers-unmeasured	keep	n/a	unknown: needs a real hosted runner
+L512	silent-undo-flag-print-no-cap-unrecorded	keep	n/a	rare and harmless; not individually re-verified
+L513	finished-agent-lock-holds-tree	keep	n/a	rare and harmless; not individually re-verified
+L514	stall-open-job-no-age-ceiling	keep	n/a	rare and harmless; not individually re-verified
+L515	guard-modules-stay-flat	keep	n/a	rare and harmless; not individually re-verified
+L516	merge-retarget-before-merge	keep	n/a	verified still true; retarget rare, none seen
+L517	undo-rename-below-pair	keep	n/a	rare and harmless; not individually re-verified
+L518	undo-rename-earlier-side	keep	n/a	rare and harmless; not individually re-verified
+L519	undo-rename-history-parent	keep	n/a	rare and harmless; not individually re-verified
+L520	git-h-stash-reads-bare	keep	n/a	rare and harmless; not individually re-verified
+L521	catalog-cell-pipes-over-cap	keep	n/a	rare and harmless; no cell is cut today
+L522	comment-narration-limits	keep	n/a	rare and harmless; debt comment-check-changed-from exists
+L524	stall-list-no-child-cap	keep	n/a	rare and harmless; not individually re-verified
+L526	guard-family-twin-elsewhere	keep	n/a	rare and harmless; full suite and CI keep twins
+L527	stall-test-exec-loses-mark	keep	n/a	rare and harmless; not individually re-verified
+L528	sweep-fetch-fail-wrong-cause	keep	n/a	verified still true; kept tree, so safe
+L530	sweep-fetch-untested	keep	n/a	verified: no test pins fetch failed or --no-tags; rare
+L531	sweep-head-drop-widens-merged-read	keep	n/a	rare and harmless; not individually re-verified
+L532	sweep-fetch-eats-sessionend-budget	keep	n/a	unmeasured; rare slow remote only
+L533	test-sweep-origin-head-platform	keep	n/a	verified: init --bare has no -b; Linux-only fixture risk
+L534	watch-flat-names-win	keep	n/a	rare and harmless; not individually re-verified
+L535	watch-reads-guard-each-call	keep	n/a	rare and harmless; small cost
+L536	watch-escaped-cap-key	keep	n/a	rare and harmless; only an attacker writes it
+L537	watch-bad-json-mixed-cap	keep	n/a	rare and harmless; not individually re-verified
+L538	watch-sonnet-1m-reported	keep	n/a	rare and harmless; false alarm in safe direction
+L540	drops-body-nested-fence	keep	n/a	verified: fence regex matches 3 backticks only; rare
+L541	drops-body-fence-in-comment	keep	n/a	rare and harmless; not individually re-verified
+L542	drops-body-edit-no-commit	keep	n/a	rare and harmless; not individually re-verified
+L543	drops-body-read-at-run-start	keep	n/a	rare and harmless; not individually re-verified
+L545	sweep-failed-fetch-stale-reap	keep	n/a	rare and harmless; GUIDE.md documents it
+L546	ci-wake-prefilter-unicode-escape	keep	n/a	rare and harmless; Claude Code never escapes ASCII
+L547	verdict-prune-reused-temp-log	keep	n/a	rare and harmless; not individually re-verified
+L549	rm-guard-home-parents-pass	keep	n/a	rare and harmless; not individually re-verified
+L550	eol-scan-bom-env-u	keep	n/a	rare and harmless; not individually re-verified
+L551	pointer-windows-eol-step-cap-unmeasured	keep	n/a	unknown: no CI step time read; needs CI
+L552	scratchpad-shared-per-session	keep	n/a	rare and harmless; not individually re-verified
+L553	question-agent-hook-block-unmeasured	keep	n/a	unknown: agent hook refusal effect unmeasured
+L554	deadline-floor-no-stamp	keep	n/a	rare and harmless; not individually re-verified
+L555	ste-lint-safepath-env	keep	n/a	verified: run inherits os.environ; CI does not set it
+L556	janitor-git-timeout-load	keep	n/a	Windows load only; needs that machine
+L557	cap-floor-base-only	keep	n/a	rare and harmless; re-run resumes
+L558	cap-label-no-step-data	keep	n/a	rare and harmless; not individually re-verified
+L559	cap-floor-counts-all-jobs	keep	n/a	rare and harmless; not individually re-verified
+L560	job-caps-scan-limits	keep	n/a	rare and harmless; not individually re-verified
+L561	temp-sweep-copies-session-reader	keep	n/a	rare and harmless; not individually re-verified
+L562	temp-sweep-untested-paths	keep	n/a	rare and harmless; not individually re-verified
+L563	refresh-prune-skips-dirty-tree	keep	n/a	rare and harmless; cost is disk only
+L564	refresh-child-survival-unmeasured	keep	n/a	unknown: Windows desktop behaviour; needs that machine
+L565	refresh-runs-clone-helper	keep	n/a	rare and harmless; not individually re-verified
+L566	refresh-gcm-prompt	keep	n/a	Windows only; needs that machine
+L567	install-hkcu-msix-copy	keep	n/a	unproven; needs Windows MSIX machine
+L568	temp-helpers-predate-standard	keep	n/a	rule binds new or touched code only; harmless
+L569	test-guard-root-predates-standard	keep	n/a	move when a lane touches it; harmless
+L570	gh-api-write-unguarded	keep	n/a	owner accepted 2026-10-25 when rule was culled
+L571	ios-ship-install-case-gaps	keep	n/a	rare and harmless; not individually re-verified
+L572	ios-ship-install-term-runs-on	keep	n/a	rare and harmless; not individually re-verified
+L573	ios-ship-recheck-skips-untracked	keep	n/a	rare and harmless; next run refuses it
+L574	ios-ship-kill-misses-children	keep	n/a	unmeasured with real xcodebuild; needs Mac
+L575	ios-ship-newline-splits-step	keep	n/a	rare and harmless; not individually re-verified
+L576	ios-ship-test-env-leaks	keep	n/a	rare and harmless; not individually re-verified
+L577	merge-revert-by-message-only	keep	n/a	rare and harmless; branch rebuildable from printed tip
+L578	merge-stacked-dropped-lane-kept	keep	n/a	rare and harmless; one extra branch
+L579	merge-rest-windows-latency	keep	n/a	Windows REST latency unmeasured; needs that machine
+L580	merge-blocked-lag	keep	n/a	lag unmeasured; never merges wrongly
+L581	merge-preread-stop-silent	keep	n/a	rare and harmless; re-run resumes
+L582	own-lock-frees-quiet-running-agent	keep	n/a	rare and harmless; same 30 min trade as agent-end reap
+L583	own-lock-climb-reaches-parent-claude	keep	n/a	rare and harmless; not individually re-verified
+L584	own-lock-reused-pid-no-start	keep	n/a	rare and harmless; not individually re-verified
+L585	own-lock-idle-floor-untested	keep	n/a	rare and harmless; not individually re-verified
+L586	skill-fallback-unpinned	keep	n/a	rare and harmless; not individually re-verified
+L587	inline-copy-names-skill-path	keep	n/a	rare and harmless; not individually re-verified
+L588	hook-stubs-one-path-form	keep	n/a	rare and harmless; every settings.json uses that form
+L589	merge-tree-removal-no-idle-wait	keep	n/a	rare and harmless; no committed work lost
+L590	merge-tree-base-is-pr-head	keep	n/a	rare and harmless; holds only under merge method
+L591	merge-tree-stale-lock-goes	keep	n/a	rare and harmless; follows sweep rule
+L592	lane-local-failed-delete-untested	keep	n/a	rare and harmless; not individually re-verified
+L593	kill-tag-agent-flag-widened	keep	n/a	rare and harmless; fails closed
+L594	kill-tag-owns-shared-daemons	keep	n/a	rare and harmless; not individually re-verified
+L595	kill-tag-platform-binary-blind	keep	n/a	macOS only; fails closed
+L596	layout-check-join-forms	keep	n/a	rare and harmless; neither form in code today
+L597	install-set-lock1-race	keep	n/a	one-off race; becomes a debt if it recurs
+L598	design-review-context-autoload	keep	n/a	a note until a real incident
+L599	lanecap-quoted-longer-phrase	keep	n/a	rare and harmless; false alarms on citations, reader sees
+L600	design-probe-vendored-skill-shot	keep	n/a	claude-settings only; child repos unaffected
+L601	playwright-probe-dash-sibling-joins	keep	n/a	rare and harmless; not individually re-verified
+L602	playwright-probe-folded-prose-hits	keep	n/a	rare and harmless; not individually re-verified
+L603	playwright-probe-root-devcontainer	keep	n/a	rare and harmless; not individually re-verified
+L604	blind-brief-word-list-misses	keep	n/a	rare and harmless; not individually re-verified
+L605	blind-brief-count-unchecked	keep	n/a	rare and harmless; not individually re-verified
+L606	pick-guard-drive-letters	keep	n/a	rare and harmless; drive-letter wording is uncommon
+L607	pick-guard-way-word	keep	n/a	rare and harmless; not individually re-verified
+L608	ci-wake-rest-404-is-nopr	keep	n/a	rare and harmless; gh pr ready still shows error
+L610	ci-wake-branch-route-narrow	keep	n/a	rare and harmless; not individually re-verified
+L611	ci-wake-branch-metachar-windows	keep	n/a	Windows only; needs that machine
+L612	ci-job-ste-ignores-inputs	keep	n/a	rare and harmless; local run is stricter
+L613	waiting-opt-shared-slug	keep	n/a	rare and harmless; not individually re-verified
+L614	waiting-opt-sel-untested	keep	n/a	rare and harmless; not individually re-verified
+L615	waiting-opt-id-namespace	keep	n/a	rare and harmless; not individually re-verified
+L616	waiting-sheet-brand-border	keep	n/a	rare and harmless; ring stays 4.5:1
+L617	scorecard-indented-caution-row	keep	n/a	rare and harmless; nothing dropped
+L618	try-marker-sunset	keep	n/a	still true; sunset due 2026-11-12, not yet reached
+L619	step-up-log-restarts	keep	n/a	still true; count both ids at next cull
+L620	round-marker-role-cases	keep	n/a	rare and harmless; shared regex covered by Try cases
+L621	step-up-quoted-marker	keep	n/a	rare and harmless; refusal names the fix
+L622	waiting-designs-mixed-shape	keep	n/a	rare and harmless; not individually re-verified
+L623	waiting-viewer-option-letter	keep	n/a	rare and harmless; not individually re-verified
+L624	waiting-drawn-infinity	keep	n/a	rare and harmless; not individually re-verified
+L625	waiting-fit-cache-drawn	keep	n/a	rare and harmless; not individually re-verified
+L626	waiting-cap-font-swap	keep	n/a	rare and harmless; not individually re-verified
+L627	waiting-cap-left-wide	keep	n/a	cosmetic; needs owner's design word
+L628	waiting-dpos-stale-form	keep	n/a	rare and harmless; not individually re-verified
+L629	waiting-head-midwidth-untested	keep	n/a	rare and harmless; not individually re-verified
+L630	shared-owner-git-case	keep	n/a	rare and harmless; not individually re-verified
+L631	shared-name-padding	keep	n/a	rare and harmless; not individually re-verified
+L632	shared-dotted-owner-untested	keep	n/a	rare and harmless; not individually re-verified
+L633	port-question-url-forms	keep	n/a	rare and harmless; not individually re-verified
+L634	port-question-cwd-untested	keep	n/a	rare and harmless; code handles each form
+L635	port-question-redesign-word	keep	n/a	rare and harmless; writer sets port: false
+L636	main-ref-url-forms-untested	keep	n/a	rare and harmless; wrong match refuses, old behaviour
+L637	other-checkout-git-pointer	keep	n/a	rare and harmless; not individually re-verified
+L638	other-checkout-cp-source	keep	n/a	rare and harmless; not individually re-verified
+L639	other-checkout-mkdir	keep	n/a	rare and harmless; not individually re-verified
+L640	red-run-root-lone-amp	keep	n/a	rare and harmless; not individually re-verified
+L641	red-run-cp-source-refused	keep	n/a	rare and harmless; not individually re-verified
+L642	red-run-bare-clone-primary	keep	n/a	rare and harmless; not individually re-verified
+L643	red-run-powershell-stranded	keep	n/a	rare and harmless; not individually re-verified
+L644	red-run-clone-order-unpinned	keep	n/a	rare and harmless; not individually re-verified
+L646	cloud-pipx-pep668	keep	n/a	not hit on today's image; fix only if images change
+L647	accent-url-scheme-relative	keep	n/a	still true; rare, harmless
+L648	accent-lone-backtick	keep	n/a	still true; rare, harmless
+L650	waiting-stale-preview-dead-button	keep	n/a	still true; rare, harmless
+L652	waiting-stage-key-label	keep	n/a	still true; harm is extra iframes only
+L654	lock-boot-shared-by-restored-vms	keep	n/a	unmeasured; rare, cost is a rerun
+L655	checks-shoot-required-unproved-offline	keep	n/a	needs branch protection read; no offline test can
+L656	layout-no-such-kind	keep	n/a	rare, harmless placeholder README
+L657	readme-links-unreachable-forms	keep	n/a	still true; odd URL forms rare
+L658	glossary-check-template-field-quote	keep	n/a	miss only; rare
+L659	glossary-check-subshell-heredoc-depth	keep	n/a	rare; glossary-ok clears it
+L660	glossary-check-platform-name-in-message	keep	n/a	three known strings; rare
+L661	uniform-pick-update-no-options	keep	n/a	writer carries options; rare
+L662	batch-guard-config-from-cwd	keep	n/a	pinned_required still reads cwd; rare with -R
+L663	batch-guard-empty-protection-counts-none	keep	n/a	still true at merge.py batch_running; rare
+L664	batch-stuck-pending-status-blocks	keep	n/a	still true; rare, draft is the exit
+L665	batch-guard-calls-grow	keep	n/a	unmeasured on Windows
+L666	batch-guard-unprotected-status-blocks	keep	n/a	needs unprotected base; rare
+L667	batch-guard-403-reads-unknown	keep	n/a	403 unmeasured; Stop on read failure
+L669	ios-web-screen-needs-duo	keep	n/a	still true; rare in iOS repos
+L672	press-link-unnumbered	keep	n/a	chosen to avoid false alarms
+L673	command-in-item-tasks-only	keep	n/a	step scoped rule to tasks
+L676	command-in-item-str-replace	keep	n/a	unmeasured tool behaviour; rare
+L677	gh-login-str-replace-alone	keep	n/a	one retry fixes
+L678	gh-login-unquoted-backslash	keep	n/a	one retry fixes
+L679	gh-login-str-replace-subfield	keep	n/a	unmeasured; rare
+L680	gh-login-ps-block	keep	n/a	reader limit; rare
+L681	gh-login-substitution	keep	n/a	reader limit; rare
+L686	ios-probe-diag-misses	keep	n/a	miss only; rare forms
+L687	splice-unclosed-script-drops-block	keep	n/a	needs malformed live page
+L688	send-bar-covers-rail	keep	n/a	cosmetic; rare
+L689	rail-one-row-clips-count	keep	n/a	narrow box, fallback font only
+L690	write-refusal-keeps-old-out	keep	n/a	needs malformed live page
+L691	roadmap-update-republishes-live-code	keep	n/a	next wake corrects it
+L692	batch-check-reads-designdata-only	keep	n/a	write now carries both blocks; rare
+L693	task-names-check-line-not-truth	keep	n/a	fix owned by claims-carry-backing decision
+L694	task-names-check-update-no-kind	keep	n/a	guard cannot see stored kind; rare
+L695	task-names-check-line-start-only	keep	n/a	one retry fixes
+L697	task-names-check-old-task-update	keep	n/a	status-only update closes it
+L698	task-names-check-file-path-no-cwd-join	keep	n/a	rare
+L699	owner-judge-line-not-truth	keep	n/a	guard cannot judge truth
+L700	owner-judge-update-no-kind	keep	n/a	guard cannot see stored kind
+L701	owner-judge-old-decision-update	keep	n/a	status-only update closes it
+L702	owner-judge-line-form	keep	n/a	refusal names form; one retry
+L703	owner-judge-stands-unchecked	keep	n/a	page shows ordinary question; harmless
+L704	option-letter-keys-limit-26	keep	n/a	over 26 options is rare
+L705	option-letter-keys-text-by-shape	keep	n/a	miss only; rare
+L706	rework-off-page-phrase-only	keep	n/a	miss only; rare
+L707	rework-off-page-history-text	keep	n/a	accepted
+L710	cloud-tarball-curl-no-cap	keep	n/a	install.sh:512 curl has no max-time; rare, old install stays
+L711	cloud-mirror-sha-write-fails	keep	n/a	rare write failure
+L712	checkout-at-raw-origin	keep	n/a	alias origin rare; tarball fallback works
+L713	cloud-mirror-skip-not-cloud-only	keep	n/a	still true; harmless
+L714	cloud-swap-old-left	keep	n/a	needs kill between two mv; rare
+L715	open-box-no-wake-to-page	keep	n/a	decision-bound; needs owner
+L716	waiting-page-gutter-cancel-keyboard-untested	keep	n/a	test gap; rare
+L717	waiting-page-gutter-cancel-script-click	keep	n/a	mouse cannot cause it; rare
+L718	step-grant-revoke-stale	keep	n/a	needs unfetched lane; rare
+L719	step-grant-one-bad-entry	keep	n/a	fail-safe false ask; rare
+L720	probe-design-screens-by-route-count	keep	n/a	probe grades by route count; rare
+L721	glossary-prepared-cache-by-identity	keep	n/a	production builds table once
+L722	words-deadline-late-by-one-scan	keep	n/a	huge JSON only; rare
+L723	ios-probe-quoted-name-with-space	keep	n/a	legacy repo only
+L724	ios-probe-quoted-separator	keep	n/a	no flag takes one; rare
+L725	session-home-unknown-dir-write	keep	n/a	needs lost session record; rare
+L726	session-home-agent-named-lane	keep	n/a	rare naming; decision-bound
+L727	session-home-worktrees-folder	keep	n/a	rare cwd
+L728	merge-role-skips-raw-merge	keep	n/a	needs owner word; debt after incident
+L729	merge-remedy-hits-role-refusal	keep	n/a	decision-bound; needs owner word
+L730	ios-probe-subshell-arg-drops-action	keep	n/a	miss only; rare
+L731	card-scroll-margin-no-safe-area	keep	n/a	cosmetic; page.html:119 still 64px
+L733	ste-changed-root-order-untested	keep	n/a	test gap; harmless
+L734	shoot-seed-fail-open	keep	n/a	Chromium does not throw; rare
+L736	shoot-own-context-newpage	keep	n/a	run aborts; nothing leaks
+L739	install-move-status-exit	keep	n/a	status failure rare
+L740	install-move-ignored-file	keep	n/a	rare
+L741	install-move-test-gaps	keep	n/a	test gap; harmless
+L742	win-rest-runner-hang	keep	n/a	unknown cause outside repo code; unmeasured
+L743	layout-check-deleted-cwd	keep	n/a	never passes; harmless traceback
+L744	layout-test-worktree-prune	keep	n/a	unmeasured race; rare
+L748	wp-field-warning-margin	keep	n/a	cosmetic
+L749	wp-field-list-template-only	keep	n/a	CI real-page case goes red
+L750	chat-press-scan-after-lose	keep	n/a	miss only; rare
+L751	chat-own-merge-press-link	keep	n/a	known limit; duplicate of L674 family
+L752	mockup-replacestate-sandbox	keep	n/a	still true in mockups; old design files, harmless
+L753	role-handoff-watch-none-wording	keep	n/a	wording only; harmless
+L754	op-model-hand-off-file-pinned	keep	n/a	wording pinned by test; harmless
+L756	op-model-wait-with-home	keep	n/a	wording ambiguity; harmless
+L757	check-handoff-id-letter-prefix	keep	n/a	miss only; rare
+L759	check-handoff-bracket-after-url	keep	n/a	real home still named; harmless
+L760	wp-ruling-draft-note	keep	n/a	found by reading, not run; rare
+L761	wp-rulings-never-leave	keep	n/a	needs owner ruling on retention
+L762	designer-steps-test-one-sentence	keep	n/a	clear message; harmless
+L763	frontend-design-cloud-missing	keep	n/a	plugin still on in settings.json; workaround exists
+L764	designer-worktree-auto-removed	keep	n/a	platform behaviour; fresh designer works
+L765	blind-lane-on-redraw	keep	n/a	decision-bound; needs owner
+L766	scratchpad-shared-across-lanes	keep	n/a	no harm seen
+L767	impeccable-launcher-refused	keep	n/a	decision design-skills; needs owner
+L768	wp-field-list-arbiter-unpinned	keep	n/a	test gap; rare
+L769	reviewer-model-claim	keep	n/a	unknown: unverified incident, no way to read model
+L771	page-queued-shape-assumed	keep	n/a	unmeasured shape; needs live owner message
+L773	still-after-tap-cannot-catch-scroll	keep	n/a	test gap; rare
+L774	send-bar-tall-covers-note	keep	n/a	20 s window, cosmetic
+L775	near-cards-comments-stale	keep	n/a	test comment drift; harmless
+L776	nao-builder-ran-opus	keep	n/a	one-time incident; no code to fix
+L777	stale-step-partial-walk	keep	n/a	needs completeness field; owner design
+L778	merge-role-proof-crash-fails-open	keep	n/a	note says debt after incident
+L779	merge-role-proof-trusts-tag	keep	n/a	decision-bound; needs owner word
+L780	dispatch-head-blocks-batch	keep	n/a	needs unusual PR state; rare
+L781	same-name-check-order-unmeasured	keep	n/a	unmeasured GitHub behaviour
+L782	head-read-dispatch-remedy	keep	n/a	merge tool prints right fix
+L783	draft-skip-check-copy	keep	n/a	tool serves many repos; accepted copy
+L784	question-form-goal-not-first	keep	n/a	miss only; rare
+L785	ci-scope-question-form-unpinned	keep	n/a	test gap; rare
+L786	question-form-import-fails-open	keep	n/a	import defect rare; CI covers
+L788	command-scan-lone-backtick	keep	n/a	miss only; rare
+L789	command-scan-plain-text	keep	n/a	miss only; rare
+L790	command-scan-false-alarms	keep	n/a	a reword clears each
+L791	command-null-refused	keep	n/a	workaround exists
+L792	command-steps-one-string	keep	n/a	as on main; rare
+L793	mac-holds-powershell	keep	n/a	miss only; rare
+L794	owner-message-grant-variant	keep	n/a	needs owner word; target keeps permissions
+L795	owner-message-default-priority	keep	n/a	unknown: platform default unverified
+L796	owner-pr-close-any-author	keep	n/a	reopen undoes it; needs owner word
+L797	auto-mode-entries-unrun	keep	n/a	needs live classifier run
+L798	role-model-late-round-line	keep	n/a	rare brief form
+L799	role-model-env-any-value	keep	n/a	Explore pinned haiku; rare
+L800	role-model-qualifier-copies	keep	n/a	accepted copy; needs owner design
+L801	role-model-unranked-reviewer-clause	keep	n/a	test gap; step-up covers
+L802	role-model-unranked-opus-row	keep	n/a	as on main; unranked models rare
+L803	role-model-spelling-other-rules	keep	n/a	rare spelling
+L804	role-model-unranked-branch-no-mutant	keep	n/a	suite still catches removal
+L805	map-uses-bare-name-any-import	keep	n/a	rare import form
+L806	map-uses-py-deep-chain	keep	n/a	JS/Python difference; rare
+L807	map-uses-renamed-import	keep	n/a	2 of 681 uses; harmless
+L808	map-uses-reexport-python	keep	n/a	known reader limit
+L809	map-blankshell-limits-unstated	keep	n/a	rare shell forms
+L810	map-js-uses-limits-unstated	keep	n/a	rare forms
+L811	map-blankshell-paths-untested	keep	n/a	proved by probe; test gap only
+L812	map-pin-two-senses	keep	n/a	wording only
+L813	map-installer-copies-unstated	keep	n/a	record gap; harmless
+L814	map-older-copy-means-version	keep	n/a	wording only
+L815	question-departs-edges	keep	n/a	edge forms; rare
+L816	trust-card-in-build-same-message-order	keep	n/a	rare message order
+L817	trust-card-in-build-denial-no-cause	keep	n/a	log detail only
+L820	record-branch-null-stops	keep	n/a	explicit null rare
+L821	reap-log-done-by-margin	keep	n/a	LOG_DONE_BY still 58; 2 s margin, rare
+L822	log-lock-retries-every-oserror	keep	n/a	Windows errno unverified; needs Windows
+L823	command-file-backticked	keep	n/a	miss only; rare
+L824	command-run-verb-script-path	keep	n/a	reword clears
+L825	test-git-ps1-twin	keep	n/a	Windows CI only; harmless
+L826	test-git-bad-count-reset	keep	n/a	rare bad env value
+L827	page-title-scan-edges	keep	n/a	no real page reaches it
+L828	c204-clamp-untested	keep	n/a	no tested width reaches; harmless
+L829	standing-grant-local-unenforced	keep	n/a	needs owner word; tool cannot tell owner
+L830	merge-put-bypass	keep	n/a	note says debt after incident; owner word
+L831	standing-grant-read-once	keep	n/a	narrow wait window; rare
+L832	cloud-setup-timeout-orphan	keep	n/a	never run; cloud only; rare
+L833	cloud-setup-origin-copy	keep	n/a	differs on contrived URLs only
+L834	cloud-setup-zombie-step	keep	n/a	sandbox-only step; harmless
+L837	holder-slash-unpinned	keep	n/a	Windows only; needs Windows
+L838	sweep-no-pipes-kwargs-only	keep	n/a	needs Windows case
+L839	heartbeat-starved-reads-stopped	keep	n/a	false green only if kill also failed
+L840	kill-holder-rekills-dead-pids	keep	n/a	seconds-wide pid reuse window; rare
+L841	scratchpad-reap-reads-ps	keep	n/a	POSIX only by design
+L842	reap-start-row-budget-unbound	keep	n/a	bound holds; test gap only
+L843	hook-bound-case-1s-slack	keep	n/a	loaded runner only; rare
+L844	lock1sh-first-holder-unproven	keep	n/a	test gap under load
+L845	win-lk-lock-regression-uncovered	keep	n/a	Windows only; needs Windows
+L846	sendmessage-state-skips-at-cap	keep	n/a	slow runner only
+L847	ci-job-no-pointer-unknown	keep	n/a	exit 2 still blocks a pass
+L848	ci-job-interrupt-leaves-verdict	keep	n/a	same on main; Ctrl-C rare
+L849	ci-job-relay-locale-decode	keep	n/a	Windows only; needs Windows
+L850	ci-job-local-action-other-path	keep	n/a	same on main; rare path
+L851	test-ci-job-pipx-probe-windows	keep	n/a	Windows only; needs Windows
+L852	test-ci-job-archive-head	keep	n/a	local run limit; harmless
+L853	map-path-hard-coded	keep	n/a	needs owner design; decision-bound
+L854	map-check-double-install	keep	n/a	CI time unmeasured; mods flag only
+L855	map-check-install-no-step-cap	keep	n/a	job cap covers it
+L856	draft-step-any-session	keep	n/a	page-only push; no merge follows
+L857	draft-hint-claim-no-kinds	keep	n/a	hand-written trailer needed; rare
+L858	draft-step-stands-wording	keep	n/a	wording only
+L859	role-model-layout-import	keep	n/a	installs ship lint/; mutate_guard comment no longer found
+L860	frozen-redirect-and-word	keep	n/a	same on main; odd redirect form rare
+L863	stale-stamped-tree-called-live-pin	keep	n/a	Rare, harmless wording; cd advice still holds
+L864	pin-line-silent-on-failed-listing	keep	n/a	Rare, harmless; failed worktree listing only
+L866	bg-timeout-no-beat-file	keep	n/a	Rare, harmless; nothing strands it
+L867	merge-progress-stdout-only	keep	n/a	No incident; rare, harmless
+L868	bare-verdict-double-beat	keep	n/a	Kept on purpose; one extra line per heartbeat
+L869	process-start-lc-all-unpinned	keep	n/a	Still true (LC_ALL=C at git_reads.py:669); test gap only, harmless
+L870	ps-lstart-tz-macos-unmeasured	keep	n/a	Needs the Mac to measure
+L872	frozen-main-mirror-literal-home	keep	n/a	Cloud HOME is not a symlink; rare, harmless
+L873	install-cloud-budget-untested	keep	n/a	Test gap only; no test names the 50 s budget; rare
+L874	frozen-grep-install-refused	keep	n/a	Accepted behaviour like the pin; one retry fixes it
+L876	home-clone-mirror-unfrozen	keep	n/a	Design tradeoff; needs the owner's word
+L877	lane-fetch-before-mirror	keep	n/a	Unmeasured; slow link only
+L879	noremote-mutant-fixture	keep	n/a	Fixture trap; rare, harmless
+L880	ln-over-directory-no-record	keep	n/a	Covered by plan refusal-vs-rule; needs the owner's word
+L882	live-lock-subject-row-unpinned	keep	n/a	Test gap only; rare, harmless
+L883	frozen-path-string-mention	keep	n/a	One case; Edit tool is the way round
+L884	impeccable-guard-shell-forms	keep	n/a	Claude rarely writes these forms
+L885	widens-mark-quote-refused	keep	n/a	Claude rarely writes this; same as main
+L886	reply-judge-import-fail-untested	keep	n/a	Untested branch; probe showed no crash; harmless
+L888	cc-312-plugin-no-autoinstall	keep	n/a	unknown: text cut off; plugin autoinstall unmeasured
+L889	kill-stub-subreaper-foreign	keep	n/a	Unmeasured; rare
+L890	layout-repeat-unnormalised-path	keep	n/a	Still refused; only message differs; harmless
+L891	layout-repeat-test-order	keep	n/a	Test gap only; harmless
+L892	explore-audit-marker-word-boundary	keep	n/a	Verified true (shared_names.py:56 \b); one retry fixes it
+L894	page-judge-title-only	keep	n/a	Rare gap in a judge; harmless
+L895	page-judge-partial-update	keep	n/a	Owner override lifts it; rare
+L896	page-judge-dead-fragment-fields	keep	n/a	Dead code, harmless
+L897	page-judge-mixed-batch	keep	n/a	Unmeasured; rare
+L898	page-judge-task-ids	keep	n/a	Unmeasured; override lifts it
+L904	page-design-band-comment	keep	n/a	Test comment only; needs a builder; harmless
+L905	page-design-stamp-path	keep	n/a	Rare edit after publish; harmless
+L906	page-design-closed-update	keep	n/a	Harmless extra check
+L907	ps1-copy-skill-prune-no-backup	keep	n/a	Decision copy-mode-overwrites-no-backup governs; needs owner word
+L909	install-sh-unchecked-skill-mv	keep	n/a	Rare failure of mv; harmless
+L910	install-tarball-no-prune	keep	n/a	Tarball install only; rare
+L911	install-first-run-rm-no-retry	keep	n/a	First run only; rare
+L912	install-ps1-nonascii-names	keep	n/a	No non-ASCII name ships now
+L913	install-manifest-test-gaps	keep	n/a	Test gaps only; rare
+L914	option-letter-keys-label-word-tag	keep	n/a	Kept out on purpose; Plan B is plain English
+L916	report-guard-gh-value-flags	keep	n/a	Needs a title that is a flag; rare
+L917	report-guard-glued-repo-flag	keep	n/a	Glued -Ro/r form; rare
+L918	pw-os-release-source-fail	keep	n/a	Real os-release files hold no shell logic
+L919	pw-os-release-env-name	keep	n/a	Generic env name; rare clash
+L920	pw-os-test-gaps	keep	n/a	Test gaps only; rare
+L921	pw-26-04-cause-unread	keep	n/a	Cause cited from a report, unread; harmless
+L924	page-stale-empty-live	keep	n/a	Owner-ruled exit (title); still true at guard.py:3651
+L926	roadmap-quoted-push-passes	keep	n/a	Quoted-word push; attacker-style form, rare
+L927	own-session-cse-id-form	keep	n/a	Rare id form
+L928	guard-comments-stale-wording	keep	n/a	unknown: which wording is stale is not shown; comments harmless
+L932	origin-odd-forms-bogus-link	keep	n/a	Odd origins only; rare
+L935	roll-out-lane-starting-tag	keep	n/a	Unverified; rare
+L936	lane-wrong-cs-step-unjudged	keep	n/a	Unmeasured
+L937	page-parked-off-look-untested	keep	n/a	Test gap only; harmless
+L938	page-parked-badge-race	keep	n/a	Harmless by its own text
+L939	page-why-noid-copy-wording	keep	n/a	Copy wording only
+L940	recovered-sidechain-boundary	keep	n/a	Rare; costs one demand
+L941	recovered-rewrite-crash	keep	n/a	Rare crash path
+L942	recovered-missing-report-tail	keep	n/a	Costs one extra block; rare
+L943	recovered-prose-match	keep	n/a	Rare; delays a demand
+L944	carry-start-separators	keep	n/a	Rare separator forms
+L945	carry-none-forms	keep	n/a	Rare forms; one retry
+L946	carry-bare-wrap	keep	n/a	Rare wrap form
+L947	carry-label-lookahead	keep	n/a	Rare bold form
+L948	carry-pre-deploy	keep	n/a	One-time at rollout; harmless
+L949	page-ruling-recite	keep	n/a	Upkeep row noise; harmless
+L950	page-ruling-free-home	keep	n/a	Silent miss in an upkeep row; harmless
+L951	page-ruling-doc-gaps	keep	n/a	Docstring and test gap; harmless
+L952	dated-claim-year-digits	keep	n/a	Rare date form
+L953	dated-claim-dot-stops	keep	n/a	Rare date forms
+L954	dated-claim-edges	keep	n/a	Rare edge cases
+L955	archive-no-record-any-repo	keep	n/a	Steer costs one turn
+L956	archive-tag-literals	keep	n/a	Fails closed; rare rename
+L957	archive-rebased-lane-commit	keep	n/a	unknown: text cut off; needs the owner's word on release rule
+L959	repeat-inbox-source-shared-try	keep	n/a	listdir error; rare
+L960	repeat-mark-lone-cr	keep	n/a	Lone CR; rare
+L961	repeat-inbox-ref-same-minute	keep	n/a	Same-minute blocks; rare
+L962	repeat-mark-append-race	keep	n/a	Same-instant race; rare
+L963	marker-flags-unmutated	keep	n/a	Test gap: no shared_names mutant (verified); harmless
+L964	lifted-row-refusal-skips-load-brake	keep	n/a	Only under an owner override
+L967	model-cap-mutants-missing	keep	n/a	Tests cover them; mutant gap only
+L968	explore-no-model-env-default	keep	n/a	Unmeasured; env-cap case
+L969	workflow-unread-brief-false-alarms	keep	n/a	Coordinator ruling; override or literal brief lifts it
+L971	page-stale-untested-paths	keep	n/a	Test gaps only
+L972	page-stale-url-forms	keep	n/a	Unmeasured
+L973	other-checkout-mkdir-touch	keep	n/a	Rare forms; shared list
+L974	builders-reset-soft-refused	keep	n/a	Accepted refusal; rare
+L975	builders-own-test-commit-forgotten	keep	n/a	Accepted after rebase; rare
+L976	builders-reflog-no-author	keep	n/a	Accepted limit of the reflog; rare
+L977	builders-amend-ff-pull-refused	keep	n/a	Accepted refusal; rare
+L978	builders-untracked-test-folder-refused	keep	n/a	Other repos unmeasured
+L979	builders-cost-line-untested	keep	n/a	Test gap only
+L981	builders-rebase-start-unread	keep	n/a	Only a log line; refusal unaffected
+L982	builders-amend-replayed-test	keep	n/a	Accepted refusal; rare
+L983	lease-fails-open	keep	n/a	Same as main; unreadable simctl only
+L984	lease-name-two-runtimes	keep	n/a	Unmeasured; needs the Mac
+L985	lease-action-case	keep	n/a	Unread MCP detail; needs the Mac
+L986	lease-reason-carry-weak	keep	n/a	Test weakness only
+L987	lease-session-raw-payload	keep	n/a	Fails closed; harmless
+L988	sim-name-casefold-xcodebuild	keep	n/a	Unmeasured; needs the Mac
+L989	sim-fixture-folder-silent	keep	n/a	Test fixture trap; rare
+L990	mcp-launch-before-lock	keep	n/a	Rare race
+L991	mutate-guard-owner-unclear	keep	n/a	Comment ambiguity; needs the owner's word
+L992	mutant-lint-copy-cost	keep	n/a	Estimate only; harmless
+L993	mutant-watch-tree-lint	keep	n/a	Unmeasured
+L995	route-unread-wrappers	keep	n/a	Rare wrapper forms
+L996	detached-launch-glued-amp	keep	n/a	Rare glued form
+L997	route-remedy-glued-action	keep	n/a	Verdict still deny; wording only
+L998	route-glued-fd-redirect	keep	n/a	Rare glued form
+L999	sim-test-record-silent	keep	n/a	Rare; sweep keeps the device
+L1000	route-build-unmeasured	keep	n/a	Needs the Mac to measure
+L1001	sim-test-untested-stops	keep	n/a	Test gaps only
+L1002	sim-test-child-signals	keep	n/a	Unmeasured; needs the Mac
+L1003	sim-test-late-reports	keep	n/a	Unmeasured; needs the Mac
+L1004	sim-test-kill-skips-cleanup	keep	n/a	Next run takes over a dead lock; harmless
+L1005	sim-test-rename-back-gap	keep	n/a	Rare race
+L1006	sim-test-ctrl-c-in-boot	keep	n/a	Rare; Ctrl-C mid boot
+L1007	sim-test-lock-per-config-dir	keep	n/a	Two config folders only; rare
+L1008	bypass-closer-glued	keep	n/a	Rare glued closers
+L1009	bootstatus-flag-boots	keep	n/a	Ruling names neither refusal nor exemption; needs the owner's word
+L1010	bypass-rare-false-alarms	keep	n/a	Three rare, harmless forms
+L1011	bypass-flag-form-passes	keep	n/a	Rare forms
+L1016	feel-step-set-done-untried	keep	n/a	Triage act; needs the owner's word
+L1017	feel-rename-half-similar	keep	n/a	Safe fail; wrong message only
+L1018	feel-edit-swap-message	keep	n/a	Misleading message only; rare
+L1019	feel-trial-time-space	keep	n/a	Rare time form
+L1020	feel-lint-says-device-check	keep	n/a	Wording only
+L1021	feel-probe-skips-debt-check	keep	n/a	Other repos only; rare
+L1022	feel-trial-trailing-text	keep	n/a	Rare form
+L1023	feel-debt-abandon-blocked	keep	n/a	Needs the owner's word on abandoning a feel debt
+L1024	feel-trial-older-than-fix	keep	n/a	Rare; later feel PR on an old trial
+L1025	lane-lint-digit-sha-refused	keep	n/a	Never a false pass
+L1026	lane-lint-hex-branch-read-as-sha	keep	n/a	Rare branch name
+L1027	lane-lint-sigterm-leaks-worktree	keep	n/a	Rare SIGTERM window
+L1028	lane-lint-stale-origin-ref	keep	n/a	Rare; deleted branch only
+L1029	answered-check-case	keep	n/a	Rare capitalised source
+L1030	answered-check-question-line	keep	n/a	Rare miss
+L1031	answered-check-inline-fence	keep	n/a	Rare forms
+L1033	ruling-cite-plain-mode-missing-record	keep	n/a	Refusal stands; rare
+L1034	report-guard-quote-prefix-indented-code	keep	n/a	Costs one extra model call; rare
+L1035	report-guard-ask-text-cuts-front	keep	n/a	Only a very long report; rare
+L1036	fail-open-three-paths	keep	n/a	Fail-open by design; rare
+L1037	no-direction-rule-no-candidate-test	keep	n/a	Test gap only
+L1038	call-judge-unreadable-source-untested	keep	n/a	Test gap only
+L1040	rewrite-stamp-binds-to-sentence	keep	n/a	Rare two-stamp sentence
+L1041	rewrite-stamp-utc-clock-date	keep	n/a	Miss only; rare
+L1042	rewrite-stamp-recall-forms	keep	n/a	Miss only; rare forms
+L1043	rewrite-unfetched-lane-refused	keep	n/a	Costs one turn
+L1044	pair-title-quotes-short-id	keep	n/a	Becomes a debt on a real incident, by its own text
+L1048	check-ruling-kind-judge-conflict	keep	n/a	Judge versus lint conflict; needs the owner's word on which wins
+L1049	cc-facts-word-in-string	keep	n/a	Rare string case
+L1050	cc-facts-unbounded-decl	keep	n/a	Rare mis-resolve
+L1051	cc-line-cut-tail	keep	n/a	Rare long list value
+L1052	window-env-forms-unread	keep	n/a	Rare env form
+L1053	last-nudge-gap-no-summary	keep	n/a	Owner ruling Nov 1 is in precompact-handoff
+L1054	grant-unfenced-paste	keep	n/a	Cleared by a not-a-grant item; rare
+L1055	answer-own-options	keep	n/a	Rare reply form
+L1056	grant-no-word-miss	keep	n/a	Miss only; rare
+L1057	answer-in-prose-miss	keep	n/a	Miss only; rare
+L1058	grant-home-not-read	keep	n/a	Design limit; rare
+L1059	grant-root-home-any	keep	n/a	Rare false match
+L1060	closed-token-midline	keep	n/a	Rare mid-line token
+L1061	grant-scope-misses	keep	n/a	Rare phrasing
+L1062	question-placeholder-trailing-period	keep	n/a	Rare placeholder form
+L1063	port-str-replace-no-symbol	keep	n/a	Rare str_replace on port item
+L1064	departs-bare-angle-name	keep	n/a	Rare component-name form
+L1065	guard-log-kolkata-needs-tzdata	keep	n/a	Only a machine with no tzdata; rare
+L1066	unread-early-line-east-blind	keep	n/a	CI on UTC covers it
+L1068	decision-watch-long-comment	keep	n/a	Cosmetic; line 890 is 154 chars
+L1069	undo-presence-skip	keep	n/a	Rare merge shape
+L1070	undo-readd-old-name	keep	n/a	Rare false alarm, same on main
+L1072	handoff-unread	keep	n/a	Unmeasured whether PostCompact fires in an agent
+L1073	handoff-unread	keep	n/a	Costs one Read; harmless
+L1074	page-locked-card-rebuild	keep	n/a	Rare caret move; harmless
+L1075	page-unstood-draft-locks	keep	n/a	Too strict, hides nothing
+L1076	page-seen-divider-words	keep	n/a	Wording difference only
+L1078	shallow-probe-fails-allows	keep	n/a	Still true; only environment fault reaches it, not a Claude act.
+L1079	shallow-only-copy-wording	keep	n/a	Wording only; fails closed, archive remedy loses nothing.
+L1080	ste-changed-none-says-shallow	keep	n/a	bin/ste-changed:97 still says shallow; rare wording.
+L1081	sweep-shallow-skips-cherry	keep	n/a	Safe-side error in shallow clones; harmless.
+L1082	shallow-bash-sites	keep	n/a	Advisory or fail-closed only; rare shallow clones.
+L1083	is-shallow-no-mutant	keep	n/a	Test gap on rare path; harmless.
+L1084	ask-send-position-untested	keep	n/a	Test gap only; page tests cover over-limit hint.
+L1085	ask-term-no-glossary-row	keep	n/a	GLOSSARY.md still has no ask row; low harm.
+L1086	ci-alarm-greener-conclusions	keep	n/a	Still true; alarm is looser than merge brake, rare.
+L1087	ci-alarm-run-window	keep	n/a	Still true (100 vs 50 runs); needs busy repo.
+L1088	ci-alarm-same-second-tie	keep	n/a	Alarm is the stricter side; rare tie.
+L1089	ci-alarm-unknown-is-quiet	keep	n/a	Design choice: unknown warns, exits 0; needs owner ruling to change.
+L1090	ci-cancelled-red-run-cleared	keep	n/a	Rare cancelled-with-red-job case; merge tool sees it.
+L1091	ci-clear-compares-job-names	keep	n/a	Not reachable in this repo's checks.yml.
+L1092	verdict-skip-other-runners	keep	n/a	No repo uses those runners.
+L1093	verdict-skip-stray-text	keep	n/a	Display only; exit code unchanged.
+L1094	caution-line-missing	keep	n/a	Still true at session_start.sh:232; rare unset checkout.
+L1095	review-cost-gh-only	keep	n/a	Cost accounting detail; harmless.
+L1096	design-round-alone-done	keep	n/a	A lane claim; rare and harmless.
+L1098	send-error-still-counts	keep	n/a	Unmeasured cloud form; rare.
+L1099	waiting-page-chat-first-heading	keep	n/a	Heading wording only.
+L1100	cite-reader-module-alias	keep	n/a	Rare alias form in a test scanner.
+L1101	cite-reader-rebound-catch	keep	n/a	Rare rebinding form.
+L1103	cite-reader-stop-variable	keep	n/a	Unread forms; rare.
+L1104	merge-network-stops-uncited	keep	n/a	Exempt by standing-merge-grant; harmless.
+L1105	merge-ignorechecks-no-record	keep	n/a	Rule lives only in stamp README; needs owner ruling.
+L1106	rejected-git-reads-absent	keep	n/a	Lane ruling keeps absent; rare broken worktree.
+L1107	git-stderr-locale	keep	n/a	English-only match fails safe; rare.
+L1109	shell-named-file-header	keep	n/a	Rare file names resembling shells; body stays in view.
+L1110	odd-backtick-unquoted-body	keep	n/a	Rare malformed heredoc body.
+L1111	written-file-run-forms-unread	keep	n/a	Guard targets mistakes, not attacker forms.
+L1116	other-checkout-agent-flag	keep	n/a	No measured payload differs; harmless.
+L1117	cloud-disk-full	keep	n/a	Cloud-only brake gap; rare, needs owner word.
+L1119	override-trailing-mark-on-word	keep	n/a	Owner-typed edge; same on main, needs owner word.
+L1120	base-copies-delete-refused	keep	n/a	Refusal fails safe; rare.
+L1121	base-copies-old-ancestor-refused	keep	n/a	Bounded by design.
+L1122	ready-heal-second-run	keep	n/a	Rare; batch brake keeps base still.
+L1123	ready-resumed-claim-page-push	keep	n/a	Rare resumed-claim path.
+L1124	claim-remedy-wording-narrow	keep	n/a	Wording only; remedy still right.
+L1125	ruling-kind-judge-live-unmeasured	keep	n/a	unknown: live model behaviour unmeasured.
+L1126	ruling-kind-first-section-stub	keep	n/a	Lint catches it at PR time.
+L1127	ruling-kind-lint-no-remedy	keep	n/a	Message lacks remedy; judge and record name it.
+L1129	red-run-rebase-judges-old-commits	keep	n/a	Recorded behaviour; rare.
+L1130	red-run-sha-not-verified	keep	n/a	Made-up sha passes; Claude unlikely to invent one.
+L1131	red-run-existing-behaviour-claims-none	keep	n/a	By design; none trailer is the route.
+L1132	test-temp-sweep-unproven	keep	n/a	Test gap; harmless sweep.
+L1133	red-run-merge-revert-judged	keep	n/a	REVERT regex still misses merge reverts; rare, trailer fixes.
+L1134	red-run-base-unknown-quiet	keep	n/a	Non-main default branch only; reports unknown.
+L1135	red-run-fixture-data-needs-none	keep	n/a	Still true; trailer none is cheap.
+L1136	merge-superseded-cancel-only	keep	n/a	merge.py:986 as described; needs differing job sets on one head.
+L1137	merge-superseded-two-run-reads	keep	n/a	Cost only.
+L1138	merge-cancelled-newest-twin	keep	n/a	Recorded twin rule; rare.
+L1139	silent-write-ref-gaps	keep	n/a	Widen only after an incident, per building-guard-needs-incident.
+L1141	load-brake-skips-create-session	keep	n/a	Cloud container claim; needs local environment test.
+L1142	pwd-delete-trailing-quote	keep	n/a	Rare quoting form.
+L1143	checkout-f-cluster	keep	n/a	Rare flag cluster.
+L1145	merge-liftable-worktree-gone	keep	n/a	Needs two rare stops together; message only.
+L1146	merge-silent-undo-no-repair	keep	n/a	Incident cost of design; rare.
+L1147	press-label-verb-only	keep	n/a	Matches act-in-place record text; edge case.
+L1148	shell-line-no-arg-chain	keep	n/a	Rare no-arg chains.
+L1149	shell-line-capital-prose	keep	n/a	Rare capitalised prose with semicolon.
+L1150	time-pinned-nested-def-missed	keep	n/a	Finder gap; rare.
+L1151	time-pinned-mock-now-alarm	keep	n/a	Rare finder false listing.
+L1152	time-pinned-destructure-decl	keep	n/a	Finder gap; rare.
+L1153	time-pinned-bound-duration-arg	keep	n/a	Finder gap; rare.
+L1154	time-pinned-helper-clock-diff	keep	n/a	Finder gap; rare.
+L1155	time-pinned-literal-hides-ms	keep	n/a	Finder gap; rare.
+L1156	time-pinned-swift-since-helper	keep	n/a	Finder gap; rare Swift form.
+L1157	time-pinned-offset-clock-input	keep	n/a	Finder false listing on injected clock; rare.
+L1158	time-pinned-bracket-scan-slow	keep	n/a	Real files unaffected.
+L1159	pkill-inverse-parent	keep	n/a	Rare pkill -v form.
+L1160	lsof-kill-in-quoted-string	keep	n/a	Rare forms; guard targets mistakes.
+L1161	nohup-prefix-setsid	keep	n/a	Rare prefix chains.
+L1162	impeccable-verbs-off-table	keep	n/a	Rare verb forms.
+L1163	builder-test-path-symlink	keep	n/a	Needs a symlink into test folder; rare.
+L1164	lsof-kill-glued-paren	keep	n/a	Rare glued-paren form.
+L1165	spec-prose-oracle	keep	n/a	Rare prose fixture under spec/.
+L1166	author-raw-cwd	keep	n/a	Windows-only; same on main.
+L1168	builder-diff-check-fail-open	keep	n/a	unknown: suspected fail-open unmeasured; did not reproduce.
+L1169	auto-mode-refuses-run-cancel	keep	n/a	Needs owner word; decision lacks the route it cites.
+L1170	bounded-git-kill-leaves-git	keep	n/a	Harm seen: none beyond a busy temp file.
+L1171	qmax-select-exits-1	keep	n/a	unknown: cause of exit 1 unread.
+L1172	banchi-cli-identify-red-clean	keep	n/a	unknown: cause unread; banchi-side test.
+L1173	defines-checks-misses-augassign	keep	n/a	Still true at mutate_shared.py:840; rare form.
+L1174	t7-box-map-no-run	keep	n/a	Banchi file; reads as crash, mutation report only.
+L1175	t7-group-cap-margin	keep	n/a	Margin measured; mutation report only.
+L1176	playwright-closed-title-crash	keep	n/a	Undercounts kills only on odd titles.
+L1177	pr-budget-restarts-per-part	keep	n/a	Mutation report cost detail.
+L1178	budget-s-flake-margin	keep	n/a	Slow-machine flake only; one-second margin.
+L1179	mutate-js-linecount-per-site	keep	n/a	Cost only; mutate_js.mjs:61 O(n) per site.
+L1180	mutate-js-multiline-site-first-line	keep	n/a	Design detail.
+L1181	renamed-file-all-lines-changed	keep	n/a	Design choice (--no-renames).
+L1183	stale-cancel-all-skipped	keep	n/a	Rare all-skipped cancelled run.
+L1184	stale-cancel-missing-head-sha	keep	n/a	GitHub always sends head_sha.
+L1185	rewrite-shared-try-drops-all	keep	n/a	Needs a malformed transcript record.
+L1186	rewrite-no-marker-skips-judge	keep	n/a	Owner has not ruled; may be stale.
+L1187	relay-comment-stale-in-main	keep	n/a	Comment only; no run changes.
+L1190	page-button-this-item	keep	n/a	Needs a web marker in text; rare false alarm.
+L1191	clause-start-noun-verb	keep	n/a	Fires only with a web marker and no link; rare.
+L1192	close-paren-no-break	keep	n/a	Rare form passes; guard targets mistakes.
+L1194	other-clone-unread-writers	keep	n/a	Writer forms unread; rare, guard targets mistakes.
+L1195	other-clone-project-dir-unmeasured	keep	n/a	unknown: CLAUDE_PROJECT_DIR in hooks not measured live.
+L1196	other-clone-stranded-false-alarm	keep	n/a	Rare stranded cwd; cd <home> works.
+L1197	other-clone-silent-catch	keep	n/a	Fails toward not-stranded; rare bug path.
+L1198	retired-advisor-reader	keep	n/a	Needs owner: name a reader or drop the log.
+L1199	restates-na-by-copied-anchors	keep	n/a	Reachable only by copying rules whole.
+L1200	restates-kind-line-unit-dropped	keep	n/a	Rare in a CLAUDE.md.
+L1201	page-stale-title-space	keep	n/a	Copy of page.html has exact title; normal work misses it.
+L1202	page-stale-old-main	keep	n/a	Ends at next fetch.
+L1203	mockup-link-target-text-ok	keep	n/a	Claude does not write such a file by mistake.
+L1205	mockup-origin-deleted-branch-ref	keep	n/a	Allowed by lane ruling any origin ref.
+L1206	build-docstring-says-six	keep	n/a	Docstring cost count only; no run change.
+L1207	designer-other-repo	keep	n/a	Rare cross-repo screen; needs owner word on design path.
+L1208	refusal-plural-not-cleared	keep	n/a	Reply must say it once per tool; rare.
+L1209	refusal-hedge-word-broad	keep	n/a	Rare hedge-word false alarm.
+L1210	report-guard-gh-wrapped-unread	keep	n/a	Wrapped gh forms; rare.
+L1212	ci-step-roadmap-builder	keep	n/a	Rename may break check names merge tool reads; needs owner.
+L1214	dropped-start-same-sha-silent	keep	n/a	Per-sha marker by design; rare.
+L1215	dropped-start-fork-approval	keep	n/a	Fork PR waiting approval; rare.
+L1216	dropped-start-check-name-copy	keep	n/a	Copy pinned equal by test_action.sh.
+L1217	zizmor-env-unset-untested	keep	n/a	Test gap; checks.yml always sets paths.
+L1218	zizmor-paths-doc-drift	keep	n/a	action.yml says spaces only; understates, harmless.
+L1219	zizmor-test-comment-files	keep	n/a	Test comment only.
+L1221	multiline-value-edges	keep	n/a	Forms GitHub rejects or rarely meets.
+L1226	draft-guard-only-loose	keep	n/a	Unlikely in normal work; deliberate if forms.
+L1227	draft-house-form-untested	keep	n/a	Test gap only.
+L1228	bare-step-for-ci-step	keep	n/a	Comments only.
+L1229	designer-unpushed-worktree-lost	keep	n/a	unknown: no incident; no SubagentStop designer check exists.
+L1230	export-scan-vendored-js	keep	n/a	Debt only after a real incident.
+L1231	export-scan-near-misses	keep	n/a	Rare near-miss shapes.
+L1232	option-key-gap-relative-path-unjoined	keep	n/a	Relative file_path rare; check skips it.
+L1233	option-key-gap-str-replace-other-page	keep	n/a	Rare cross-page str_replace.
+L1234	option-key-gap-closed-reopened	keep	n/a	Rare reopen sequence.
+L1235	option-key-gap-kind-case	keep	n/a	Capital Decision rare.
+L1236	option-key-gap-kind-unpinned-off-page	keep	n/a	Test gap; surviving mutant.
+L1240	milestone-branch-run-wording	keep	n/a	Needs owner ruling on branch run as milestone proof.
+L1241	seed-branch-delete-refused	keep	n/a	Needs owner grant for seed-branch deletes outside claude-settings.
+L1244	scope-playwright-test-action-cost	keep	n/a	Cost: one guard job per edit; rare file.
+L1245	scope-shoot-md-no-carve-out	keep	n/a	No such .md exists.
+L1246	scope-playwright-comment-md	keep	n/a	Comment omits .md exception; harmless.
+L1247	execpath-fallback-script	keep	n/a	Likelihood unmeasured; variable normally set.
+L1248	execpath-fallback-key-split	keep	n/a	Extra 3 s read once; rare.
+L1249	execpath-fallback-windows-cwd	keep	n/a	Not run on Windows; unlikely.
+L1250	execpath-fallback-untested-mutants	keep	n/a	Test gap; harmless.
+L1253	text-only-overflow-css-fix	keep	n/a	Routing ambiguity; needs owner word.
+L1254	lockfail1-catch-text	keep	n/a	Message text only; still counts FAIL.
+L1256	page-ready-line-removed-key	keep	n/a	Needs writer to remove a key under a draft; rare.
+L1258	decision-watch-slack-unpinned	keep	n/a	Test gap on one-second slack.
+L1259	lane-one-topic-slug-dots	keep	n/a	Dotted step slugs rare.
+L1260	lane-one-topic-new-step-reread	keep	n/a	Refused once, one get_session clears.
+L1261	step-home-any-ref	keep	n/a	Retired step counts; rare.
+L1263	silent-undo-fetch-untested	keep	n/a	Test gap; fetch failure reads UNKNOWN red.
+L1264	silent-undo-two-call-sites	keep	n/a	Waits on bin/ci-job --lint support for local actions.
+L1265	silent-undo-push-skips-green	keep	n/a	Caller gates on pull_request in checks.yml.
+L1266	precommit-merge-old-offender	keep	n/a	Hits only repo already tracking an offender.
+L1267	no-verify-unguarded	keep	n/a	No incident; building-guard-needs-incident.
+L1268	all-jobs-passed-child-key-indent-steps	keep	n/a	Red only, never a pass.
+L1269	all-jobs-passed-flow-needs-bracket-comment	keep	n/a	Red only; rare comment form.
+L1270	all-jobs-passed-draft-eq-false	keep	n/a	Loud false alarm on unusual if form.
+L1271	all-jobs-passed-job-continue-on-error	keep	n/a	Claude unlikely to write it.
+L1272	all-jobs-passed-cs-crlf	keep	n/a	checks.yml is LF.
+L1274	all-jobs-passed-run-both-untested	keep	n/a	Test gap; job still fails.
+L1275	all-jobs-passed-action-path-inline	keep	n/a	unknown: zizmor verdict unmeasured here; CI runs zizmor.
+L1276	refile-target-unfetched	keep	n/a	Run still exits 1 with unknown line.
+L1277	hub-word-in-code	keep	n/a	Code and tests only; hub_clone still in stale_pages.py.
+L1279	answered-feed-receipts-test-only	keep	n/a	Cleanup only; comment at page.html:1160 says so.
+L1280	answered-refold-unprobed	keep	n/a	unknown: no test covers refold behaviour.
+L1281	lane-force-push-refused	keep	n/a	Needs owner word to allow lease form in auto mode.
+L1282	page-filed-cost-misses-read-back-rev-parse	keep	n/a	Cost line off by one process; harmless.
+L1283	page-filed-blocks-is-a-glossary-not-name	keep	n/a	Reword when next edited.
+L1284	verdict-argv-value-match	keep	n/a	Rare names.
+L1285	verdict-swift-version	keep	n/a	Rare in normal work.
+L1286	verdict-marker-prefixed	keep	n/a	Same family as an existing debt.
+L1287	verdict-sgr-in-count	keep	n/a	Forced colour only.
+L1288	playwright-pass-with-no-tests	keep	n/a	Opt-in flag only.
+L1289	tier-line-lane-tests-loose	keep	n/a	Line itself right today; test looseness only.
+L1290	tool-list-comment-only-key	keep	n/a	No agent file has that form.
+L1291	can-write-partial-deny	keep	n/a	Every agent denies all three write tools together.
+L1292	refuse-print-indirect-output	keep	n/a	still true; every hook print is direct, so rare
+L1294	classifier-refuses-lease-push	keep	n/a	auto-mode classifier is outside repo; needs owner's word
+L1295	lane-no-own-record-owner-facing	keep	n/a	rare; fails to writer route, not traced further
+L1296	map-fix-trailing-space-dup	keep	n/a	no such line on main; rare
+L1297	python-fstring-nested-quote-cite	keep	n/a	stated scanner limit; rare
+L1298	hash-comment-langs-unread	keep	n/a	no host maps those extensions
+L1299	map10-scanner-cases-unpinned	keep	n/a	test gap only; probes pass
+L1300	map-fix-ismain-reason	keep	n/a	harmless duplicate guard; comment now exists
+L1301	map10-bad-id-line	keep	n/a	message wording only
+L1302	cloud-setup-runs-start-hooks	keep	n/a	decision cloud-start-hooks-run-fresh covers it; harmless
+L1303	cloud-resume-only-hook-stale	keep	n/a	no such entry exists; rare
+L1304	cloud-start-entries-unread-branch	keep	n/a	test gap on an unreachable warning branch
+L1305	reason-flag-rebase-no-record	keep	n/a	no repo sets method rebase
+L1306	fake-gh-amp-in-field-value	keep	n/a	test-fake gap; Windows only
+L1307	ask-stack-keepfail-over-holding	keep	n/a	rare UI moment with storage refused
+L1308	ask-stack-spent-label-narrower	keep	n/a	measured: no height change; harmless
+L1309	ask-stack-undo-window-from-at	keep	n/a	same as main; slow store only
+L1310	ask-stack-reload-mid-undo-dup	keep	n/a	accepted by design
+L1311	ask-undo-focus-ios-unmeasured	keep	n/a	needs iOS Safari device check
+L1313	ask-undone-focus-unconditional	keep	n/a	same as main; rare focus steal
+L1316	scan-address-capital-phrase	keep	n/a	heuristic limit; refusal names field, reword clears
+L1317	map-show-symlink-file	keep	n/a	tracked symlinked code file is rare
+L1318	map-show-path-step-unpinned	keep	n/a	Windows-only proof class; needs Windows
+L1319	map-show-maplines-filter-copy	keep	n/a	duplicate pinned by test case 19
+L1320	own-session-null-text-block	keep	n/a	own_session.py:84 still true; real blocks carry str, rare
+L1321	rerun-in-flight-blocks-clear	keep	n/a	stricter only; rare two-group case
+L1322	rerun-in-flight-mixed-unknown	keep	n/a	wording only; merge still refuses
+L1323	opus-plain-ask	keep	n/a	rare; frame text rarely an Opus ask
+L1324	opus-plain-ask	keep	n/a	owner's own words; no hole
+L1325	opus-plain-ask	keep	n/a	no live path
+L1326	opus-plain-ask	keep	n/a	rare; compaction text counted as owner turn
+L1327	map-stale-drops-untracked-cite	keep	n/a	MAP1 check catches the same line first
+L1328	map-stale-own-page-list	keep	n/a	same result today
+L1329	map-stale-cost-posix-only	keep	n/a	Windows proof needs Windows
+L1330	armed-copy-branch-behind-main	keep	n/a	NOTE only; branch-behind-main case rare
+L1331	armed-copy-untested-unknowns	keep	n/a	test gap on fail-safe branches
+L1332	armed-copy-dangling-link	keep	n/a	rare dangling symlink
+L1334	prose-judge-decisions-folder-fixture	keep	n/a	config-key workaround exists; fixture-only
+L1335	builder-diff-merge-main-refused	keep	n/a	unknown: cause unmeasured
+L1336	worktree-home-child-clone	keep	n/a	unknown: refusal text not read
+L1337	classifier-refuses-branch-create	keep	n/a	classifier outside repo; needs owner
+L1338	opus-plain-ask	keep	n/a	rare cloud repeat-ask case
+L1339	opus-plain-ask	keep	n/a	rare multi-block seed
+L1340	opus-plain-ask	keep	n/a	test fixture shape unmeasured
+L1341	sim-test-sigkill-leaves-sim-booted	keep	n/a	SIGKILL rare; needs the Mac
+L1344	cloud-watchdog-143-reads-cut	keep	n/a	log text only; install.sh:1056 maps 143 to 124
+L1345	classifier-refuses-bash-src-build	keep	n/a	classifier outside repo; CI covers proof
+L1346	archive-guard-agent	keep	n/a	coordinator archives itself; harmless
+L1347	archive-guard-child-repo-read	keep	n/a	add_repo workaround known; rare
+L1348	classifier-refuses-reviewer-probe	keep	n/a	refusal was right; no defect
+L1349	force-branches-asks	keep	n/a	Claude rarely writes it
+L1350	artifactdata-list-others-docs	keep	n/a	labelled as collaborator data; needs owner view
+L1351	export-scan-telegram-width	keep	n/a	real id widths unmeasured
+L1352	export-scan-encoded-tokens	keep	n/a	encoded forms rare
+L1353	export-scan-red-checks-verdict	keep	n/a	test gap; each case hits own shape
+L1354	classifier-refuses-rule-record-writer	keep	n/a	classifier outside repo; needs owner grant
+L1355	lane-history-reword-refused	keep	n/a	classifier refusal; workaround known
+L1356	stall-stop-summary-race	keep	n/a	100 ms race; rare
+L1357	stall-listing-lost-on-block	keep	n/a	unknown: unmeasured
+L1358	launchd-sweep-log-growth	keep	n/a	unmeasured growth; Mac only
+L1359	agent-end-note-sees-200-rows	keep	n/a	busy-machine undercount; note only
+L1360	agent-end-lock-wait-hides-kill	keep	n/a	rare lock timeout
+L1361	agent-end-lost-done-reads-killed	keep	n/a	rate unmeasured; line names cause
+L1362	run-log-key-case-on-mac	keep	n/a	macOS only; needs the Mac
+L1363	run-log-key-untested	keep	n/a	test gap; no wrong line shows
+L1364	run-log-lock-thread-only	keep	n/a	two-process race rare
+L1366	kind-line-pins	keep	n/a	test gap only
+L1368	lane-call-wording	keep	n/a	comment wording nit; harmless
+L1369	export-all-step-test-pins-wording	keep	n/a	test pins wording by design; cause line shown
+L1370	cloud-released-lock-stuck	keep	n/a	unknown: cause unmeasured; partly fixed
+L1373	lock-retake-stale-reread	keep	n/a	unknown: caching proxy effect unmeasured
+L1374	lane-send-message-refused	keep	n/a	needs owner ruling on refusal routing
+L1375	merge-body-unlink-untested	keep	n/a	test gap; harmless temp file
+L1376	gh-cmd-shim-claim-split	keep	n/a	Windows only; needs Windows
+L1377	alarm-renamed-workflow-unknown	keep	n/a	rare rename; fails safe to unknown
+L1378	docs-only-design-fail-open	keep	n/a	rare docs-only design review
+L1379	review-state-docstring-width	keep	n/a	width lint passes; harmless
+L1382	materialize-all-builds-every-fixture	keep	n/a	cost only (~6 s); still true
+L1383	frozen-path-refuses-verdict	keep	n/a	unknown: guard.log refusals unread
+L1385	credential-letters-end-anchor	keep	n/a	false negatives only; main refused none
+L1386	credential-letters-brace-untested	keep	n/a	test gap; no case before brace confirmed
+L1387	ci-job-lint-skips-make	keep	n/a	waits on degen cost measure
+L1388	shared-tree-scratch-repo-false-alarm	keep	n/a	unknown: scratchpad exemption exists; cd-in-one-call case unverified
+L1389	shared-tree-script-file-unread	keep	n/a	script-file reset rare; mistake form unlikely
+L1390	replay-select-root-dot	keep	n/a	rows right; only large extract; no profile hits
+L1391	opus-plain-ask-one-role-exclusion	keep	n/a	same as main; owner's own words
+L1392	opus-plain-ask-scope-kill	keep	n/a	rare hook kill; no owner-visible line
+L1393	reply-undo-hidden-by-fold	keep	n/a	rare UI case; reply still sent
+L1394	reply-send-clears-ask-line	keep	n/a	nothing lost
+L1395	reply-owner-falls-to-writer	keep	n/a	only bad data hits it
+L1396	reply-midbox-edit-keeps-sent	keep	n/a	no words lost
+L1397	reply-close-drops-late-keys	keep	n/a	rare; typed words before close kept
+L1398	batch-runner-classifier-refusals	keep	n/a	classifier outside repo; went to owner
+L1399	classifier-refuses-relayed-ruling	keep	n/a	already filed as step owner-word-relay; needs owner
+L1402	park-turn-start-read	keep	n/a	first Park waits for wake; rare
+L1405	wait-pid-timing-flake	keep	n/a	rare flake; passed on rerun
+L1407	secret-scan-dash-prefix	keep	n/a	false negative; rare token form
+L1408	secret-scan-google-prefix	keep	n/a	only made-up key escapes
+L1409	classifier-refuses-allow-brief	keep	n/a	classifier outside repo; owner pastes entries
+L1410	red-run-remedy-route-limits	keep	n/a	rare merge-in-range; recovers with abort
+L1411	wait-copy-uses-stood-pick	keep	n/a	rare state; page UI
+L1412	wait-badge-outside-answered-untested	keep	n/a	test gap only
+L1413	wait-ended-reads-answered	keep	n/a	clears at next writer wake
+L1414	wait-gh-timeout-untested	keep	n/a	test gap only
+L1415	page-grant-routing-pick	keep	n/a	fails safe; item re-asked
+L1416	page-grant-usage-error-keeps-folder	keep	n/a	test gap only
+L1417	relay-kept-answer-counted	keep	n/a	prose-only rule; needs owner choice
+L1418	relay-lane-blank-untested	keep	n/a	test gap; rare blank lane
+L1419	relay-idle-receiver-no-status	keep	n/a	page still shows the wait
+L1420	relay-park-receiver-untold	keep	n/a	fails closed at page_grant check
+L1421	park-tell-resent-on-retry	keep	n/a	rare retry after failed write
+L1422	park-second-tell-test-narrow	keep	n/a	test gap only
+L1423	relay-chat-after-kept-answer	keep	n/a	fails safe; closed item never counted
+L1424	mappaths-prefix-no-slash	keep	n/a	still true (map-check.mjs:33); config misuse, rare
+L1425	mutation-report-action-untested	keep	n/a	test_action.sh confirmed missing; rare action change
+L1426	changed-log-case-misses-git	keep	n/a	replay suite covers helper
+L1427	budget-is-per-part	keep	n/a	cost only; banchi profile
+L1428	tests-for-pools-scopes	keep	n/a	over-runs tests only
+L1429	underscore-test-is-product	keep	n/a	main behaviour kept; code_not skips test_/_test_ only
+L1430	stale-pages-maps-guard-suite	keep	n/a	cost only
+L1431	tested-by-label-near-miss	keep	n/a	exact-label rule; rare typo
+L1432	tested-by-data-string	keep	n/a	rare false pass
+L1433	tested-by-subheading	keep	n/a	rare layout
+L1434	own-model-unquoted-forms	keep	n/a	incident form caught; rare variants
+L1435	model-slot-phrase-loose	keep	n/a	loose rule; one-off phrase false alarm
+L1436	known-defects-deps-argv	keep	n/a	UNKNOWN reads fail safe; child-repo profile only
+L1438	workflow-drops-per-file	keep	n/a	over-refuse on workflow moves; rare for builders
+L1439	workflow-fragment-write-passes	keep	n/a	commit, push and stop refuse the full file
+L1440	workflow-addopts-env-unread	keep	n/a	same as main
+L1441	test-author-run-forms-refused	keep	n/a	builder may add them; narrow by design
+L1442	verdict-log-path-space	keep	n/a	space in log path rare
+L1443	shared-tag-pin-partial	keep	n/a	test gap only
+L1445	roadmap-page-date-untested	keep	n/a	test gap; labels exist in index.html
+L1446	test-build-pin-comment-stale	keep	n/a	comment nit at test_build.py:67; harmless
+L1447	stalled-hold-missed-forms	keep	n/a	unusual build call forms; rare
+L1448	own-record-no-time-bound	keep	n/a	rare; unmeasured
+L1449	triage-hold-except-silent	keep	n/a	fail-open leaves no log line; rare
+L1450	ready-title-only-pr	keep	n/a	rare title/branch mismatch
+L1451	wake-fallback-no-delay	keep	n/a	needs owner ruling on comments contract
+L1452	wake-undo-withdraw-silent	keep	n/a	same as main
+L1453	wake-invalid-stored-id	keep	n/a	same as main; rare
+L1454	wake-thread-kept-across-visits	keep	n/a	needs owner ruling on contract vs design
+L1455	child-glossary-odd-forms	keep	n/a	same holes as main; odd forms rare
+L1456	report-checks-block-once	keep	n/a	design: stop_hook_active turn read once
+L1460	draft-landed-two-homes	keep	n/a	local test stricter; safe direction
+L1461	idle-lane-mixed-bucket-forms	keep	n/a	false negative only
+L1462	undo-ignores-scroll	keep	n/a	rare UI case
+L1463	reconcile-reorder-detach	keep	n/a	same as before PR; rare
+L1464	ci-job-store-python-alias	keep	n/a	Windows only; needs Windows
+L1466	ci-job-no-windows-ci	keep	n/a	needs Windows CI runner; owner choice
+L1468	stale005-wrapped-middle-row	keep	n/a	rare wrapped-claim edit
+L1469	stale005-unpunctuated-block	keep	n/a	rare prose form
+L1470	costtests-pin-not-exact	keep	n/a	test looseness only
+L1471	state-files-unpruned	keep	n/a	small files; slow growth
+L1472	layer-a-weak-check-passes	keep	n/a	waits on reply judge part (v)(b)
+L1474	wait-pending-masks-no-job-ran	keep	n/a	unreachable with all-jobs-passed alone
+L1475	wait-literal-job-names	keep	n/a	templated required names not used
+L1476	wait-reads-local-workflows	keep	n/a	rare; unknown run still holds
+L1477	workflow-name-quote-scan	keep	n/a	fails safe; test gap
+L1479	hand-off-dependency-phrases-read-as-capability	keep	n/a	heuristic edge in judge phrases
+L1480	measured-with-time-reads-undated	keep	n/a	heuristic edge
+L1481	refusal-cite-by-tool-not-act	keep	n/a	heuristic edge; rare 403 collision
+L1482	refusals-file-blank-line-untested	keep	n/a	test gap only
+L1483	report-section-ends-at-labels-only	keep	n/a	design limit
+L1484	stale-cites-p-diff-textconv-128	keep	n/a	needs missing textconv tool; rare
+L1485	stale005-report-share-one-try	keep	n/a	structure nit; caught by report except
+L1486	route-rows-fallback-drops-elsewhere-act	keep	n/a	missed flag only
+L1487	route-rows-fallback-untested	keep	n/a	test gap only
+L1488	stalled-open-ceiling-loose	keep	n/a	test looseness only
+L1489	credential-name-alphabet	keep	n/a	note says second false alarm makes it a debt
+L1490	prove-judge-dup-line-last-wins	keep	n/a	rare duplicate rows
+L1491	prove-judge-span-overlap	keep	n/a	rare overlap
+L1492	prove-judge-label-typo-skipped	keep	n/a	skipped, not refused; rare
+L1493	prove-judge-all-unknown-rate	keep	n/a	report wording only
+L1494	prove-judge-one-error-line	keep	n/a	report detail only
+L1495	prove-judge-no-json-unknown	keep	n/a	offline prove tool; unknown not false alarm
+L1496	prove-judge-excerpt-bound-bytes	keep	n/a	bounded; rare multibyte
+L1497	prove-judge-read-before-size-check	keep	n/a	bounded by repo file size
+L1498	prove-judge-unknown-narrates-tools	keep	n/a	candidate step; needs owner pick
+L1499	after-merge-misses-claude-guard	keep	n/a	no config has such command
+L1500	base-pin-interrupt-skips-ff	keep	n/a	needs interrupt at exact moment; rare
+L1502	draft-claim-line-no-ready-checks-test	keep	n/a	test gap; also on main
+L1503	conflict-markers-untracked-cap	keep	n/a	needs over 100 untracked files; rare
+L1504	conflict-markers-unresolved-add	keep	n/a	rare unresolved add path
+L1505	conflict-markers-push-var-branch	keep	n/a	rare variable branch push
+L1506	conflict-markers-loop-subshell	keep	n/a	rare loop or subshell commit
+L1507	conflict-markers-chain-clean-refuse	keep	n/a	remedy names separate push
+L1508	conflict-markers-show-uncapped	keep	n/a	cost only; many marker files rare
+L1509	conflict-markers-stale-tracking	keep	n/a	rare rewound remote
+agent-reports-with-live-watcher.md	agent-reports-with-live-watcher	keep	n/a	Owner dropped the check over 248 false refusals; reopen only on evidence.
+banchi-build-steps.md	banchi-build-steps	keep	n/a	Owner ruled 2026-09-25 Banchi steps stay out of the stamp.
+build-disk-guard.md	build-disk-guard	keep	n/a	Owner ruling: waits for measured threshold and his grant.
+ci-wake-gh-host-bare-repo.md	ci-wake-gh-host-bare-repo	keep	n/a	Unmeasured and rare: needs GH_HOST set to an enterprise host.
+ci-wake-misses-mcp-ready.md	ci-wake-misses-mcp-ready	keep	n/a	Still true; cloud wait uses PR subscription; needs owner ruling that it suffices.
+design-branch-deleted-unmerged.md	design-branch-deleted-unmerged	keep	n/a	Guard lane on branch design-branch-delete unmerged; mockup recovery needs owner.
+exit-worktree-hook-unmeasured.md	exit-worktree-hook-unmeasured	keep	n/a	Needs one live EnterWorktree/ExitWorktree run; matcher is in place.
+explain-accessvbom.md	explain-accessvbom	keep	n/a	Owner request needing his word on the Office setting.
+ff-first-lane-not-a-tip.md	ff-first-lane-not-a-tip	keep	n/a	Still true, 0 of 112 merges; harm is one leftover branch.
+handoff-choice-exempts-line.md	handoff-choice-exempts-line	keep	n/a	Still true; reply_judge covers route cites only; claims-carry-backing part (v) in flight.
+handoff-page-context-unread.md	handoff-page-context-unread	keep	n/a	Still true; same in-flight claims-carry-backing part (v) record.
+handoff-verb-list-closed.md	handoff-verb-list-closed	keep	n/a	Still true; adding 'could not' risks false alarms; part (v) is days old.
+hooks-to-mods-judges.md	hooks-to-mods-judges	keep	n/a	Plan step E mostly unbuilt; needs owner ruling per part.
+inbox-saves-other-notices.md	inbox-saves-other-notices	keep	n/a	Owner ruled the bandaid; origin-field fix unmeasured; tags ruled one at a time.
+inbox-send-window-unbounded.md	inbox-send-window-unbounded	keep	n/a	Needs owner pick of option A or B.
+lane-cycle-delete-order.md	lane-cycle-delete-order	keep	n/a	Still true; needs a cycle of lanes, which is rare.
+layout-kind-repeats-extras.md	layout-kind-repeats-extras	keep	n/a	Still true; only bites when a new layout kind is added; error names the remedy.
+layout-legacy-repos.md	layout-legacy-repos	keep	n/a	legacy-repos map still live; waits on q_max and home roll-outs.
+local-triage-tier-proof.md	local-triage-tier-proof	keep	n/a	Owner ruled 2026-11-05: build nothing until a Mac-and-Windows fix exists.
+long-lived-head-lost-in-batch.md	long-lived-head-lost-in-batch	keep	n/a	Still true; merge.keepBranches covers it; restore is one push.
+map-py-base-name-match.md	map-py-base-name-match	keep	n/a	Base-name match is deliberate for sys.path.insert; stdlib collision is rare.
+measured-time-table.md	measured-time-table	keep	n/a	Record says build when the owner asks for the table.
+merge-head-race-remains.md	merge-head-race-remains	keep	n/a	Still true; tool refuses safely and manual dispatch works.
+merge-silent-exit.md	merge-silent-exit	keep	n/a	unknown: two incidents of 10-20, no repro; cause not located.
+nowindow-bin-no-fallback	nowindow-bin-no-fallback	keep	n/a	Still true; only a copy-mode install order hits it, rare
+nowindow-ctrl-c-orphans	nowindow-ctrl-c-orphans	keep	n/a	unknown: Ctrl-C on Windows unmeasured, needs a Windows run
+nowindow-fallback-silent	nowindow-fallback-silent	keep	n/a	Still true; Windows popup return only, rare and harmless
+nowindow-git-prompt-hangs	nowindow-git-prompt-hangs	keep	n/a	unknown: hang unmeasured; merge.py sh() sets no GIT_TERMINAL_PROMPT
+nowindow-scan-misses-os-system	nowindow-scan-misses-os-system	keep	n/a	Scan lists os.system as a named ceiling; product code has none
+old-merge-tool-refuses-stamp	old-merge-tool-refuses-stamp	keep	n/a	Needs install_from_main.sh run on each machine; machine step
+opus-ask-scheduled-text	opus-ask-scheduled-text	keep	n/a	unknown: needs hook dump of source field on installed Claude Code
+page-answer-second-click	page-answer-second-click	keep	n/a	Needs owner to pick the fix; Mac card unmeasured
+pin-missing-files-no-install	pin-missing-files-no-install	keep	n/a	Still true; needs a killed pin add or quarantine, rare
+pinoff1-freshness-flaky	pinoff1-freshness-flaky	keep	n/a	unknown: Windows-only flake, cause unread; pinoff1 case still present
+playwright-rows-measure	playwright-rows-measure	keep	n/a	Owner ruling 2026-10-16 keeps rows until a Mac Playwright run
+push-head-mismatch-trap	push-head-mismatch-trap	keep	n/a	Owner ruling 2026-10-02 holds rule until Banchi reports hatch uses
+record-code-spans-unindexed	record-code-spans-unindexed	keep	n/a	Still true; frequency unmeasured, rare gap
+refresh-lock-untested	refresh-lock-untested	keep	n/a	Still untested; needs a killed child, rare and low harm
+refusal-route-around-guard	refusal-route-around-guard	keep	n/a	Owner ruling: prose only until second route-around measured
+refusal-settle-reads	refusal-settle-reads	keep	n/a	unknown: read cost unmeasured on a real session
+sharables-adopts-the-stamp	sharables-adopts-the-stamp	keep	n/a	Owner ruling 2026-10-06; work waits on sharables' next claim, other repo
+short-copy-passes	short-copy-passes	keep	n/a	Still true; SHARED_MIN is 12, frequency unmeasured, rare
+skill-copy-no-typescript	skill-copy-no-typescript	keep	n/a	Only a cloud or no-symlink copy hits it; error message says what to do
+squash-lane-branch-kept	squash-lane-branch-kept	keep	n/a	Only squash merges hit it; branch kept, harmless
+stamp-shallow-depth-two	stamp-shallow-depth-two	keep	n/a	Owner ruling 2026-09-28: full history for now
+unstarted-guard-held	unstarted-guard-held	keep	n/a	Held on purpose pending a re-measure after triage writes paused
+upgrade-strips-name-port	upgrade-strips-name-port	keep	n/a	Only a backticked name.ext:N in a v1 map; rare
+verdict-pipe-drops-line	verdict-pipe-drops-line	keep	n/a	Still true; one incident, no guard; rare and harmless
+verdict-rewritten-xcode-output	verdict-rewritten-xcode-output	keep	n/a	unknown: xcbeautify log lines unmeasured; needs Mac
+windows-main-run-flakes	windows-main-run-flakes	keep	n/a	Fix landed; closes only after 10 green Windows runs on main
+wp-batch-reads-installed-copy	wp-batch-reads-installed-copy	keep	n/a	Still true (batch reads page.html beside script); needs mid-session template merge, rare

@@ -1,0 +1,26 @@
+where	slug	verdict	size	reason
+L474	records-page-gen-false-alarm	fix	small	guard_merge _runs_generator reads -h, --che, --root as runs; only --check/--print excluded
+L649	waiting-shown-fallback-sibling	fix	small	openShown falls back to sibling design at page.html:2935; still true
+L651	waiting-shown-fallback-untested	fix	small	no test covers openShown fallback; still true
+L683	press-link-unlabelled-link	fix	small	guard counts a link the page does not draw
+L709	text-rules-str-replace-unseen	fix	small	refuses str_replace on closed item or task; false alarm
+L747	wp-more-context-focus	fix	small	page.html:1722 morebtn has no id; focus drops
+L770	page-write-without-n	fix	small	feedback guard false-blocks writer on close update
+L772	page-block-no-closed-hint	fix	small	block reason omits [closed] way out
+L818	set-waiting-page-usage-exit	fix	small	usage error exits 1, same code as already set
+L819	set-waiting-page-new-root	fix	small	mistyped root makes new folder and exits 0
+L901	vitals-tbt-source	fix	small	principles.md source line 241 still lacks a TBT page
+L1012	none-direction-roadmap-test	fix	small	Skill wording gap; small text fix in waiting-page SKILL.md
+L1097	report-guard-url-string-compare	fix	small	report_guard.py:987 string-compares URL; use layout.is_waiting_page_url. False block.
+L1278	answered-fold-false-lock	fix	small	page.html:1639 foldLocked ignores isSaved; stale draft false-locks fold.
+L1314	scan-key-unanchored	fix	small	export_page credential-name regex has no word-start anchor; false alarm confirmed
+L1400	alts-accessible-name	fix	small	page.html .alts buttons lack act+target name per a11y.md
+L1401	bar-stay-open-plural	fix	small	page.html:2096 says '1 stay open.'; update 3 pinning tests
+L1403	park-inbox-sentence	fix	small	SKILL.md claim wrong for item park answers; local_time.py skips only parked:true
+alts-dash-edge-contrast.md	alts-dash-edge-contrast	fix	small	page.html .btn.dash edge still --line; only .pkb uses --faint.
+ask-seen-on-hidden-tab.md	ask-seen-on-hidden-tab	fix	small	markAsksSeen still stamps on every hide and pagehide (page.html:2343-2345).
+carry-source-words.md	carry-source-words	fix	small	SOURCE_RE still only git|page|digest (report_guard.py:726).
+inbox-send-error-counts.md	inbox-send-error-counts	fix	small	_proves and Pages.sent ignore tool_result; results map already exists in the file.
+ps-command-misses-bash	ps-command-misses-bash	fix	small	PS_BASH_OPERATOR in question_form.py still lists only six bash forms
+rail-row-touch-height	rail-row-touch-height	fix	small	page.html .ov-head still min-height 32px with no coarse-pointer rule
+scan-mid-sentence-false-alarm	scan-mid-sentence-false-alarm	fix	small	export_page.py bare_value still refuses when text follows the value

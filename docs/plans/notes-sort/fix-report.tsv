@@ -1,0 +1,23 @@
+where	slug	verdict	size	reason
+L539	config-dir-copies	fix	small	daily_note, override, precompact_handoff, sim_boot_record still copy config_dir logic
+L708	option-letter-keys-id-shape	fix	small	refuses prose like 'key Q4'; false alarm
+L746	feedback-guard-agent-burst	fix	small	false block on agent hand-back; seen twice
+L755	report-guard-model-name-next	fix	small	report guard false alarm, four times in one lane
+L758	check-handoff-count-false-alarm	fix	small	false alarm on '(3 open)'
+L862	test-verdict-temp-half	fix	small	Still true: lint/test_verdict.py lines 66,85,101,159 use default temp
+L887	feedback-home-resolves-cwd	fix	small	False alarm in feedback_guard; no repo-root resolve found on main
+L903	text-size-home-readme	fix	small	a11y.md Text size row still cites MDN outside its home
+L915	report-guard-head-omits-pr	fix	small	report_guard.py:199 head still omits PR, revert, delete
+L923	tracking-turn-git-push-test	fix	small	Row cites test_67 only (rule_mechanisms.json:481); add 61 and 64
+L933	layout-third-origin-parser	fix	small	lint/layout.py still has GITHUB and repo_name copy
+L958	repeat-mark-inbox-ref-space	fix	small	feedback_guard.py:853 MARKED still \S+ with a spaced ref
+L1014	none-direction-task-done	fix	small	call_judge.py:231 is_reask never checks the done key
+L1071	report-guard-model-window	fix	small	Guard false alarm hit twice; spawn_models window untraced
+L1102	cite-reader-tuple-except	fix	small	_caught_as_stop still rejects tuple except; false alarm, one-line fix.
+L1112	repo-item-judged-as-repeat	fix	small	new_items (feedback_guard.py:891) still judges [repo] items; skip them. Advisory false alarm.
+L1255	lint-jobs-copy-suite-jobs	fix	small	test_windows_split.py:315 LINT_JOBS literal copies CHECKS_SUITE_JOBS.
+L1262	step-dir-spelled-twice	fix	small	STEP_PATH (feedback_guard.py:167) and STEP_DIR (override.py:140) duplicate one path.
+L1459	lane-tag-copies	fix	small	guard.py:2338 and report_guard.py:648 copy LANE_TAG from shared_names
+code-check-pin-drift.md	code-check-pin-drift	fix	small	bin/ste-changed PINNED holds only ste-lint and zizmor.
+one-shot-grant-label	one-shot-grant-label	fix	small	GRANT_HOMES in feedback_guard.py still has no one-shot home
+refusal-shapes-missed	refusal-shapes-missed	fix	small	_REFUSAL in precompact_handoff.py still lacks the permission-to-read/edit shapes
