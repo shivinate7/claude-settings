@@ -10017,7 +10017,10 @@ AG_OTHER_SESSION = "c6a5d0c9b8a7f6e5d"
 AG_UNREADABLE = "c7b6e1d0c9b8a7f6e"
 AG_EMPTY = "c8c7f2e1d0c9b8a7f"
 AG_ABSENT = "c9d8a3f2e1d0c9b8a"  # no transcript file is written for this id
-AG_DECOY = "cad9b4a3f2e1d0c9b"  # written beside the MAIN lane fixture: a triage record that only an agent read would use
+AG_DECOY = "cad9b4a3f2e1d0c9b"  # written beside the MAIN lane fixture: a lane record on another step
+AG_TRIAGE_OVER_LANE = "cb0a9f8e7d6c5b4a3"  # beside the MAIN lane fixture: a triage record, which the main lane must beat
+AG_LANE_OVER_TRIAGE = "cc1b0a9f8e7d6c5b4"  # beside the MAIN triage fixture: a lane record with no open pull request
+ARCH_DECOY_TAGS = ["cs-build:lane", "cs-step:agent-step", "cs-repo:o/r"]  # a lane on a step other than the main lane's
 AG_FILLER = [line for i in range(400)
              for line in (role_use("f%d" % i, "Bash", {"command": "true"}), role_result("f%d" % i, "ok"))]
 AG_SPECS = (
@@ -10027,8 +10030,10 @@ AG_SPECS = (
     ("archive-no-target", AG_FULL, AG_FILLER + role_target_call("t1", ARCH_LANE_TAGS)),
     ("archive-no-target", AG_NO_RECORD, [role_use("b1", "Bash"), role_result("b1", "ok")]),
     ("archive-no-target", AG_OTHER_SESSION, role_target_call("t1", ARCH_LANE_TAGS, target=ROLE_OTHER_TWO)),
-    ("archive-lane", AG_DECOY, role_target_call("t1", ARCH_TRIAGE_TAGS)),
+    ("archive-lane", AG_DECOY, role_target_call("t1", ARCH_DECOY_TAGS)),
     ("archive-lane", AG_EMPTY, []),  # no lines: a zero-byte file
+    ("archive-lane", AG_TRIAGE_OVER_LANE, role_target_call("t1", ARCH_TRIAGE_TAGS)),
+    ("archive-triage", AG_LANE_OVER_TRIAGE, role_target_call("t1", ARCH_LANE_TAGS)),
 )
 # An unreadable transcript is a folder at its path, so the guard's open() fails on it.
 AG_FOLDERS = (("archive-no-target", AG_UNREADABLE), ("archive-lane", AG_UNREADABLE))
@@ -10090,8 +10095,8 @@ def agent_scope_case():
     return check
 
 
-# The four allows and refusals below fail on the base guard. It reads the main transcript only, finds no record of the
-# target there, and refuses with the no-record reason. A fixed guard that reads the agent's record passes them.
+# The four cases below judge the agent's own record. A guard that reads the main transcript only fails them: it finds no
+# record of the target there and refuses with the no-record reason.
 archive_agent_allow("an agent's record of a lane with no open pull request is read from its transcript, and allowed",
                     role_path("archive-no-target"), AG_LANE_CLOSED, fake_gh_path(ARCHCLOSED))
 archive_agent_allow("an agent's record of a triage target is read from its transcript, and allowed though a slug pull "
@@ -10125,6 +10130,15 @@ archive_agent_refuse("an agent call with no transcript_path is refused: there is
 archive_refuse("a main-session call reads the main transcript, not the agent folder beside it: the open lane pull "
                "request refuses", role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN,
                lacks=ARCHIVE_READ_PIN)
+# Both transcripts hold a record of the target. A lane record governs over a non-lane one, and of two lane records the
+# agent's own record is the one that counts.
+archive_agent_allow("an agent's lane record on another step beats the main lane record: the main lane's open pull request "
+                    "does not refuse", role_path("archive-lane"), AG_DECOY, fake_gh_path(ARCHOPEN))
+archive_agent_refuse("a main lane record with an open pull request beats an agent's triage record: the open pull request "
+                     "refuses", role_path("archive-lane"), AG_TRIAGE_OVER_LANE, fake_gh_path(ARCHOPEN),
+                     carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_agent_allow("a main triage record does not beat an agent's lane record: with no open pull request the lane is allowed",
+                    role_path("archive-triage"), AG_LANE_OVER_TRIAGE, fake_gh_path(ARCHCLOSED))
 
 
 # =========================================================================== 5h. one lane, one topic
