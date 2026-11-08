@@ -822,7 +822,7 @@ def fenced_lines(rows):
 def paren_cites(row):
     """The text of each parenthesised group of the row that no code span swallows, with backticks dropped so
     "(read `hooks/x.py:2`)" reads as "(read hooks/x.py:2)". The one home of what a backing looks like on a line."""
-    spans = [m.span() for m in CODE_SPAN.finditer(row)]
+    spans = [m.span() for m in INLINE_CODE_RE.finditer(row)]
     return [m.group(1).replace("`", "").strip() for m in PAREN_GROUP.finditer(row)
             if not any(a <= m.start() < b for a, b in spans)]
 
@@ -907,7 +907,7 @@ def backed_lines(texts, changed):
 def named_in_code_spans(row):
     """(paths, names) of the code spans on `row`: a span that is one file path is a path, any other span (a name or a number) is a name."""
     paths, names = [], []
-    for match in CODE_SPAN.finditer(row):
+    for match in INLINE_CODE_RE.finditer(row):
         span = match.group(0).strip("`").strip()
         if not span:
             continue
@@ -969,7 +969,7 @@ def blanked(text):
         for i in range(start, end):
             if chars[i] != "\n":
                 chars[i] = " "
-    for match in CODE_SPAN.finditer(text):
+    for match in MULTILINE_CODE_SPAN.finditer(text):
         start, end = match.span()
         ticks = len(match.group(1))
         blank(outside, start, end)
@@ -1260,8 +1260,9 @@ MECHANISMS = "lint/rule_mechanisms.json"
 # Where a rule's guard, check or CI step lives. No other module holds this set (report_guard.ANSWERED_TOP_DIRS is the
 # top dirs a source path may start with, a different set), so it lives here.
 RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
+# blanked() reads a whole block and keeps a span that crosses a line break whole; every other reader here takes one line.
+MULTILINE_CODE_SPAN = re.compile(INLINE_CODE_RE.pattern, re.S)
 HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 
 
 def anchor_sentences(text):
@@ -1269,7 +1270,7 @@ def anchor_sentences(text):
     code span is a mention of the form, not an anchor."""
     found = {}
     for block in re.split(r"\n[ \t]*\n", text.replace("\r\n", "\n")):
-        spans = [m.span() for m in CODE_SPAN.finditer(block)]
+        spans = [m.span() for m in INLINE_CODE_RE.finditer(block)]
         start = 0
         for match in ANCHOR_RE.finditer(block):
             if any(a <= match.start() < b for a, b in spans):

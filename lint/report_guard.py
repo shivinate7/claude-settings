@@ -147,10 +147,8 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+from inline_code import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py)
 
-# A copy of INLINE_CODE_RE in lint/ste_lint.py, the one home. It stays a copy because importing ste_lint loads the
-# whole linter on every Stop, and an ignored or idle turn must import no linter (test_70).
-INLINE_CODE = r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)"
 
 
 def _span_text(match):
@@ -464,7 +462,7 @@ def done_format_problem(text):
 # `D12: ...`, `D12 (..)`), or `D12's two words`, or it sits in parentheses after words
 # (`short titles (D12)`).
 CITE_ID_RE = re.compile(r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
-CITE_SKIP_RE = re.compile(r"```.*?```|(?-s:" + INLINE_CODE + r")|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
+CITE_SKIP_RE = re.compile(r"```.*?```|(?-s:" + INLINE_CODE_RE.pattern + r")|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
 GLOSS_AFTER_RE = re.compile(
     r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+"""
     r"""|^["')\]]*\s+(?:says|means|is|covers|rules)\s+[A-Za-z][\w'-]*\s+[\w'-]+""")
@@ -677,7 +675,7 @@ PARENT_TARGETS = {"@parent", "parent"}
 # (Don't) cannot span to the next quote. A word that opens with an elided apostrophe ('til, 'Cause, '25,
 # '90s) is no opening quote either: the space before it looks like one, but the apostrophe stands for dropped
 # letters or digits. Text alone cannot tell a lone opener from a real one, so the elisions are named.
-QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'(?!(?i:til|till|cause|cos|bout|em|round|tis|twas|kay|nuff)\b|\d\d(?:s)?\b)[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|' + INLINE_CODE)
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'(?!(?i:til|till|cause|cos|bout|em|round|tis|twas|kay|nuff)\b|\d\d(?:s)?\b)[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|' + INLINE_CODE_RE.pattern)
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
@@ -1718,7 +1716,7 @@ ASK_TEXT_MAX = 6000
 # A `?` that ends a sentence: before white space or the line end, and after any closing mark. A `?` inside a URL or a
 # code span is no question.
 SENTENCE_QUESTION = re.compile(r"\?[*_)\"']*(?:\s|$)")
-CODE_SPAN = re.compile(INLINE_CODE)
+CODE_SPAN = INLINE_CODE_RE
 QUOTE_PREFIX = re.compile(r"^[ ]{0,3}(?:>[ ]?)*")
 INDENTED_CODE = re.compile(r"^(?: {4}|\t)")
 UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\S)", re.I)

@@ -445,16 +445,7 @@ def load_config(start: str) -> dict:
 NUL = "\x00"
 _PH_RE = re.compile(r"\x00\d+\x00+")
 
-# A code span opens with a whole run of backticks and closes with a run of the same length, so a
-# backtick inside a double-backtick span stays inside it. The (?<!`) before the opener keeps an
-# unclosed run from opening a shorter span mid-run. Used by the linter and the fixer.
-INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
-
-
-def code_span_text(match):
-    """The text inside one INLINE_CODE_RE match, without its backtick runs."""
-    run = len(match.group(1))
-    return match.group()[run:-run]
+from inline_code import INLINE_CODE_RE, code_span_text  # noqa: E402,F401  the one home of the inline-code mask (lint/inline_code.py), re-exported for importers
 
 MASK_PATTERNS = [
     INLINE_CODE_RE,                                 # inline code

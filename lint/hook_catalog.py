@@ -498,7 +498,6 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
 # A marker opens overruled text. "No longer" is a marker only as "No longer in force": "No longer used: x" is plain prose.
 # A hyphen after a marker joins it to another word ("Previously-run tests"), so it is no marker.
 OPENS_HISTORY = re.compile(r"(?:superseded|overruled|previously|old ruling|no longer in force)(?![A-Za-z0-9-])", re.I)
@@ -535,7 +534,7 @@ def lines_outside_fences(text):
 
 def mask_code(text):
     """text with each inline code span turned into NUL characters, newlines kept, so every index stays valid."""
-    return CODE_SPAN.sub(lambda m: re.sub(r"[^\n]", "\0", m.group(0)), text)
+    return INLINE_CODE_RE.sub(lambda m: re.sub(r"[^\n]", "\0", m.group(0)), text)
 
 
 def blocks(text):
