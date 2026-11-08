@@ -1,0 +1,11 @@
+{
+  "title": "degen's waiting page data is exported to its roadmap branch",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.63,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "degen registers a waiting page (LT2ST4u9…), but degen's roadmap branch has no waiting/ folder, so its data was never copied, and this account gets 404 on the page. Found by lane export-after-page-write (#1784; coordinator, 23:24 CST Nov 7).",
+  "note": "The page sits on another account, so a degen page writer on the owner's Mac owns the export. Owner task page item 398 now asks a Mac session for both banchi and degen. Done check: degen's roadmap branch holds waiting/items and the page shows its roadmap block. Slug and title by triage; no source gave one.",
+  "updatedAt": "2026-11-07T23:25:00-06:00"
+}

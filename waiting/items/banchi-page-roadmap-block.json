@@ -1,13 +1,13 @@
 {
   "added": "2026-11-08T05:17:00Z",
-  "context": "Goal: banchi's waiting page shows its roadmap. Today the roadmap block is empty, while banchi's roadmap branch holds 146 steps.\nWhy you: banchi's page sits on another account, so no cloud session can rebuild it, and no session on your Mac is reachable from here (ListAgents, 23:16 CST: none). You only start the session; it does the work.\nSteps: on your Mac, open a Claude Code session in the banchi checkout, or tell banchi's page writer if one runs. Paste the line below. Then press Done here.\nLine to paste: Run skill waiting-page, step \"Update the roadmap block\", for banchi's waiting page.",
+  "context": "Goal: banchi's and degen's waiting pages show their roadmap and items.\nWhy you: both pages sit on another account, so no cloud session can write them, and no session on your Mac is reachable from here (ListAgents, 23:16 CST: none). You only start the session; it does the work.\n- banchi: the roadmap block is empty, while banchi's roadmap branch holds 146 steps.\n- degen: degen registers a waiting page (LT2ST4u9\u2026), but degen's roadmap branch has no waiting/ folder, so its data was never copied, and this account gets 404 on the page (lane export-after-page-write, 23:24 CST).\nSteps: on your Mac, open a Claude Code session in each checkout, or tell each repo's page writer if one runs. Paste the line for that repo. Then press Done here.\nbanchi: Run skill waiting-page, step \"Update the roadmap block\", for banchi's waiting page.\ndegen: Run skill waiting-page: export degen's waiting page into waiting/ on degen's roadmap branch, then update its roadmap block.",
   "home": "roadmap-blank-pages",
   "id": "banchi-page-roadmap-block",
   "kind": "task",
   "n": 398,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "ref": "step roadmap-blank-pages; lane session_013NEJKyqU19UoQgbHWPzXBz; #1779",
-  "short": "Fill banchi's blank roadmap",
+  "ref": "step roadmap-blank-pages; step degen-page-export; lane session_013NEJKyqU19UoQgbHWPzXBz; #1779; #1784",
+  "short": "Fix banchi's and degen's pages",
   "status": "open",
-  "title": "Ask a Mac session to fill banchi's blank roadmap block"
+  "title": "Ask a Mac session to fill banchi's blank roadmap block and degen's missing page data"
 }
