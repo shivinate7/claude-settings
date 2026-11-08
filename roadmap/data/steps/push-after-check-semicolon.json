@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a git push joined by ';' after a check in the same command",
+  "why": "A push chained with ';' runs even when the check before it fails, so a red check does not stop the push (#2098, 09:32 CST Nov 8).",
+  "note": "Filed 09:51 CST Nov 8 from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), its own mistake: `check_silent_undo ...; echo; git push` pushed though the check exited 1; fixed on #2098 with an empty Drops-lines commit. Fix: refuse, or ask, a `git push` joined by ';' after another command, and point to '&&'. Red case: that command. One home: extend the ';' reader of step git-write-after-failed-cd (ready), not a second parser.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 711,
+  "updatedAt": "2026-11-08T09:51:00-06:00"
+}
