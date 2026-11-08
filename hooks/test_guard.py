@@ -2634,10 +2634,10 @@ sh("subject: show reads the entry without taking it", VCS + " stash show stash@{
    cwd=SUBJSTASH)
 sh("subject: a hard reset in the tree that holds the stash takes nothing",
    VCS + " reset --hard HEAD", "allow", cwd=SUBJSTASH)
-# `git stash create` (incident 2026-11-07: three agents refused). It writes a stash commit object
-# and prints its hash. It adds no entry, changes no ref, index or working tree, and loses no work.
-# Main reads it as a stack action, so every row over a real entry is RED on main. The SUBJDIRTY row
-# has an empty stack, is GREEN on main, and stays green: `create` is not read against the tree.
+# `git stash create` writes a stash commit object and prints its hash. It adds no entry, changes no
+# ref, index or working tree, and loses no work, so it is a read even over a real stack entry. The
+# rows below pin that, with and without a message argument. The SUBJDIRTY row runs over an empty
+# stack in a dirty tree, which pins that a dirty tree alone does not turn `create` into a write.
 sh("stash create: over a real entry in a dirty checkout takes nothing", VCS + " stash create",
    "allow", cwd=SUBJSTASHDIRTY)
 sh("stash create: a message argument over a real entry takes nothing",
@@ -22537,8 +22537,8 @@ sh("other-checkout: a git -C log into a separate clone of the same repo is allow
    VCS + " -C " + slash(XCL_SEP) + " log --oneline -1", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C show HEAD into a separate clone of the same repo is allowed",
    VCS + " -C " + slash(XCL_SEP) + " show HEAD", "allow", cwd=XCL_PRIMARY)
-# `git stash create` (incident 2026-11-07) writes a stash commit object and takes no entry, so it is a
-# read here too. The clone's stack is judged as its own: a pop and a drop stay refused.
+# `git stash create` writes a stash commit object and takes no entry, so it is a read through `git -C`
+# as well. The clone's stack is judged as its own: a pop and a drop stay refused.
 sh("other-checkout: a git -C stash create into a separate clone of the same repo is allowed",
    VCS + " -C " + slash(XCL_SEP) + " stash create", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C stash pop into a separate clone of the same repo is refused",
