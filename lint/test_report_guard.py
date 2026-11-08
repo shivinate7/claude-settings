@@ -1504,6 +1504,34 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
 
+    # The incident's Done line: turn 1's reviewer ran on its agents/reviewer.md pin (haiku), turn 2's on sonnet.
+    INCIDENT_DONE = ("> **Done:**\n> - BUILT: PR #1504 (fix the agent-end log read), commits 3e3d99ef9 (red test) and "
+                     "cd5545af5 (fix). (test-author haiku, builder sonnet, {reviewer} round 1 FAIL, reviewer sonnet round 2 PASS)"
+                     "\n>\n> **Next:**\n> - Unstarted: none.")
+
+    def test_dm_false_alarm_landed_turn_reviewer_haiku_named_passes(self):
+        # Catches: a landed turn 1 ends at the peer wake, so turn 2's window holds only the sonnet reviewer. Done names
+        # turn 1's haiku round too, and the session's spawns (not the window's) must back that name.
+        out = self.verdict(self.INCIDENT_DONE.format(reviewer="reviewer haiku"), [self.REVIEWER_R2],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R1, landed=True))
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_unlanded_turn_reviewer_haiku_named_passes(self):
+        # Catches: the same Done line with turn 1 unlanded. No wake starts a window there, so the window holds turn 1's
+        # haiku reviewer and turn 2's sonnet reviewer, and both names are backed by the window.
+        out = self.verdict(self.INCIDENT_DONE.format(reviewer="reviewer haiku"), [self.REVIEWER_R2],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R1, landed=False))
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_landed_turn_reviewer_opus_named_blocks(self):
+        # Catches: the control for the two cases above. The same spawns run haiku and sonnet, so a Done line that names
+        # reviewer opus, which no reviewer spawn ran, must still block.
+        out = self.verdict(self.INCIDENT_DONE.format(reviewer="reviewer opus"), [self.REVIEWER_R2],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R1, landed=True))
+        self.assertIsNotNone(out, "the report passed: a reviewer opus name that no reviewer spawn ran was not blocked")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("'reviewer opus' matches no reviewer spawn", out["reason"])
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
