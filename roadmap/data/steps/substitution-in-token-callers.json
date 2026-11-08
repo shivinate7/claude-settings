@@ -1,11 +1,11 @@
 {
   "title": "Every command_indexes caller reads glued substitutions",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzLjdrBsFWzoCdBwG7",
   "why": "The command_indexes callers (guard_stream, guard_wsl, guard_push_delete, question_form) miss glued substitutions, plus the inner cd root and rm after cd.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
-  "updatedAt": "2026-11-07T18:31:00-06:00"
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506.",
+  "updatedAt": "2026-11-07T18:32:00-06:00"
 }

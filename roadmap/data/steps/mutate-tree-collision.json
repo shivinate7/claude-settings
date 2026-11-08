@@ -1,11 +1,11 @@
 {
   "title": "The ruling and decision tree_ paths join mutate_guard's collision check",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKyoqH7Pdyv1k1rK8bE",
   "why": "mutate_guard's collision check leaves out the ruling and decision tree_ paths.",
   "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
-  "updatedAt": "2026-11-07T18:31:00-06:00"
+  "updatedAt": "2026-11-07T18:32:00-06:00"
 }

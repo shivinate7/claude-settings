@@ -1,11 +1,11 @@
 {
   "title": "A mutant drops only the substitution read in guard_merge._push_calls",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzLjdrBsFWzoCdBwG7",
   "why": "No mutant proves the substitution read in guard_merge._push_calls; a change that drops it alone is not caught.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
-  "updatedAt": "2026-11-07T18:31:00-06:00"
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506.",
+  "updatedAt": "2026-11-07T18:32:00-06:00"
 }
