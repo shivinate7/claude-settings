@@ -11640,8 +11640,8 @@ sh("frozen: a caffeinate-wrapped cp onto bin/verdict is denied", "caffeinate cp 
    "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a cp in a process substitution onto bin/verdict is denied", "cat <(cp a " + CFG_VERDICT + ")",
    "deny", "frozen-path", cwd=NOGIT)
-sh("frozen: a setsid-wrapped cp onto bin/verdict is denied", "setsid cp a " + CFG_VERDICT, "deny",
-   "frozen-path", cwd=NOGIT)
+sh("frozen: a setsid-wrapped cp onto bin/verdict is denied by detached-launch first",
+   "setsid cp a " + CFG_VERDICT, "deny", "detached-launch", cwd=NOGIT)
 sh("frozen: an ionice-wrapped cp onto bin/verdict is denied", "ionice cp a " + CFG_VERDICT, "deny",
    "frozen-path", cwd=NOGIT)
 sh("frozen: a strace-wrapped cp onto bin/verdict is denied", "strace cp a " + CFG_VERDICT, "deny",
