@@ -2185,3 +2185,4 @@
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
 - sweep-proof-no-suite: no lint/ test proves `_test_temp.sweep`, so a broken sweep of temp dirs would pass CI (lint/_test_temp.py). Found by lane builder-report-in-head, 2026-11-08. Decision: test-temp-standard.
+- report-in-head-paren-path: an entry that is only a parenthesised path, as in `Files: a.py, (b.py)`, reads as a note and is dropped, so a missing b.py passes (lint/check_report_in_head.py `clean_entry`). Fix: an entry that is only a note raises Unknown. Decision: builder-report-in-head.
