@@ -956,6 +956,18 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
 
 
+def _unreadable_confirm(segment: str) -> bool:
+    """True when `segment` does not tokenize (a quote left open) yet names the merge tool and the text `--confirm`. The words after the
+    open quote cannot be read, so the checkout the merge acts in is unknown: that is a refusal, never a skip. The merge tool is read from
+    the text before the quote that never closes (the last unquoted step of walk_quotes), with merge_tool_args, the one reader of which
+    segment runs the merge tool. A segment with no `--confirm` in its text is not judged: the tool refuses an abbreviated flag
+    (allow_abbrev is off), so it cannot confirm, and an open quote is a shell syntax error besides."""
+    if "--confirm" not in segment:
+        return False
+    opener = max((at for at, _char, quote in walk_quotes(segment) if not quote), default=None)
+    return opener is not None and merge_tool_args(segment[:opener]) is not None
+
+
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
 
 
@@ -978,6 +990,8 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
                 if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
+        if tokens is None and _unreadable_confirm(segment):
+            return True
         if merge_tool_args(segment) is None:
             continue
         try:
