@@ -36,6 +36,8 @@ among them, and no full suite. A red lane does not hand off.
 The lane session runs the lint, never a builder in an isolated worktree, because Claude Code's worktree
 check refuses it there. An isolated agent runs plain, separate git commands, never git named inside python
 text, and runs no background command. Claude Code's own worktree check refuses both.
+A cloud lane session works in its own checkout and never calls EnterWorktree. Inside one, Claude Code's own
+worktree check refuses `merge --lane-lint` in every form.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
