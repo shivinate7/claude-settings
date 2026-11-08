@@ -51,11 +51,12 @@ done and to do, since done to to do is only 4.9 to 5.7:1.
 ## Builder changes, `skills/waiting-page/page.html` (picks 1 and 4)
 
 - CSS: `.segbar` gets `position: relative`.
-- CSS: `.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.01px) * 1000000), 100%); }`.
+- CSS: `.segbar > i { max-width: calc(100% - clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000000), 100%)); }`.
 - CSS: `.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000000), 100%); }`.
 - CSS: `.segbar > .runs > i { flex: var(--c) 1 0px; min-width: min(4px, calc((100% - var(--k) * 2px + 2px) / var(--k))); }`.
-- The switch is a step at W = 5px x steps - 2px: at or above it the cells draw (the 0.01px lead keeps them on at W = edge),
-  below it the runs layer is the full bar (the layout grid is 1/64px, so one step under makes the product 15625px or more).
+- The switch is a step at W = 5px x steps - 2px, in the runs rule only: at or above it the runs layer is 0px, and one
+  layout grid unit under it (1/(64 x zoom) CSS px) makes the product the full bar. The cells take 100% minus the runs
+  width, so the two layers always sum to one bar: no lead to tune against the grid, which moves with zoom.
   A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
 - CSS: `.segbar i.pzd { background: linear-gradient(var(--muted), var(--muted)) left bottom / 100% 50% no-repeat; }`, in place
   of the ring. Base bcaab2c62 has no `.segbar i.pzd::after`, so there is nothing to delete.

@@ -13,7 +13,7 @@ bar width, cells or runs, the narrowest drawn part, the paused mark, and the tok
 
 Measured today (the mockup's "Today" options, 30 steps): rail chip 58px at 390 (cells 0px, nothing drawn), rail chip
 97px at 1280 (1.3px), phase head 90px at 1280 (1.06px). The 97px is the mockup's layout, not the page's: the shipped
-rail chip at 1280 is 216.8px (5 equal columns, 7.2px a cell), so it draws cells. There a paused ring fills its cell and paints solid
+rail chip at 1280 is 216.8px (5 equal columns, a 7.2px pitch; the cell is (216.8 - 58)/30 = 5.29px), so it draws cells. There a paused ring fills its cell and paints solid
 `--muted` beside a solid `--accent` done cell: 1.08 to 1.25:1. Now card and phase head at 390 are 5px a cell or more.
 
 ## Items
@@ -27,6 +27,7 @@ rail chip at 1280 is 216.8px (5 equal columns, 7.2px a cell), so it draws cells.
    reads larger than its share (4px of 58px for 1 of 30).
    Departs from: `skills/roadmap/page/index.html` `segs` and `.bar`, one cell per step at every width.
    Owner grant: yes. Pick: yes.
+   Owner ruling: pick a (runs on narrow bars, each run at least 4 px; wider bars keep one cell per step), waiting-page item 380, 2026-11-07 21:26 CST.
 
 2. **Narrow rule, option Count only.** The same threshold. Under it, no bar: the chip's d/n count stays.
    Gain: no proportion shown wrong. Loss: the 30-step chip and the phase head at 1280 draw no bar while the other chips
@@ -54,11 +55,12 @@ rail chip at 1280 is 216.8px (5 equal columns, 7.2px a cell), so it draws cells.
 ## Builder changes, `skills/roadmap/page/index.html` (picks 1 and 4)
 
 - CSS: `.bar{position:relative}` added to `.bar`.
-- CSS: `.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2.01px)*1000000),100%)}`.
+- CSS: `.bar>i{max-width:calc(100% - clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%))}`.
 - CSS: `.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%)}`.
 - CSS: `.bar>.runs>i{flex:var(--c) 1 0px;min-width:min(4px,calc((100% - var(--k)*2px + 2px)/var(--k)));height:100%}`.
-- The switch is a step at W = 5px x steps - 2px: at or above it the cells draw (the 0.01px lead keeps them on at W = edge),
-  below it the runs layer is the full bar (the layout grid is 1/64px, so one step under makes the product 15625px or more).
+- The switch is a step at W = 5px x steps - 2px, in the runs rule only: at or above it the runs layer is 0px, and one
+  layout grid unit under it (1/(64 x zoom) CSS px) makes the product the full bar. The cells take 100% minus the runs
+  width, so the two layers always sum to one bar: no lead to tune against the grid, which moves with zoom.
   A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
 - JS: `<b class="runs">` gets `style="--k:K"`, its run count (at least 1).
 - CSS: `.bar i.pzd{background:linear-gradient(var(--muted),var(--muted)) left bottom/100% 50% no-repeat;box-shadow:none}`, in place of the ring.
