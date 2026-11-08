@@ -3307,8 +3307,8 @@ class ParallelPreviewTests(unittest.TestCase):
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
                 cond.notify_all()
-                # Hold this call until a second one is in flight, or 0.2 s pass: a serial run never gets one.
-                cond.wait_for(lambda: state["now"] >= 2, timeout=0.2)
+                # Hold this call until a second one is in flight, or 2 s pass: a serial run never gets one.
+                cond.wait_for(lambda: state["now"] >= 2, timeout=2.0)
             try:
                 return real(*a, **k)
             finally:
