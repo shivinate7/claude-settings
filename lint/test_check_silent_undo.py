@@ -2930,5 +2930,106 @@ class PrBase(unittest.TestCase):
         self.assertEqual(rc, 0, "a clean lane read against a base named main exited %d" % rc)
 
 
+def card(*added):
+    """app.txt as base_repo() writes it, with each of `added` after the Card function."""
+    return BODY + "function Card() {}\n" + "".join(line + "\n" for line in added)
+
+
+class MergedMain(unittest.TestCase):
+    """Main's own commits, read on a branch that merged main in. A merge that main made, and a change that main
+    took out, are main's work, not the branch's, so a local run of the branch against its base must not flag them.
+    Each case runs main() with an explicit --upstream, so the verdict under test is the one the base names."""
+
+    def setUp(self):
+        self.r = base_repo()
+
+    def run_main(self, upstream):
+        argv = ["--repo", self.r.dir, "--upstream", upstream, "--head", "HEAD", "--strict"]
+        return PrintedFindings.run_main(self, argv, "utf-8")
+
+    def listed(self, rev, sha):
+        return sha in self.r.sh("rev-list", rev).split()
+
+    def cut_base(self, msg, **files):
+        """Branch B is cut off main with one commit of its own, and pushed. Back on main. -> that commit."""
+        r = self.r
+        r.sh("checkout", "-q", "-b", "B")
+        sha = r.commit(msg, **files)
+        r.sh("push", "-q", "origin", "B")
+        r.sh("checkout", "-q", "main")
+        return sha
+
+    def lane_from_base(self):
+        self.r.sh("checkout", "-q", "-b", "lane", "origin/B")
+
+    def main_drops_a_feature_line(self):
+        """Main merges a feature and takes its added line out by hand. A lane off B then merges main. -> main's merge."""
+        r = self.r
+        self.cut_base("B edits other", other_txt="other v1.5\n")
+        r.sh("checkout", "-q", "-b", "feat")
+        r.commit("feat adds a line", app_txt=card("feature line"))
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "feat")
+        merge = r.commit("Merge feat, drop its line", app_txt=card())
+        r.push()
+        self.lane_from_base()
+        r.commit("lane edits other", other_txt="other v2\n")
+        r.sh("merge", "-q", "--no-edit", "origin/main")
+        return merge
+
+    def test_a_main_merge_that_drops_its_feature_line_is_not_read_on_a_branch_that_merged_main(self):
+        r = self.r
+        merge = self.main_drops_a_feature_line()
+        self.assertTrue(self.listed("origin/main", merge), "scope: main's merge is not on origin/main")
+        self.assertFalse(self.listed("origin/B", merge), "scope: origin/B already holds main's merge")
+        self.assertIn(merge, r.sh("rev-list", "--merges", "origin/B..HEAD").split(), "scope: the lane's range does not reach main's merge")
+        rc, out = self.run_main("origin/B")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_main_change_that_takes_out_a_line_the_base_tip_added_is_not_read_on_a_branch_that_merged_main(self):
+        r = self.r
+        tip = self.cut_base("B adds a branch line", app_txt=card("branch line"))
+        r.commit("main adds the same line", app_txt=card("branch line"))
+        r.push()
+        self.lane_from_base()
+        r.sh("merge", "-q", "--no-edit", "origin/main")  # the lane takes main's line in before main takes it out
+        r.sh("checkout", "-q", "main")
+        takes_out = r.commit("main takes its line out", app_txt=card())
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "origin/main")
+        self.assertEqual(r.sh("rev-parse", "origin/B"), tip, "scope: origin/B is not at the base tip")
+        self.assertTrue(self.listed("origin/main", takes_out), "scope: the change that takes the line out is not on origin/main")
+        self.assertFalse(self.listed("origin/B", takes_out), "scope: origin/B already holds the change that takes the line out")
+        rc, out = self.run_main("origin/B")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_lane_merge_that_drops_a_line_main_added_still_fails(self):  # control
+        r = self.r
+        self.cut_base("B adds a branch line", app_txt=card("branch line"))
+        r.commit("main adds a line to other", other_txt="other v1\nmain line\n")
+        r.push()
+        self.lane_from_base()
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        r.commit("Merge main, drop its line", other_txt="other v1\n")
+        self.assertIn("main line", r.sh("show", "origin/main:other.txt"), "scope: main does not hold the line the lane drops")
+        rc, out = self.run_main("origin/B")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("- main line", out)
+
+    def test_a_lane_commit_that_takes_out_a_line_the_base_tip_added_still_fails(self):  # control
+        self.cut_base("B adds a branch line", app_txt=card("branch line"))
+        self.lane_from_base()
+        self.r.commit("lane takes its line out", app_txt=card())
+        rc, out = self.run_main("origin/B")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("undoing", out)
+
+    def test_explicit_origin_main_is_unchanged_on_a_lane_that_merged_main(self):  # control
+        self.main_drops_a_feature_line()
+        rc, out = self.run_main("origin/main")
+        self.assertEqual(rc, 0, out)
+
+
 if __name__ == "__main__":
     unittest.main()
