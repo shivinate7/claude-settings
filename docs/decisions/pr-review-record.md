@@ -62,7 +62,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 Counted as real `gh` calls, one call per list read however many pages it pages.
 
-- `merge <pr> --confirm`, and the preview, add the third-round gate's reads, one call each however many pages: the repo's issue comments since the oldest open PR, and the open PRs. A PR with no lane tips reads the comments only, since it opened. The gate reads no check run.
+- `merge <pr> --confirm`, and the preview, add the third-round gate's one read, however many pages: the repo's issue comments since the oldest lane tip was committed (less a day for clock skew, the date from local git). A PR with no lane tips reads the comments since it opened. The gate reads no open PR and no check run.
 - `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
