@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint runs the guard suite, after the Playwright install that CI makes",
+  "why": "After #1916 (lane lint runs the picked suites of other Linux jobs), lane lint still never runs hooks/test_guard.py. Its CI step's env NODE_PATH points at `.github/shoot/node_modules`, which only the composite action actions/playwright-setup makes, in 5 steps: npm ci, pin.sh, cache, a browser install and optional apt. So every guard lane reaches the batch with test_guard unrun (lane lane-lint-hook-suites, 05:14 CST Nov 8).",
+  "note": "Fix: give the action's install one home, a script that both the action and ci-job call, so lane lint runs it before the suite. Not built in lane lane-lint-hook-suites: it is a new capability (a browser download, and apt on a local machine), outside #1916's scope. Debt docs/debts/lane-lint-guard-suite-not-run.md (in #1916), Until 2026-11-21. Slug from the lane. Filed 05:16 CST Nov 8; no lane yet, the coordinator assigns one.",
+  "phase": "now",
+  "status": "todo",
+  "order": 614,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T05:14:00-06:00"
+}
