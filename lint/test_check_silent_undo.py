@@ -383,7 +383,7 @@ class PrBodyEscape(unittest.TestCase):
                 ok, why = self.excused(body)
                 self.assertTrue(ok, "a Drops-lines line above the attribution and a bare session link excuses nothing: %s" % (why,))
 
-    def test_a_session_link_inside_other_text_does_not_hide_the_trailer(self):  # control
+    def test_a_session_link_inside_other_text_excuses_nothing(self):  # control
         L, A, S = self.LINE, self.ATTR, self.SESSION
         self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nSee %s\n" % (L, A, S),
                                      "Summary.\n\n%s\n\n%s\n\nClosing prose.\n\n%s\n" % (L, A, S),
