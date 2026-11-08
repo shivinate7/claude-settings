@@ -878,8 +878,9 @@ RECORD_REASON = (
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
     "own turn, then retry. Before you ask the owner for this step, run `git fetch origin`, then "
-    "`git branch -r --contains <commit>`: when the commit is already on the remote record branch, nothing is "
-    "left to do; ask the owner only when it is not. "
+    "`git merge-base --is-ancestor <commit> origin/<record branch>`, where <commit> is the commit the push "
+    "would send: exit 0 means it is already on the record branch and nothing is left to do; ask the owner "
+    "only when it is not. "
     "(decision session-tiers, the triage session is the only writer of the record branch)"
 )
 
