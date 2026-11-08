@@ -9509,6 +9509,21 @@ sh("env: heredoc-prose-refuse: a node body whose template literal holds a // lin
 sh("env: heredoc-prose-refuse: a python body with a # in a string, then an open read of an env file, denies",
    "python3 - <<'EOF'\ns = \"#\"; p = '" + ENV + "'\nopen(p).read()\nEOF", "deny", "env-file", cwd=NOGIT)
 
+# An escaped slash in a regex literal is code, so the blanker must not read the slash after it as a comment
+# opener. Each form below is denied on main and allowed on head, so each is red on head.
+sh("env: heredoc-prose-refuse: a node body with a regex split on an escaped slash, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst p = s.split(/\\//); require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a replace regex holding an escaped slash, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst a = s.replace(/^https?:\\/\\//, ''); require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a regex holding an escaped slash and a star, on the line before a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst a = s.replace(/\\/*$/, '');\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+# A real // comment after a regex line still blanks: the regex does not change where the comment is.
+sh("env: heredoc-prose-allow: a node body with a regex holding an escaped slash, then a // comment naming an env file on its own line, is allowed",
+   "node - <<'EOF'\nconst r = /a\\/b/;\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
