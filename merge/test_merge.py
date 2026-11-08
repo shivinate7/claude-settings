@@ -13706,7 +13706,7 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assert_own_remedy(rc, out, err, "must exist", self.MISSING_REMEDY)
 
     def incident(self):
-        """The record of incident PR 1983: reviewer prose between its CI line and its rule. -> (the record as posted, the same text cut after its CI
+        """A posted record with reviewer prose between its CI line and its rule, which the parser refuses. -> (the record as posted, the same text cut after its CI
         line). The cut parses, so the prose is the one difference between the two."""
         bad = record_text(head=self.NEWEST, rounds=REVIEW_PASS) + "\nReviewer prose.\n" + REVIEW_FOOTER
         cut = bad[:bad.index(REVIEW_CI_LINE) + len(REVIEW_CI_LINE)] + "\n"
@@ -14166,11 +14166,11 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
 
 class ReviewFixAfterFinalFail(ReviewChainFixture):
     """A fix check after the final round (decision hold-unsafe-after-round-3, decision pr-review-record): a failed or WIDE fix check on a record that
-    reached round 3 holds the change, and its finding starts a new lane at round 1. The fix check reads only the newest earlier record, so a plain
-    record that copies rounds 1 to 3 at a new head would hide that fix check, and a fix check from that head would be written. Record A, at EARLIER,
-    holds the rounds and the fix check; record B, at NEWEST, copies the rounds with no fix line; the fix check PASS from B at LIVE must be refused. A
-    refusal exits 2 and prints no record. Its stderr names head A and the cause. Before the final round a FAIL counts as the next round, and a chain
-    after records that PASS every round with no failed fix check is written. Those cases pass on the old code and are the controls."""
+    reached its final round holds the change, and its finding starts a new lane from the first round. The fix check reads only the newest earlier
+    record, so a plain record that copies every round at a new head would hide that fix check, and a fix check from that head would be written. Record A,
+    at EARLIER, holds the rounds and the fix check; record B, at NEWEST, copies the rounds with no fix line; the fix check PASS from B at LIVE must be
+    refused. A refusal exits 2 and prints no record. Its stderr names head A and the cause. Before the final round a FAIL counts as the next round, and a
+    chain after records that PASS every round with no failed fix check is written. Those cases pass on the old code and are the controls."""
 
     TWO_FAILS = REVIEW_FAILED_THREE[:2]  # rounds 1 and 2 FAIL: the rounds a record holds before its final round
 
@@ -14204,7 +14204,7 @@ class ReviewFixAfterFinalFail(ReviewChainFixture):
         self.assertIn("new lane at round 1", err, "the refusal does not say the finding starts a new lane at round 1:\n" + err)
 
     def test_a_fail_fix_check_before_round_3_counts_as_the_next_round_and_the_chain_is_written(self):
-        # control, green on the old code: before the final round a FAIL is the next round, so B's round 2 FAIL fills its slot and the PASS is written
+        # control, green on the old code: before the final round a FAIL is the next round, so B's FAIL in the round before the last fills its slot and the PASS is written
         comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=ReviewFixRemedies.FAIL_ONE,
                                                      fix=(fix_check_line(verdict="FAIL", head=self.OTHER),))),
                     review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.TWO_FAILS)))
@@ -14221,13 +14221,13 @@ class ReviewFixAfterFinalFail(ReviewChainFixture):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
 
 class ReviewFixChainCap(ReviewChainFixture):
-    """A chain holds at most two fix checks (owner page item 426 a, 2026-11-08 10:19 CST). A chain is the consecutive records on the pull request
+    """A chain holds at most two fix checks (owner page item 426 a, decision pr-review-record). A chain is the consecutive records on the pull request
     after the last record with no Fix check line, each carrying a Fix check PASS. A fix check on a chain that already holds two is refused with exit
-    2 and no record. Its stderr names the two fix checks and a fresh chain at round 1. A record with no Fix check line starts a new count. Cases 1
+    2 and no record. Its stderr names the two fix checks and a fresh chain from the first round. A record with no Fix check line starts a new count. Cases 1
     and 3 are red on the old code, which writes the third link; cases 2 and 4 are its controls and pass there."""
 
     HEAD_A, HEAD_B, HEAD_C = "4e" * 20, "5e" * 20, "6e" * 20  # the chain's records, oldest first; the live head is LIVE, or HEAD_C in case 2
-    HEAD_E = "7e" * 20  # a round 2 record with no Fix check line, after the chain
+    HEAD_E = "7e" * 20  # a second-round record with no Fix check line, after the chain
     ONE_FAIL = ReviewFixRemedies.FAIL_ONE
     TWO_FAILS = ReviewFixAfterFinalFail.TWO_FAILS
     ALL_PASS, ALL_PASS_ARGS = ReviewFixRemedies.ALL_PASS, ReviewFixRemedies.ALL_PASS_ARGS
@@ -14258,7 +14258,7 @@ class ReviewFixChainCap(ReviewChainFixture):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_B, "reviewer", "haiku", "PASS"))
 
     def test_a_third_fix_check_after_round_3_is_refused(self):
-        # the same chain after round 3: each record passed rounds 1 to 3 with Net value zero, and each link keeps it, so only the count refuses the link
+        # the same chain after the final round: each record passed every round with Net value zero, and each link keeps it, so only the count refuses the link
         comments = (self.chain_link(1, self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
                     self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
                     self.chain_link(3, self.HEAD_C, fix_base=self.HEAD_B, rounds=self.ALL_PASS, net="zero"))
