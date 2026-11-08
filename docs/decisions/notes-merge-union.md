@@ -17,7 +17,7 @@ versions stay. A note that one lane deletes or reverts can come back when anothe
 `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Check: `lint/check_record_slugs.py` fails a lane only when the lane's diff raises a slug's row count above
-its count at the merge base of origin/main and HEAD, and the slug then has two or more rows. Slugs compare
+its count at the merge base of origin/main and HEAD. The slug must then have two or more rows. Slugs compare
 without case. Duplicates already on main do not fail a lane. With file names given, or when git cannot read
 the diff, any duplicate in the file fails. `--list` prints every duplicate in the checkout's notes file,
 main's included, and exits 0 (1 only when the layout cannot be read). It names slugs, not lanes, and
