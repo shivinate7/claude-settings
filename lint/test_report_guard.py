@@ -1225,6 +1225,32 @@ class DoneNamesModelsTests(unittest.TestCase):
                            "> **Next** Unstarted: none", [BUILDER_SONNET, self.BUILDER_OPUS_R2])
         assert_blocks(self, out, "no model named for builder opus")
 
+    # Roadmap step `report-guard-role-default-model`: a full model id in Done names its family, and a spawn with
+    # no model field runs its agents/reviewer.md pin. The env says sonnet, so a pass shows the pin wins over it.
+    def test_dm_pin_no_model_reviewer_reads_file_pin_haiku(self):
+        out = self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_PINNED])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_green_full_id_sonnet_plain_names_sonnet_run(self):
+        # "claude-sonnet-5-5" carries the family sonnet, so it names the sonnet reviewer's run.
+        assert_no_model_block(self, self.verdict(NAMED_REPORT % "reviewer claude-sonnet-5-5", [REVIEWER_SONNET]))
+
+    def test_dm_green_full_id_sonnet_in_code_span_names_sonnet_run(self):
+        assert_no_model_block(self, self.verdict(NAMED_REPORT % "reviewer `claude-sonnet-5-5`", [REVIEWER_SONNET]))
+
+    def test_dm_green_full_id_haiku_in_parens_names_haiku_run(self):
+        assert_no_model_block(self, self.verdict(NAMED_REPORT % "reviewer (claude-haiku-5-5)", [REVIEWER_HAIKU]))
+
+    def test_dm_green_short_name_sonnet_on_sonnet_spawn_passes(self):
+        # The control for the full-id cases: the short name on the same spawn passes.
+        self.assertIsNone(self.verdict(NAMED_REPORT % "reviewer sonnet", [REVIEWER_SONNET]))
+
+    def test_dm_red_full_id_of_other_family_still_blocks(self):
+        # claude-haiku-5-5 is haiku, and the sonnet reviewer did not run haiku. The Done line must block.
+        # Today it blocks as unnamed; once full ids are read, it blocks as a mismatch. Either way it blocks.
+        assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer claude-haiku-5-5", [REVIEWER_SONNET]),
+                      "Model-name guard")
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
