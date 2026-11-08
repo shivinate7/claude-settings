@@ -21517,6 +21517,43 @@ sh("other-checkout: a git -C commit into a clone of a different repo is allowed"
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
    VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
 
+# A commit message is text. From a lane's own worktree, `../docs` resolves into the primary's
+# `.claude/worktrees` folder, a folder that holds no `docs` checkout. The write scan reads the message's
+# words as paths only when the scan fails closed on the text (an escaped quote, a curly quote, a line break
+# or a hash inside the quotes) and the text also holds a `->` or a move-type word. The rows below are red
+# on a guard that refuses that text as another checkout. A plain message and a quoted heredoc body pass
+# already, so they are green controls for the same path.
+UP_SEP = slash(os.path.relpath(XCL_SEP, XCL_LANE))   # the separate clone, as a path from the lane
+BACKTICK = chr(96)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and a move word, is allowed",
+   VCS + ' commit -m "move \\"pins\\" to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with a curly apostrophe and an arrow, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs don’t"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a multi-line commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs\n\nsee \\"walk\\""', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote, an arrow and a hash, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs # not a comment"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with no write word, is allowed",
+   VCS + ' commit -m "re-point pins to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc commit body naming ../docs is allowed",
+   VCS + " commit -F - <<'EOF'\nre-point \"pins\" -> ../docs\nEOF", "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc in a substitution, naming ../docs in a commit message, is allowed",
+   VCS + " commit -m \"$(cat <<'EOF'\nfix: walk ../docs\nEOF\n)\"", "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message with a lone apostrophe, naming ../docs, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs, don\'t"', "allow", cwd=XCL_LANE)
+
+# Still refused: a real move into a separate clone, from the lane. A relative path to a clone is judged too,
+# and so is a backtick in a message, which the shell runs as a command.
+sh("other-checkout: a cd into a separate clone by a relative path, chained to a commit, is refused",
+   "cd " + UP_SEP + " && " + VCS + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a git -C commit into a separate clone by a relative path is refused",
+   VCS + " -C " + UP_SEP + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a backtick copy into a separate clone, inside a commit message, is refused",
+   VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
+   "deny", "other-checkout", cwd=XCL_LANE)
+
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
 XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
