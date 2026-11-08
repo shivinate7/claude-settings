@@ -21152,12 +21152,13 @@ def _home_fixture(agent_id):
 
 
 def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=None, temp=None,
-                 any_of=(), unnamed=(), config=None, detail=""):
+                 any_of=(), unnamed=(), config=None, detail="", reason_starts=""):
     """Run one call. A problem is recorded unless it gets `expect`, and a deny must name `rule`.
     `temp` is the temp folder the guard run reads. `any_of` names rules, one of which a deny must name,
     for a call an earlier rule may already refuse. A deny must also name none of `unnamed`. `config` is the
-    config folder the run logs to, and `detail` the text a logged deny's matched field must start with: the
-    printed reason names only the rule, so the detail is the one check of the cause."""
+    config folder the run logs to, and `detail` the text a logged deny's matched field must start with. The
+    printed reason names the rule; `reason_starts`, when set, is the text a deny's printed reason must begin
+    with, for a row that pins the whole reason."""
     got, reason = _decide_full(tool, cwd, agent_id=agent_id, temp=temp, command=command, config=config)
     if got != expect:
         problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
@@ -21167,6 +21168,8 @@ def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=Non
         problems.append("%s: the deny names none of %s (%s)" % (label, ", ".join(any_of), reason[:120]))
     elif got == "deny" and any(text in reason for text in unnamed):
         problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
+    elif got == "deny" and reason_starts and not reason.startswith(reason_starts):
+        problems.append("%s: the printed reason does not begin with %r (%s)" % (label, reason_starts, reason[:160]))
     elif got == "deny" and detail and not _logged_deny_detail(config, detail):
         problems.append("%s: no logged deny carries the detail %r" % (label, detail))
 
@@ -21919,11 +21922,12 @@ def _relesc_scope(agent, folders):
 
 
 def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash",
-                needs=(), detail=""):
+                needs=(), detail="", reason_starts=""):
     """Register one row: `command` as a call of `tool` from folders[cwd_key], as `agent`, judged `expect`.
     `command` takes the folder paths as %(name)s keys. The row asserts its scope first. `needs` names the
     folder keys the fixture may not make on this platform (a symlink); a row missing one skips. `detail`, a
-    deny's matched-field prefix, is read from the run's own guard.log, in a config folder of the row's own."""
+    deny's matched-field prefix, is read from the run's own guard.log, in a config folder of the row's own.
+    `reason_starts` is the text a deny's printed reason must begin with (see `_expect_call`)."""
     def check():
         folders, problems = _relesc_fixture()
         if problems:
@@ -21938,7 +21942,8 @@ def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, 
         found = []
         config = tempfile.mkdtemp(prefix="relesc-cfg-", dir=ROOT) if detail else None
         _expect_call(found, label, expect, tool, folders[cwd_key], agent, command % shell, rule=rule,
-                     temp=RELESC_TMP, any_of=any_of, unnamed=(ROOT, slash(ROOT)), config=config, detail=detail)
+                     temp=RELESC_TMP, any_of=any_of, unnamed=(ROOT, slash(ROOT)), config=config, detail=detail,
+                     reason_starts=reason_starts)
         return (not found), ("; ".join(found) if found else "as the row names")
 
     FIXTURELESS_CHECKS.add(check)
@@ -22106,9 +22111,12 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
 # folder. The incident: an agent meant the restore for its red checkout, typed the path relative, and overwrote its
 # own edit. The clause refuses that. The folder is named by an absolute path (`%(red)s`), by a relative one
 # (`%(red_from_home)s`), or by a cd, pushd or -C. A restore that names red in its own segment, or runs in red after a
-# chained cd, resolves in red, and passes. Each deny checks its logged detail, which the printed reason does not carry.
+# chained cd, resolves in red, and passes. Each deny checks its logged detail. The printed reason names the rule; a
+# relative-restore deny's printed reason also carries the restore text, which one row pins whole (`reason_starts`).
 # Decision: an-agent-outside-its-home-tree-must-stop.
-RED_RESTORE_DETAIL = _load_guard_module().RED_RESTORE_DETAIL   # the guard's own detail: the rows check its prefix
+_GUARD_UNDER_TEST = _load_guard_module()
+RED_RESTORE_DETAIL = _GUARD_UNDER_TEST.RED_RESTORE_DETAIL   # the guard's own detail: the rows check its prefix
+RED_RESTORE_REASON = _GUARD_UNDER_TEST.WORKTREE_HOME_RESTORE_REASON   # the guard's own printed text
 
 # Deny, from the recorded home: a relative restore whose command names the agent's own red-run folder in another segment.
 _relesc_add("worktree-home red restore: git -C <red> status && git restore src/app.py, a relative restore after a "
@@ -22198,10 +22206,21 @@ _relesc_add("worktree-home red restore: git restore --source HEAD t.py, no red f
 _relesc_add("worktree-home red restore: git -C <red> status && git -C $X restore t.py, a variable folder the clause does "
             "not read, is refused by shared-tree", "deny", "git -C %(red)s status && git -C $X restore t.py", "home",
             rule="shared-tree")
+# The printed reason of a relative-restore deny: the restore text the guard prints, after its rule name, whole.
+_relesc_add("worktree-home red restore: git -C <red> status && git restore src/app.py, the printed reason names the "
+            "relative path and gives the absolute-path remedy, is refused", "deny",
+            "git -C %(red)s status && git restore src/app.py", "home", rule="worktree-home",
+            detail=RED_RESTORE_DETAIL, reason_starts="worktree-home: " + RED_RESTORE_REASON)
+# The work-tree skip decides this row: the restore's tree is another checkout, not the one its cwd is in, so the
+# clause does not read its path. A red folder named in the command does not make it a restore of red.
+_relesc_add("worktree-home red restore: git -C <red> status && git --work-tree=<another checkout> restore t.py, the "
+            "tree it runs in is not read, is allowed", "allow",
+            "git -C %(red)s status && git --work-tree=%(other_red)s restore t.py", "home")
 
 
-# The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
-# today. The new clause may not add to either; a count above its pin fails. Rows: label, agent, cwd key,
+# The cost pins: the git spawns and worktree-list spawns each call makes. The first rows are measured on the
+# unchanged code, and the new clause may not add to them. The restore rows are measured with the restore clause
+# built, so each pin there is what the clause spends. A count above its pin fails. Rows: label, agent, cwd key,
 # command, most spawns, most worktree lists.
 RELESC_COST = (
     ("mkdir -p ../tmp from the home", RELESC_AGENT, "home", "mkdir -p ../tmp", 4, 0),
@@ -22211,7 +22230,9 @@ RELESC_COST = (
     ("mkdir ../tmp from the primary, no record", RELESC_FREE, "free", "mkdir ../tmp", 4, 0),
     ("mkdir fresh from the home, allowed", RELESC_AGENT, "home", "mkdir fresh", 4, 0),
     ("git -C red status && git restore src/app.py from the home", RELESC_AGENT, "home",
-     "git -C %(red)s status && git restore src/app.py", 6, 0),
+     "git -C %(red)s status && git restore src/app.py", 4, 0),
+    ("git -C red status && git restore <home>/src/app.py, an absolute target, from the home", RELESC_AGENT, "home",
+     "git -C %(red)s status && git restore %(home)s/src/app.py", 6, 0),
 )
 
 
