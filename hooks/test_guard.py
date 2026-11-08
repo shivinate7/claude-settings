@@ -15478,12 +15478,34 @@ def ors_h5(label):
     return ors_chain(label, VCS + " status && " + ORS_PUSH)
 
 
-ors_red("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: asks", ors_h1)
+def ors_deny_alone(label, build):
+    """A chained ask command: `build` makes the scenario, then the push must deny as a chained ask command, since an
+    ask command runs alone (rule ask-alone)."""
+    def case():
+        ctx = build(ors_slug(label))
+        problem = ors_scope_problem(ctx, red=True)
+        if problem:
+            return False, problem
+        decision, reason = ors_push(ctx)
+        if decision != "deny" or CHAIN_ASK not in reason:
+            return False, "the push was %s (%s), want deny naming %s" % (decision, reason[:80], CHAIN_ASK)
+        problem = ors_reason_problem(reason)
+        if problem:
+            return False, problem
+        return True, "denied as a chained ask command: " + ctx["note"]
+    FIXTURELESS_CHECKS.add(case)
+    LOG_CHECKS_EXTRA.append((label, case))
+
+
+ors_deny_alone("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h1)
 ors_allow("push-owes-review-record: H1c the same chain with a record at H: allowed silently", ors_h1c)
-ors_red("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: asks", ors_h2)
-ors_red("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: asks", ors_h3)
-ors_red("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: asks",
-        ors_h4)
+ors_deny_alone("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h2)
+ors_deny_alone("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h3)
+ors_deny_alone("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: "
+               "denies, ask-alone", ors_h4)
 ors_allow("push-owes-review-record: H5 a status check then a push, HEAD at H and the remote at H: allowed silently", ors_h5)
 
 
