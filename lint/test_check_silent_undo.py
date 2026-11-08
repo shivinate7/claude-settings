@@ -2299,14 +2299,10 @@ class RetireCite(unittest.TestCase):
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
 
     def test_a_green_run_below_the_pr_head_is_deferred_to_merge_and_excuses_the_debt_delete_in_ci(self):  # ruling 20:03 CST
-        self.land({self.DEBT: debt(PROSE)})
-        head = self.drop(self.DEBT)
-        self.assert_deleted(head, self.DEBT)
-        body = self.CITE % (self.SLUG, RUN_URL)
-        below = self.r.sh("rev-parse", "origin/main")  # the parent of the PR head: a strict ancestor, so the cite is deferred to merge
-        problems, notes = self.silent(head, body, Runs(("success", below)))
+        head, body, lane = self.cited_close_on_a_lane()
+        problems, notes = self.silent(head, body, Runs(("success", lane)))  # the lane tip is in base..head: a cite on it is deferred to merge
         self.assertFalse(self.finding(problems, self.DEBT), (problems, notes))
-        self.assertTrue(any("deferred to merge" in n and below[:9] in n for n in notes), notes)
+        self.assertTrue(any("deferred to merge" in n and lane[:9] in n for n in notes), notes)
 
     def test_no_run_reader_excuses_nothing(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2431,6 +2427,18 @@ class RetireCite(unittest.TestCase):
         self.assert_deleted(head, self.DEBT)
         return head, self.CITE % (self.SLUG, RUN_URL)
 
+    def cited_close_on_a_lane(self):
+        """cited_close, with a lane tip below the head: the branch cuts from origin/main, commits its own lane, then deletes the debt.
+        The lane tip is in base..head, so a cite on it is deferred to merge. -> (head, body, lane tip)."""
+        self.land({self.DEBT: debt(PROSE)})
+        self.r.sh("checkout", "-q", "-b", "retire", "origin/main")
+        lane = self.r.commit("lane: a commit", lane_txt="lane\n")
+        self.r.sh("rm", "-q", self.DEBT)
+        self.r.sh("commit", "-q", "-m", "drop the files")
+        head = self.r.sh("rev-parse", "HEAD")
+        self.assert_deleted(head, self.DEBT)
+        return head, self.CITE % (self.SLUG, RUN_URL), lane
+
     def cli(self, head, runs, flag=True, env=None):
         """main() on `head` as CI runs it: `--pr-body-env CASE_BODY` when flag is set, the merge tool's Host.cited_run as the run
         reader `runs` (a Runs fake), and `env` for the run's variables. PR_BODY, CASE_BODY and CI start unset. -> (exit code, printed text).
@@ -2461,11 +2469,10 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_the_run_is_read_against_the_head_the_flag_gives(self):
-        head, body = self.cited_close()
-        below = self.r.sh("rev-parse", "origin/main")  # the parent of the head: a green run there excuses nothing
-        self.r.sh("checkout", "-q", "--detach", below)  # the checkout is not the head, so a reader keyed to HEAD reads this run
+        head, body, lane = self.cited_close_on_a_lane()
+        self.r.sh("checkout", "-q", "--detach", lane)  # the lane tip below the head: the checkout is not the head, so a reader keyed to HEAD reads this run
         self.assertNotEqual(self.r.sh("rev-parse", "HEAD"), head, "premise: the checkout must not sit at the head")
-        runs = Runs(("success", below))
+        runs = Runs(("success", lane))
         code, out = self.cli(head, runs, env={CASE_BODY: body})
         self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the cited run, so the case proves nothing")
         self.assertEqual(code, 0, out)
