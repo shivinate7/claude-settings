@@ -9016,7 +9016,7 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
-# ---- auto-merge (owner ruling of 2026-11-07 19:03 CST): a hook refuses auto-merge for Claude, and the button stays the
+# ---- auto-merge (decision no-merge-during-batch-ci): a hook refuses auto-merge for Claude, and the button stays the
 # owner's. Auto-merge skips the merge tool's records rebuild. The rule runs before merge-checks and bare-merge, so a pending
 # or red head still prints the auto-merge reason. It denies in every repo, merge-tool stamp or not. Its cases sit in the
 # auto-merge section after the bare-merge cases, where the stamp repos are built.
@@ -9262,8 +9262,8 @@ sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 
    silent=True, cwd=STAMPREPO)
 
 
-# ---- auto-merge cases (owner ruling of 2026-11-07 19:03 CST). Each denial names the merge tool and never asks. A gh api PUT
-# of a merge path merges the head, so it is judged as `gh pr merge 5 -R o/r` is (coordinator answer, 2026-11-07 19:07 CST).
+# ---- auto-merge cases (decision no-merge-during-batch-ci). Each denial names the merge tool and never asks. A gh api PUT
+# of a merge path merges the head, so it is judged as `gh pr merge 5 -R o/r` is.
 _AUTO_GREEN = dict(env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 _AUTO_PENDING = dict(env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 _AUTO_RED = dict(env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
