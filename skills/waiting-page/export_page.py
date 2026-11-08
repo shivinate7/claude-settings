@@ -217,23 +217,25 @@ def email_is_no_person(found):
 
 
 WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
-LOWER_WORD = re.compile(r"[a-z]+")  # a hyphen part in lower case only
-CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # the words here have at most three consonants in a row; `y` counts as one
+LOWER_WORD = re.compile(r"[a-z]+")  # a separated part in lower case only
+CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # four consonants in a row; `y` counts as one, so `monstrous` (nstr) is refused by the run
+LOWER_RUN = re.compile(r"[b-df-hj-np-tv-z]{5,}", re.I)  # five in a row, used per part by the lower-case separated form
 
 
 def letters_are_words(value):
-    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form and no run of
-    four or more consonants. A value with a hyphen whose parts are all lower case (`tight-compact`) is checked for the
-    run in each part alone; any other value also needs a third or more of its letters to be vowels, and its run is
-    checked across the joined letters. `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass. Random letters in a mixed
-    case or with few vowels do not. Random lower-case letters with enough vowels still pass."""
+    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form. A value of
+    two or more parts split on `-` or `_`, all lower case (`tight-compact`, `page_length_limit`), skips the vowel share
+    and is refused only when one part holds a run of five or more consonants. Any other value needs at least 30% of its
+    letters to be vowels and no run of four or more consonants across the joined letters. `REPLACE_WITH_YOUR_KEY` and
+    `infrastructure` pass. Random letters in a mixed case or with few vowels do not. Random lower-case letters with
+    enough vowels still pass."""
     parts = [p for p in re.split(r"[_-]", value) if p]
     letters = "".join(parts)
     if not (letters and all(WORD_SEGMENT.fullmatch(p) for p in parts)):
         return False
-    hyphen_parts = value.split("-")
-    if len(hyphen_parts) > 1 and all(LOWER_WORD.fullmatch(p) for p in hyphen_parts):
-        return not any(CONSONANT_RUN.search(p) for p in hyphen_parts)
+    separated = re.split(r"[_-]", value)
+    if len(separated) > 1 and all(LOWER_WORD.fullmatch(p) for p in separated):
+        return not any(LOWER_RUN.search(p) for p in separated)
     return (sum(c in "aeiouAEIOU" for c in letters) * 10 >= len(letters) * 3
             and not CONSONANT_RUN.search(letters))
 
