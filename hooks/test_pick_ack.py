@@ -57,6 +57,7 @@ OWN_ENV = "cse_PICKSELF01"  # what LANE_ENV holds for OWN_REMOTE
 TARGET = "session_PICKTGT01"  # the lane the send goes to
 OTHER = "session_PICKOTHER01"  # another lane
 PARENT = "session_PICKPARENT01"  # this session's parent: the target of a send to "@parent"
+OTHER_PARENT = "session_PICKOTHERPARENT01"  # the parent of OTHER, which no own record of this session names
 FIXTURE_TIME = "2026-11-08T09:00:00.000Z"  # a fixed stamp: no case reads the clock
 PICK = ("Goal: keep the stamp check in the lint job.\n"
         "Problem (rule): the stamp runs after lint, so a red stamp hides the lint verdict.\n"
@@ -115,15 +116,22 @@ def real_frame_shape(record, from_session):
             and content.startswith('<cross-session-message from-session="%s">' % from_session))
 
 
-def own_session_record(parent):
-    """A get_session call and its result for this session. The result is the record's JSON: a ccr block whose id is
-    the remote id and which names its parent_session_id, as get_session returns it."""
-    tool_id = "fixture-get-session"
-    call = {"type": "tool_use", "id": tool_id, "name": GET_SESSION, "input": {}}
-    body = json.dumps({"ccr": {"id": OWN_REMOTE, "title": "a lane session", "tags": [], "parent_session_id": parent}})
+def get_session_record(record_id, parent, given=None):
+    """A get_session call and its result. `given` is the call's input: {} for this session's own call, or
+    {"session_id": other} for another session's. The result is the record's JSON: a ccr block with the record's
+    remote id and its parent_session_id, as get_session returns it."""
+    given = given or {}
+    tool_id = "fixture-get-session-%s-%s" % (record_id, given.get("session_id", "own"))
+    call = {"type": "tool_use", "id": tool_id, "name": GET_SESSION, "input": given}
+    body = json.dumps({"ccr": {"id": record_id, "title": "a session", "tags": [], "parent_session_id": parent}})
     done = {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": body}]}
     return [{"type": "assistant", "cwd": REPO, "message": {"role": "assistant", "content": [call]}},
             {"type": "user", "cwd": REPO, "message": {"role": "user", "content": [done]}}]
+
+
+def own_session_record(parent):
+    """This session's own get_session call and its result: the record names OWN_REMOTE and its parent."""
+    return get_session_record(OWN_REMOTE, parent)
 
 
 def sent(target, message, tool_id):
@@ -315,6 +323,35 @@ def case_uuid_parent_send_asks_without_remote_env():
     parent_send_asks_with_uuid_payload(
         "@parent, payload id a UUID, env unset: a reply asks, resolved through the own record's ccr.id",
         "parent-uuid-noenv", None)
+
+
+def case_own_record_ignores_other_session_get_session():
+    # A get_session call that names another session reads that session's record, never this one's. With the env
+    # unset, the parent comes from the own record alone: the other session's parent must not be read for @parent.
+    case = "own_record_id: a get_session call naming another session never gives this session's record"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
+    other = get_session_record(OTHER, OTHER_PARENT, given={"session_id": OTHER})
+    frame = real_inbound(OTHER_PARENT, PICK)
+    shapes = (
+        ("after this session's own call", "own-record-after-own", [own_session_record(PARENT), other, frame], True),
+        ("as the only call", "own-record-only", [other, frame], False),
+    )
+    for label, name, items, has_own in shapes:
+        path = transcript(name, [owner_said("Run the lint on the batch."), *items])
+        check(case + " (" + label + "): scope: the other record names its own parent",
+              own_session.own_session_read(path, OTHER)[2] == OTHER_PARENT, "other parent is not read")
+        want = OWN_REMOTE if has_own else None
+        check(case + " (" + label + "): own_record_id is " + str(want), own_session.own_record_id(path) == want,
+              "own_record_id gave %r" % (own_session.own_record_id(path),))
+        with mock.patch.dict(os.environ) as env:
+            env.pop(LANE_ENV, None)
+            got, err = send_capturing_stderr(fn, AGREED, path, target="@parent")
+        check(case + " (" + label + "): a reply to @parent passes", got is None, "asked: got %r" % (got,))
+        lines = 0 if has_own else 1  # the own parent resolves quietly; no parent resolves with one stderr line
+        check(case + " (" + label + "): stderr lines: %d" % lines, len(err) == lines, "stderr lines: %r" % (err[:3],))
 
 
 def case_quoted_departs_line_asks():
@@ -581,6 +618,7 @@ CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_check
          case_departs_pick_with_real_checked_passes, case_inbound_pick_with_real_checked_passes,
          case_parent_send_asks_on_parent_departs_frame, case_parent_send_without_parent_id_passes_with_stderr,
          case_uuid_parent_send_asks_with_remote_env, case_uuid_parent_send_asks_without_remote_env,
+         case_own_record_ignores_other_session_get_session,
          case_quoted_departs_line_asks, case_numbered_departs_line_asks,
          case_fenced_departs_line_passes, case_departs_line_after_fence_asks,
          case_lone_backtick_in_text_does_not_hide_departs_line,
