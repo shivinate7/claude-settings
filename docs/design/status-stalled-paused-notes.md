@@ -65,7 +65,7 @@ The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
 - Open: paused cells under ~3px read like done (measured 1.02-1.09:1 on this page's tokens); built by lane `nfp-narrow-paused-cell`:
   a paused cell paints its lower half in `--muted` and a narrow bar draws one run per kind (`status-narrow-cells-notes.md`
-  picks "Low cell" and "Runs"). The owner question on runs is open on page item 380.
+  picks "Low cell" and "Runs"). The owner ruled runs on page item 380 (pick a, 2026-11-07 21:26 CST); see roadmap-narrow-cells-notes.md, item 1.
 - Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane

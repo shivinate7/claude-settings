@@ -13,7 +13,7 @@ bar width, cells or runs, the narrowest drawn part, the paused mark, and the tok
 
 Measured today (the mockup's "Today" options, 30 steps): rail chip 58px at 390 (cells 0px, nothing drawn), rail chip
 97px at 1280 (1.3px), phase head 90px at 1280 (1.06px). The 97px is the mockup's layout, not the page's: the shipped
-rail chip at 1280 is 216.8px (5 equal columns, a 7.2px pitch; the cell is (216.8 - 58)/30 = 5.29px), so it draws cells. There a paused ring fills its cell and paints solid
+rail chip at 1280 is 216.8px (5 equal columns, a 7.2px pitch; the cell is (216.8 - 58)/30 = 5.29px), so it draws cells. In the mockup's 97px chip a paused ring fills its cell and paints solid
 `--muted` beside a solid `--accent` done cell: 1.08 to 1.25:1. Now card and phase head at 390 are 5px a cell or more.
 
 ## Items
@@ -61,7 +61,6 @@ rail chip at 1280 is 216.8px (5 equal columns, a 7.2px pitch; the cell is (216.8
 - The switch is a step at W = 5px x steps - 2px, in the runs rule only: at or above it the runs layer is 0px, and one
   layout grid unit under it (1/(64 x zoom) CSS px) makes the product the full bar. The cells take 100% minus the runs
   width, so the two layers always sum to one bar: no lead to tune against the grid, which moves with zoom.
-  A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
 - JS: `<b class="runs">` gets `style="--k:K"`, its run count (at least 1).
 - CSS: `.bar i.pzd{background:linear-gradient(var(--muted),var(--muted)) left bottom/100% 50% no-repeat;box-shadow:none}`, in place of the ring.
 - JS: `segs(c,n)` appends `<b class="runs">` holding one `<i class="KIND" style="--c:COUNT">` per kind with a count above 0, in
@@ -97,7 +96,7 @@ nothing in either mockup; it reads the harness, not the screen in the frames.
   the Now card words carry it.
 - The 4px floor of a run holds for every bar the pages draw. The narrowest is the 30-step rail chip, 39.4px at a 320px
   viewport; k runs need 6k - 2px (34px for six, the most there are). Below 6k - 2px the floor gives way: each run takes
-  an equal share, so every run stays visible. The test pins only that each run shows at 1px or more (a 6-step bar, 20px).
+  an equal share, so every run stays visible. Tests pin the 4px floor (RUN_MIN_PX) from 6k - 2px up, at the 320 and 390 rail chip and the 1280 phase head, and that each run shows below it (a 6-step bar, 20px). Zoom sweeps (1.1, 2) pin one layer at the edge.
 - Open: at the 4px floor a 1-step run reads larger than its share (4px of 58px for 1 of 30). The d/n count is exact.
 - Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 

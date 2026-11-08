@@ -80,7 +80,7 @@ The detector found nothing. It reads the harness, not the screen in the frames.
   words. A question for the owner, not blocking: is the stalled band's red mark enough of a key?
 - Open: paused cells under ~3px read like done (measured 1.08-1.25:1 on the roadmap tokens); built by lane `nfp-narrow-paused-cell`:
   a paused cell paints its lower half in `--muted` and a narrow bar draws one run per kind (`roadmap-narrow-cells-notes.md`
-  picks "Low cell" and "Runs"). The owner question on runs is open on page item 380.
+  picks "Low cell" and "Runs"). The owner ruled runs on page item 380 (pick a, 2026-11-07 21:26 CST); see roadmap-narrow-cells-notes.md, item 1.
 - Open: Tint (item 3) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane

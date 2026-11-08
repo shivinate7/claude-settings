@@ -26,6 +26,7 @@ done and to do, since done to to do is only 4.9 to 5.7:1.
    larger than its share.
    Departs from: `skills/waiting-page/page.html` `segs` and `.segbar`, one cell per step at every width.
    Owner grant: yes. Pick: yes.
+   Owner ruling: pick a (runs on narrow bars, each run at least 4 px; wider bars keep one cell per step), waiting-page item 380, 2026-11-07 21:26 CST.
 
 2. **Narrow rule, option Count only.** The same threshold; under it, no bar, the d/n count stays.
    Loss: the current chip draws no bar while its neighbours do. Pick: no.
@@ -57,7 +58,6 @@ done and to do, since done to to do is only 4.9 to 5.7:1.
 - The switch is a step at W = 5px x steps - 2px, in the runs rule only: at or above it the runs layer is 0px, and one
   layout grid unit under it (1/(64 x zoom) CSS px) makes the product the full bar. The cells take 100% minus the runs
   width, so the two layers always sum to one bar: no lead to tune against the grid, which moves with zoom.
-  A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
 - CSS: `.segbar i.pzd { background: linear-gradient(var(--muted), var(--muted)) left bottom / 100% 50% no-repeat; }`, in place
   of the ring. Base bcaab2c62 has no `.segbar i.pzd::after`, so there is nothing to delete.
 - JS: `segs(c, n)` appends `<b class="runs">` holding one `<i class="KIND" style="--c:COUNT">` per kind with a count above
@@ -92,8 +92,9 @@ nothing; it reads the harness, not the screen in the frames.
   in-progress and stalled blocks sit between them in the fixture, but a phase with neither puts them side by side.
 - The 4px floor of a run holds for every bar the pages draw. The narrowest is the 30-step rail chip, 39.4px at a 320px
   viewport; k runs need 6k - 2px (34px for six, the most there are). Below 6k - 2px the floor gives way: each run takes
-  an equal share, so every run stays visible. The test pins only that each run
-  shows at 1px or more (a 6-step bar, 20px).
+  an equal share, so every run stays visible. Tests pin the 4px floor (RUN_MIN_PX) from
+  6k - 2px up, at the 320 and 390 rail chip and the 1280 phase head, and that each run shows below it (a 6-step bar,
+  20px). Zoom sweeps (1.1, 2) pin one layer at the edge.
 - Open: at the 4px floor a 1-step run reads larger than its share. The d/n count is exact.
 - Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 
