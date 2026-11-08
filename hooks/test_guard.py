@@ -13483,6 +13483,8 @@ DOTROOT = os.path.join(ROOT, "dotroot")
 def _build_dotroot():
     make_repo(DOTROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
                         "src/app.py": "x = 1\n", "README.md": "base\n",
+                        # A root .py that no test pattern matches, so a shell glob `*.py` expands to a file.
+                        "main.py": "x = 1\n",
                         # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
                         "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n"})
 
@@ -13540,6 +13542,10 @@ sh("builder-test: shell write, git ls-files -x '*.py' of src piped to xargs, sed
 # A glob over src names product files only, since src holds no test.
 sh("builder-test: shell write, sed -i over the src/*.py glob, is allowed",
    "sed -i s/a/b/ src/*.py", "allow", **DR)
+# The shell's `*` stays in one segment, so `*.py` names only main.py, which is no test. A glob that
+# crossed the `/` would name tests/test_a.py.
+sh("builder-test: shell write, sed -i over the *.py glob at the root, is allowed",
+   "sed -i s/a/b/ *.py", "allow", **DR)
 # Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
 # ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
 # test in tests/, so the case is refused.
