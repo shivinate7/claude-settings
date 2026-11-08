@@ -52,6 +52,24 @@ OPENS_CODE = (
 )
 
 
+# Runs report_guard.py as the Stop hook runs it, and writes to stderr the number of builtin calls the run made (the c_call
+# events of sys.setprofile). The count is the same on every run of one code, so a case that compares two sizes reads no clock.
+CALLS_CODE = (
+    "import json, runpy, sys\n"
+    "calls = [0]\n"
+    "def count(frame, event, arg):\n"
+    "    if event == 'c_call':\n"
+    "        calls[0] += 1\n"
+    "sys.setprofile(count)\n"
+    "try:\n"
+    "    runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    "except SystemExit:\n"
+    "    pass\n"
+    "sys.setprofile(None)\n"
+    "sys.stderr.write('CALLS ' + str(calls[0]) + '\\n')\n"
+)
+
+
 def setUpModule():
     trg.setUpModule()  # the run folder, CLAUDE_CONFIG_DIR, the model stub and the missing route-rows seam
 
@@ -157,6 +175,21 @@ class CannotClaimTests(unittest.TestCase):
 
     def assert_passes(self, out, case):
         self.assertIsNone(out, "%s was refused: %s" % (case, out and out.get("reason")))
+
+    def reply_run(self, text, code=None, timeout=15):
+        """The Stop run on one reply, with no refusals file and no route rows. `code`, when given, wraps report_guard.py
+        as OPENS_CODE and CALLS_CODE do; else the Stop hook runs as it is. Returns the finished process."""
+        hook_base.write_route_rows(self.rows, [])
+        transcript = trg.write_transcript([trg.human("open a PR"), trg.assistant_text(text)], self.run_dir)
+        hook = {"hook_event_name": "Stop", "transcript_path": transcript, "stop_hook_active": False, "cwd": self.run_dir}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
+        env[hook_base.ROUTE_ROWS_ENV] = self.rows
+        argv = [sys.executable, "-c", code, trg.REPORT_GUARD] if code else [sys.executable, trg.REPORT_GUARD]
+        run = subprocess.run(argv, input=json.dumps(hook), capture_output=True, text=True, timeout=timeout,
+                             env=hook_base.surface_env(env, "local"))
+        self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
+        self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
+        return run
 
     # ---- red: each fails on the unchanged code, where no check exists. One case per method, so the red count is clean.
 
@@ -789,6 +822,137 @@ class CannotClaimTests(unittest.TestCase):
         _, claimed_opened, _, _ = self.opened_by_stop(refuse + " I can't open the PR.")
         extra = claimed_opened.count(refusals) - free_opened.count(refusals)
         self.assertEqual(extra, 1, "the refusals file read %d more times on a claim line, expected one" % extra)
+
+    # ---- the follow-up to the claim-backing debts: the gate-reason debt, the script-try debt, and the notes on check
+    # words, the api.github.com dot, the missed act words and the semicolon scan. A red line is a claim the check must
+    # read. A control is a line its fix must leave as it is, and each control names whether it already passes.
+
+    def test_cc_red_gate_reason_because_ci_is_no_claim(self):
+        # Catches: a claim whose clause carries a gate (because CI) read as a claim with no try. A gate is a true reason,
+        # so the line is no hand-off. The turn holds no try, so only the gate skip can clear it.
+        line = "I can't merge the PR because CI is red."
+        out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+        self.assert_passes(out, "a claim whose clause carries a gate (because CI)")
+
+    def test_cc_red_gate_reason_while_the_batch_run_is_no_claim(self):
+        # Catches: a claim whose clause carries a gate (while the batch run) read as a claim with no try.
+        line = "I cannot merge it while the batch run is in progress."
+        out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+        self.assert_passes(out, "a claim whose clause carries a gate (while the batch run)")
+
+    def test_cc_red_gate_reason_rule_id_after_the_act_is_no_claim(self):
+        # Catches: a claim that names its hyphenated rule id in parentheses after the act, read as a claim with no try.
+        line = "I can't push to main (git-main-only-by-pr)."
+        out = self.stop([trg.human("push to main"), trg.assistant_text(line)])
+        self.assert_passes(out, "a claim that names its rule id after the act")
+
+    def test_cc_green_connect_failure_because_clause_still_blocks(self):
+        # Control, already green: a connect failure is no gate, so the because clause does not skip the claim. The
+        # notice is no try, so the line blocks as no try.
+        line = "I can't open the PR because the MCP server failed to connect."
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_could_not_open_with_only_a_notice_still_blocks(self):
+        # Control, already green: a bare claim whose only evidence is a notice. The notice is no try, so it blocks.
+        line = "I could not open the PR."
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_plain_cannot_merge_with_no_try_or_cite_still_blocks(self):
+        # Control, already green, for the gate-reason debt's retire line: with no gate, no try and no cite, it blocks.
+        line = "I cannot merge the PR."
+        out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_failed_merge_tool_call_is_a_try_of_pr_merge(self):
+        # Catches: a failed call to the repo's merge tool read as no try of pr-merge, so a claim it backs blocks. The bare
+        # name and the installed path both name the merge tool.
+        for command, line in (("merge 12", "I couldn't merge PR 12: `merge 12` exited 1."),
+                              ("~/.claude/bin/merge 12", "I couldn't merge PR 12: `~/.claude/bin/merge 12` exited 1.")):
+            with self.subTest(command=command):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash(command, "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a failed `%s` backs a pr-merge claim" % command)
+
+    def test_cc_red_failed_open_pr_script_is_a_try_of_pr_open(self):
+        # Catches: a failed repo script whose name holds the act word (open-pr) read as no try of pr-open.
+        line = "I could not open the PR: `open-pr.sh` exited 1."
+        out = self.stop([trg.human("open a PR"), *failed_bash("./open-pr.sh", "tu_o"), landed_reply(line)])
+        self.assert_passes(out, "a failed open-pr.sh backs a pr-open claim")
+
+    def test_cc_green_failed_unrelated_script_does_not_back_pr_open(self):
+        # Control, already green: a failed script whose name holds no act word backs no act, so the claim blocks.
+        line = "I could not open the PR; `lint.sh` exited 1."
+        out = self.stop([trg.human("open a PR"), *failed_bash("./lint.sh", "tu_l"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_present_tense_check_word_names_the_check(self):
+        # Catches: check words in the past tense only (tried, failed), so a line that names its failed try in the present
+        # tense (fails, returns) reads as naming no check. Only the check word differs from the named-check case.
+        clauses = ("the create tool refuses it.", "the create tool denies it.", "the create tool rejects it.",
+                   "the create tool fails.", "the create tool returns an error.", "the create tool errors.")
+        for clause in clauses:
+            line = "I can't open the PR: " + clause
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), *failed_pr_create(), landed_reply(line)])
+                self.assert_passes(out, "a present-tense check word names the failed try: %r" % line)
+
+    def test_cc_red_api_github_dot_does_not_end_the_clause(self):
+        # Catches: the dot in api.github.com read as the end of the clause, so the github-reach phrase never reaches its
+        # route and the claim reads as no act.
+        line = "I can't reach api.github.com from here."
+        out = self.stop([trg.human("reach GitHub"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_github_dot_com_still_reads_as_github_reach(self):
+        # Control, already green: a dot inside github.com is also no clause end, and the claim still blocks as no try.
+        line = "I can't reach github.com from here."
+        out = self.stop([trg.human("reach GitHub"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_git_push_with_a_command_word_before_the_verb_is_a_claim(self):
+        # Catches: "git" between the phrase and the verb, so "I can't git push" reads as no push claim.
+        line = "I can't git push the branch."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_git_push_claim_with_its_failed_try_and_check_passes(self):
+        # Control, already green: the same claim backed by a failed git push, named. The fix must keep the try and check.
+        line = "I can't git push the branch: `git push` failed."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"),
+                         landed_reply(line)])
+        self.assert_passes(out, "a git push claim backed by its failed try, named")
+
+    def test_cc_red_draft_github_pull_request_is_a_pr_open_claim(self):
+        # Catches: the object window of pr-open too short for "a draft GitHub pull request", so the claim reads as no act.
+        line = "I cannot open a draft GitHub pull request."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_call_count_of_a_long_semicolon_sentence_grows_linearly(self):
+        # Catches: the semicolon list that _claim builds for each phrase, so a long semicolon sentence costs a quadratic
+        # number of calls. The builtin calls of the Stop run grow by 2 from 500 to 1,000 phrases for a linear check and by
+        # 4 for a quadratic one, once the count for no phrases is taken off. A count reads no clock (test-practices P5).
+        def calls(phrases):
+            run = self.reply_run(" ".join(["I can't open the PR;"] * phrases) + ".", CALLS_CODE, timeout=120)
+            self.assertIn("CALLS ", run.stderr, "the call count did not print: " + run.stderr[-300:])
+            return int(run.stderr.rpartition("CALLS ")[2])
+
+        base, small, large = calls(0), calls(500), calls(1000)
+        growth = (large - base) / float(small - base)
+        self.assertLess(growth, 3, "the calls grow %.2fx from 500 to 1,000 phrases; a linear check grows 2x" % growth)
+
+    def test_cc_green_full_size_semicolon_sentence_keeps_its_block(self):
+        # Control at full size: a 160 KB sentence of 7,800 phrases, each a claim with no try. The block stays, and it is
+        # the no-try variant. It reads no clock, so it is green on the old code and must stay green after a fix.
+        run = self.reply_run(" ".join(["I can't open the PR;"] * 7800) + ".", timeout=120)
+        out = json.loads(run.stdout) if run.stdout.strip() else None
+        self.assertIsNotNone(out, "no block came for the 160 KB sentence")
+        self.assertEqual(out.get("decision"), "block", "the 160 KB sentence was not blocked")
+        self.assertIn(HEAD, out.get("reason", ""), "the block for the 160 KB sentence is not the cannot-claim guard")
+        self.assertIn(NO_TRY, out.get("reason", ""), "the 160 KB sentence has the wrong variant")
 
 
 if __name__ == "__main__":
