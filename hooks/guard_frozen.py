@@ -331,8 +331,9 @@ def _resolve_vars(cmd: str) -> str:
 #  (a) the value of a named message flag: `git [-C dir] commit` -m, --message or -F, and
 #      `gh pr|issue create|edit` --title, --body, -t or -b;
 #  (b) a quoted argument of a pure printer (`echo`, `printf`, `cat`, `grep`, `wc`, `jq`).
-# Either is data only when its output runs nowhere: a pipe only into a printer (an interpreter as a
-# pipe target fails closed, as on main: it may run the text, and `python run.py` may read it), and
+# Either is data only when its output runs nowhere: a pipe only into a printer or a filter (`head`,
+# `tail`, and a `sed` or `awk` whose program cannot run its input; any other pipe target fails
+# closed, as on main: it may run the text, and `python run.py` may read it), and
 # a write to a file only when every segment of the command is a printer or
 # a `cd`. A redirect target is never data. All other text stays in view. Each segment is judged
 # alone, so a leading `cd dir &&` or `Set-Location dir;` does not change the answer.
@@ -370,6 +371,16 @@ _RENAMES_A_COMMAND = re.compile(
     re.IGNORECASE)
 _PARAM_OPERATOR = re.compile(r"\$\{[^}]*@")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
+# A filter only selects or edits the lines it is given. `sed` and `awk` can run a line as a command
+# (sed `e`, awk `system`), so each is a filter only for a program that cannot: a sed program of
+# address-plus-`p`/`d`/`q`/`=` commands and `s` commands whose flags are not `e` or `w`, an awk program
+# with no `system`, `getline` or pipe, and no program file in either. `head` and `tail` run nothing.
+_FILTERS = frozenset(("head", "tail", "sed", "awk"))
+_SED_ADDRESS = r"(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/|\+\d+))?!?"
+_SED_COMMAND = (r"\s*(?:" + _SED_ADDRESS + r")?\s*(?:[pdq=]"
+                r"|s(?P<d>[^\s\\;])(?:(?!(?P=d)).)*(?P=d)(?:(?!(?P=d)).)*(?P=d)[gpiIm\d]*)\s*")
+_SED_COMMAND = re.compile(_SED_COMMAND)
+_AWK_UNSAFE = re.compile(r"\bsystem\b|\bgetline\b|\||\bclose\b")
 _REDIRECT_CHARS = frozenset("0123456789<>&|")
 _NULL_TARGETS = ("/dev/null", "nul", "$null")
 # A descriptor dup or close after a redirect (`&1`, `&2-`, `&-`) names a descriptor, not a file.
@@ -417,7 +428,7 @@ def _is_redirect(word: str) -> bool:
 
 
 def _kind(words, plain: str) -> str:
-    """'printer', 'message', 'cd' or '' for one segment."""
+    """'printer', 'filter', 'message', 'cd' or '' for one segment."""
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
         return ""
     name = _name(words[0])
@@ -425,6 +436,8 @@ def _kind(words, plain: str) -> str:
         return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
+    if name in _FILTERS and _is_filter(name, [_unquoted(word) for word in words[1:]]):
+        return "filter"
     if name == "git":
         index = 1
         while words[index:index + 1] == ["-C"]:
@@ -433,6 +446,58 @@ def _kind(words, plain: str) -> str:
     if name == "gh" and tuple(words[1:3]) in _GH_MESSAGE_CALLS:
         return "message"
     return ""
+
+
+def _sed_program_safe(script: str) -> bool:
+    """True when every `;`-separated command of the sed program is one `_SED_COMMAND` accepts."""
+    position = 0
+    while True:
+        found = _SED_COMMAND.match(script, position)
+        if not found:
+            return False
+        position = found.end()
+        if position >= len(script):
+            return True
+        if script[position] != ";":
+            return False
+        position += 1
+        if position >= len(script):
+            return True
+
+
+def _is_filter(name: str, args) -> bool:
+    """True when `name args` selects or edits its input lines and cannot run one as a command."""
+    if name in ("head", "tail"):
+        return True
+    if name == "sed":
+        scripts, files, index = [], [], 0
+        while index < len(args):
+            word = args[index]
+            if word in ("-e", "--expression") and index + 1 < len(args):
+                scripts.append(args[index + 1])
+                index += 1
+            elif re.fullmatch(r"-[nErsz]+|--quiet|--silent|--regexp-extended", word):
+                pass
+            elif word.startswith("-") and len(word) > 1:
+                return False   # -i, -f, --file, an unknown flag
+            else:
+                files.append(word)
+            index += 1
+        if not scripts and files:
+            scripts = [files.pop(0)]
+        return bool(scripts) and all(_sed_program_safe(script) for script in scripts)
+    program, index = None, 0
+    while index < len(args) and program is None:
+        word = args[index]
+        if word in ("-F", "-v"):
+            index += 1   # its value is the next word
+        elif word.startswith("-") and len(word) > 1:
+            if re.fullmatch(r"-f|--file.*|-i|--include.*|-E|--exec.*", word):
+                return False   # a program file or an include runs code the scan cannot read
+        else:
+            program = word
+        index += 1
+    return program is not None and not _AWK_UNSAFE.search(program)
 
 
 def _writes_a_file(words) -> bool:
@@ -661,7 +726,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             while last + 1 < len(kinds) and ends[last] == "|":
                 last += 1
             chain = range(number, last + 1)
-            runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
+            runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
