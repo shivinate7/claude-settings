@@ -34,7 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
-from test_stall_watch_stop import queue_op, stop_summary  # noqa: E402  the harness's stop summary and queue records (one home)
+from test_stall_watch_stop import atis_latch, hook_success, last_prompt, queue_op, stop_summary, tools_used  # noqa: E402  the harness's record builders (one home)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -116,9 +116,11 @@ def tool_result_msg(tool_use_id="tu_1"):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
-def assistant_text(text):
-    return {"type": "assistant", "isSidechain": False,
-            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+def assistant_text(text, stop_reason=None):
+    message = {"role": "assistant", "content": [{"type": "text", "text": text}]}
+    if stop_reason:
+        message["stop_reason"] = stop_reason  # a reply that ends its turn carries "end_turn", as a real one does
+    return {"type": "assistant", "isSidechain": False, "message": message}
 
 
 def compact_boundary():
@@ -595,33 +597,39 @@ class ReportGuardTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stdout.strip(), "",
                              "a turn that lands nothing was asked for a report: " + run.stdout[:200])
-        # Catches: a stop_hook_summary or a queue-operation record between the reply and the peer message stops the
-        # peer message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for
-        # a report. The row with no record between is the control.
-        between = [("no record", None), ("stop_hook_summary", stop_summary(0)), ("queue-operation", queue_op("enqueue", 0))]
-        for label, extra in between:
+        # Catches: a record that ends no turn and starts none, between the reply and the peer message, stops the peer
+        # message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for a
+        # report. The stop summary and queue rows are green before the fix. The last-prompt, atis-latch, tools-used and
+        # hook_success rows, and the measured order from a real transcript, are red. The row with no record is the control.
+        measured = [queue_op("enqueue", 0), stop_summary(0), queue_op("remove", 0), queue_op("enqueue", 0),
+                    last_prompt(), atis_latch(), queue_op("dequeue", 0)]
+        ends_no_turn = [("stop_hook_summary", [stop_summary(0)]), ("queue-operation", [queue_op("enqueue", 0)]),
+                        ("last-prompt", [last_prompt()]), ("atis-latch", [atis_latch()]),
+                        ("tools-used", [tools_used(["Bash"])]), ("hook_success attachment", [hook_success()]),
+                        ("measured order", measured)]
+        for label, extra in [("no record", [])] + ends_no_turn:
             with self.subTest(between=label), tempfile.TemporaryDirectory() as tmp:
                 records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
-                           tool_result_msg(), assistant_text(GOOD_REPORT)]
-                if extra is not None:
-                    records.append(extra)
-                records += [peer_msg("fix check: 0 findings on abc1234"), assistant_text("Fix check passed; nothing to land.")]
+                           tool_result_msg(), assistant_text(GOOD_REPORT, "end_turn"), *extra,
+                           peer_msg("fix check: 0 findings on abc1234"),
+                           assistant_text("Fix check passed; nothing to land.", "end_turn")]
                 run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
                 self.assertEqual(run.returncode, 0)
                 self.assertEqual(run.stdout.strip(), "",
                                  "%s between the reply and the peer message: the peer message did not start a new "
                                  "turn, so the earlier commit still counts: %s" % (label, run.stdout[:200]))
-        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a queue-operation
-        # record, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
-        # record but a tool result passes this reply and fails here.
-        with tempfile.TemporaryDirectory() as tmp:
-            records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
-                       tool_result_msg(), queue_op("enqueue", 0),
-                       peer_msg("Answer: yes, rename it."), assistant_text("Renamed it and committed.")]
-            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
-            self.assertEqual(run.returncode, 0)
-            self.assertNotEqual(run.stdout.strip(), "", "a mid-turn peer message after a queue-operation reset the window")
-            self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a record that ends
+        # no turn, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
+        # record but a tool result passes these replies and fails here.
+        for label, extra in ends_no_turn:
+            with self.subTest(mid_turn=label), tempfile.TemporaryDirectory() as tmp:
+                records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                           tool_result_msg(), *extra,
+                           peer_msg("Answer: yes, rename it."), assistant_text("Renamed it and committed.")]
+                run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+                self.assertEqual(run.returncode, 0)
+                self.assertNotEqual(run.stdout.strip(), "", "a mid-turn peer message after %s reset the window" % label)
+                self.assertEqual(json.loads(run.stdout).get("decision"), "block")
 
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
         # Pinned by hand, not read from report_guard.LANDING_TOOLS: an emptied set must fail here.
@@ -1497,8 +1505,9 @@ class CompactionCarryTests(unittest.TestCase):
         # sourceless. "issue #5" is the pinned edge that already passes. An issue with no # is no source
         # (test_cc_red_issue_without_a_hash_is_no_source). A PR with no # is no source
         # (test_cc_red_pr_source_without_a_hash_is_no_source).
+        # The "#" form beside a source word is the control for the bare forms (test_cc_red_pull_without_a_hash_is_no_source).
         items = ["ruling X from pull request #978", "ruling X from pull #978", "ruling X from commits abc1234",
-                 "ruling X from sha abc1234", "ruling X from issue #5"]
+                 "ruling X from sha abc1234", "ruling X from issue #5", "ruling X from pull request #978 (git)"]
         for item in items:
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
@@ -1506,8 +1515,10 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_pull_without_a_hash_is_no_source(self):
         # Catches: the one "#" optional across PR, pull and issue passes "pull <n>" and "pull request <n>" as a source.
-        # The records list "pull #<n>" and "pull request #<n>" only.
-        items = ["ruling X from pull 978", "ruling X from pull request 978"]
+        # The records list "pull #<n>" and "pull request #<n>" only. A source word beside a bare pull does not rescue
+        # it: "pull 978 (git)" and "pull request 978 (git)" are no source either.
+        items = ["ruling X from pull 978", "ruling X from pull request 978", "ruling X from pull 978 (git)",
+                 "ruling X from pull request 978 (git)"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
@@ -1527,16 +1538,29 @@ class CompactionCarryTests(unittest.TestCase):
     def test_cc_red_pr_source_without_a_hash_is_no_source(self):
         # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   3" (spaces), "PR 978", "GitHub PR 978",
         # "pr 2 of the plan", "the PR 3 times", and "PR 978 on the page", where the word "page" is a source of its own
-        # and the bare PR still passes. The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs "#<n>". The
-        # green controls are "PR #3" and "PR #978 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
+        # and the bare PR still passes. A source word beside a bare PR does not rescue it either: "PR-978 on the page",
+        # "PR: 978 (git)", "PR number 978 (git)". The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs "#<n>".
+        # The green controls are "PR #3" and "PR #978 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
                  "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
-                 "ruling X from PR 978 on the page"]
+                 "ruling X from PR 978 on the page", "ruling X from PR-978 on the page", "ruling X from PR: 978 (git)",
+                 "ruling X from PR number 978 (git)"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
                 self.assertIsNotNone(out, "a PR with no # passes as a source: " + item)
                 self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_pr_refusal_names_the_hash_fix(self):
+        # Catches: the refusal for "PR 978 (git)" tells the owner to end each item with git, page or digest, which the
+        # item already does. The fix it needs is a PR with "#<n>", and the refusal must name "PR #<n>". The control is
+        # "PR #978 (git)", which passes.
+        control = report_lines("Recovered: ruling X from PR #978 (git)", "Handoff gave: none")
+        self.assertIsNone(self.stop(self.compacted_turn(control)), "a sourced PR #<n> item blocks")
+        reply = report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")
+        out = self.stop(self.compacted_turn(reply))
+        self.assertBlocksNaming(out, "ruling X from PR 978 (git)")
+        self.assertIn("PR #<n>", out["reason"], "the refusal for a PR with no # does not name PR #<n> as the fix")
 
     def test_cc_green_issue_with_a_hash_is_a_source(self):
         # Catches: "issue #<n>" refused as sourceless. It is the control for the case above: the same item with the "#".

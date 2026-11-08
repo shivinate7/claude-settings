@@ -232,6 +232,30 @@ def queue_op(operation, ago):
                "content": "queued prompt"}, ago)
 
 
+def last_prompt():
+    """A last-prompt record, with the fields of a real one. It has no timestamp and opens no turn."""
+    return {"type": "last-prompt", "leafUuid": "test-leaf", "sessionId": "test-stall-watch-stop"}
+
+
+def atis_latch():
+    """An atis-latch record, with the fields of a real one. It has no timestamp and opens no turn."""
+    return {"type": "atis-latch", "atis": "", "sessionId": "test-stall-watch-stop"}
+
+
+def tools_used(names):
+    """A tools-used record: the names of the tools a turn used, with the fields of a real one. It opens no turn."""
+    return {"type": "tools-used", "tools": list(names), "sessionId": "test-stall-watch-stop"}
+
+
+def hook_success(hook_name="Stop"):
+    """An attachment record that a hook ran and finished cleanly, with the fields of a real hook_success record."""
+    return {"type": "attachment", "isSidechain": False, "renderedRole": "system",
+            "sessionId": "test-stall-watch-stop",
+            "attachment": {"type": "hook_success", "hookName": hook_name, "hookEvent": hook_name,
+                           "toolUseID": "test-tool-use", "command": "true", "content": "", "stdout": "",
+                           "stderr": "", "exitCode": 0, "durationMs": 5}}
+
+
 def meta_wake(text, ago):
     """A user record with isMeta true: a hand-back or a hook's feedback that wakes a turn with no prompt."""
     return at({"type": "user", "isMeta": True, "message": {"role": "user", "content": text}}, ago)
