@@ -325,6 +325,9 @@ def run_mutants(entries, run_one):
     killed = ran - survivors - wrong_cause
     print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
         killed, ran, survivors, wrong_cause, skipped))
+    if shard is not None and ran == 0:
+        print("Nothing ran: every mutation in shard %s is skipped on this platform" % shard)
+        return 1
     return 1 if (survivors or wrong_cause) else 0
 
 
