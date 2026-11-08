@@ -12,7 +12,7 @@ import sys
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    _checkout_root_by_stat, _git_common_dir,
+    _checkout_root_by_stat, _git_common_dir, is_proxy_origin,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs, marker_hits  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -1262,7 +1262,8 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 # ---- a reviewer brief names its pull request (rule review-needs-pr, decision pr-review-record)
 # A spawn of a RECORD_REVIEWER_ROLES role whose brief carries a round marker must name the pull request it reviews.
 NEEDS_PR_NAMED = re.compile(
-    r"(?:\bPRs?|\bpull\s+requests?)[\s-]*#?\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+", re.IGNORECASE)
+    r"(?:\bPRs?|\bpull\s+requests?)[\s-]*#?\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+"
+    r"|(?:\bPRs?|\bpull\s+requests?)\s*(?::|\(|\bnumber\b)\s*\(?#?\d+", re.IGNORECASE)
 NEEDS_PR_REMOTE_URL = re.compile(r"(?:^|[/@])github\.com[:/]", re.IGNORECASE)
 NEEDS_PR_REASON = (
     "review-needs-pr: this reviewer brief names no pull request. Open the draft pull request first and name it in "
@@ -1273,7 +1274,7 @@ NEEDS_PR_REASON = (
 
 def _has_github_remote(folder: str) -> bool:
     """True when the config of the checkout holding FOLDER has a remote whose url names github.com (https or
-    scp form). A linked worktree reads the common config. No checkout, no config or an unreadable one is False.
+    scp form) or is the cloud proxy origin (git_reads.is_proxy_origin). A linked worktree reads the common config. No checkout, no config or an unreadable one is False.
     Cost: a stat walk and one config file read, no subprocess, no network."""
     try:
         root = _checkout_root_by_stat(os.path.realpath(folder))
@@ -1291,7 +1292,8 @@ def _has_github_remote(folder: str) -> bool:
             in_remote = re.match(r"\[remote\s+\"", line, re.IGNORECASE) is not None
         elif in_remote:
             found = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
-            if found and NEEDS_PR_REMOTE_URL.search(found.group(1).strip().strip('"')):
+            url = found.group(1).strip().strip('"') if found else ""
+            if url and (NEEDS_PR_REMOTE_URL.search(url) or is_proxy_origin(url)):
                 return True
     return False
 

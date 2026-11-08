@@ -128,9 +128,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
   review-needs-pr      deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `reviewer` or
-                       `design-reviewer` whose brief names no pull request (`PR #<n>`, `pull request #<n>`, or a
-                       github.com pull URL; an issue URL or a bare `#12` does not count), when the repo holding the
-                       payload's cwd has a remote naming github.com. A repo with no github remote, no cwd, and a
+                       `design-reviewer` whose brief carries a `Round N of 3` marker (a brief with no marker is not
+                       judged) and names no pull request (`PR #<n>`, `PR <n>`, `PR: <n>`, `PR (#<n>)`,
+                       `PR number <n>`, `pull request #<n>`, or a github.com pull URL; an issue URL, a bare `#12` and
+                       `PR review` with no number do not count), when the repo holding the payload's cwd has a remote
+                       naming github.com or the cloud proxy origin. A repo with no github remote, no cwd, and a
                        config that is missing or unreadable, allow. Config file reads only (a linked worktree reads
                        the common config): no subprocess, no network. An override lifts it. (pr-review-record)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
