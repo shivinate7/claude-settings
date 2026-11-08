@@ -8,6 +8,7 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+SignalKilled: a step whose run ends by a signal, or whose verdict is killed first, reads unknown, never FAIL.
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
   that cannot run exits 2.
   SuiteSteps also covers a multi-line step with a preamble line, a suite with an argument, a suite that reaches a changed
@@ -253,6 +254,28 @@ class Unknowns(Job):
     def test_a_fail_outranks_an_unknown_in_the_exit_code(self):
         rc, lines, out = self.run_job(step("tool", "no-such-tool-c69"), step("bad", "false"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["unknown", "FAIL"]), out)
+
+
+class SignalKilled(Job):
+    """A step whose run ends by a signal reads unknown, never FAIL: the tree is not at fault. The live line `FAIL ...
+    (verdict printed no verdict line)` is ci-job's default when verdict prints no verdict line and exits nonzero. verdict
+    prints none when a signal kills it first, so ci-job read the kill as a failure. The kill here is verdict's own: $PPID is
+    the verdict that started this shell."""
+
+    @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
+    def test_a_verdict_killed_before_its_verdict_line_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("killed", "kill -KILL $PPID\nexit 0"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+
+    @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
+    def test_a_step_killed_by_sigterm_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("term", "kill -TERM $$"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+
+    @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
+    def test_a_step_killed_by_sigkill_reads_unknown_never_fail(self):
+        rc, lines, out = self.run_job(step("kill", "kill -KILL $$"))
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
 
 
 class Conditions(Job):

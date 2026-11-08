@@ -31,6 +31,13 @@ UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+JOBS, VERBATIM = __JOBS__, __VERBATIM__  # {job: (steps, rc)} for a job a case scripts on its own; lines the checks lint prints as they are
+JOB = sys.argv[1] if len(sys.argv) > 1 else ""
+if JOB in JOBS:
+    STEPS, RC = JOBS[JOB]
+if "--step" in sys.argv:  # ci-job's --step NAME: only the named steps print
+    wanted = [sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--step"]
+    STEPS = [pair for pair in STEPS if pair[1] in wanted]
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
@@ -45,6 +52,8 @@ end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
 lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+if JOB == "checks":
+    lines += VERBATIM
 print("\\n".join(lines))
 if RC == 1:
     with open(STEP_LOG, "w", encoding="utf-8") as f:
@@ -86,9 +95,51 @@ jobs:
         run: python3 lint/b.py
 """
 
+# The workflow of the other jobs, committed on the lane's head. checks-merge-install is Linux, checks-macos is not. Each picked suite's
+# step is named here, so a case reads the step a follow-up run names.
+OTHER_JOB, MACOS_JOB = "checks-merge-install", "checks-macos"
+MERGE_SUITE, MACOS_SUITE = "Merge tool git-half fixture suite", "Idle-lanes reader fixture suite"  # python3 merge/test_merge.py, python3 merge/test_idle_lanes.py
+OTHER_JOBS_WORKFLOW = """name: t
+on: push
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint one
+        run: python3 lint/a.py
+  checks-merge-install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge tool git-half fixture suite
+        run: python3 merge/test_merge.py
+  checks-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Idle-lanes reader fixture suite
+        run: python3 merge/test_idle_lanes.py
+"""
+COLLISION = "error: cannot lock ref 'refs/remotes/origin/main': is at %s but expected %s" % ("a" * 40, "b" * 40)  # git's text when another fetch moved the ref
+
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
+
+
+def not_run_line(job, suites):
+    """The line bin/ci-job prints for the picked suites of another job, as it prints it: the checks lint names each such job."""
+    return "%-15s job %s: picked %s; job %s runs them, not checks" % ("not run", job, ", ".join(suites), job)
+
+
+class QuietClock:
+    """merge's clock, with sleep recorded and not waited: a retry pause costs no wall-clock time in a case. -> the waits asked for."""
+    def __init__(self):
+        self.waits = []
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def sleep(self, secs):
+        self.waits.append(secs)
 
 
 class NoLock:
@@ -125,15 +176,21 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+    def stub_text(self, steps, rc, sleep=0, jobs=None, verbatim=()):
+        """The stub's source. `jobs` ({job: (steps, rc)}) scripts a job's own run, by its name as argv[0]; `verbatim` lines follow the
+        checks lint's step lines, as ci-job prints its not-run lines."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
+                .replace("__JOBS__", repr(dict(jobs or {}))).replace("__VERBATIM__", repr(list(verbatim))))
+
+    def write_stub(self, steps, rc, sleep=0, jobs=None, verbatim=()):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+        tm.put(self.stub, self.stub_text(steps, rc, sleep, jobs, verbatim))
         return self.stub
 
-    def use_ci_job(self, steps, rc):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc)
+    def use_ci_job(self, steps, rc, jobs=None, verbatim=()):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`; see stub_text for `jobs` and `verbatim`."""
+        self.write_stub(steps, rc, jobs=jobs, verbatim=verbatim)
         patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
         patch.start()
         self.addCleanup(patch.stop)
@@ -169,24 +226,32 @@ class LaneLint(CiJobStub, tm.CloudSession):
             self.fail("argparse refused the command line: " + last)
         return rc, out + err
 
-    def lint_run(self, *argv, base="main", head=None, cloud=False):
+    def lint_run(self, *argv, base="main", head=None, cloud=False, other_runs=0):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
-        `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
+        `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards.
+        `other_runs` is the number of runs of a picked suite in another job the lane lint makes on top of that one."""
         head = head or self.head("feat")
         if os.path.exists(self.log):
             os.remove(self.log)
         rc, text = self.run_lane(*argv, cloud=cloud)
-        runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        run = runs[0]
-        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
-        self.assertEqual(run["head"], head)
-        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
-        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
-        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
-        self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
-        self.assertEqual(self.worktrees(), 1)
+        self.assert_lint_calls(text, head, base, other_runs)
         return rc, text
+
+    def assert_lint_calls(self, text, head, base="main", other_runs=0):
+        """The calls the stub logged: one checks lint and `other_runs` runs of other jobs, each in a detached tree at `head`, gone afterwards."""
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1 + other_runs, "the lint ran %d times, want %d (the checks lint and %d run of a picked suite in another job): %s"
+                         % (len(runs), 1 + other_runs, other_runs, text))
+        lint = [run for run in runs if run["argv"][:1] == ["checks"]]
+        self.assertEqual(len(lint), 1, "the checks lint ran %d times, want once: %s" % (len(lint), text))
+        self.assertEqual(lint[0]["argv"], ["checks", "--lint", "--base", "origin/" + base])
+        for run in runs:
+            self.assertEqual(run["head"], head, "a lint run was not at the lane head: %s" % run["argv"])
+            self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
+            self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+            self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
+            self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
+        self.assertEqual(self.worktrees(), 1)
 
     def push_release_branch(self):
         sh = tm.sh
@@ -198,8 +263,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
-        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        text = self.stub_text(steps, rc)
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -731,6 +795,138 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(self.unshallow_fetches(argvs), [], "a full lane checkout ran `git fetch --unshallow`")
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def other_jobs_head(self):
+        """The lane's head with the workflow of the other jobs committed on feat. RecordsEnv.on is the one home of that push; it
+        reads only self.other and sh, so this case calls it on itself. -> feat's head."""
+        tm.RecordsEnv.on(self, "feat", {".github/workflows/checks.yml": OTHER_JOBS_WORKFLOW}, "feat: the workflow of the other jobs")
+        return self.head("feat")
+
+    def test_a_picked_suite_in_another_linux_job_runs_there_and_its_failure_fails_the_lane_lint(self):
+        head = self.other_jobs_head()
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("FAIL", MERGE_SUITE)], 1)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)  # the other job's run is asserted first: scope before subject
+        self.assertEqual(rc, 1, "a FAIL of the picked suite in %s read as a pass of the lane lint: %s" % (OTHER_JOB, out))
+        self.assertTrue(any(line.startswith("FAIL") and MERGE_SUITE in line for line in out.splitlines()),
+                        "the refusal does not name the failing suite of %s: %s" % (OTHER_JOB, out))
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_the_same_suite_passing_in_the_other_job_passes_the_lane_lint_and_the_output_names_the_suite(self):
+        head = self.other_jobs_head()
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)
+        self.assertEqual(rc, 0, out)
+        named = [line for line in out.splitlines() if line.startswith("PASS") and ("merge/test_merge.py" in line or MERGE_SUITE in line)]
+        self.assertTrue(named, "the picked suite run in %s is not named as run in the output: %s" % (OTHER_JOB, out))
+
+    def test_a_picked_suite_past_its_own_limit_reads_unknown_names_the_suite_and_leaves_the_checks_lint_alone(self):
+        head = self.other_jobs_head()
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)},
+                        verbatim=[not_run_line(OTHER_JOB, ["merge/test_merge.py"])])
+        bounds, real = {}, merge.sh
+
+        def sh(args, *rest, **kwargs):  # each ci-job run ends at once, at the bound it was given: a stall with no wait (stalled_unshallow_fetch)
+            if self.stub in args:
+                bounds["other" if OTHER_JOB in args else "checks"] = kwargs.get("timeout")
+                if OTHER_JOB in args:
+                    if kwargs.get("timeout") is None:
+                        return 124, "no bound on the picked suite's run"
+                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh):
+            rc, out = self.run_lane("--lane-lint", head)
+        self.assertIn("other", bounds, "the picked suite of %s never ran as a ci-job run of its own: %s" % (OTHER_JOB, out))
+        self.assertIsNotNone(bounds["other"], "the picked suite's run has no time limit, so a stall never ends: " + out)
+        self.assertEqual(bounds.get("checks"), merge.LINT_SECONDS, "the checks lint's own bound moved: " + out)
+        self.assertNotEqual(rc, 0, "a picked suite past its limit read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertTrue(any("timed out" in line.lower() and ("merge/test_merge.py" in line or MERGE_SUITE in line)
+                            for line in out.splitlines()), "the refusal does not say the suite timed out: " + out)
+        self.assertRegex(out, r"(?i)unknown")
+        self.assertEqual(len([run for run in self.lint_calls() if run["argv"][:1] == ["checks"]]), 1, out)
+        self.assertEqual(self.worktrees(), 1)
+
+    def test_a_picked_suite_only_in_a_macos_job_is_one_not_run_line_and_the_lane_lint_passes(self):
+        head = self.other_jobs_head()
+        self.use_ci_job(PASSING, 0, jobs={MACOS_JOB: ([("PASS", MACOS_SUITE)], 0)},
+                        verbatim=[not_run_line(MACOS_JOB, ["merge/test_idle_lanes.py"])])
+        rc, out = self.lint_run("--lane-lint", head, head=head)  # no run in any job but checks: the macOS job is never run here
+        self.assertEqual(rc, 0, out)
+        notes = [line for line in out.splitlines() if MACOS_JOB in line]
+        self.assertEqual(len(notes), 1, "the macOS job's picked suite is not printed as one `not run` line: %s" % out)
+        self.assertTrue(notes[0].startswith("not run"), out)
+
+    def test_control_no_picked_suite_in_another_job_makes_no_extra_run(self):
+        head = self.other_jobs_head()
+        self.use_ci_job(PASSING, 0, jobs={OTHER_JOB: ([("PASS", MERGE_SUITE)], 0)})  # the checks lint picks nothing in another job
+        rc, out = self.lint_run("--lane-lint", head, head=head)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def run_with_main_fetch_failing(self, target, fails, failure):
+        """Run the lane lint of `target` with the first `fails` fetches of main answered `failure` (exit, text), as a fetch that another
+        lint's fetch moved answers; every other git call runs as it is. -> (rc, output, fetches of main, the waits a retry asked for)."""
+        main = "+refs/heads/main:refs/remotes/origin/main"
+        seen, clock, real = {"main": 0}, QuietClock(), merge.git
+
+        def git(cwd, *a, **kwargs):
+            if a[:3] == ("fetch", "-q", "origin") and main in a:
+                seen["main"] += 1
+                if seen["main"] <= fails:
+                    return failure
+            return real(cwd, *a, **kwargs)
+
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        with unittest.mock.patch.object(merge, "git", git), unittest.mock.patch.object(merge, "time", clock):
+            rc, out = self.run_lane("--lane-lint", target)
+        return rc, out, seen["main"], clock.waits
+
+    def test_a_fetch_of_main_that_collides_with_another_lints_fetch_is_retried_and_the_lint_goes_on(self):
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        for target in ("7", head):  # a PR target fetches main in open_worktree, a ref target in lane_head_and_base
+            with self.subTest(target=target):
+                rc, out, fetches, _ = self.run_with_main_fetch_failing(target, 1, (1, COLLISION))
+                self.assertGreaterEqual(fetches, 2, "the fetch of main that collided with another lint's fetch was not retried: " + out)
+                self.assertEqual(rc, 0, "a fetch that collided with another lint's read as a failed lint: " + out)
+                self.assertEqual(len(pass_lines(out)), 1, out)
+                self.assert_lint_calls(out, head)
+
+    def test_control_a_fetch_of_main_that_fails_for_another_reason_stops_after_one_fetch(self):
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out, fetches, _ = self.run_with_main_fetch_failing(head, 99, (128, "fatal: couldn't find remote ref main"))
+        self.assertEqual(fetches, 1, "a fetch that failed for another reason was retried: " + out)
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("fetch origin main", out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran after the fetch failed")
+
+    def test_control_a_lint_run_past_its_bound_reads_unknown_and_prints_no_fail_line(self):
+        """The bound: ci-job runs past LINT_SECONDS, set to 1 s here. The fake ends the run at once, at the bound it was given, so nothing waits."""
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        bounds, real = [], merge.sh
+
+        def sh(args, *rest, **kwargs):
+            if self.stub in args and "checks" in args:
+                bounds.append(kwargs.get("timeout"))
+                if kwargs.get("timeout") is None:
+                    return 124, "no bound on the lint"
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "LINT_SECONDS", 1), unittest.mock.patch.object(merge, "sh", sh):
+            rc, out = self.run_lane("--lane-lint", head)
+        self.assertEqual(bounds, [1], "the lint run was not bounded by LINT_SECONDS: " + out)
+        self.assertNotEqual(rc, 0, "a lint run past its bound read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("FAIL")], [], "a run past its bound printed a FAIL line: " + out)
+        self.assertRegex(out, r"(?i)unknown")
+        self.assertRegex(out, r"did not finish in 1 s|timed out")
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
