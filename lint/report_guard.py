@@ -2008,8 +2008,8 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
-        except Exception:
-            pass
+        except Exception as err:  # fails open, but the broken check is named on stderr
+            print("report_guard: answered check failed: %s: %s" % (type(err).__name__, err), file=sys.stderr)
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
