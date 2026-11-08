@@ -187,9 +187,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
                        that holds a `<` or no letter or digit is a refusal. A brief to a lane that clears those checks is
-                       refused unless its text names `Triage: session_<id>` and `Batch runner: session_<id>` (label without
-                       case, optional number and parenthetical gloss, anywhere in the message). A lane `create_session` whose
-                       prompt has the marker line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
+                       refused unless its text names a session id for each of Coordinator, Triage and Batch runner
+                       (guard_merge.ROLE_LABELS): per label, without case, a word boundary before and after, then on the
+                       same line a gap of up to guard_merge.ROLE_GAP_MAX characters with no other role label and no
+                       `session_`, then `session_` and an id that holds a digit (anywhere in the message; form only, no
+                       roster match; cost: message text only). A lane `create_session` whose prompt has the marker line
+                       is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,

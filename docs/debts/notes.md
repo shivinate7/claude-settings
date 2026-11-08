@@ -2187,4 +2187,5 @@
 - brief-id-markdown-backtrack: a lane brief id label followed by about 1000 `*` or `_` and no colon costs about 2 s to match; a run of 100 costs under 3 ms (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
 - brief-id-placeholder-digit: a placeholder id that holds a digit, such as `session_x1`, passes the lane brief id check (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
 - brief-id-quoted-or-linked: the lane brief id check refuses an id in quotes or a markdown link, such as `Triage: "session_01A"`; the refusal shows the form, so one retry fixes it (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
+- brief-role-ids-no-roster-match: the lane brief role check reads form only, so one id given for Coordinator, Triage and Batch runner passes, as does an id of the wrong session (hooks/guard_merge.py `_brief_ids_hit`). Decision: session-tiers.
 - brief-id-leading-underscore-run: a run of about 20000 `_` before any label costs about 1.9 s in the lane brief id check (hooks/guard_merge.py `_BRIEF_MD`). Decision: session-tiers.
