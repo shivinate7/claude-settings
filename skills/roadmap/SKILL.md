@@ -85,8 +85,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
-  release a lane whose draft pull is already in the default branch. `body` is the pull's description, also
-  optional: a pull whose body names a lane's session id as a whole token joins that lane's pull set. `branches`: lane branches with no open pull request.
+  release a lane whose draft pull is already in the default branch. `body` is the pull's description (`null` when empty): copy it onto every open pull
+  row. A pull whose body names a lane's session id as a whole token joins that lane's pull set, and an open row with no `body` key holds every lane. `branches`: lane branches with no open pull request.
 - `closedPulls`: optional. The closed and merged pull requests, newest update first, read as far back as the oldest
   live lane session: `branch` is the head ref, `head` the head sha, `base` the base branch, `merged` true when GitHub
   merged it. The open `pulls` key never holds them, so a closed pull never reads as open. A file without the key reads
@@ -252,11 +252,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
     `Step:` trailer is on main, or its status is `done`, or a landed pull is on its head refs (the lane's
     landed body-named pull lands each step of the lane). A pull is landed when it merged with its `base` the default
     branch, or its `head` sha is already in the default branch (`git merge-base --is-ancestor`). A step off the record
-    branch has landed only by its trailer or a landed pull. A landed pull also clears the "still doing under this lane" hold;
+    branch has landed only by its trailer or a landed pull. A landed pull on a step's own head refs (or a trailer, or status
+    `done`) also clears the "still doing under this lane" hold; a pull found only by its body does not;
   - no open pull holds it. The lane's pull set is the pulls whose `branch` is a step slug or `lane/<slug>`, plus any
     pull, open or closed, whose `body` names the session id as a whole token (the URL or the bare id). A
     draft pull whose `head` sha is already in the default branch
-    releases the lane. A ready pull always holds it. A closed pull that did not land neither holds nor lands. A failed git read reads as not landed;
+    releases the lane. A ready pull always holds it. An open pull row with no `body` key reads as naming every lane,
+    so it holds them all: triage's live file must copy `body` onto every open pull row. A closed pull that did not land neither holds nor lands. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
     The page writes `open` and `closed` only, so only `closed` releases a lane;

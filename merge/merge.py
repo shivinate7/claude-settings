@@ -40,7 +40,7 @@
                           any pull whose body names the session id as a whole token) is merged, closed, or an open draft whose head is on main, and at
                           least one is landed (merged into the default branch, or its head is in it); a step done or with a Step trailer lands as before.
                           Cost per call: runs only on call; gh REST pages (all open pulls; closed pulls newest update first, to the oldest created_at of a
-                          non-archived lane session, or 10 pages of 100 when none), one repo read, one git merge-base per distinct pull head; no file written, no timer.
+                          non-archived lane session, and never more than 10 pages of 100), one repo read, one git merge-base per distinct pull head; no file written, no timer.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -3272,25 +3272,36 @@ def write_merge_role(tier):
 
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
-CLOSED_PULL_PAGES = 10  # pages of 100 closed pulls the --sessions read takes at most; with no session bound it is the whole bound
+CLOSED_PULL_PAGES = 10  # pages of 100 closed pulls the --sessions read takes at most, bound or no bound
 
-def unwrap_rows(data):
+CONTINUATION_KEYS = ("has_more", "next_cursor", "next_page_token", "next")  # a truthy one on the last page means a later page was not given
+
+def unwrap_rows(data, pages=None):
     """The rows of a list_sessions or ArtifactData list file: a list of rows, a page object (`data` holds the rows, itself or one level down
-    under the tool's return key), or a list of such pages. A row is any other object. Raises ValueError for anything else."""
+    under the tool's return key), or a list of such pages. A row is any other object. Raises ValueError for anything else.
+    When `pages` is a list, each page object met is appended to it, in file order, so the caller can read the last page's paging keys."""
     if isinstance(data, list):
-        return [row for part in data for row in unwrap_rows(part)]
+        return [row for part in data for row in unwrap_rows(part, pages)]
     if not isinstance(data, dict):
         raise ValueError(f"expected a row or a page of rows, got {type(data).__name__}")
     if isinstance(data.get("data"), list):
-        return unwrap_rows(data["data"])
+        if pages is not None:
+            pages.append(data)
+        return unwrap_rows(data["data"], pages)
     inner = [v for v in data.values() if isinstance(v, dict) and isinstance(v.get("data"), list)]
-    return unwrap_rows(inner[0]) if len(inner) == 1 and "id" not in data else [data]
+    return unwrap_rows(inner[0], pages) if len(inner) == 1 and "id" not in data else [data]
 
 def read_rows(path, what):
+    """The rows of the file `path`; `what` is `sessions` or `items`. A last page that says more pages follow (a truthy CONTINUATION_KEYS key) with none in the file
+    is a Stop: a partial list would list too few lanes and read as a whole one."""
+    pages = []
     try:
-        return unwrap_rows(json.loads(pathlib.Path(path).read_text(encoding="utf-8")))
+        rows = unwrap_rows(json.loads(pathlib.Path(path).read_text(encoding="utf-8")), pages)
     except (OSError, ValueError) as e:
         raise Stop(f"the {what} file {path} could not be read: {e}")
+    if pages and any(pages[-1].get(key) for key in CONTINUATION_KEYS):
+        raise Stop(f"unknown (the {what} file holds a partial page; read every page)")
+    return rows
 
 def lane_session_bound(build, sessions):
     """The oldest created_at (a datetime) among the lane sessions that are not archived, or None when there is none or a row's created_at is unreadable.
@@ -3308,10 +3319,11 @@ def lane_session_bound(build, sessions):
 def live_from_files(build, root, sessions_path, items_path, host):
     """The live-work object for `merge --idle-lanes --sessions FILE --items FILE`: the rows of the two files, with the pulls read from GitHub here.
     Open pulls: every page. Closed and merged pulls: newest update first, read page by page and stopped at the first page whose oldest update is
-    before the bound lane_session_bound gives; with no bound, at CLOSED_PULL_PAGES pages. A cut read can only miss a landed pull, which leaves a lane
-    unlisted, never listed wrongly."""
-    sessions = read_rows(sessions_path, "--sessions")
-    items = [row["data"] if isinstance(row.get("data"), dict) else row for row in read_rows(items_path, "--items")]
+    before the bound lane_session_bound gives, and never after more than CLOSED_PULL_PAGES pages. A cut read can only miss a landed pull, which leaves a lane
+    unlisted, never listed wrongly. readAt is the older of the two files' modification times, so the build's freshness check holds for files read long ago."""
+    sessions = read_rows(sessions_path, "sessions")
+    items = [row["data"] if isinstance(row.get("data"), dict) else row for row in read_rows(items_path, "items")]
+    read_at = datetime.datetime.fromtimestamp(min(os.path.getmtime(sessions_path), os.path.getmtime(items_path)), datetime.timezone.utc)
     bound = lane_session_bound(build, sessions)
 
     def before_bound(page):
@@ -3330,14 +3342,14 @@ def live_from_files(build, root, sessions_path, items_path, host):
     opened = [row(d, False) for d in host.pages("pulls", fields={"state": "open"})]
     closed = [row(d, True) for d in host.pages("pulls", fields={"state": "closed", "sort": "updated", "direction": "desc"},
                                                 stop=before_bound, max_pages=CLOSED_PULL_PAGES)]
-    return {"readAt": datetime.datetime.now(datetime.timezone.utc).isoformat(), "threads": [], "pulls": opened,
+    return {"readAt": read_at.isoformat(), "threads": [], "pulls": opened,
             "closedPulls": closed, "sessions": sessions, "items": items}
 
 def idle_lanes(live, sessions=None, items=None, host=None):
     """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step moves or closes), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     The input is `live` (the publisher's file), or `sessions` and `items` (the raw list_sessions and ArtifactData list outputs), for which the pulls are read here with `gh api`.
-    Cost: runs only on call. With --sessions: gh REST pages (open pulls, all; closed pulls, to the bound live_from_files states), one repo read, one git merge-base per distinct pull head. No file is written and no timer is set."""
+    Cost: runs only on call. With --sessions: gh REST pages (open pulls, all; closed pulls, to the bound live_from_files states and never past CLOSED_PULL_PAGES pages), one repo read, one git merge-base per distinct pull head. No file is written and no timer is set."""
     if not live and not (sessions and items):
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file, or --sessions FILE and --items FILE. No list was made.", file=sys.stderr)
         return 1
@@ -3391,7 +3403,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
-    p.add_argument("--sessions", default=None, metavar="FILE", help="with --idle-lanes and --items, in place of --live: the list_sessions output, every page. The pulls are read from GitHub. Cost: runs only on call; gh REST pages (all open pulls, closed pulls newest update first to the oldest created_at of a non-archived lane session, or 10 pages), one git merge-base per distinct pull head; no file written, no timer")
+    p.add_argument("--sessions", default=None, metavar="FILE", help="with --idle-lanes and --items, in place of --live: the list_sessions output, every page. The pulls are read from GitHub. Cost: runs only on call; gh REST pages (all open pulls, closed pulls newest update first to the oldest created_at of a non-archived lane session, and never more than 10 pages), one git merge-base per distinct pull head; no file written, no timer. readAt is the older file's mtime")
     p.add_argument("--items", default=None, metavar="FILE", help="with --idle-lanes and --sessions: the ArtifactData list output of the waiting page's items")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")

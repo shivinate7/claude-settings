@@ -1316,9 +1316,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     the session id as a whole token (body_names_session). A pull is landed when it merged with its base the default branch,
     or its head sha is already in the default branch (`closedPulls` rows carry merged, base and head; open rows carry head).
     A step with a landed pull on its own head refs, or a landed body-named pull of the lane (which names no step, so it
-    lands each step of the lane), is landed: it does not wait, and it clears the "still doing under this lane" hold, as a
-    trailer does. A lane is held back by an open pull in its set unless that pull is a draft whose head sha is already in
-    the default branch; a closed pull that did not land neither holds nor lands. It is also held back by an open waiting-page item whose
+    lands each step of the lane), is landed for the waiting gate. Only a landed pull on the step's own head refs (or a
+    trailer, or status done) clears the "still doing under this lane" hold: a body-named pull does not. A lane is held back
+    by an open pull in its set unless that pull is a draft whose head sha is already in the default branch; an open
+    unlanded pull row with no `body` key (a live file from before the key) is read as naming every lane, so it holds them
+    all. A closed pull that did not land neither holds nor lands. It is also held back by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
     status `closed` releases an item.
 
@@ -1383,8 +1385,12 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             continue
         body_landed = any(landed(p) for p in (*open_pulls, *closed_pulls) if body_names_session(p.get("body"), sid))
 
+        def by_own_pull(k):
+            return any(landed(p) for p in (*open_pulls, *closed_pulls) if p.get("branch") in lane_head_refs(k))
+
         def by_pull(k):
-            return body_landed or any(landed(p) for p in (*open_pulls, *closed_pulls) if p.get("branch") in lane_head_refs(k))
+            # The waiting gate and the absent-step proof accept a body-named landed pull; the doing hold below takes only a pull on the step's own head refs.
+            return body_landed or by_own_pull(k)
 
         absent = [k for k in mine if k not in steps and not by_pull(k)]
         if absent and trailer_ids is None:
@@ -1401,12 +1407,13 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if any(k in steps and steps[k].get("status") != "done" and k not in marks and not by_pull(k) for k in mine):
             continue
         heads = {name for k in mine for name in lane_head_refs(k)}
-        if any((p.get("branch") in heads or body_names_session(p.get("body"), sid)) and holds(p) for p in open_pulls):
+        # An open pull row with no `body` key (a live file from before the key) may name any lane, so it holds them all: fail closed.
+        if any((p.get("branch") in heads or "body" not in p or body_names_session(p.get("body"), sid)) and holds(p) for p in open_pulls):
             continue
         if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
             continue
         doing = sorted(k for k, d in steps.items()
-                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks and not by_pull(k))
+                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks and not by_own_pull(k))
         if doing:
             out.append("hold (step %s still doing under this lane; lane %s)" % (" ".join(doing), sid))
             continue
