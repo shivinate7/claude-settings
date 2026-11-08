@@ -50,6 +50,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -1281,16 +1282,76 @@ def case_step_span_flag_after_a_determiner_is_text():
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
 
 
+def case_step_folder_with_title_hyphen_is_text():
+    # A folder whose last segment is Title-Hyphen (`Claude-Settings`) names a path, not a cmdlet: the word before the hyphen
+    # is no approved PowerShell verb, so each passes. Main passes all four; head refuses them as a shell line.
+    # `/opt/bin/Get-Thing` stays refused, as its verb Get is approved (case_step_path_cmdlet_is_a_shell_line).
+    for folder in ("~/Documents/Claude-Settings", "/Users/shiv/Compass-Datacenters",
+                   r"C:\Users\shiv\Compass-Datacenters", "/Users/shiv/Documents/Meeting-Notes"):
+        page("a step naming the folder `%s` is text and passes" % folder, "set",
+             entry_of(task_item(["Check the output of `%s`" % folder])), None)
+
+
+def case_step_absolute_path_cmdlet_is_refused_in_every_form():
+    # A Verb-Noun cmdlet at an absolute path is a shell line in every form of path. Head passes the forward-slash drive,
+    # the `$HOME/` form and the `~\` form, so each is a bypass (main passes them too). The `~/` form already refuses.
+    refused = ("command-in-item", "shell line")
+    for span in ("C:/tools/Get-Thing", "$HOME/bin/Get-Item", r"~\Get-Item", "~/bin/Get-Item"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
+# A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
+# `[ \t]+` form about 4. The limit sits between them.
+RATIO_LIMIT = 3.0
+
+
+def cpu_per_call(fn, floor=0.05, reps=3):
+    """The least CPU seconds per call of fn. Each batch runs until this process has used `floor` seconds of CPU, so a clock
+    tick is small against it, and the least batch drops a spike. CPU time leaves out the time another process holds the
+    CPU, which the load on a shared machine would add to a wall-clock timing. Windows CPU time ticks about 16 ms."""
+    best = None
+    for _ in range(reps):
+        calls = 1
+        while True:
+            start = time.process_time()
+            for _ in range(calls):
+                fn()
+            took = time.process_time() - start
+            if took >= floor:
+                break
+            calls *= 2
+        best = took / calls if best is None else min(best, took / calls)
+    return best
+
+
+def case_powershell_spaced_literals_are_no_bash_test():
+    # A PowerShell cast with spaces, `( [ int ] 5 )`, and an array literal after a `;`, `; [ 1, 2 ]`, are PowerShell text, not
+    # a bash `[ ... ]` test, so each passes. A real bash test after a `;` stays refused: the fix cannot drop the alternative.
+    for name, ps in (("a spaced cast in parentheses", "$n = ( [ int ] 5 )"),
+                     ("a spaced array literal after a semicolon", "$a = 1; [ 1, 2 ]")):
+        page("a PowerShell command with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    page("a PowerShell command with a bash test after a semicolon is refused as a bash operator", "set",
+         entry_of(ps_task("$a = 1; [ -f x ]")), ("command-in-item", "bash operator"))
+
+
 def case_bracket_test_alternative_is_linear():
-    # The `[ ... ]` test alternative of PS_BASH_FORMS runs `[ \t]+` and then `[^\]\n]*`, and both take spaces. On a `[`
-    # with many spaces after it, each split between the two rescans the run, so one match is quadratic in its length.
-    # Python's re has no step count, so the pin reads the pattern's source: no such overlapping pair, in the single or
-    # the double bracket form. The controls, a real single or double bracket test, stay refused.
-    pattern = getattr(question_form, "PS_BASH_FORMS", None)
-    source = pattern.pattern if pattern is not None else ""
-    check("PS_BASH_FORMS holds no `[ \\t]+` run before `[^\\]\\n]*` (quadratic on a `[` with many spaces)",
-          pattern is not None and r"[ \t]+[^\]\n]*" not in source,
-          "PS_BASH_FORMS holds the overlapping pair `[ \\t]+[^\\]\\n]*`, which rescans a run of spaces")
+    # The `[ ... ]` test alternative of PS_BASH_FORMS, single and double bracket, must take about linear time on a `[` with
+    # many spaces after it, or a page write with such a line stalls. The outcome is that stall, so the pin times item_hit on
+    # that line with N and with 2N spaces, in this one process, and compares the two. The verdict at the large size must be
+    # a pass, so the timed call is the real path and not an early return.
+    for opener in ("[", "[["):
+        small = entry_of(ps_task(opener + " " * 2000 + "x"))
+        large = entry_of(ps_task(opener + " " * 4000 + "x"))
+        verdict("a PowerShell line of `%s` and 4000 spaces passes, the timed path" % opener,
+                call("item_hit", "set", large), None)
+        small_cost = cpu_per_call(lambda: call("item_hit", "set", small))
+        large_cost = cpu_per_call(lambda: call("item_hit", "set", large))
+        ratio = large_cost / small_cost
+        check("a PowerShell line of `%s` with a run of spaces grows linearly when the run doubles" % opener,
+              ratio < RATIO_LIMIT,
+              "doubling the spaces after `%s` took %.1f times as long: the bracket test is quadratic"
+              % (opener, ratio))
     refused = ("command-in-item", "bash operator")
     page("a PowerShell test, [ -f x ] on a line of its own, is refused as a bash operator", "set",
          entry_of(ps_task("[ -f x ]\ngit log")), refused)
@@ -1956,6 +2017,8 @@ def main():
                  case_powershell_bash_prefix_command_substitution,
                  case_powershell_two_deep_expansion,
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
+                 case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
+                 case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
             case()
