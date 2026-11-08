@@ -863,15 +863,15 @@ class Host:
         return found
 
     def pr_files(self, n, changed):
-        """-> [(path, status)] of the pull request's changed files, one paged read of pulls/<n>/files. A rename also gives its old path as removed.
+        """-> [(path, status, additions)] of the pull request's changed files, one paged read of pulls/<n>/files; a missing additions counts 0. A rename also gives its old path as removed, with 0.
         A failed read is a Stop, never an empty list, which would read as a clean diff. So is a list shorter than `changed`, the pull request's
         changed_files count: GitHub lists at most 3000 files, and a diff not read in full cannot clear a guard."""
         out, entries = [], 0
         for f in self.pages(f"pulls/{n}/files"):
             entries += 1
-            out.append((f["filename"], f["status"]))
+            out.append((f["filename"], f["status"], int(f.get("additions") or 0)))
             if f.get("previous_filename"):
-                out.append((f["previous_filename"], "removed"))
+                out.append((f["previous_filename"], "removed", 0))
         if not isinstance(changed, int):
             raise Stop("the pull request read gave no changed-file count, so the diff cannot be checked in full. " + REVIEW_CITE)
         if entries < changed:
@@ -3292,11 +3292,11 @@ def guard_hits(paths):
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
 
 def kind_misfits(kind, files):
-    """-> the sorted paths that break the kind, over (path, status) pairs. docs-only: a path not ending .md. delete-only: a status other than removed."""
+    """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path not ending .md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
-        return sorted(p for p, _ in files if not p.endswith(".md"))
+        return sorted(p for p, _, _ in files if not p.endswith(".md"))
     if kind == "delete-only":
-        return sorted(p for p, st in files if st != "removed")
+        return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
     return []
 
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
@@ -3431,7 +3431,7 @@ def main(argv, host=None, lock=None):
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             files = h.pr_files(a.pr, info["changed_files"])
-            hits = guard_hits([p for p, _ in files])
+            hits = guard_hits([p for p, _, _ in files])
             if a.guard == "no" and hits:
                 raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the record with --guard yes. " + REVIEW_CITE)
             misfits = kind_misfits(a.kind, files)
