@@ -21622,7 +21622,7 @@ def _slash_c_builder_hit(name, target):
         guard._expanded = real_expanded
 
 
-def worktree_home_cwd_nt_gate_case():
+def worktree_home_cwd_nt_drive_case():
     """Pins the drive read in `_settings_place` (guard.py) off Windows. The folder is read through
     `_expanded` only when os.name is "nt", so a `/c/` folder names the checkout there. This fakes
     Windows as `_slash_c_builder_hit` does, and checks the scope first: the fake drive map must reach
@@ -21710,7 +21710,7 @@ def worktree_home_cwd_builder_scratch_case():
 # Each builds its own repository and calls no lazy fixture, so a filtered run skips that build.
 FIXTURELESS_CHECKS.update((
     worktree_home_cwd_builder_refuse_case, worktree_home_cwd_builder_src_case,
-    worktree_home_cwd_builder_scratch_case, worktree_home_cwd_nt_gate_case))
+    worktree_home_cwd_builder_scratch_case, worktree_home_cwd_nt_drive_case))
 
 
 # ------------------------------------------------------------------ other-checkout: a separate clone
@@ -22196,7 +22196,7 @@ LOG_CHECKS = (
      worktree_home_cwd_config_case),
     ("worktree-home: the agent cap rule reads a /c/ cwd as main does", worktree_home_cwd_cap_case),
     ("worktree-home: the settings-place drive read counts a /c/ folder that maps to the checkout, "
-     "off Windows", worktree_home_cwd_nt_gate_case),
+     "off Windows", worktree_home_cwd_nt_drive_case),
     ("worktree-home: a builder write to a test file from a /c/ cwd in a repository is refused "
      "off Windows", worktree_home_cwd_builder_refuse_case),
     ("worktree-home: a builder write to product code from a /c/ cwd in a repository is allowed "
