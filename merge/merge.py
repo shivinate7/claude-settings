@@ -45,7 +45,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 Every host runs the whole flow (c53): the cloud proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push everywhere (default_lock). The cloud proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, functools, importlib.util, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -65,7 +65,14 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
     raise ImportError(_why) from e  # an importer, such as the merge guard, must see a failed load, not a process exit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
-from git_reads import lists_refs, listing_text  # noqa: E402  the one home of the ls-remote stdout-only read (hooks/git_reads.py); the janitor reads through it too
+def _load_hooks_module(name):
+    """The hooks/<name>.py module, loaded by path under a private name: a stale module of the same name in sys.modules (a copy-mode install) cannot shadow it."""
+    spec = importlib.util.spec_from_file_location("merge_" + name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", name + ".py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+_git_reads_home = _load_hooks_module("git_reads")  # the one home of the ls-remote stdout-only read (hooks/git_reads.py); the janitor reads through it too
+lists_refs, listing_text = _git_reads_home.lists_refs, _git_reads_home.listing_text
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 
 class Stop(Exception):

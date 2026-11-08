@@ -33,7 +33,7 @@ def _git(where: str, *args):
 
 def lists_refs(args):
     """True for `git -C <dir> ls-remote ...`, the one git call whose stdout is the answer: a stderr line on its success (a trace, a warning) is no ref. Keyed on the
-    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` and `ls_remote` below both read it."""
+    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` reads it."""
     return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
 
 

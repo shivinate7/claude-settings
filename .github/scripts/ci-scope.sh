@@ -17,6 +17,11 @@ on=" "
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
+    # merge/merge.py's module-level imports (its sys.path inserts of hooks/ and lint/, and the try block that loads hook_catalog) set the merge flag
+    # beside the flags the arms below give each path. A list, not a read of merge.py: this script also runs in fixture repos and a Windows checkout,
+    # where merge.py or python3 may be absent, and merge.py's function-level imports (guard_core, sweep) are in other arms on purpose. A new
+    # module-level import in merge.py is added here.
+    case "$f" in hooks/_nowindow.py|hooks/git_reads.py|hooks/required_check.py|lint/hook_catalog.py) on="$on $M " ;; esac
     case "$f" in
       # Fail safe: this script, the workflow, and git settings that change every checkout.
       .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
