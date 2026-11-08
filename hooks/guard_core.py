@@ -811,22 +811,29 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+def _runner(interpreters: str):
+    return re.compile(r"(?:" + interpreters + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+                      r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+
+
+_RUNNER = _runner(_INTERPRETERS)
+_SHELL_RUNNER = _runner(_SHELLS)   # a rule that judges shell lines: python or node naming the file reads it, never runs it as shell
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
+def _runs_written_file(text: str, headers, shells_only: bool = False) -> bool:
     """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
     (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    runs nothing. The word is compared as written, so `$HOME/f` matches only itself. `shells_only` leaves a
+    Python or Node word out of the runners, as it leaves them out of the heredoc headers."""
+    runner = _SHELL_RUNNER if shells_only else _RUNNER
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words)
         if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
             return True
     return False
@@ -855,7 +862,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
+            text, [header for _, _, header in bodies], shells_only):
         return cmd  # the body may be executed, so keep it under inspection
     return "\n".join([dropped] + runs)
 

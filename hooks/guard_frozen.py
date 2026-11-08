@@ -465,6 +465,18 @@ def _data_words(kind: str, words):
     return data
 
 
+def _interpreter_data_words(words):
+    """The indexes of the quoted words after a python or node command word that are data: its
+    arguments, which the program reads, not shell text. A redirect target and the script of an inline
+    flag (`-c`, `-e`) stay in view. The command word is read through wrappers (`timeout 5 python3`)."""
+    start = resolve_command(tuple(words))
+    if start is None or not (_PY_COMMAND.match(_name(words[start])) or _NODE_COMMAND.match(_name(words[start]))):
+        return set()
+    return {index for index in range(start + 1, len(words))
+            if ("'" in words[index] or '"' in words[index]) and not _is_redirect(words[index - 1])
+            and not (_PY_C_FLAG.match(words[index - 1]) or _NODE_EVAL_FLAG.match(words[index - 1]))}
+
+
 def _unquoted(word: str) -> str:
     """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
     kind of quote is text. The `$` of an unquoted `$'...'` or `$"..."` goes with the quote.
@@ -619,12 +631,14 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, interpreter_args_data=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none)."""
+    name as a third argument (`''` when none). `interpreter_args_data` reads a quoted argument of a
+    python or node command as data, as a printer's is: the interpreter does not run it as shell text
+    (`_interpreter_data_words`). A rule whose predicate stays safe only with shell text read keeps it off."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -652,6 +666,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
+        if interpreter_args_data and not closed:
+            data = data | _interpreter_data_words(raw)
         words, shown, script = [], [], []
         for index, word in enumerate(raw):
             if index in data:

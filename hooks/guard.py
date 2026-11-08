@@ -4484,7 +4484,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     elif tool in SHELL_TOOLS:
         targets = None
         raw = str(tool_input.get("command", "") or "")
-        command = strip_heredoc_bodies(raw)
+        # A rule on shell lines: a Python or Node body, or a file only it reads, is not a shell write.
+        command = strip_heredoc_bodies(raw, shells_only=True)
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
@@ -4536,7 +4537,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True,
+                               interpreter_args_data=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.

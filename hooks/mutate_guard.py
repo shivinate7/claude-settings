@@ -247,9 +247,13 @@ MUTATIONS = [
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
      '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
+     '            text, [header for _, _, header in bodies], shells_only):\n'
      '        return cmd',
      '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    ("other-checkout: a python command's quoted argument reads as shell text",
+     '                               interpreter_args_data=True) if writes else ""',
+     '                               interpreter_args_data=False) if writes else ""', "guard",
+     'heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument is allowed'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
