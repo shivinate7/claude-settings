@@ -2430,7 +2430,7 @@ MUTATIONS = [
      '        lambda role: role_isolation_pin(pointer_checkout(), role))',
      '        tool, tool_input, "" if payload.get("agent_id") else trust_transcript if isinstance(trust_transcript, str) else "",\n'
      '        lambda role: role_isolation_pin(pointer_checkout(), role))',
-     "guard", "a subagent's send to a finished reviewer the parent spawned is refused"),
+     "guard", "an agent's send to a finished reviewer the parent spawned is refused"),
     ("resume-finished-reviewer: every send is taken as an agent's own, so the rule skips it",
      '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",\n'
      '        lambda role: role_isolation_pin(pointer_checkout(), role))',
@@ -2452,6 +2452,10 @@ MUTATIONS = [
      '    worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
      '    worktree = False or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
      "guard", "a main-session send to a finished Workflow agent spawned with a worktree is refused"),
+    ("resume-finished-reviewer: a finished Workflow agent with a worktree flag and no agent type is not refused",
+     '    if state == reader.FINISHED and (agent_type or worktree):',
+     '    if state == reader.FINISHED and agent_type:',
+     "guard", "a finished Workflow agent with a worktree flag and no agentType is refused as an agent"),
     ("resume-finished-reviewer: a Workflow agent is found by its agent id only, so its label names none",
      'and target in (agent_id, rec.get("label"))):',
      'and target == agent_id):',

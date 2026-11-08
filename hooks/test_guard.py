@@ -101,7 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost",
-    "resume-finished-reviewer": "a SendMessage from the main session, or from a subagent (a payload with agent_id), to a spawn that has finished (a background finish notice, or a foreground result) and either ran in a worktree (isolation worktree, or with no isolation input the role file's pin, any role) or is a reviewer or design-reviewer: the target resolved by agentId or spawn name, the latest spawn with that name wins; a send from the main session or a subagent to a Workflow agent, named by its agentId or its journal label (finished when its run's journal holds its result line, a reviewer by its meta agentType, and a finished one with no meta file asks, as its role is unknown) is judged the same way; a result of unknown shape asks; a send to main, a name no spawn holds, a missing transcript, and a finished spawn with no worktree that is not a reviewer are allowed",
+    "resume-finished-reviewer": "a SendMessage from the main session, or from an agent (a payload with agent_id), to a spawn that has finished (a background finish notice, or a foreground result) and either ran in a worktree (isolation worktree, or with no isolation input the role file's pin, any role) or is a reviewer or design-reviewer: the target resolved by agentId or spawn name, the latest spawn with that name wins; a send from the main session or an agent to a Workflow agent, named by its agentId or its journal label (finished when its run's journal holds its result line, a reviewer by its meta agentType, and a finished one with no meta file asks, as its role is unknown) is judged the same way; a result of unknown shape asks; a send to main, a name no spawn holds, a missing transcript, and a finished spawn with no worktree that is not a reviewer are allowed",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10347,7 +10347,7 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 
 # =========================================================================== 5j. resume a finished reviewer
 #
-# Rule resume-finished-reviewer. A SendMessage from the main session, or from a subagent (a payload with agent_id, whose
+# Rule resume-finished-reviewer. A SendMessage from the main session, or from an agent (a payload with agent_id, whose
 # spawn the parent's transcript holds), is refused when
 # `to` names a spawn that has finished and either ran in a worktree (the Agent input isolation worktree, or, with no
 # isolation input, the role's agent-file pin, any role: the worktree is gone once it finishes, owner ruling 409 a,
@@ -10359,6 +10359,8 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 # A Workflow agent has no Agent input, so its worktree is that flag or its role file's pin. A finished one with a
 # worktree is refused for any role. Otherwise only a reviewer is refused. `to` names it by its agentId or by its
 # started line's label. A finished one with no meta file has no role, so the send asks.
+# A started-only Workflow agent (no result line) is finished when its run record beside the transcript,
+# workflows/<runId>.json, says killed or completed.
 # `to` resolves to a spawn by its launch result's toolUseResult.agentId, or by the spawn call's `name` input, and the
 # latest spawn with that name wins. A background
 # spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.
@@ -10491,7 +10493,7 @@ RF_WF_AGENTS = [
 RF_WF_NOMETA_RUN = "wf_0a7d3e9b-4c1"
 RF_WF_NOMETA_AGENT = "f2c8e5a1d7b09346d"
 RF_WF_NOMETA_AGENTS = [(RF_WF_NOMETA_AGENT, "meta-missing", "Review", None, True)]
-# A run whose agents are workflow-subagents spawned with isolation worktree: their meta holds spawnedWithWorktree and a
+# A run whose agents are workflow-subagent agents spawned with isolation worktree: their meta holds spawnedWithWorktree and a
 # worktreePath, as the probe measured it (wf_19ac2aae-ebb). A finished one with those keys is refused, a running one
 # with them passes, and a finished one with no worktree keys passes (the control).
 RF_WF_WT_RUN = "wf_7d3a1f0c-9e2"
@@ -10504,6 +10506,18 @@ RF_WF_WT_AGENTS = [
     (RF_WF_NOKEYS_AGENT, "scan-no-worktree", "Scan", "workflow-subagent", True),
 ]
 RF_WF_WT_EXTRA = {RF_WF_WT_AGENT: RF_WF_WT_KEYS, RF_WF_WT_RUNNING_AGENT: RF_WF_WT_KEYS}
+# A reviewer stopped with TaskStop leaves a started line and no result line. Its run record beside the transcript
+# (workflows/<runId>.json) names the run's status: killed when stopped, completed when finished. A run with no record
+# is still running. The notype run's agent is finished, with a worktree flag and no agentType in its meta.
+RF_WF_KILLED_RUN, RF_WF_KILLED_AGENT = "wf_6e1b9d3a-0c8", "c7a3e9f1d5b20846e"
+RF_WF_COMPLETED_RUN, RF_WF_COMPLETED_AGENT = "wf_8f2d4b6a-e91", "a2e8c5f0b7d31964c"
+RF_WF_NORECORD_RUN, RF_WF_NORECORD_AGENT = "wf_1c7e5a9d-f34", "e5b0d8a3c6f97412a"
+RF_WF_NOTYPE_RUN, RF_WF_NOTYPE_AGENT = "wf_3d6a0e8c-b27", "f9c4a1e7d2b68053b"
+RF_WF_KILLED_AGENTS = [(RF_WF_KILLED_AGENT, "review-killed", "Review", "reviewer", False)]
+RF_WF_COMPLETED_AGENTS = [(RF_WF_COMPLETED_AGENT, "review-completed", "Review", "reviewer", False)]
+RF_WF_NORECORD_AGENTS = [(RF_WF_NORECORD_AGENT, "review-no-record", "Review", "reviewer", False)]
+RF_WF_NOTYPE_AGENTS = [(RF_WF_NOTYPE_AGENT, "scan-no-type", "Scan", None, True)]
+RF_WF_NOTYPE_EXTRA = {RF_WF_NOTYPE_AGENT: RF_WF_WT_KEYS}
 # A run whose journal cannot be read: its journal.jsonl is a folder, so the guard's open() fails on it. The journal
 # holds no agent, so the target is named by no readable journal.
 RF_WF_UNREADABLE_RUN = "wf_9b2c6e4a-1f7"
@@ -10608,30 +10622,36 @@ RF_TRANSCRIPTS = {
         rf_launch("p1", "Plan", RF_REMOTE_PLAN, RF_REMOTE_PLAN_AGENT, isolation="remote"), rf_finish("p1")),
     "builder-empty-isolation-finished": rr_session(
         rf_launch("b1", "builder", RF_EMPTY_BUILDER, RF_EMPTY_BUILDER_AGENT, isolation=""), rf_finish("b1")),
-    # A subagent's own send. Each sender is the running builder spawned in the transcript, so the payload's agent_id is
+    # An agent's own send. Each sender is the running builder spawned in the transcript, so the payload's agent_id is
     # that spawn's agentId, as the probe measured it.
-    "subagent-sender-finished-reviewer": rr_session(
+    "agent-sender-finished-reviewer": rr_session(
         rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT), rf_finish("r1"), rr_comment("c1", rr_record()),
         rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT)),
-    "subagent-sender-running-reviewer": rr_session(
+    "agent-sender-running-reviewer": rr_session(
         rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT), rr_comment("c1", rr_record()),
         rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT)),
-    "subagent-sender-finished-worktree": rr_session(
+    "agent-sender-finished-worktree": rr_session(
         rf_launch("b1", "builder", RF_WT_BUILDER, RF_WT_BUILDER_AGENT, isolation="worktree"), rf_finish("b1"),
         rf_launch("b2", "builder", RF_OTHER, RF_OTHER_AGENT, isolation="worktree")),
     # A Workflow run, whose folder sits beside this transcript (write_rf_workflow). Its launch result names the run's
     # folder, as the real one does. The run leaves no spawn in this transcript.
     "workflow-agents": rr_session(rf_workflow_launch("workflow-agents", RF_WF_RUN)),
-    # A builder spawned in the transcript, still running, then a Workflow run. A subagent's send to a Workflow agent
+    # A builder spawned in the transcript, still running, then a Workflow run. An agent's send to a Workflow agent
     # carries the builder's agentId, which this transcript holds as the spawn's id.
-    "workflow-subagent-sender": rr_session(rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT),
-                                           rf_workflow_launch("workflow-subagent-sender", RF_WF_RUN)),
+    "workflow-agent-sender": rr_session(rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT),
+                                           rf_workflow_launch("workflow-agent-sender", RF_WF_RUN)),
     # A Workflow run whose one agent has a result line and no meta file.
     "workflow-no-meta": rr_session(rf_workflow_launch("workflow-no-meta", RF_WF_NOMETA_RUN)),
     # A builder spawned in the transcript, still running, then a Workflow run whose agents were spawned with isolation
-    # worktree (RF_WF_WT_RUN). The builder is the sender of the subagent cases.
+    # worktree (RF_WF_WT_RUN). The builder is the sender of the agent cases.
     "workflow-worktree": rr_session(rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT),
                                     rf_workflow_launch("workflow-worktree", RF_WF_WT_RUN)),
+    # A reviewer stopped with TaskStop, and one whose run finished: each run record says so. A run with no record,
+    # and a run whose agent is finished with a worktree flag and no agentType.
+    "workflow-killed": rr_session(rf_workflow_launch("workflow-killed", RF_WF_KILLED_RUN)),
+    "workflow-completed": rr_session(rf_workflow_launch("workflow-completed", RF_WF_COMPLETED_RUN)),
+    "workflow-norecord": rr_session(rf_workflow_launch("workflow-norecord", RF_WF_NORECORD_RUN)),
+    "workflow-notype": rr_session(rf_workflow_launch("workflow-notype", RF_WF_NOTYPE_RUN)),
     # A Workflow run whose journal cannot be read (write_rf_transcripts makes its journal a folder).
     "workflow-unreadable": rr_session(rf_workflow_launch("workflow-unreadable", RF_WF_UNREADABLE_RUN)),
     # No spawn at all: the empty state.
@@ -10642,7 +10662,8 @@ RF_TRANSCRIPTS = {
 def write_rf_workflow(transcript_name, run, agents, meta_extra=None):
     """A Workflow run's folder beside the transcript `transcript_name`: the journal, a launched line, then a started line
     for each agent and a result line for each one that finished, and one meta file per agent, holding its agentType.
-    An agent whose agentType is None has no meta file. `meta_extra` maps an agent id to more meta keys, such as the
+    An agent whose agentType is None has no meta file, unless `meta_extra` gives it keys: then its meta holds those
+    keys alone. `meta_extra` maps an agent id to more meta keys, such as the
     worktree keys of an agent spawned with isolation worktree."""
     folder = os.path.join(RF_DIR, transcript_name, "subagents", "workflows", run)
     lines = [json.dumps({"type": "launched"})]
@@ -10652,19 +10673,38 @@ def write_rf_workflow(transcript_name, run, agents, meta_extra=None):
         if finished:
             lines.append(json.dumps({"type": "result", "key": key, "agentId": agent_id, "result": "done",
                                      "toolsUsed": ["Bash"]}))
-        if agent_type is not None:
-            meta = {"agentType": agent_type, "model": "sonnet"}
-            meta.update((meta_extra or {}).get(agent_id, {}))
+        extra = (meta_extra or {}).get(agent_id, {})
+        if agent_type is not None or extra:
+            meta = {"agentType": agent_type, "model": "sonnet"} if agent_type is not None else {"model": "sonnet"}
+            meta.update(extra)
             write(os.path.join(folder, "agent-%s.meta.json" % agent_id), json.dumps(meta))
     write(os.path.join(folder, "journal.jsonl"), "\n".join(lines) + "\n")
+
+
+def write_rf_run_record(transcript_name, run, status):
+    """A Workflow run's record beside the transcript `transcript_name`, at <transcript minus .jsonl>/workflows/<runId>.json,
+    a sibling of subagents/. It holds the keys the probe's record holds, with fixture values: the run's id, name, status,
+    result and counts. A stopped run (status killed) holds an error and a null result; a finished one holds its result."""
+    record = {"runId": run, "workflowName": "review-run", "status": status, "agentCount": 1, "logs": [],
+              "phases": [{"title": "Review"}], "durationMs": 5542, "startTime": 1794157505311,
+              "timestamp": "2026-11-08T17:05:10.864Z", "result": None if status == "killed" else "done"}
+    if status == "killed":
+        record["error"] = "Error: Workflow aborted"
+    write(os.path.join(RF_DIR, transcript_name, "workflows", run + ".json"), json.dumps(record))
 
 
 def write_rf_transcripts():
     write_transcripts(RF_TRANSCRIPTS, RF_DIR)
     write_rf_workflow("workflow-agents", RF_WF_RUN, RF_WF_AGENTS)
-    write_rf_workflow("workflow-subagent-sender", RF_WF_RUN, RF_WF_AGENTS)
+    write_rf_workflow("workflow-agent-sender", RF_WF_RUN, RF_WF_AGENTS)
     write_rf_workflow("workflow-no-meta", RF_WF_NOMETA_RUN, RF_WF_NOMETA_AGENTS)
     write_rf_workflow("workflow-worktree", RF_WF_WT_RUN, RF_WF_WT_AGENTS, RF_WF_WT_EXTRA)
+    write_rf_workflow("workflow-killed", RF_WF_KILLED_RUN, RF_WF_KILLED_AGENTS)
+    write_rf_run_record("workflow-killed", RF_WF_KILLED_RUN, "killed")
+    write_rf_workflow("workflow-completed", RF_WF_COMPLETED_RUN, RF_WF_COMPLETED_AGENTS)
+    write_rf_run_record("workflow-completed", RF_WF_COMPLETED_RUN, "completed")
+    write_rf_workflow("workflow-norecord", RF_WF_NORECORD_RUN, RF_WF_NORECORD_AGENTS)
+    write_rf_workflow("workflow-notype", RF_WF_NOTYPE_RUN, RF_WF_NOTYPE_AGENTS, RF_WF_NOTYPE_EXTRA)
     # The journal is a folder, so the guard's open() fails on it, as the role transcript's `unreadable` folder does.
     os.makedirs(os.path.join(RF_DIR, "workflow-unreadable", "subagents", "workflows", RF_WF_UNREADABLE_RUN,
                              "journal.jsonl"), exist_ok=True)
@@ -10677,15 +10717,15 @@ lazy_fixture([RF_POINTER], write_rf_pointer)
 
 def rf_refuse(name, tool_input, transcript, agent_id=None, carries=RF_CARRIES, config=None, agent_type=None):
     """A SendMessage the guard refuses for the rule: the reason names the rule and each fragment in `carries`
-    (by default a fresh reviewer and the prior report, the reviewer wording). `agent_id` and `agent_type` make it a
-    subagent's send."""
+    (by default a fresh reviewer and the prior report, the reviewer wording). `agent_id` and `agent_type` make it an
+    agent's send."""
     add("resume-finished-reviewer: " + name, "deny", rule=RF_RULE, tool=RR_BUILTIN_SEND, cwd=NOGIT,
         transcript=transcript, carries=carries, agent_id=agent_id, agent_type=agent_type, env=ROLE_ENV, config=config,
         **tool_input)
 
 
 def rf_allow(name, tool_input, transcript, agent_id=None, config=None, agent_type=None):
-    """A SendMessage the guard lets through silently. `agent_id` and `agent_type` make it a subagent's send."""
+    """A SendMessage the guard lets through silently. `agent_id` and `agent_type` make it an agent's send."""
     add("resume-finished-reviewer: " + name, "allow", tool=RR_BUILTIN_SEND, cwd=NOGIT, transcript=transcript,
         silent=True, agent_id=agent_id, agent_type=agent_type, env=ROLE_ENV, config=config, **tool_input)
 
@@ -10764,26 +10804,26 @@ rf_allow("the latest spawn with the name wins: an older finished reviewer, then 
 rf_allow("a send to main is allowed", {"to": "main", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
 rf_allow("a name that matches no spawn (a peer session) is allowed",
          {"to": "session-peer-pr9", "message": RF_MSG}, rf_path("bg-reviewer-finished"))
-# Controls for the subagent cases below: a main-session send to the same finished spawns on the same transcripts. The old
-# code already refuses these, so each shows the transcript reads as finished, and a red subagent case is the guard's.
-rf_refuse("control: a main-session send to a finished reviewer on the subagent transcript is refused",
-          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("subagent-sender-finished-reviewer"))
-rf_refuse("control: a main-session send to a finished worktree builder on the subagent transcript is refused",
-          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("subagent-sender-finished-worktree"),
+# Controls for the agent cases below: a main-session send to the same finished spawns on the same transcripts. The old
+# code already refuses these, so each shows the transcript reads as finished, and a red agent case is the guard's.
+rf_refuse("control: a main-session send to a finished reviewer on the sender transcript is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("agent-sender-finished-reviewer"))
+rf_refuse("control: a main-session send to a finished worktree builder on the sender transcript is refused",
+          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("agent-sender-finished-worktree"),
           carries=("fresh builder",))
-# A subagent's own send. Its payload carries agent_id and agent_type, and agent_id is the spawn's agentId, which the
+# An agent's own send. Its payload carries agent_id and agent_type, and agent_id is the spawn's agentId, which the
 # parent's transcript holds (the running builder in each of these). Its send is judged as the main session's is.
-rf_refuse("a subagent's send to a finished reviewer the parent spawned is refused",
-          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("subagent-sender-finished-reviewer"),
+rf_refuse("an agent's send to a finished reviewer the parent spawned is refused",
+          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("agent-sender-finished-reviewer"),
           agent_id=RF_OTHER_AGENT, agent_type="builder")
-rf_refuse("a subagent's send to a finished worktree builder the parent spawned is refused, and the reason says fresh builder",
-          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("subagent-sender-finished-worktree"),
+rf_refuse("an agent's send to a finished worktree builder the parent spawned is refused, and the reason says fresh builder",
+          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("agent-sender-finished-worktree"),
           agent_id=RF_OTHER_AGENT, agent_type="builder", carries=("fresh builder",))
-rf_allow("a subagent's send to a running reviewer the parent spawned passes",
-         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("subagent-sender-running-reviewer"),
+rf_allow("an agent's send to a running reviewer the parent spawned passes",
+         {"to": RF_REVIEW, "message": RF_MSG}, rf_path("agent-sender-running-reviewer"),
          agent_id=RF_OTHER_AGENT, agent_type="builder")
-rf_allow("a subagent's send to main passes",
-         {"to": "main", "message": RF_MSG}, rf_path("subagent-sender-finished-reviewer"),
+rf_allow("an agent's send to main passes",
+         {"to": "main", "message": RF_MSG}, rf_path("agent-sender-finished-reviewer"),
          agent_id=RF_OTHER_AGENT, agent_type="builder")
 # A main-session send to a Workflow agent, named by its agentId. Its spawn is in its run's journal, not the transcript:
 # it has finished when its result line exists, has no worktree, and is a reviewer by its meta agentType.
@@ -10799,21 +10839,21 @@ rf_refuse("a main-session send to a finished Workflow reviewer, named by its jou
           {"to": "review-finished", "message": RF_MSG}, rf_path("workflow-agents"))
 rf_allow("control: a main-session send to a finished non-reviewer Workflow agent, named by its label, passes",
          {"to": "scan-finished", "message": RF_MSG}, rf_path("workflow-agents"))
-# A subagent's send (a payload with agent_id) to a finished Workflow reviewer is refused. Its sender is the running
-# builder spawned in that transcript. The control is a subagent's send to a finished non-reviewer Workflow agent.
-rf_refuse("a subagent's send to a finished Workflow reviewer is refused",
-          {"to": RF_WF_REVIEW_AGENT, "message": RF_MSG}, rf_path("workflow-subagent-sender"),
+# An agent's send (a payload with agent_id) to a finished Workflow reviewer is refused. Its sender is the running
+# builder spawned in that transcript. The control is an agent's send to a finished non-reviewer Workflow agent.
+rf_refuse("an agent's send to a finished Workflow reviewer is refused",
+          {"to": RF_WF_REVIEW_AGENT, "message": RF_MSG}, rf_path("workflow-agent-sender"),
           agent_id=RF_OTHER_AGENT, agent_type="builder")
-rf_allow("control: a subagent's send to a finished non-reviewer Workflow agent passes",
-         {"to": RF_WF_DONE_AGENT, "message": RF_MSG}, rf_path("workflow-subagent-sender"),
+rf_allow("control: an agent's send to a finished non-reviewer Workflow agent passes",
+         {"to": RF_WF_DONE_AGENT, "message": RF_MSG}, rf_path("workflow-agent-sender"),
          agent_id=RF_OTHER_AGENT, agent_type="builder")
 # A finished Workflow agent of agentType workflow-subagent that was spawned with isolation worktree: its meta holds
 # spawnedWithWorktree and a worktreePath, and its worktree is gone once it finishes. Refused for a main-session send and
-# for a subagent's send. The role pins no isolation, so the meta keys are what decide.
+# for an agent's send. The role pins no isolation, so the meta keys are what decide.
 rf_refuse("a main-session send to a finished Workflow agent spawned with a worktree is refused",
           {"to": RF_WF_WT_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"),
           carries=("fresh workflow-subagent", "prior report"))
-rf_refuse("a subagent's send to a finished Workflow agent spawned with a worktree is refused",
+rf_refuse("an agent's send to a finished Workflow agent spawned with a worktree is refused",
           {"to": RF_WF_WT_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"),
           agent_id=RF_OTHER_AGENT, agent_type="builder", carries=("fresh workflow-subagent", "prior report"))
 # The same agent type with the same keys, while it runs (a started line, no result), passes. A finished one with no
@@ -10822,6 +10862,19 @@ rf_allow("a main-session send to a running Workflow agent spawned with a worktre
          {"to": RF_WF_WT_RUNNING_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"))
 rf_allow("control: a main-session send to a finished Workflow agent of workflow-subagent with no worktree keys passes",
          {"to": RF_WF_NOKEYS_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"))
+# A reviewer stopped with TaskStop leaves a started line and no result line. Its run record says killed, so the run is
+# finished, and the reviewer is refused. A finished run's record says completed, and the same. A run with no record is
+# still running, so its started-only reviewer passes.
+rf_refuse("a started-only Workflow reviewer whose run record says killed is refused: the run was stopped",
+          {"to": RF_WF_KILLED_AGENT, "message": RF_MSG}, rf_path("workflow-killed"))
+rf_refuse("a started-only Workflow reviewer whose run record says completed is refused: the run finished",
+          {"to": RF_WF_COMPLETED_AGENT, "message": RF_MSG}, rf_path("workflow-completed"))
+rf_allow("a started-only Workflow reviewer with no run record passes: the run is still running",
+         {"to": RF_WF_NORECORD_AGENT, "message": RF_MSG}, rf_path("workflow-norecord"))
+# A finished Workflow agent with no agentType has the role agent, and its worktree flag alone refuses it.
+rf_refuse("a finished Workflow agent with a worktree flag and no agentType is refused as an agent",
+          {"to": RF_WF_NOTYPE_AGENT, "message": RF_MSG}, rf_path("workflow-notype"),
+          carries=("this agent has finished", "fresh agent", "prior report"))
 # Asked: no readable journal names the target, and a journal beside the transcript cannot be read. The control is the
 # same target on a transcript whose journals all read: nothing names it, so it passes.
 rf_ask("a Workflow agent whose journal cannot be read asks: no readable journal names it",
@@ -10833,7 +10886,7 @@ rf_allow("a send in a transcript with no spawn at all is allowed",
 rf_allow("a missing transcript is allowed, never refused",
          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("missing"))
 # Asked: a finished Workflow agent with a result line and no meta file. Its role is unknown, and an unknown state asks
-# (coordinator ruling, 2026-11-07 20:30 CST).
+# (coordinator ruling).
 rf_ask("a finished Workflow agent with no meta file asks: its role is unknown",
        {"to": RF_WF_NOMETA_AGENT, "message": RF_MSG}, rf_path("workflow-no-meta"))
 # Asked: the target is a reviewer whose result shape is unknown, so the guard cannot tell whether it finished.
