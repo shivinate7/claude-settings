@@ -612,7 +612,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, "a lane checkout that stayed shallow after the unshallow fetch read as a pass: " + out)
         self.assertEqual(pass_lines(out), [], "a PASS line printed on a clone that stayed shallow: " + out)
         self.assertIn("unknown", out.lower(), "the refusal does not say the lint is unknown: " + out)
-        self.assertRegex(out, r"(?i)origin (?:itself )?is (?:itself )?shallow", "the refusal does not say origin itself is shallow, the cause to fix: " + out)
+        self.assertRegex(out, r"(?i)origin (?:itself )?is (?:itself )?shallow", "the refusal does not say origin itself is shallow, one cause to fix: " + out)
+        self.assertRegex(out, r"(?i)\brefspec\b", "the refusal does not name a fetch refspec that leaves history out, the other cause to fix: " + out)
         self.assertNotIn("git fetch --unshallow origin", out, "the refusal tells the reader to run the command that just ran, which cannot fix a shallow origin: " + out)
         self.assertEqual(self.lint_calls(), [], "ci-job ran on a clone that stayed shallow")
 
