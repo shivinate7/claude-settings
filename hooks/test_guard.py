@@ -11909,6 +11909,60 @@ sh("frozen: a parallel --shuf flag, wrapped cat of the config hook, is a read an
    "parallel --shuf cat {} ::: " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: an nsenter -m value glued to a path, wrapped cat of the config hook, is a read and is allowed",
    "nsenter -m/proc/1/ns/mnt cat " + CFG_HOOK, "allow", cwd=NOGIT)
+# LONG FLAGS, PARALLEL VALUE FLAGS AND `{}` PLACEMENT. nsenter's long flags take a value as the next word or after `=`;
+# a bare one takes none. The walk must step past the value before it reads the glued `-m/...`, so `cp` is the command
+# word. parallel's value flags in its current parallel.pod (--limit, --memsuspend, --group-by, --jl, --semaphore-timeout,
+# --ssh-delay) are missing from the walk's set, so each value is read as the command word and the verb behind it is
+# hidden. In a quoted parallel command, `{}` is the input path: a write whose target is `{}` writes the frozen file, while
+# a cp whose source is `{}` only reads it.
+sh("frozen: an nsenter --target 1 long flag before a glued -m value, wrapped cp onto the config hook, is denied",
+   "nsenter --target 1 -m/proc/1/ns/mnt cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter --target=1 long flag before a glued -m value, wrapped cp onto the config hook, is denied",
+   "nsenter --target=1 -m/proc/1/ns/mnt cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter --preserve-credentials bare long flag before a glued -m value, wrapped cp onto the config hook, is denied",
+   "nsenter --preserve-credentials -m/proc/1/ns/mnt cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter --target 1 long flag before a glued -m value, wrapped cat of the config hook, is a read and is allowed",
+   "nsenter --target 1 -m/proc/1/ns/mnt cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: an nsenter --target=1 long flag before a glued -m value, wrapped cat of the config hook, is a read and is allowed",
+   "nsenter --target=1 -m/proc/1/ns/mnt cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: an nsenter --preserve-credentials bare long flag before a glued -m value, wrapped cat of the config hook, is a read and is allowed",
+   "nsenter --preserve-credentials -m/proc/1/ns/mnt cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel --limit value, wrapped rm of the config hook, is denied",
+   "parallel --limit 10 rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --memsuspend value, wrapped rm of the config hook, is denied",
+   "parallel --memsuspend 2G rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --group-by value, wrapped rm of the config hook, is denied",
+   "parallel --group-by 1 rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --jl value, wrapped rm of the config hook, is denied",
+   "parallel --jl log rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --semaphore-timeout value, wrapped rm of the config hook, is denied",
+   "parallel --semaphore-timeout 5 rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --ssh-delay value, wrapped rm of the config hook, is denied",
+   "parallel --ssh-delay 1 rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --limit value, wrapped cat of the config hook, is a read and is allowed",
+   "parallel --limit 10 cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel quoted command with a redirect onto its {} input is denied",
+   "parallel 'echo x > {}' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel quoted command removing its {} input after an && is denied",
+   "parallel 'rm {} && echo ok' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel quoted command teeing its {} input after a ; is denied",
+   "parallel 'cat a; tee {}' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel quoted command piping into a tee of its {} input is denied",
+   "parallel 'printf x | tee {}' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel quoted command with a redirect onto a temp file, not its {} input, is allowed",
+   "parallel 'echo x > /tmp/bak/x' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel quoted command reading its {} input after an && is a read and is allowed",
+   "parallel 'cat {} && echo ok' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel quoted command reading its {} input after a ; is a read and is allowed",
+   "parallel 'cat a; cat {}' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel quoted command piping into a cat of its {} input is a read and is allowed",
+   "parallel 'printf x | cat {}' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a plain cp of the config hook into a temp folder is a read and is allowed",
+   "cp " + CFG_HOOK + " /tmp/bak/", "allow", cwd=NOGIT)
+sh("frozen: a parallel cp of the config hook into a temp folder, unquoted, is a read and is allowed",
+   "parallel cp {} /tmp/bak/ ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel cp of the config hook into a temp folder, quoted, is a read and is allowed",
+   "parallel 'cp {} /tmp/bak/' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -22219,6 +22273,56 @@ sh("other-checkout: a parallel --shuf flag, wrapped cat of a separate clone, is 
    "parallel --shuf cat {} ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: an nsenter -m value glued to a path, wrapped cat of a separate clone, is a read and is allowed",
    "nsenter -m/proc/1/ns/mnt cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+# THE LONG-FLAG, PARALLEL VALUE-FLAG AND `{}` FORMS OF THE FROZEN ROWS ABOVE, AIMED AT A SEPARATE CLONE. Each deny is
+# refused as other-checkout. Each allow reads the separate clone's file, or writes into a temp folder.
+sh("other-checkout: an nsenter --target 1 long flag before a glued -m value, wrapped cp into a separate clone, is refused",
+   "nsenter --target 1 -m/proc/1/ns/mnt cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter --target=1 long flag before a glued -m value, wrapped cp into a separate clone, is refused",
+   "nsenter --target=1 -m/proc/1/ns/mnt cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter --preserve-credentials bare long flag before a glued -m value, wrapped cp into a separate clone, is refused",
+   "nsenter --preserve-credentials -m/proc/1/ns/mnt cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter --target 1 long flag before a glued -m value, wrapped cat of a separate clone, is a read and is allowed",
+   "nsenter --target 1 -m/proc/1/ns/mnt cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter --target=1 long flag before a glued -m value, wrapped cat of a separate clone, is a read and is allowed",
+   "nsenter --target=1 -m/proc/1/ns/mnt cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter --preserve-credentials bare long flag before a glued -m value, wrapped cat of a separate clone, is a read and is allowed",
+   "nsenter --preserve-credentials -m/proc/1/ns/mnt cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --limit value, wrapped rm into a separate clone, is refused",
+   "parallel --limit 10 rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --memsuspend value, wrapped rm into a separate clone, is refused",
+   "parallel --memsuspend 2G rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --group-by value, wrapped rm into a separate clone, is refused",
+   "parallel --group-by 1 rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --jl value, wrapped rm into a separate clone, is refused",
+   "parallel --jl log rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --semaphore-timeout value, wrapped rm into a separate clone, is refused",
+   "parallel --semaphore-timeout 5 rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --ssh-delay value, wrapped rm into a separate clone, is refused",
+   "parallel --ssh-delay 1 rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --limit value, wrapped cat of a separate clone, is a read and is allowed",
+   "parallel --limit 10 cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command with a redirect onto its {} input, a separate clone's file, is refused",
+   "parallel 'echo x > {}' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command removing its {} input after an && is refused",
+   "parallel 'rm {} && echo ok' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command teeing its {} input after a ; is refused",
+   "parallel 'cat a; tee {}' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command piping into a tee of its {} input is refused",
+   "parallel 'printf x | tee {}' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command with a redirect onto a temp file, not its {} input, is allowed",
+   "parallel 'echo x > /tmp/bak/x' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command reading its {} input after an && is a read and is allowed",
+   "parallel 'cat {} && echo ok' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command reading its {} input after a ; is a read and is allowed",
+   "parallel 'cat a; cat {}' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel quoted command piping into a cat of its {} input is a read and is allowed",
+   "parallel 'printf x | cat {}' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a plain cp of a separate clone's file into a temp folder is a read and is allowed",
+   "cp " + OTHER_WRITE_TARGET + " /tmp/bak/", "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel cp of a separate clone's file into a temp folder, unquoted, is a read and is allowed",
+   "parallel cp {} /tmp/bak/ ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel cp of a separate clone's file into a temp folder, quoted, is a read and is allowed",
+   "parallel 'cp {} /tmp/bak/' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
