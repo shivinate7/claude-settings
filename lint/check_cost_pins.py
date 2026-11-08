@@ -56,7 +56,7 @@ Exit 1 when there is a finding, 0 when there is none. The decision records (kind
 the debt notes file are read. A debt record's Cost line is not read. Each test file is read once per run.
 Cost: per run, one read of the notes file and one read of each test file a Cost sentence or a note names, cached.
 The number of test files read is not pinned. lint/layout.py reads lint/layout.json and its extras file again on each
-record-kind lookup, with no cache. Those layout reads are not pinned.
+record-kind lookup, with no cache, and reads git files to name the repo. Those layout reads are not pinned.
 """
 import argparse
 import collections
