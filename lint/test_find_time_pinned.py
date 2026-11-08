@@ -549,6 +549,18 @@ class PythonCalendarTest(FinderCase):
                        listed=["t_real = time.gmtime()"],
                        clean=["# t_comment = time.gmtime()", "NOTE = 't_note = time.ctime()'", "Docstring:"])
 
+    def test_date_today_and_datetime_today_on_a_module_chain_are_listed(self):
+        text = src(
+            "import datetime",
+            "",
+            "def test_today(x):",
+            "    assert datetime.date.today() == x",
+            "    assert datetime.datetime.today() == x",
+        )
+        self.put("tests/test_today.py", text)
+        calendar_judge(self, "tests/test_today.py", text,
+                       listed=["assert datetime.date.today() == x", "assert datetime.datetime.today() == x"])
+
 
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
 
@@ -1356,6 +1368,15 @@ class HangGuardTest(FinderCase):
         ), "the JSON rows lost a test-cap finding or its category")
         self.assertEqual(out["counts"]["test-cap"], 2, "the JSON counts lost a test-cap")
         self.assertEqual(code, 0, "a file whose only findings are test-caps exits %d, not 0" % code)
+
+    def test_hang_guard_with_an_unread_file_exits_2(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        self.put("tests/test_bad.py", "def broken(:\n    pass\n")
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
+        self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout, "scope: the unread file was not found")
+        self.assertEqual(proc.returncode, 2,
+                         "a hang guard with an unread file exits %d, not 2" % proc.returncode)
 
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
