@@ -105,7 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "sendmessage-session-id": "SendMessage whose to starts session_: refused, since SendMessage reaches no cloud session; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
+    "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10664,10 +10664,11 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 # =========================================================================== 5i. SendMessage to a cloud session
 FAMILY = "sendmessage-session-id"
 #
-# Rule sendmessage-session-id. SendMessage addresses in-process agents and local teammates by name. It never reaches a
-# cloud session, so a SendMessage whose `to` starts `session_` is refused: its hand-off could go missing. The refusal
-# names the right tool, mcp__claude-code-remote__send_message, and its session_id argument. Only SendMessage with such a
-# `to` is refused. An agent name, @parent, an empty, missing or non-string `to`, and the right tool itself all pass.
+# Rule sendmessage-session-id. SendMessage addresses an agent by name. A `session_` id is no agent name, and auto mode
+# refused a SendMessage that named one. So a SendMessage whose `to` starts `session_` is refused: its hand-off could go
+# missing, and whether SendMessage delivers to such an id is unmeasured. The refusal names the right tool,
+# mcp__claude-code-remote__send_message, and its session_id argument. Only SendMessage with such a `to` is refused.
+# An agent name, @parent, an empty, missing or non-string `to`, and the right tool itself all pass.
 # The allows are as load-bearing as the refusals: a false alarm here stops a hand-off to a reviewer or the parent.
 SENDMESSAGE_RULE = "sendmessage-session-id"
 SENDMESSAGE_TOOL = "SendMessage"
