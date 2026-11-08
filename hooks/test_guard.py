@@ -8286,6 +8286,24 @@ sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env"
 sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
    "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
 
+# Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
+# and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
+# is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
+# command, with env only as an argument. `bunx` is no loader command, so no bunx case is pinned here.
+sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
+   "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, bun x is the exec alias, so env is the child",
+   "bun --env-file=" + ENV + " x env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker --sig-proxy takes no value, so serve env is the image's own command",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img serve env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with no child after the image, so serve is the image's own command",
+   "docker run --env-file " + ENV + " --pull always img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, bun x runs vitest, an app's own test command",
+   "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
