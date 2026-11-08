@@ -30,7 +30,7 @@ Hook: stall_watch.py --hook
   drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled.
 
   BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
-  design (bin/verdict) appends its heartbeat there too, and the watcher relays it to its stdout (the
+  design appends there too (hooks/stall_beat.py: bin/verdict's heartbeat, bin/ci-job's start line per step), and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
