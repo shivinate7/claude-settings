@@ -18,12 +18,14 @@ This rule saves a wasted round. It does not stop an unseen test change. `role_wr
 
 ## What a message edits
 
-The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, make (`make the fix in X`). Each edit verb governs one object:
+The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, append, make (`make the fix in X`). After a determiner or a preposition, `fix`, `update` and `change` are nouns (`the guard fix in X`, `a bug fix`). Each edit verb governs one object:
 
 - `only` or `just` may sit between the verb and its object (`Edit only X`).
 - A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an object (`Fix X is not your job`).
 - The object is the first path after the verb in its clause, and a path joined to it by `and`, `or` or a comma. A later path is a spec or a target: `Make guard.py handle the case in tests/x.py` and `Fix guard.py for/as/to satisfy ... tests/x.py` edit guard.py only.
 - With no path right after the verb (a determiner or `file` may sit between), a noun phrase then `in`, `at`, `of`, `to` or `into` and the path governs that path (`Fix the failing case in X`, `Make the fix in X`, `Add a case to X`). After another preposition (`for`, `as`, `with`) the path is a spec.
+- A participle right before `at` or `in` makes the path a locator, not an object (`Fix the failure reported at X:120`). The participles are the set `MESSAGE_LOCATOR_PARTICIPLES` in hooks/guard.py. Ruling: lane, 2026-11-08 11:30 CST, process-only.
+- A gerund after `by` governs its own direct path (`Make it pass by fixing X`, `Fix the bug by updating X`).
 - A noun phrase whose head is note, report or summary governs nothing (`Make a note of the failures in X`).
 - A test noun as the head (case, cases, test, assert) makes the path a spec when a test-author is sent it (`Add red cases for the empty brief in hooks/guard.py`). A builder is still judged on that path.
 - With no object, a path that leads the clause is governed (`X.py: add a case`, `The assertion at X is not specific, replace it`).
@@ -33,7 +35,7 @@ A test node id (`X.py::case`) names its file.
 
 A prohibition is no order. `not`, `don't`, `never` or `without` right before an edit verb clears that verb only, with one adverb allowed between (`don't just fix`). `Don't forget to update X` is an order, and in `Don't just fix A, also update B` the update of B is an order. A negation before another word (`is not specific`) clears nothing. A cleared verb still takes its object, so a later verb of the clause does not read that path as leading the clause.
 
-A path is not governed when it is the object of run, read, check or show, or when it goes green or passes (`make X green`, `make X pass`). Nor is it governed when it follows `pass`, `match` or `satisfy` (the target), or sits inside a command or a quoted example (`python3 ...`, `verdict ...`, or a backtick or double-quoted span of several words). A path inside a double-quoted span is still a read path for a carry: `Quote: "X:12 is wrong". Fix it.` carries X. A clause ends at `;`, `then`, `so`, a sentence end, and an `and` before a word that is neither an edit verb, a determiner nor a path. A verb after a determiner (`the fix`) is a noun. A verb after another agent's name (`the builder will fix guard.py`) or after `I` or `we` is that agent's act, not the receiver's.
+`verdict` is a command word only at a clause head. A path is not governed when it is the object of run, read, check or show, or when it goes green or passes (`make X green`, `make X pass`). Nor is it governed when it follows `pass`, `match` or `satisfy` (the target), or sits inside a command or a quoted example (`python3 ...`, `verdict ...`, or a backtick or double-quoted span of several words). A path inside a double-quoted span is still a read path for a carry: `Quote: "X:12 is wrong". Fix it.` carries X. A clause ends at `;`, `then`, `so`, a sentence end, and an `and` before a word that is neither an edit verb, a determiner nor a path. A verb after a determiner (`the fix`) is a noun. A verb after another agent's name (`the builder will fix guard.py`) or after `I` or `we` is that agent's act, not the receiver's.
 
 ## Accepted limits
 
@@ -45,7 +47,7 @@ The guard stops Claude's mistakes, not an attacker (`guard-guards-mistakes-only`
 - A carry reaches the nearest earlier clause of the sentence, else one sentence back. A path two sentences back is not read. `Run X. Fix the failure` carries nothing, because X was run, though the failure may sit in X.
 - A read path, or a path that led its clause, carries only to an anaphor right after the verb, and only across clauses. `Read X. Fix the failing case.`, `Read X and fix it` and `X is wrong. Fix the failing assert.` pass.
 - A noun compound is no anaphor, so `Read tests/x.py. Fix the fixture bug.` and `Fix the guard tests` pass. A role noun before `and` is a compound too: `Fix the tests and the guard` carries nothing.
-- `Make it pass by <gerund> X`, where X is a path, carries nothing, because that clause names a path. X is not governed either, so `Make it pass by editing tests/x.py` to a builder passes. A compound X (`by fixing the guard code`) keeps the anaphor's side.
+- A compound X after `by` and a gerund (`by fixing the guard code`) names no path, so it keeps the anaphor's side.
 - `finally` as a goal filler has no case of its own.
 - A double-quoted span of several words is data, so an order written in quotes (`Do this: "edit tests/x.py"`) passes. So does a quoted order inside an `Ask:` line. Only a later pathless edit with an anaphor carries a quoted path.
 - `Fix guard.py. Add a note to your report.`, sent to a test-author, is refused: the verb's clause names no path, and guard.py was governed in the sentence before.
