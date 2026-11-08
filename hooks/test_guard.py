@@ -7179,6 +7179,11 @@ UNB_BRIEF_SHELL = "Write the shell tests for the stop hook. Push your commit to 
 UNB_BRIEF_NEAR = "Write the shell tests for the stop hook. Push your commit to shell-tests-2x and report back."
 UNB_STANDING = "Push only with: git push origin HEAD:<branch>. The branch for this lane is shell-tests-2."
 UNB_BIG_BRIEF = "Work through the stop-hook notes. " * 6000 + UNB_BRIEF_SHELL   # about 200 KB, branch last
+# A sentence-ending "." or "/" after a branch name is not part of the name. A "." or "/" followed by a
+# letter, digit, "_" or "-" is.
+UNB_BRIEF_PERIOD = "Write the shell tests for the stop hook. Push to shell-tests-2."
+UNB_BRIEF_OLD = "Write the shell tests for the stop hook. Push to shell-tests-2.old and report back."
+UNB_BRIEF_SUB = "Write the shell tests for the stop hook. Push to shell-tests-2/sub and report back."
 
 
 def unb_id(n):
@@ -7212,6 +7217,9 @@ UNB_AGENTS = {
     unb_id(14): [unb_record(UNB_BRIEF_NEAR)],
     unb_id(16): [unb_record("")],
     unb_id(17): [unb_record(UNB_BIG_BRIEF)],
+    unb_id(18): [unb_record(UNB_BRIEF_PERIOD)],
+    unb_id(19): [unb_record(UNB_BRIEF_OLD)],
+    unb_id(20): [unb_record(UNB_BRIEF_SUB)],
 }
 
 
@@ -7265,12 +7273,18 @@ unb_ask("brief names shell-tests-2x, push to shell-tests-2 asks (token boundary)
         VCS + " push origin HEAD:shell-tests-2", unb_id(14), "test-author")
 unb_ask("empty brief content names no branch, asks",
         VCS + " push -u origin HEAD", unb_id(16), "test-author")
+unb_ask("brief names only shell-tests-2.old, push -u origin HEAD asks (a dot and letters follow)",
+        VCS + " push -u origin HEAD", unb_id(19), "test-author")
+unb_ask("brief names only shell-tests-2/sub, push -u origin HEAD asks (a slash and letters follow)",
+        VCS + " push -u origin HEAD", unb_id(20), "test-author")
 
 # SILENT allow: the brief names the branch, or the push is not this rule's push.
 unb_allow("brief names shell-tests-2, push origin HEAD:shell-tests-2 is silent",
           VCS + " push origin HEAD:shell-tests-2", unb_id(7), "test-author")
 unb_allow("brief names shell-tests-2, push -u origin HEAD is silent",
           VCS + " push -u origin HEAD", unb_id(7), "test-author")
+unb_allow("brief ends a sentence with shell-tests-2., push -u origin HEAD is silent",
+          VCS + " push -u origin HEAD", unb_id(18), "test-author")
 unb_allow("brief as a list of text blocks names shell-tests-2, push -u origin HEAD is silent",
           VCS + " push -u origin HEAD", unb_id(8), "test-author")
 unb_allow("a brief of about 200 KB names shell-tests-2 last, push -u origin HEAD is silent",
