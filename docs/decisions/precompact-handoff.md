@@ -45,8 +45,8 @@ Owner, 2026-10-13 11:20 CDT: the reorient and re-read hooks live in claude-setti
    - The PreToolUse guard (`hooks/guard.py`, rule `agent-handoff-write`) refuses an agent's Write, Edit, MultiEdit or NotebookEdit of the session's own handoff. The payload must carry a valid `agent_id`. The path is matched by `names_handoff` in `hooks/reread_check.py`; an owner override lifts it, and a failed import allows.
    - `run_precompact` writes nothing when cwd holds `.claude/worktrees/agent-<17 hex>`, since Claude Code gives an agent's PreCompact the parent's `session_id` and no `agent_id`.
    - Gap: a shared-cwd agent's PreCompact still writes the digest and the state file over the parent's. Fix: none — no agent signal for a shared-cwd agent in the PreCompact payload. Until: 2026-11-21.
-   - Not covered: a Bash heredoc or redirect into the handoff is not refused. It becomes a debt only after an incident.
-   - Not covered: a main session whose cwd is an `agent-<17 hex>` worktree loses its PreCompact digest and state.
+   - Gap: a Bash heredoc or redirect into the handoff is not refused. Fix: step:handoff-bash-redirect.
+   - Gap: a main session whose cwd is an `agent-<17 hex>` worktree loses its PreCompact digest and state. Fix: none — cwd is the only agent signal in the PreCompact payload, and a main session rarely stands in an agent's worktree. Until: 2026-11-21.
    - Cost: one `names_handoff` check on an agent's file write; a refusal writes its guard.log line; the PreCompact check is one string split.
 
 Reason for items 8 and 9: after /clear or a fork a session started blind. After compaction a session could work a turn before it read its handoff. The guard refuses that work at each call it judges. The Stop refusal catches a turn that ends unread. Reason for item 10: a compaction summary and an old handoff hold beliefs with no source.
