@@ -1469,14 +1469,14 @@ def stamp_stop(what, out):
     reason = errs[-1] if errs else lines[0] if lines else "no output"
     return Stop(f"{what}: {reason} (full output: {log})")
 
-def base_stamp_config(wt, tmp, cfgrel, base_ref):
-    """The stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28).
-    -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+def base_stamp_kinds(wt, cfgrel, base_ref):
+    """The stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28). -> (text, kinds): (None, []) when the base has no config, else the file's
+    text and its "kinds" list (empty when it has none). A base or file that cannot be read raises Unread, and a file that does not parse raises Stop."""
     c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
     if c:  # an unreadable base is not an absent file
         raise Unread(f"cannot read {base_ref} to look for {cfgrel} {STAMP_CFG_CITE}: {listed}")
     if not listed:
-        return None
+        return None, []
     try:
         c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
         if c:
@@ -1484,6 +1484,12 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
         kinds = json.loads(text).get("kinds")
     except (ValueError, AttributeError) as e:
         raise Stop(f"cannot read the config {cfgrel} on {base_ref} {STAMP_CFG_CITE}: {e}")
+    return text, kinds or []
+
+def base_stamp_config(wt, tmp, cfgrel, base_ref):
+    """The stamp config as the base branch holds it (base_stamp_kinds).
+    -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+    text, kinds = base_stamp_kinds(wt, cfgrel, base_ref)
     if not kinds:
         return None
     path = os.path.join(tmp, "base-stamp.json")
@@ -1500,16 +1506,9 @@ REBUILD_DROPS = f"Drops-lines: {RECORDS_PAGE} -- a generated page, rebuilt by th
 
 def claim_paths(wt, base_ref, cfgrel=STAMP_CFG):
     """-> (folders, files): where a claim writes record files, from the stamp config on `base_ref` (the way stamp.mjs's recordPaths reads it: each kind's folder, file and manifest).
-    No config, or no kinds, writes none. A config that cannot be read or parsed raises, so the caller refuses as unknown."""
-    c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
-    if c:
-        raise ValueError(f"git ls-tree {base_ref} failed: " + (listed.splitlines() or ["?"])[-1])
-    if not listed:
-        return (), ()
-    c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
-    if c:
-        raise ValueError(f"git show {base_ref}:{cfgrel} failed: " + (text.splitlines() or ["?"])[-1])
-    kinds = json.loads(text).get("kinds") or []
+    stamp.mjs is the home of that read and is a node program, so the Python side repeats its path rule only. No config, or no kinds, writes none. A config that cannot be read or parsed raises
+    (base_stamp_kinds), so the caller refuses as unknown."""
+    kinds = base_stamp_kinds(wt, cfgrel, base_ref)[1]
     return (tuple(k["folder"].strip("/") + "/" for k in kinds if k.get("folder")),
             tuple(p for k in kinds for p in (k.get("file"), k.get("manifest")) if p))
 
@@ -2238,7 +2237,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None, own_out
 def owed_round(records, sha):
     """-> (kind, clause, num) when lane tip `sha` owes a done review record, else None. `records`: {pull request number: [record bodies,
     oldest first]}. A round is owed per pull request: the newest record on each pull request that names `sha` is read on its own, and one that owes a round (kinds "held", "fix", "net" and
-    "round" below) refuses, whatever a record on another pull request says. Only when no pull request owes a round does the newest record
+    "round" below) refuses, whatever a record on another pull request says. A record with Guard or check no owes no round on its own pull request. Only when no pull request owes a round does the newest record
     that names `sha`, across every pull request (a RecordBody knows its place in the comment list; a plain body is older than any read one), decide: done passes, and a Guard or check no that is not done is "unreviewed".
     `num` is the pull request the deciding record was posted on. `clause` finishes the sentence "#N (head ...)". `kind` picks the remedy: "held" (net value negative: the owner decides,
     no more rounds), "fix" (the fix check failed: the fix needs a new lane), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed, or the record is bad), "unreviewed" (the newest record for the head
@@ -2257,8 +2256,11 @@ def owed_round(records, sha):
     if not newest:
         return "unnamed", "has no done review record for its head (no record names it)", None
     for posted in sorted(per_pr):
+        parsed = parse_review(per_pr[posted][1])
+        if parsed and parsed["n"] == posted and parsed["guard"] == "no":
+            continue  # a Guard or check no never owes a round on its own pull request; the newest-record rule below reads it
         r = judge_record(posted, per_pr[posted][1], sha)
-        if r and r[0] != "unreviewed":
+        if r:
             return r[0], r[1], posted
     _, num, body = newest
     r = judge_record(num, body, sha)
@@ -2371,8 +2373,8 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
     holds (read_lanes' own_out; merge commits never count as own, so an edited merge on an integration head is read through its tips only; a revert of a lane merge and a revert of that revert
     are two own commits, a rare false alarm). The merge tool's own commits (tool_commit) are no lane work: never own, and the own head is read through them. `chain` (read_lanes'
     chain_out) is the own head and each commit under the tool's own commits on top of it; the newest of these that a record names is the own head the check judges, and when no
-    record names any of them, the refusal names `info["head"]`. Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, the newest record that names it decides, across
-    every pull request (owed_round), and its PR line must be the PR it was posted on. A pull request whose newest record has Guard or check yes and whose records name no lane tip and not the own head is refused too (stale_guard_round),
+    record names any of them, the refusal names `info["head"]`. Only when every commit of its own is a merge of lane tips is it an integration pull request. Per head, a round owed on any pull request refuses, whatever another pull request holds; when none is owed, the newest record that names the head
+    decides, across every pull request (owed_round), and its PR line must be the PR it was posted on. A pull request whose newest record has Guard or check yes and whose records name no lane tip and not the own head is refused too (stale_guard_round),
     when that record's head is new to the batch: in the history of the pull request's own head and not on its base. A record for a head outside that history is another
     pull request's, and one for a head on the base is a pull request's merged earlier.
     Reads one thing from GitHub: the repo's comments, since the oldest commit new to the base (less a day), or since this pull request opened when no commit is new.
