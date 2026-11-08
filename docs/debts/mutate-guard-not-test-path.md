@@ -5,4 +5,4 @@
 - **Decision.** `builders-cannot-edit-tests` (a builder must not delete, skip or rewrite a test).
 - **Retire.** PR #1675 merges, and a case in `hooks/test_guard.py` shows a builder's change to an existing entry refuses.
 
-- Fix: PR #1675
+- Fix: step:notes-fix-merge-ci
