@@ -1083,8 +1083,10 @@ CAP_ASK_REASON = (
 
 def _settings_place(path: str, cwd: str) -> bool:
     """True when a settings basename sits where Claude Code reads one: a `.claude` folder, the config
-    directory, the working folder, or a folder only the shell can name. The managed file is read from a place no spelling names, so its
-    basename alone counts. A same-named fixture in a scratch folder is none of them."""
+    directory, the working folder, the working folder's checkout root, a folder only the shell can name,
+    or the target's own folder when that is a checkout root or holds `install.ps1`. The managed file is
+    read from a place no spelling names, so its basename alone counts. A same-named fixture in a scratch
+    folder is none of them."""
     name = basename(path)
     if name not in SETTINGS_BASENAMES:
         return False
@@ -1106,15 +1108,6 @@ def _settings_place(path: str, cwd: str) -> bool:
         root = _checkout_root_by_stat(os.path.realpath(_expanded(cwd, "")))
         if root:
             here.add(os.path.normcase(root))
-        # A folder holding `install.ps1` is an install source: a local install links ~/.claude/settings.json to its
-        # settings.json. Every such ancestor counts, not the nearest only: the outer one's file is as reachable.
-        up = os.path.realpath(_expanded(cwd, ""))
-        while up:
-            if os.path.exists(os.path.join(up, "install.ps1")):
-                here.add(os.path.normcase(up))
-            if os.path.dirname(up) == up:
-                break
-            up = os.path.dirname(up)
     target = os.path.realpath(folder)
     # The target's own folder is a place too, from any cwd: a checkout root (`.git` marks it) or an install
     # source (`install.ps1`) holds a settings file that a local install links into ~/.claude.
