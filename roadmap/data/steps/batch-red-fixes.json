@@ -1,0 +1,11 @@
+{
+  "title": "Fixes for #1894's 8 notes and debt drop-red-hits-every-suite (a per-job hit map)",
+  "why": "#1894 (step merge-batch-split-and-pipeline) filed debt drop-red-hits-every-suite and 8 notes (lane session_013NEJL3NAnujQ8Pbt5dXkwP, 04:25 CST Nov 8).",
+  "note": "Fix: a per-job hit_suites filter for the debt, red first on an over-drop, and a fix for each of the 8 notes. Follow-up from #1894's head, Merge after: #1894. Doing (lane, 04:27 CST Nov 8). Queue fix. Filed 04:31 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 598,
+  "owner": "triage",
+  "lane": "session_013NEJL3NAnujQ8Pbt5dXkwP",
+  "updatedAt": "2026-11-08T04:28:00-06:00"
+}

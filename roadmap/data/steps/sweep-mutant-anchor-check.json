@@ -1,0 +1,11 @@
+{
+  "title": "A mutate_sweep mutant's anchor matches once, and the sweep's anchor pre-check reads ambiguous anchors too",
+  "why": "In janitor/mutate_sweep.py the mutant \"stale lock: a lock reason of another form counts as stale\" (~1177) matches janitor/sweep.py twice, at :439 and :480 (note sweep-anchor-first-match), so it may mutate the wrong place (lane draft-pr-guard-heredoc, session_013NEJKzzx35nAWSwPacHRXt, 04:27 CST Nov 8; coordinator 04:26 CST).",
+  "note": "Fix: point that mutant's anchor at stale_agent_lock_verdict; move mutate_sweep's stale-only pre-check (~1584) onto mutate_shared.find_anchor; add it to the new lint/check_mutant_anchors.py. Follows step lane-lint-mutant-anchors and retires note sweep-anchor-first-match. Red case first: the ambiguous anchor passes the sweep pre-check today; control: a unique anchor passes. Lane session_013NEJKzzx35nAWSwPacHRXt. Slug from the lane (the coordinator named it mutate-sweep-anchor-first-match). Queue fix. Filed 04:30 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 596,
+  "owner": "triage",
+  "lane": "session_013NEJKzzx35nAWSwPacHRXt",
+  "updatedAt": "2026-11-08T04:28:00-06:00"
+}
