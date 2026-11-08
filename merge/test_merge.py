@@ -13364,6 +13364,30 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "a plain record was refused:\n" + out + err)
         self.assertIn("Round 1: reviewer, sonnet, PASS", posted_body(self, out).splitlines(), "the plain round line changed")
 
+    def test_round_heads_fix_path_refuses_a_foreign_round_head_at_write(self):
+        # the --fix-check branch runs the same own-commit check as the plain one. The fix base is the earlier record's Head, so the fix base is not
+        # compared. The copy names its own round 1 head, and the new round 2 names a head of another pull request
+        earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=(f"Round 1: reviewer, sonnet, PASS, {REVIEW_OLD_HEAD}",)))
+        rounds = (f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}", f"2:reviewer:sonnet:PASS:{self.FOREIGN[0]}")
+        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        host = self.record_host(earlier, diffs=self.own_replies(REVIEW_OLD_HEAD))
+        rc, out, err = self.write_at(host, rounds, extra=fix)
+        self.assertIn((self.FOREIGN[0], self.LIVE), host.compare_reads, "scope: the fix-check write did not compare the foreign head with the live head")
+        self.assert_head_refused(rc, out, err, (self.FOREIGN[0],))
+        # control: the same argv, with the foreign head read as this pull request's own commit, is written
+        host = self.record_host(earlier, diffs=self.own_replies(REVIEW_OLD_HEAD, self.FOREIGN[0]))
+        rc, out, err = self.write_at(host, rounds, extra=fix)
+        self.assertEqual(rc, 0, "control: the fix-check write with the head read as this pull request's own was refused:\n" + out + err)
+
+    def test_round_heads_listing_reads_a_new_form_record_done_without_a_crash(self):
+        # the listing reads the newest record against the earlier ones: round 1 FAILed on an old head, and round 2 PASSed on the live head
+        earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=(f"Round 1: reviewer, sonnet, FAIL, {REVIEW_OLD_HEAD}",)))
+        newest = review_comment(2, 7, record_text(rounds=(f"Round 1: reviewer, sonnet, FAIL, {REVIEW_OLD_HEAD}", f"Round 2: reviewer, sonnet, PASS, {REVIEW_HEAD[:9]}")))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], (earlier, newest))
+        self.assertNotIn("Traceback", err, "the listing crashed on a record that names heads:\n" + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the #7 line does not read done")
+
 class ReviewRoundHeadsGate(unittest.TestCase):
     """review_state reads a record whose Round lines name heads (decision pr-review-record). Its top round is done only when every line of that round
     names the live head by a sha prefix, or when a fix check PASS follows and the record's Head is live. A top round that names another head is stale
