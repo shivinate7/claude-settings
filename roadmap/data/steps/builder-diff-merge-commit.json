@@ -1,11 +1,11 @@
 {
   "title": "The builder-diff guard counts test paths against MERGE_HEAD, not HEAD, at the commit that makes a merge commit",
   "why": "At a merge commit, the builder-diff guard counts test paths against HEAD while MERGE_HEAD is set, so the files the merge brings in read as the builder's own test edits. Live case: MERGE_HEAD e2703c611, HEAD ddeebc925, 40 staged test paths (lane tier-boundaries-enforced, session_013NEJKzVTWMbokJ3KFanBBC; coordinator, 03:56 CST Nov 8).",
-  "note": "Fix: when MERGE_HEAD is set, the guard counts only the paths the builder changed beyond the merge's own result (the diff against MERGE_HEAD and HEAD both), so a merge's incoming test files do not count as test edits. Red case first: a merge commit that brings in test files from main is refused today; control: a builder test edit in the same merge still refuses. Built in lane tier-boundaries-enforced as a follow-up guard fix. Related step tier-boundaries-enforced. The records-page finding of that lane is dropped: the commit held conflict markers, so its refusal was right. Queue fix (owner 13:20 CST Nov 7). Filed 03:59 CST Nov 8.",
+  "note": "Fix: when MERGE_HEAD is set, the guard counts only the paths the builder changed beyond the merge's own result (the diff against MERGE_HEAD and HEAD both), so a merge's incoming test files do not count as test edits. Red case first: a merge commit that brings in test files from main is refused today; control: a builder test edit in the same merge still refuses. Built in lane tier-boundaries-enforced as a follow-up guard fix. Related step tier-boundaries-enforced. The records-page finding of that lane is dropped: the commit held conflict markers, so its refusal was right. Queue fix (owner 13:20 CST Nov 7). Filed 03:59 CST Nov 8. Owner item 437 a (page answer 18:16Z = 12:16 CST Nov 8): keep \"builders never write test content\", and measure a builder's test edits against main after the merge, so main's own test changes pass; conflicts inside test files still go to a test-author (#1521). This step is the home; the lane records his pick in decision builders-cannot-edit-tests.",
   "phase": "now",
   "status": "doing",
   "order": 585,
   "owner": "triage",
   "lane": "session_013NEJKzVTWMbokJ3KFanBBC",
-  "updatedAt": "2026-11-08T03:58:00-06:00"
+  "updatedAt": "2026-11-08T12:17:00-06:00"
 }
