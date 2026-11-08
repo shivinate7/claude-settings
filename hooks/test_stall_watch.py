@@ -514,6 +514,17 @@ def report_names_the_wait_helper():
 
 
 @posix_case
+def report_runs_the_wait_helper_by_its_bin_path():
+    """6c. the report's run line names the helper by its bin path: a bare wait-pid is not on PATH in an agent worktree"""
+    rc, text, secs, _cmd = run_rewritten("sleep 30")
+    problems = expect(rc == 3, f"exit {rc}, want 3")
+    problems += expect("run `bin/wait-pid" in text or "run `~/.claude/bin/wait-pid" in text,
+                       "the run line names bare wait-pid, which is not on PATH in an agent worktree")
+    reap()
+    return problems
+
+
+@posix_case
 def report_lists_the_job_pid_parent_first():
     """12. a single command: the STALL line lists the job's own pid, parent first, so stopping the line ends the job"""
     problems = []

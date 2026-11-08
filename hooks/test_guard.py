@@ -7134,6 +7134,21 @@ sh("python -c escaped plain push allows (control)",
 sh("python -c escaped forced push still denies (control)",
    r'python3 -c "import os; os.system(\"' + VCS + r' push -f origin x\")"', "deny", "force-push",
    cwd=PUSHFEAT, carries=REMEDY)
+# The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
+# each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
+# after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
+sh("push text: a # inside a quoted push argument allows", VCS + ' push origin HEAD:x "# not --force"',
+   "allow", cwd=PUSHFEAT)
+sh("push text: a // inside a quoted push argument allows",
+   VCS + ' push origin HEAD:x "https://example.com --force"', "allow", cwd=PUSHFEAT)
+sh("push text: a /* inside a quoted push argument allows", VCS + ' push origin HEAD:x "/* --force"',
+   "allow", cwd=PUSHFEAT)
+sh("push text: a multi-line commit message naming a force push allows",
+   VCS + ' commit -m "fix\n' + VCS + ' push --force"', "allow", cwd=PUSHFEAT)
+sh("push text: a multi-line echo with a # line naming a force push allows",
+   'echo "a\n# ' + VCS + ' push --force\nb"', "allow", cwd=PUSHFEAT)
+sh("false alarm: a lone quote in text before a # comment naming a force push allows",
+   "echo it's # " + VCS + " push --force", "allow", cwd=PUSHFEAT)
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
