@@ -654,8 +654,8 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
-# `--prefix` is read (npm_prefix_flag): its folder is the one judged. A workspace flag is read for
-# `npm version` only (NPM_WORKSPACE_FLAGS).
+# `--prefix` and its short form `-C` are read (npm_prefix_flag): their folder is the one judged. A
+# workspace flag is read for `npm version` only (NPM_WORKSPACE_FLAGS).
 # THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
 # list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
 # command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
@@ -668,22 +668,27 @@ NPM_READ_ONLY = {
     "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
     "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
     "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
-    "v", "info", "show", "whoami",
+    "v", "info", "show", "whoami", "shrinkwrap",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
     "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
     "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
     "--install-strategy", "--logs-dir", "-C", "-L", "--location", "-c", "--call", "-m", "--message",
-    "--reg",
+    "--reg", "--depth", "--package",
 }
-# Options after which the command changes nothing in the working folder's install.
+# The short forms npm reads as a long option. npm_option_words rewrites them, so each option has one name.
+NPM_SHORT_FLAGS = {"-C": "--prefix", "-L": "--location"}
+# Options after which the command changes nothing in the working folder's install. A value option is
+# read as one `name=value` word (npm_option_words), so `-L global` is `--location=global`.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
-# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them.
+# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them. npm
+# resolves a unique abbreviation to its command, so a word that starts one of these is read as it.
 NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
 # only rewrites package.json.
 NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
+NPM_VERSION_WORDS = {"version", "verison"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -735,14 +740,30 @@ def npm_prefix(where: str) -> str:
         folder = parent
 
 
+def npm_option_words(words):
+    """The words with each value option joined to its value as `name=value`, so a value is never read as
+    the subcommand and an option reads the same as its `name=value` form. A short form is named by its long
+    one (NPM_SHORT_FLAGS). A value option with no word after it stays as it is."""
+    joined, at = [], 0
+    while at < len(words):
+        name, equals, value = words[at].partition("=")
+        if equals:
+            joined.append(NPM_SHORT_FLAGS.get(name, name) + equals + value)
+        elif name in NPM_VALUE_FLAGS and at + 1 < len(words):
+            at += 1
+            joined.append(NPM_SHORT_FLAGS.get(name, name) + "=" + words[at])
+        else:
+            joined.append(name)
+        at += 1
+    return joined
+
+
 def npm_prefix_flag(words, where: str) -> str:
-    """The folder `--prefix <dir>` or `--prefix=<dir>` names, from `where` when relative, else ''. npm uses
-    that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm."""
+    """The folder `--prefix <dir>`, `--prefix=<dir>` or the `-C` forms name, from `where` when relative, else
+    ''. npm uses that folder as the prefix as it stands, with no walk upward. The last flag wins, as in npm."""
     value = ""
-    for at, word in enumerate(words):
-        if word == "--prefix" and at + 1 < len(words):
-            value = words[at + 1]
-        elif word.startswith("--prefix="):
+    for word in npm_option_words(words):
+        if word.startswith("--prefix="):
             value = word[len("--prefix="):]
     value = value.strip("\"'")
     if "$" in value or "`" in value or value.startswith("~"):
@@ -762,22 +783,21 @@ def linked_nm_hit(segment: str, where: str) -> str:
 
     def install(args):
         # A `)` glued to the last word closes the subshell or substitution the command sits in.
-        words = [arg.rstrip(")") for arg in args]
+        words = npm_option_words([arg.rstrip(")") for arg in args])
         subcommand, at = "", 0
         while at < len(words):
-            if words[at] in NPM_VALUE_FLAGS:
-                at += 2
-            elif words[at].startswith("-"):
+            if words[at].startswith("-"):
                 at += 1
             else:
                 word = words[at].lower()
-                version_in_workspace = word == "version" and any(
-                    flag in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace") for flag in words)
+                version_in_workspace = word in NPM_VERSION_WORDS and any(
+                    flag.split("=")[0] in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace")
+                    for flag in words)
                 # `audit` rewrites the install when `fix` follows it, after any flag.
                 if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
                     subcommand = word
-                if word in NPM_DRY_RUN_WRITERS:
+                if any(writer.startswith(word) for writer in NPM_DRY_RUN_WRITERS):
                     words = [flag for flag in words if flag != "--dry-run"]
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
