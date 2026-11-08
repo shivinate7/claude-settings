@@ -1,11 +1,11 @@
 {
   "title": "The waiting page emits a settle signal, so its 24 test sleeps can wait on a condition",
   "why": "Lane timing-tests, 10:14 CST Nov 8: 24 sleeps in skills/waiting-page/tests/page.test.mjs wait out a settle after layout, scroll or a gesture, or a window in which nothing should happen.",
-  "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go.",
+  "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go. Lane: timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf), coordinator 10:18 CST.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
   "status": "todo",
   "order": 726,
-  "updatedAt": "2026-11-08T10:17:00-06:00"
+  "updatedAt": "2026-11-08T10:25:00-06:00"
 }

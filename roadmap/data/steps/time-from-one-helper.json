@@ -1,0 +1,11 @@
+{
+  "title": "One shared helper prints the Central time, so no session types a time from memory",
+  "why": "Sessions keep typing times from memory: triage, lanes and the coordinator sent guessed times on Nov 8 (10:04, 10:16-10:20 and 10:25 CST, each off by 1-8 minutes).",
+  "note": "Filed 10:25 CST Nov 8 from the owner's ask, 10:17 CST (\"yes\"), relayed by the coordinator; a gap fix under item 410 a. Topic written-time. The cause fix; related guards after the fact: message-time-matches-clock, stamp-check-page-and-roadmap.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKyggQsYbfxs62CE1mx",
+  "status": "doing",
+  "order": 729,
+  "updatedAt": "2026-11-08T10:25:00-06:00"
+}

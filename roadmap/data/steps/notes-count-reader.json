@@ -1,0 +1,11 @@
+{
+  "title": "A count in a debt note is flagged unless a check reads that number",
+  "why": "Lane record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw): on #2063 it wrote \"0 doc-relative cites among 266\" into note stale010-subfolder-relative-cite; the line it added was itself a cite, so the count was wrong at once, and the failed fix check restarted the review chain.",
+  "note": "Filed 10:25 CST Nov 8 from that lane (rule verification-checked-reader-for-numbers). Fix: lint flags a count in docs/debts/notes.md (\"N cites\", \"among N\") unless a check reads that number. Related: decision-count-reader (doing).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 728,
+  "updatedAt": "2026-11-08T10:25:00-06:00"
+}
