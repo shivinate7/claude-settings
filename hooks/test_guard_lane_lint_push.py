@@ -15,8 +15,11 @@ first run has and the second lacks. So a finding origin already holds does not r
 the sent commits add does. A ref other than HEAD is judged by its own sha. A range that cannot be read (UNKNOWN)
 is allowed, with one guard.log line and one stderr line that say unknown, and that stderr line names the fix
 `git fetch --unshallow origin`. A push that follows a commit-making segment in the same call (commit, merge, revert,
-cherry-pick, rebase, am) is refused, and the refusal says to run the push in a call of its own. A workflow with no
-fast step, and a checkout with no checks.yml, is skipped in silence. A push the lint does not judge starts no lint.
+cherry-pick, rebase, am, pull) is refused, and the refusal says to run the push in a call of its own. A fast step is
+a lint command under bin/ci-job's is_lint whose env takes a pull-request value. Any other step never runs at push, and
+its if: is not read. A step that takes only the base ref reads the checked-out HEAD and runs once: against origin's
+default branch, or against the destination when origin holds it. A workflow with no fast step, and a checkout with no
+checks.yml, is skipped in silence. A push the lint does not judge starts no lint.
 
 THE SEAMS THE GUARD HONORS.
   CAP_ENV          seconds one lint run may take, read from the guard's environment. Case 7b sets it to 1 and runs
@@ -39,6 +42,7 @@ import glob
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -54,6 +58,7 @@ sys.path.insert(0, os.path.join(REPO, "testing"))
 import _test_git  # noqa: E402,F401  the one home of the test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
+from workflow_steps import step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 RUN = _test_temp.run_folder()
 
@@ -76,6 +81,11 @@ SHIM = ("#!/usr/bin/env python3\n"
         "runpy.run_path(%r, run_name=\"__main__\")\n" % REAL_UNDO)
 SILENT_RUN = 'python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict'
 STUB_RUN = 'python3 lint/undo_step_stub.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict'
+BASE_RUN = 'python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --strict'   # reads the checked-out HEAD
+HEAVY_REL = "heavy.sh"
+HEAVY_RUN = "bash heavy.sh"   # a run that bin/ci-job's is_lint does not read as a lint command
+HEAVY_NAME = "Heavy suite"
+CI_JOB = os.path.join(REPO, "bin", "ci-job")
 
 PROBE = r"""
 import json, runpy, subprocess, sys
@@ -121,19 +131,20 @@ def commit(where, files, subject, body=""):
     git(where, "commit", "-q", "-m", subject + ("\n\n" + body if body else ""))
 
 
-def workflow(run=SILENT_RUN, cond="github.event_name == 'pull_request'"):
-    """checks.yml with the silent-undo step's run line set to `run` and its if: set to `cond`. None: a workflow
-    with no such step."""
+def workflow(run=SILENT_RUN, cond="github.event_name == 'pull_request'", head=True, name="Silent undo check"):
+    """checks.yml with one step named `name`: its run line set to `run`, its if: set to `cond`, and its env: the base
+    ref, with the head sha too when `head`. None: a workflow with no such step."""
     text = ("name: checks\non: [pull_request]\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n")
     if run is None:
         return text + "      - name: Mod version bump\n        run: python3 lint/check_mod_versions.py\n"
-    return text + ("      - name: Silent undo check\n"
+    head_env = "          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n" if head else ""
+    return text + ("      - name: %s\n"
                    "        if: ${{ %s }}\n"
                    "        env:\n"
                    "          BASE_REF: ${{ github.base_ref }}\n"
-                   "          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n"
-                   "        run: %s\n" % (cond, run))
+                   "%s"
+                   "        run: %s\n" % (name, cond, head_env, run))
 
 
 def stub_program(seen, lines, code, sleep_s=0):
@@ -151,9 +162,9 @@ def stub_program(seen, lines, code, sleep_s=0):
             "sys.exit(%r)\n" % (seen, sleep_s, list(lines), code))
 
 
-def base_repo(case, run=SILENT_RUN, checks=True):
+def base_repo(case, run=SILENT_RUN, checks=True, head=True):
     """A bare origin and a clone whose `main` holds the base files and the workflow, pushed to origin. `checks`
-    False leaves .github/workflows/checks.yml out of the tree altogether."""
+    False leaves .github/workflows/checks.yml out of the tree altogether. `head` False gives the step no head sha."""
     origin = os.path.join(case, "origin.git")
     clone = os.path.join(case, "clone")
     git(case, "init", "-q", "--bare", "-b", "main", origin)
@@ -161,20 +172,20 @@ def base_repo(case, run=SILENT_RUN, checks=True):
     git(clone, "remote", "add", "origin", origin)
     files = {"notes.txt": NOTES, "policy.txt": "v1\n", "lint/check_silent_undo.py": SHIM}
     if checks:
-        files[".github/workflows/checks.yml"] = workflow(run)
+        files[".github/workflows/checks.yml"] = workflow(run, head=head)
     commit(clone, files, "main: base")
     git(clone, "push", "-q", "origin", "main")
     git(clone, "remote", "set-head", "origin", "main")
     return clone, origin
 
 
-def drop_repo(case, pushed=False, run=SILENT_RUN, lane_step=None, merge_body="", checks=True):
+def drop_repo(case, pushed=False, run=SILENT_RUN, lane_step=None, merge_body="", checks=True, head=True):
     """Branch `topic` holds a lane commit, then merges origin/main's later commit and drops the line main added
     (notes.txt), so the merge reads as a silent undo. origin/topic is the lane commit. With `pushed`, the merge
     is pushed to origin/topic first, and one more lane commit is left to push. `lane_step` is a (run, stub
     text) pair the lane commits to its own workflow before the merge. `merge_body` is the merge message's body.
-    `checks` False builds the repo with no checks.yml at all."""
-    clone, _origin = base_repo(case, run, checks)
+    `checks` False builds the repo with no checks.yml at all. `head` False gives the workflow's step no head sha."""
+    clone, _origin = base_repo(case, run, checks, head)
     git(clone, "checkout", "-q", "-b", "topic")
     if lane_step is not None:
         commit(clone, {".github/workflows/checks.yml": workflow(lane_step[0]), STUB_REL: lane_step[1]},
@@ -242,6 +253,16 @@ def clean_repo(case, commits=2, name="lane-clean"):
     git(clone, "checkout", "-q", "-b", name)
     for index in range(commits):
         commit(clone, {"lane-%d.txt" % index: "lane %d\n" % index}, "lane: add lane-%d.txt" % index)
+    return clone
+
+
+def stub_lane(case, lines, code):
+    """clean_repo's lane with two commits, and its own workflow whose one fast step runs STUB_RUN: a stand-in that
+    prints `lines` and exits `code`. Returns the clone."""
+    seen = os.path.join(case, "seen.json")
+    clone = clean_repo(case, commits=2)
+    commit(clone, {".github/workflows/checks.yml": workflow(STUB_RUN), STUB_REL: stub_program(seen, lines, code)},
+           "lane: the step runs a stand-in")
     return clone
 
 
@@ -335,6 +356,25 @@ def seen_runs(case):
         with open(path, encoding="utf-8") as handle:
             runs.append(json.load(handle))
     return runs
+
+
+def launches_of(out, text):
+    """The guard's own process starts whose argv names `text`."""
+    return [s for s in out.starts if any(text in part for part in s["argv"])]
+
+
+def ref_exists(where, ref):
+    return subprocess.run(GIT + ["rev-parse", "--verify", "-q", ref], cwd=where, capture_output=True).returncode == 0
+
+
+def ci_job_is_lint(text, name):
+    """Whether bin/ci-job's is_lint reads the step named `name` in workflow `text` as a lint command. The module runs
+    as a library (its main does not run), so the selector's one home answers, and no copy of it is kept here."""
+    is_lint = runpy.run_path(CI_JOB, run_name="ci_job_scope")["is_lint"]
+    found = [block for block in step_blocks(text) if step_key(block, "name") == name]
+    if len(found) != 1:
+        raise RuntimeError("fixture scope: no single step named %r in the workflow" % name)
+    return bool(is_lint(found[0]))
 
 
 def tearDownModule():
@@ -463,11 +503,15 @@ class DenyCases(LaneLintCase):
             ("cherry-pick", "git cherry-pick origin/main"),
             ("rebase", "git rebase origin/main"),
             ("am", "git am patch.mbox"),
+            ("pull --rebase", "git pull --rebase"),
+            ("pull --ff-only", "git pull --ff-only"),
         )
         for verb, before in chains:
             with self.subTest(verb):
                 out = guard_run(case, clone, before + " && git push origin topic")
                 self.assert_denied(out, None, lints=None, remedy="call of its own")
+        with self.subTest("control: a pull with no push after it is allowed"):
+            self.assert_allowed(guard_run(case, clone, "git pull --rebase"))
 
 
 class AllowCases(LaneLintCase):
@@ -586,6 +630,37 @@ class SkipCases(LaneLintCase):
         out = guard_run(case, clone, "git push origin topic")
         self.assert_silent_allow(out)
 
+    def test_11a_a_step_whose_run_is_not_a_lint_command_never_runs_at_push(self):
+        case = self.case()
+        heavy = workflow(HEAVY_RUN, head=False, name=HEAVY_NAME)
+        scope(not ci_job_is_lint(heavy, HEAVY_NAME), "bin/ci-job's is_lint reads the heavy step as a lint command")
+        clone = clean_repo(case, commits=1)
+        commit(clone, {".github/workflows/checks.yml": heavy, HEAVY_REL: "exit 0\n"},
+               "lane: a heavy step that takes the base ref")
+        out = guard_run(case, clone, "git push origin lane-clean")
+        self.assert_silent_allow(out)
+        with self.subTest("no launch of the heavy step on the push"):
+            self.assertEqual(launches_of(out, HEAVY_REL), [], "the guard launched %r on a push" % HEAVY_RUN)
+        with self.subTest("control: a lint command that takes only the base ref runs on the same push"):
+            control = self.case()
+            base_only = workflow(BASE_RUN, head=False)
+            scope(ci_job_is_lint(base_only, "Silent undo check"), "bin/ci-job's is_lint does not read the control as lint")
+            clone = clean_repo(control, commits=1)
+            commit(clone, {".github/workflows/checks.yml": base_only}, "lane: a lint step that takes the base ref")
+            self.assert_allowed(guard_run(control, clone, "git push origin lane-clean"), lints=LINT_LAUNCHES)
+
+    def test_11c_a_non_lint_step_whose_if_the_guard_cannot_read_prints_nothing(self):
+        case = self.case()
+        heavy = workflow(HEAVY_RUN, cond="contains(github.ref, 'release')", head=False, name=HEAVY_NAME)
+        scope(not ci_job_is_lint(heavy, HEAVY_NAME), "bin/ci-job's is_lint reads the heavy step as a lint command")
+        clone = clean_repo(case, commits=1)
+        commit(clone, {".github/workflows/checks.yml": heavy, HEAVY_REL: "exit 0\n"},
+               "lane: a heavy step with an if the guard cannot read")
+        out = guard_run(case, clone, "git push origin lane-clean")
+        self.assert_silent_allow(out)
+        with self.subTest("no launch of the heavy step on the push"):
+            self.assertEqual(launches_of(out, HEAVY_REL), [], "the guard launched %r on a push" % HEAVY_RUN)
+
 
 class UnknownCases(LaneLintCase):
     def test_7b_a_lint_run_past_the_time_cap_is_unknown_and_allowed(self):
@@ -646,11 +721,7 @@ class CostCases(LaneLintCase):
 class StepCases(LaneLintCase):
     def test_9a_the_guard_runs_the_command_the_step_names(self):
         case = self.case()
-        seen = os.path.join(case, "seen.json")
-        clone = clean_repo(case, commits=2)
-        commit(clone, {".github/workflows/checks.yml": workflow(STUB_RUN),
-                       STUB_REL: stub_program(seen, ["silent-undo: FAIL: notes.txt: stub finding"], 1)},
-               "lane: the step runs a stand-in that fails")
+        clone = stub_lane(case, ["silent-undo: FAIL: notes.txt: stub finding"], 1)
         code, _stdout = real_undo(clone, "origin/main")
         scope(code == 0, "the real check fails the clean lane, so the stand-in is not the only failure")
         out = guard_run(case, clone, "git push origin lane-clean")
@@ -674,6 +745,75 @@ class StepCases(LaneLintCase):
         heads = [run[run.index("--head") + 1] for run in runs if "--head" in run]
         self.assertIn(git(clone, "rev-parse", "topic"), heads, "the step was not run on the pushed head")
         self.assertIn(git(clone, "rev-parse", "origin/topic"), heads, "the step was not run on the remote tip")
+
+    def test_11b_a_refusal_lists_finding_lines_and_no_remedy_allowed_or_unknown_line(self):
+        case = self.case()
+        clone = drop_repo(case)
+        code, stdout = real_undo(clone, "origin/main")
+        remedy = [line for line in stdout.splitlines() if line.startswith("silent-undo: REMEDY")]
+        scope(code == 1 and len(remedy) == 1, "the real check does not print one REMEDY line for the merge")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
+        with self.subTest("the real check's REMEDY line is not in the refusal"):
+            self.assertNotIn(remedy[0], out.reason, "the refusal lists the REMEDY line")
+
+        stand_in = self.case()
+        clone = stub_lane(stand_in, ["silent-undo: ALLOWED notes.txt: allowed-token",
+                                     "silent-undo: FAIL: policy.txt: stub finding",
+                                     "silent-undo: REMEDY: remedy-token"], 1)
+        code, _stdout = real_undo(clone, "origin/main")
+        scope(code == 0, "the real check fails the clean lane, so the stand-in is not the only failure")
+        out = guard_run(stand_in, clone, "git push origin lane-clean")
+        self.assert_denied(out, "policy.txt", lints=LINT_LAUNCHES)
+        with self.subTest("an ALLOWED line is not in the refusal"):
+            self.assertNotIn("allowed-token", out.reason, "the refusal lists the ALLOWED line")
+        with self.subTest("a REMEDY line is not in the refusal"):
+            self.assertNotIn("remedy-token", out.reason, "the refusal lists the REMEDY line")
+
+        mixed = self.case()
+        clone = stub_lane(mixed, ["silent-undo: FAIL: policy.txt: stub finding",
+                                  "silent-undo: UNKNOWN: unknown-token"], 1)
+        out = guard_run(mixed, clone, "git push origin lane-clean")
+        with self.subTest("a finding beside an UNKNOWN line is unknown and allowed, not refused"):
+            self.assert_unknown_note(out)
+
+
+class BaseOnlyCases(LaneLintCase):
+    """A step that takes only the base ref reads the checked-out HEAD and runs once: against origin's default branch,
+    or against the destination when origin holds it."""
+
+    def test_12a_a_finding_in_the_sent_commits_refuses_a_push_to_a_new_destination(self):
+        case = self.case()
+        clone = drop_repo(case, run=BASE_RUN, head=False)
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge against origin/main")
+        scope(not ref_exists(clone, "refs/remotes/origin/lane-new"), "origin already holds lane-new")
+        out = guard_run(case, clone, "git push origin topic:lane-new")
+        self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES)
+
+    def test_12b_a_finding_origin_already_holds_does_not_refuse_the_push_to_the_destination(self):
+        case = self.case()
+        clone = drop_repo(case, pushed=True, run=BASE_RUN, head=False)
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge against origin/main")
+        code, _stdout = real_undo(clone, "origin/topic")
+        scope(code == 0, "the commits past origin/topic hold a finding, so the push would not test the held case")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_allowed(out, lints=LINT_LAUNCHES)
+
+    def test_12c_a_ref_other_than_head_is_allowed_with_one_unknown_note(self):
+        case = self.case()
+        clone = drop_repo(case, run=BASE_RUN, head=False)
+        git(clone, "checkout", "-q", "-b", "other-branch")
+        git(clone, "checkout", "-q", "-b", "clean-head", "origin/main")
+        code, stdout = real_undo(clone, "origin/main", "other-branch")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail other-branch")
+        out = guard_run(case, clone, "git push origin other-branch:topic")
+        self.assert_allowed(out, lints=LINT_LAUNCHES)
+        self.assert_unknown_note(out)
+        with self.subTest("the one note says the step reads HEAD, not the pushed ref"):
+            self.assertTrue(any("other than the checked-out HEAD" in note for note in out.notes),
+                            "the guard.log line does not say it: %s" % out.notes)
 
 
 if __name__ == "__main__":

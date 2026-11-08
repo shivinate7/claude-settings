@@ -666,6 +666,10 @@ jobs:
           GUARD_CHROMIUM: "1"
         run: python3 hooks/test_guard.py
 
+      - name: Lane lint push guard suite
+        if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
+        run: python3 hooks/test_guard_lane_lint_push.py
+
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
   # `checks` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
   # installs the copy that .github/shoot/package-lock.json pins, through actions/playwright-setup.
