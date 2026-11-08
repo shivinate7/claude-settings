@@ -584,12 +584,13 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
-_COMPOUND_HEAD = ("for", "while", "until", "if", "elif", "then", "do", "else")
+_COMPOUND_HEAD = ("for", "while", "until", "if", "elif")
 
 
 def _cd_certain(segments, ends, number: int) -> bool:
     """True when segment `number` runs only if every segment before it ran: each separator ahead of it is
-    `&&`, or a `;` that ends a compound's header line (`for ...; do`, `if ...; then`), which the compound owns."""
+    `&&`, or a `;` that ends a compound's header line (`for ...; do`, `if ...; then`), which the compound owns.
+    Only headers count: a body (`then`, `do`, `else`) may not run, so a `cd` in it is never certain."""
     return all(ends[k] == "&&" or (ends[k] == ";" and segments[k].split()[:1] and segments[k].split()[0] in _COMPOUND_HEAD)
                for k in range(min(number, len(ends))))
 
