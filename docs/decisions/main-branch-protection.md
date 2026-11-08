@@ -25,13 +25,15 @@ protection. GitHub's branch protection setting is the owner's to change.
 - Force pushes and branch deletion are blocked. The repo has no rulesets.
 - The protection holds the one required check. A new job goes in the `needs` of `all-jobs-passed`, not in
   the protection. A pinned `merge.requiredChecks` list in `stamp.json` must equal a non-empty branch protection list, or `merge` stops and names both sets (sweep row `pinned-mismatch`, `refuse_pinned_mismatch`; roadmap step c189, the merge tool and branch protection work).
-- The switch changes only the required checks:
-  `gh api -X PATCH repos/shivinate7/claude-settings/branches/main/protection/required_status_checks`
-  with `strict=false` and one check, `all-jobs-passed`, app id 15368 (GitHub Actions). It needs the shivinate7
-  login: `ssemwal-cdc` has push, not admin. A handed block opens with `gh auth switch -u shivinate7` (decision
-  `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier refuses the
-  PATCH as a CI bypass, so the owner runs it. The owner switched it on 2026-10-31 at 14:52 CDT (waiting-page
-  item 101); the coordinator's read-back showed the one check and strict false.
+- The switch changes only the required checks, through `protect.py`: preview
+  `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo shivinate7/claude-settings --check all-jobs-passed`,
+  then the same with `--confirm`. On a branch with a check rule it PATCHes the check list only; `strict` stays.
+  The protection holds one check, `all-jobs-passed`, with `strict` false. The protection pins app id
+  15368 (GitHub Actions) (read 2026-11-03 19:19 CST: `checks` [{all-jobs-passed, 15368}]). `protect.py` sends `contexts` only, so it does not pin an app id. Whether a contexts-only PATCH keeps that pin is unmeasured. The write needs the
+  shivinate7 login: `ssemwal-cdc` has push, not admin. A handed block opens with `gh auth switch -u shivinate7`
+  (decision `act-in-place`). A cloud session acts as `shivinate7` with admin, but the auto-mode classifier
+  refused the direct PATCH as a CI bypass, so the owner runs the switch. Whether it refuses `protect.py --confirm` is unmeasured.
+  The owner switched it on 2026-10-31 at 14:52 CDT (waiting-page item 101) with a direct call, not protect.py; the coordinator's read-back showed the one check and strict false.
 - Before every merge, read the checks yourself and refuse on red. The `merge` tool reads its checks
   from the branch protection.
 - Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch
