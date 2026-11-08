@@ -20772,7 +20772,8 @@ def worktree_home_cross_checkout_named_argv_case():
     is text, so it passes. A GUARD bound twice, from a
     non-literal, to a name that is not `.py`, or inside a function or loop is a name the guard cannot read, so it
     is refused. A node -e list that the judge only prints or dumps runs nothing, so it passes; run by
-    subprocess, it is refused. Text in a comment, a string or a print is not a binding, so it does not change a verdict.
+    subprocess or through a wrapper, an alias, list() or a JSON round trip, it is refused. Text in a comment,
+    a string or a print is not a binding, so it does not change a verdict.
     Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
     """
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcolistargv")
@@ -20831,6 +20832,27 @@ def worktree_home_cross_checkout_named_argv_case():
     check("control: the same node -e list run by subprocess, copying into another checkout, is refused",
           "deny", "Bash", lane_a, command=judge("subprocess.run(%s, text=True)" % node_list))
 
+    # Refused: the same node -e list reaches subprocess through a wrapper, an alias, a list() copy or a JSON
+    # round trip. The guard must read each such call, so each is refused.
+    node_req = "['node', '-e', \"require('fs').writeFileSync('%s/y','x')\"]" % other
+    wrapped = (
+        ("a user wrapper sh() over subprocess.run",
+         "def sh(c):\n    subprocess.run(c)\nsh(%s)" % node_req),
+        ("call_node(args) over subprocess.run",
+         "def call_node(args):\n    subprocess.run(args)\ncall_node(%s)" % node_req),
+        ("run imported as r from subprocess",
+         "from subprocess import run as r\nr(%s)" % node_req),
+        ("an alias, runner = subprocess.run",
+         "runner = subprocess.run\nrunner(%s)" % node_req),
+        ("subprocess.run(list(...))",
+         "subprocess.run(list(%s))" % node_req),
+        ("subprocess.run(json.loads(json.dumps(...)))",
+         "subprocess.run(json.loads(json.dumps(%s)))" % node_req),
+    )
+    for form, call in wrapped:
+        check("node -e list run through %s, copying into another checkout, is refused" % form,
+              "deny", "Bash", lane_a, command=judge(call))
+
     # Text in a comment, a string or a lone quote is not a binding, so each of these is allowed with the path inline.
     check("comment: a `# GUARD = sys.argv[1]` line in the judge script is allowed", "allow", "Bash", lane_a,
           command=judge("# GUARD = sys.argv[1]\n" + inline_run))
@@ -20845,7 +20867,8 @@ def worktree_home_cross_checkout_named_argv_case():
         return False, "; ".join(problems)
     return True, ("a judge script with GUARD bound once to a literal .py path passes over a list argv with no "
                   "shell; GUARD bound twice, from a non-literal, to a non-.py name, or in a function or loop is "
-                  "refused; a node -e list only printed or dumped passes, and run by subprocess is refused")
+                  "refused; a node -e list only printed or dumped passes, and run by subprocess or through a "
+                  "wrapper is refused")
 
 
 def _stand_in_git(tag):
@@ -22350,7 +22373,7 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_heredoc_list_argv_case),
     ("worktree-home: named argv path: a judge script that binds GUARD once to a literal .py path, and a "
      "node -e list only printed, are allowed; GUARD bound twice, from a non-literal, to a non-.py name, or in "
-     "a function or loop is refused, and a node -e list run by subprocess is refused",
+     "a function or loop is refused, and a node -e list run by subprocess or through a wrapper is refused",
      worktree_home_cross_checkout_named_argv_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
