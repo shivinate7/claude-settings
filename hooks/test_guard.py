@@ -8632,7 +8632,7 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
 # excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
 # made by mkdir, and a file type after rg -T names no file. Main refuses each allow row except the
 # rg -T one, which main allows.
-# Each deny row is refused by this guard: the name is a path, a glob that includes it, a loader or
+# Each refuse row is refused by this guard: the name is a path, a glob that includes it, a loader or
 # in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
 # (the next word reads from it). jq, gojq and yq read -C as a
 # colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
@@ -8711,6 +8711,19 @@ sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location 
 # ag reads the files its -G glob names. -G takes a value, so the `.env` after `-fG` is that glob, and it is read.
 sh("env: flag-false-alarm: ag -fG takes .env as its -G glob, and the glob reads it",
    "ag -fG " + ENV + " K", "deny", "env-file", cwd=NOGIT)
+# A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
+# reads that file while `.env` is the pattern. The guard judged `.env` as the pattern and let each row through.
+for _cmd in (
+    "ag --hidden -G e " + ENV,
+    "ag -u -G e " + ENV,
+    "ag --hidden --file-search-regex e " + ENV,
+):
+    sh("env: ag hidden: refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# The controls. A hidden search whose -G regex names no env file reads none, so it stays allowed. The last
+# row is allowed here and refused by main: main reads the `e` after -G as the pattern and judges `.env` as
+# a file. ag reads `.env` as the pattern, and without a hidden flag it skips dotfiles, so no env file is read.
+for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
+    sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 
 
 def incident_write_strip_case():
