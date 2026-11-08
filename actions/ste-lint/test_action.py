@@ -15,7 +15,8 @@ bin/ste-changed where its own folder holds no actions/. The command still finds 
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
 Also asserts an uncommitted or untracked markdown file is linted or fails bin/ste-changed, never a plain PASS, a file .gitignore
-matches is not linted, and a clean tree still passes."""
+matches is not linted, and a clean tree still passes. A non-ASCII untracked name is linted by its own name, a run with no merge
+base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -512,11 +513,11 @@ def git_read(cwd, *a):
     return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True).stdout
 
 
-def uncommitted_run(change):
-    """A topic fixture with `change` applied and not committed, then bin/ste-changed main there. Returns whether
-    HEAD is origin/main's commit, git status (ignored files too), and the command's exit code and output."""
+def uncommitted_run(change, base=UNCOMMITTED_BASE):
+    """A topic fixture with `base` committed on main and `change` applied and not committed, then bin/ste-changed main
+    there. Returns whether HEAD is origin/main's commit, git status (ignored files too), and the command's exit code and output."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
-        work = make_repo(d, UNCOMMITTED_BASE, change)
+        work = make_repo(d, base, change)
         at_base = git_read(work, "rev-parse", "HEAD") == git_read(work, "rev-parse", "origin/main")
         status = git_read(work, "status", "--porcelain", "--ignored")
         rc, out = run_command(work)
@@ -526,8 +527,9 @@ def uncommitted_run(change):
 at_base, status, rc, out = uncommitted_run(edit_draft)
 check("uncommitted scope: HEAD is origin/main and draft-note.md is modified, not committed",
       at_base and " M draft-note.md" in status, status)
-check("uncommitted: the command lints draft-note.md or exits 1 naming it, never a plain PASS",
-      ("draft-note.md" in parts(out)["files"] or (rc != 0 and "draft-note.md" in out)) and "Traceback" not in out, out)
+check("uncommitted: exits non-zero on the 41-word sentence in draft-note.md", rc != 0, out)
+check("uncommitted: the verdict is FAIL and names draft-note.md",
+      "ste-lint: FAIL" in out and "draft-note.md" in out, out)
 at_base, status, rc, out = uncommitted_run(edit_data)
 check("uncommitted control scope: HEAD is origin/main, data.txt is modified, no markdown is",
       at_base and " M data.txt" in status and ".md" not in status, status)
@@ -536,13 +538,87 @@ check("uncommitted control: no markdown changed still passes with exit 0",
 at_base, status, rc, out = uncommitted_run(edit_new)
 check("untracked scope: HEAD is origin/main and new-note.md is untracked, not ignored",
       at_base and "?? new-note.md" in status, status)
-check("untracked: the command lints new-note.md or exits 1 naming it, never a plain PASS",
-      ("new-note.md" in parts(out)["files"] or (rc != 0 and "new-note.md" in out)) and "Traceback" not in out, out)
+check("untracked: exits non-zero on the 41-word sentence in new-note.md", rc != 0, out)
+check("untracked: the verdict is FAIL and names new-note.md",
+      "ste-lint: FAIL" in out and "new-note.md" in out, out)
 at_base, status, rc, out = uncommitted_run(edit_ignored)
 check("ignored control scope: HEAD is origin/main and .gitignore matches ignored-note.md",
       at_base and "!! ignored-note.md" in status, status)
 check("ignored control: a markdown file .gitignore matches is not linted, plain PASS with exit 0",
       rc == 0 and "ste-lint: no markdown changed" in out and "ignored-note.md" not in out and "Traceback" not in out, out)
+
+
+# An uncommitted removal. A tracked doc cites hooks/keep.py, and the working tree deletes it, uncommitted. Once
+# committed, the range removes the path and the cite is STALE001 (CI fails on it). The command read only the committed
+# range, so the uncommitted removal passed. It must fail the same way. The committed removal is the control: CI's check.
+STALE_LOCAL_BASE = {"a.md": "# T\n\nShort line.\n", "docs/guide.md": "# Guide\n\n- see `hooks/keep.py`\n",
+                    "hooks/keep.py": "X = 1\n"}
+
+
+def remove_keep(work):
+    os.remove(os.path.join(work, "hooks", "keep.py"))  # a deletion, not committed
+
+
+def remove_keep_committed(work):
+    remove_keep(work)
+    git(work, "commit", "-qam", "remove hooks/keep.py")
+
+
+at_base, status, rc, out = uncommitted_run(remove_keep, base=STALE_LOCAL_BASE)
+check("uncommitted removal scope: HEAD is origin/main and hooks/keep.py is deleted, not committed",
+      at_base and " D hooks/keep.py" in status, status)
+check("uncommitted removal: exits non-zero", rc != 0, out)
+check("uncommitted removal: names the stale cite docs/guide.md:3 as STALE001",
+      "docs/guide.md:3: STALE001 " in out, out)
+rc, out = run("changed", base=STALE_LOCAL_BASE, change=remove_keep_committed)
+check("committed removal, control: the step fails on the same stale cite, as CI does",
+      rc == 1 and "docs/guide.md:3: STALE001 " in out, out)
+
+
+# A non-ASCII untracked name. git quotes such a name in `git ls-files` output unless -z is passed ("caf\303\251.md"),
+# so the step read a name no file has. The name the file has is listed and linted, and a clean sentence passes. The ASCII
+# name beside it is the control: the same shape, with no quoting to get wrong.
+def untracked_run(name, text):
+    """A topic fixture with one new markdown file `name`, untracked and never git-added, then bin/ste-changed main there.
+    Returns the untracked names git lists with -z (no quoting), and the command's exit code and output."""
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+        work = make_repo(d, UNCOMMITTED_BASE, lambda w: write(w, name, text, "w"))
+        names = git_read(work, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+        rc, out = run_command(work)
+    return names, rc, out
+
+
+names, rc, out = untracked_run("café.md", "# Café\n\nShort line.\n")
+check("non-ASCII untracked scope: café.md is untracked, not ignored", "café.md" in names, str(names))
+check("non-ASCII untracked: the scope lists café.md by its own name", "café.md" in parts(out)["files"], out)
+check("non-ASCII untracked: exits 0 with PASS on a clean sentence", rc == 0 and "ste-lint: PASS" in out, out)
+names, rc, out = untracked_run("clean-note.md", "# Clean\n\nShort line.\n")
+check("ASCII untracked control: clean-note.md is listed, exits 0 and PASSes",
+      "clean-note.md" in parts(out)["files"] and rc == 0 and "ste-lint: PASS" in out, out)
+
+
+# No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The
+# unknown-base rule (decision stale-cites-at-merge, docs/decisions/stale-cites-at-merge.md: a base that does not resolve
+# is unknown, not a finding, and the check exits 0; rule verification-report-unknown-reads) holds here too: the command
+# exits 0 and names the missing merge base as unknown. It must not print nothing and exit 1, as it does today.
+def unrelated_change(work):
+    git(work, "checkout", "-q", "--orphan", "unrelated")
+    git(work, "rm", "-q", "-r", "--cached", ".")  # the index only: the files stay on disk, untracked
+    write(work, "u.md", "# U\n\nShort line.\n")
+    git(work, "add", "u.md")
+    git(work, "commit", "-qm", "unrelated")
+
+
+with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+    work = make_repo(d, BASE_FILES, unrelated_change)
+    has_base = subprocess.run(["git", "merge-base", "origin/main", "HEAD"], cwd=work, capture_output=True).returncode == 0
+    rc, out = run_command(work)
+check("no merge base scope: origin/main and HEAD share no commit", not has_base, str(has_base))
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the command exits 0", rc == 0, out)
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output names the missing merge base",
+      re.search(r"merge[ -]base", out, re.I) is not None, out)
+check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output says the result is unknown",
+      "unknown" in out, out)
 
 
 # Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
