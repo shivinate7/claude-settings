@@ -378,9 +378,10 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, TWO_WORKTREES_DENY_REASON, WORKTREE_PRUNE_ASK_REASON,
+            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON,
             WORKTREE_REMOVE_DENY_REASON, two_worktrees_hit, worktree_remove_forced,
         )
+        from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
@@ -3650,7 +3651,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             continue
         matched = two_worktrees_hit(segment, head_root(segment, here))
         if matched:
-            refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_DENY_REASON, matched)
+            refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_REFUSE_REASON, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the

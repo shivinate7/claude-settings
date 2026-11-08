@@ -119,7 +119,7 @@ WORKTREE_PRUNE_ASK_REASON = (
 #   `checkout|switch --ignore-other-worktrees`: refused with any branch, so no list is read.
 # Any other call, a plain `checkout x` and an unforced add included, is git's own refusal to make.
 # The list is read once, only for a refused form; a read that fails refuses.
-TWO_WORKTREES_DENY_REASON = (
+TWO_WORKTREES_REFUSE_REASON = (
     "Rule (shared trees): another worktree of this clone holds this branch, or the call turns off "
     "git's check that no two worktrees hold one branch. A commit in either tree then moves the "
     "branch under the other tree, whose files stay at the old commit, and a commit there reverts "
@@ -127,7 +127,8 @@ TWO_WORKTREES_DENY_REASON = (
     "Remedy: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, "
     "commit there, then `git -C <own worktree> push origin HEAD:<branch>`. Name the worktree with "
     "-C, because a shell's cwd can reset to another checkout. To read the other tree, use "
-    "`git -C <dir>`."
+    "`git -C <dir>`. "
+    "(decision two-worktrees-one-branch, two worktrees never hold one branch)"
 )
 
 
@@ -228,7 +229,7 @@ def two_worktrees_form(subcommand: str, args):
 
 
 def two_worktrees_hit(segment: str, root: str) -> str:
-    """Return the matched text when one segment is a refused form (see TWO_WORKTREES_DENY_REASON), else ''.
+    """Return the matched text when one segment is a refused form (see TWO_WORKTREES_REFUSE_REASON), else ''.
 
     ROOT is the tree the call runs in. Only a worktree other than ROOT's own counts as a holder, so
     the holder's own `checkout -B x` passes. The worktree whose root is the deepest one holding ROOT
