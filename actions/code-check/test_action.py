@@ -804,7 +804,7 @@ class RulingCheck(unittest.TestCase):
         self.assertIn("ruff check", read_calls(calls), "a .yml-only diff did not start ruff:\n" + out)
 
     def test_png_and_md_diff_skips_the_layers(self):
-        """Control, green on bda9f0237: a picture and a note are docs, so no layer starts."""
+        """Control: a picture and a note are docs, so no layer starts."""
         rc, out, calls = self.run_pr("", "2026-11-20T10:00:00-06:00",
                                      files={"docs/widget.md": "Widget docs.\n", "docs/widget.png": "picture\n"},
                                      extra_base=self.PY_BASE, subject="Add the widget picture")
