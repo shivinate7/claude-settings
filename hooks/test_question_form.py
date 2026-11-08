@@ -548,6 +548,16 @@ SESSION_PRESSES_AFTER_PICK = [
     "The session clicks Merge after your pick.",
     "The session presses Merge after your pick.",
 ]
+# A Claude clause is a session clause, as "The session ..." is (SESSION_PRESS takes "Claude"): the press or mark
+# Claude makes right after its subject is its own act, so the owner presses nothing. Each passes with no link. The
+# label names the same act as its clause, since a label's press verb must be one the clause also makes.
+CLAUDE_OWN_ACT_NEEDS_NO_LINK = [
+    ("Merge PR #374", "Claude clicks Merge on PR #374."),
+    ("Mark PR #374 ready", "Claude marks PR #374 ready."),
+    ("Mark PR #374 ready", "Claude quietly marks PR #374 ready after the pick."),
+]
+# A Claude clause with a click after "after" is not excused: SESSION_HANDS_ON refuses the click word. It stays refused.
+CLAUDE_CLICK_AFTER_STAYS_REFUSED = ["Claude merges PR #374 after clicking Approve."]
 # A Claude clause that waits for, or needs, an owner's press ("the owner's merge", "the owner has to approve it",
 # "the owner reviews and approves it") leaves that press to the owner, so it is refused: the option needs a link.
 CLAUDE_WAITS_ON_OWNER_PRESS = [
@@ -630,6 +640,16 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
         chat("a session clause that clicks or presses after the pick, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in CLAUDE_OWN_ACT_NEEDS_NO_LINK:
+        page("a Claude clause that is its own act, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, label=label, how=how), keep])), None)
+        chat("a Claude clause that is its own act, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), None)
+    for how in CLAUDE_CLICK_AFTER_STAYS_REFUSED:
+        page("a Claude clause with a click after 'after', %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause with a click after 'after', %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
     for how in CLAUDE_WAITS_ON_OWNER_PRESS:
         page("a Claude clause that waits for an owner press, %r, with no link, is refused as press-link" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
