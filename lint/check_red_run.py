@@ -8,7 +8,17 @@ A new test is seen red on the old code before it is trusted (`roles-each-layer-p
 records that run as a trailer on the commit that adds the test:
 
     Red-run: <command> -> <N> failed on <sha>       N is 1 or more, sha is 7 or more hex digits
+    Red-run: mutant: <mutation> -> <N> failed on <sha>
+                                                    for a claim only a mutation shows red: <mutation> is non-empty, and
+                                                    sha has the same shape as the failed form's
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
+
+A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
+pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
+any whitespace before the colon, the colon, then a literal space. The failed and none forms need a literal space after
+`Red-run:`. The check reads the sha's shape only, as it does for the
+failed form, and never that the sha exists or that the mutation was made: those parts are claimed. A rebase or a
+cherry-pick rewrites the commit a sha names, so a reach check raised false alarms.
 
 The check reads each non-merge commit in <base>..HEAD. When HEAD's tree holds lint/check_red_run.py (this repo),
 it judges a commit only when that commit's parent tree holds the file too, so a commit from before the check landed
@@ -32,6 +42,8 @@ import guard  # noqa: E402  is_test_rel is the one home of what a test path is (
 
 SELF_REL = "lint/check_red_run.py"
 RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
+MUTANT_KEY = re.compile(r"^Red-run:\s*(?i:mutant)\s*:")  # routes a line to the mutant form
+MUTANT = re.compile(r"^Red-run:\s*(?i:mutant)\s*: \s*\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 FIELD = "\x1f"
@@ -49,9 +61,16 @@ def git(root, *args):
     return r.stdout
 
 
-def has_trailer(message):
-    """True when a line of the message is a valid Red-run line: a red run of 1 or more failures, or none with a reason."""
+def has_valid_trailer(message):
+    """True when a Red-run line has 1 or more failures, or is none with a reason. Pure: it reads no repo."""
     for line in message.splitlines():
+        if not line.startswith("Red-run:"):
+            continue
+        if MUTANT_KEY.match(line):
+            mutant = MUTANT.match(line)
+            if mutant and int(mutant.group(1)) >= 1:
+                return True
+            continue
         red = RED.match(line)
         if (red and int(red.group(1)) >= 1) or NONE.match(line.rstrip()):
             return True
@@ -96,7 +115,9 @@ def gaps(root, base):
         if parent is None or REVERT.search(message) or (rollout and not check_landed(root, parent)):
             continue
         paths = added_test_paths(root, parent, sha)
-        if paths and not has_trailer(message):
+        if not paths:
+            continue
+        if not has_valid_trailer(message):
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
             lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown))
     return lines
@@ -125,7 +146,8 @@ def main(args):
     for line in bad:
         print(line)
     if bad:
-        print("check_red_run: add `Red-run: <command> -> <N> failed on <sha>` (N 1 or more), or "
+        print("check_red_run: add `Red-run: <command> -> <N> failed on <sha>` (N 1 or more), "
+              "`Red-run: mutant: <mutation> -> <N> failed on <sha>` (a claim only a mutation shows red), or "
               "`Red-run: none: <reason>` for a change that adds no new claim, to the commit message.")
         print("check_red_run: the last commit, not yet pushed: reword it with "
               "`git commit --amend -m <subject> -m \"Red-run: ...\"`, then `git push`.")

@@ -7,6 +7,7 @@ A commit that adds lines to a test path carries a trailer line in its message:
 
     Red-run: <command> -> <N> failed on <sha>     N >= 1, sha 7 or more hex digits
     Red-run: none: <reason>                       reason non-empty
+    Red-run: mutant: <mutation> -> <N> failed on <sha>   mutation non-empty; sha 7 or more hex digits
 
 The check reads the non-merge commits in <base>..HEAD, from --base <sha>, else env BASE_SHA. A test
 path is one that hooks/guard.py is_test_rel judges. When HEAD holds lint/check_red_run.py, a commit whose
@@ -84,6 +85,18 @@ class Fixture(unittest.TestCase):
 
     def has_file(self, rev, rel):
         done = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", rev + ":" + rel],
+                              capture_output=True, env=GIT_ENV)
+        return done.returncode == 0
+
+    def names_commit(self, rev):
+        """True when git resolves rev to a commit in the fixture repo."""
+        done = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", rev + "^{commit}"],
+                              capture_output=True, env=GIT_ENV)
+        return done.returncode == 0
+
+    def reaches_head(self, rev):
+        """True when HEAD's history holds rev."""
+        done = subprocess.run(["git", "-C", self.tree, "merge-base", "--is-ancestor", rev, "HEAD"],
                               capture_output=True, env=GIT_ENV)
         return done.returncode == 0
 
@@ -177,8 +190,9 @@ class CheckCase(Fixture):
 
     def test_untrailered_test_commit_is_flagged(self):
         out = self.flagged_untrailered()
-        # The check's message states both trailer forms, and how to add a trailer to a commit.
+        # The check's message states each trailer form, and how to add a trailer to a commit.
         self.assertIn("Red-run: <command> -> <N> failed on <sha>", out, out)
+        self.assertIn("Red-run: mutant: <mutation> -> <N> failed on <sha>", out, out)
         self.assertIn("Red-run: none: <reason>", out, out)
         self.assertIn("reword", out, out)
 
@@ -233,20 +247,82 @@ class CheckCase(Fixture):
                 self.assertFlagged(sha, "add widget tests", rel)
 
     def test_zero_failures_is_flagged(self):
-        self.base()
-        rel = self.new_test_path()
-        sha = self.commit("add widget tests", {rel: TEST_TEXT},
-                          red="Red-run: python3 lint/test_widgets.py -> 0 failed on abc1234")
-        self.assertFlagged(sha, "add widget tests", rel)
+        for form in ("Red-run: python3 lint/test_widgets.py -> 0 failed on %s",
+                     "Red-run: mutant: drop the guard -> 0 failed on %s"):
+            with self.subTest(form=form):
+                self.base()  # a real sha, so the zero count is the only cause
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=form % self.base_sha)
+                self.assertFlagged(sha, "add widget tests", rel)
 
     def test_short_or_missing_sha_is_flagged(self):
         for red in ("Red-run: python3 lint/test_widgets.py -> 1 failed on abc123",
-                    "Red-run: python3 lint/test_widgets.py -> 1 failed"):
+                    "Red-run: python3 lint/test_widgets.py -> 1 failed",
+                    "Red-run: mutant: drop the guard -> 1 failed on abc123",
+                    "Red-run: mutant: drop the guard -> 1 failed"):
             with self.subTest(red=red):
                 self.base()
                 rel = self.new_test_path()
                 sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=red)
                 self.assertFlagged(sha, "add widget tests", rel)
+
+    def test_mutant_with_an_empty_mutation_is_flagged(self):
+        for form in ("Red-run: mutant:  -> 1 failed on %s", "Red-run: mutant: -> 1 failed on %s",
+                     "Red-run: Mutant: -> 1 failed on %s", "Red-run: mutant : -> 1 failed on %s",
+                     "Red-run: MUTANT: -> 1 failed on %s"):
+            with self.subTest(form=form):
+                self.base()
+                rel = self.new_test_path()
+                sha = self.commit("add widget tests", {rel: TEST_TEXT}, red=form % self.base_sha)
+                self.assertFlagged(sha, "add widget tests", rel)
+
+    def test_mutant_with_a_mutation_passes(self):
+        """Each spelling of the mutant form passes with a mutation. These are the controls for the empty-mutation case."""
+        for form in ("Red-run: mutant: drop the guard -> 1 failed on %s",
+                     "Red-run: Mutant: drop the guard -> 1 failed on %s",
+                     "Red-run: mutant : drop the guard -> 1 failed on %s",
+                     "Red-run: MUTANT: drop the guard -> 1 failed on %s"):
+            with self.subTest(form=form):
+                self.base()
+                self.commit("add widget tests", {self.new_test_path(): TEST_TEXT}, red=form % self.base_sha)
+                self.assertClean()
+
+    # Shape only, by the process-only lane pick for the mutant form. A rebase or cherry-pick rewrites the
+    # commit a mutant line names, and a fresh CI clone lacks it, so the check reads the sha's shape, not its reach.
+    # The reach is the open note red-run-sha-not-verified (a mutant sha is not checked for reach). The two cases
+    # here pin that shape-only read, so a reach check that lands later must re-point them.
+    def test_mutant_naming_no_commit_passes(self):
+        self.base()
+        self.assertFalse(self.names_commit("f" * 40))  # scope: the sha names no commit
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT},
+                    red="Red-run: mutant: drop the guard -> 1 failed on " + "f" * 40)
+        self.assertClean()
+
+    def test_mutant_naming_an_unmerged_commit_passes(self):
+        """The side commit exists in the repo, but no branch HEAD reaches merges it. Shape only, so it passes."""
+        self.base()
+        self.git("checkout", "-q", "-b", "side")
+        side = self.commit("change widget product on side", {PRODUCT_REL: PRODUCT_TEXT})
+        self.git("checkout", "-q", "main")
+        self.assertTrue(self.names_commit(side))  # scope: the side commit exists
+        self.assertFalse(self.reaches_head(side))  # scope: HEAD does not reach it
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT},
+                    red="Red-run: mutant: drop the guard -> 1 failed on " + side)
+        self.assertClean()
+
+    def test_mutant_with_a_seven_digit_sha_passes(self):
+        """Seven hex digits is the least the mutant form takes. The pair of the six-digit case, which is flagged."""
+        self.base()
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT},
+                    red="Red-run: mutant: drop the guard -> 1 failed on " + self.base_sha[:7])
+        self.assertClean()
+
+    def test_mutant_naming_an_in_range_commit_passes(self):
+        self.base()
+        prod = self.commit("change widget product", {PRODUCT_REL: PRODUCT_TEXT})
+        self.commit("add widget tests", {self.new_test_path(): TEST_TEXT},
+                    red="Red-run: mutant: drop the guard -> 1 failed on " + prod)
+        self.assertClean()
 
     def test_commit_that_only_deletes_test_lines_passes(self):
         rel = "lint/test_trim.py"
