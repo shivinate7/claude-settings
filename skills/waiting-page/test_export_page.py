@@ -37,6 +37,8 @@ Contract the page cases assume (the builder builds to it):
   --check: `export_page.py --check --fetched DIR --page FILE` runs the same item checks
     and writes nothing. A held item prints its `held item <n>: <sentence>` line and exits 4; a clean run prints one line
     `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
+  --all, a waiting-page entry whose own `collections` lacks `items` or `answers`: `<id>: checks unknown: collections lack
+    <name>`, the copy written, exit 2, and no item held for that entry (an unread answers collection holds answered items).
 """
 import collections
 import contextlib
@@ -1950,6 +1952,79 @@ class RepublishChecksFirst(Base):
         republish = step.find("Republish")
         self.assertGreaterEqual(republish, 0, "step 3 has no Republish sentence, so the order cannot be read. Step 3:\n" + step)
         self.assertLess(check.start(), republish, "step 3 runs the check after the republish. Step 3:\n" + step)
+
+
+class WaitingCollectionsRun(Copied):
+    """--all with a waiting-page entry whose own `collections` is `collections` (None: the default five). The fetched page is
+    named page01 and holds `items`, `answers` and the page with item 292's mockups. Returns (the run, the worktree)."""
+
+    def run_all(self, collections, items, answers=None):
+        root = os.path.join(self.tmp.name, "repo")
+        entry = {"id": "page01", "url": "https://claude.ai/artifact/page01", "role": "waiting-page", "account": "work"}
+        if collections is not None:
+            entry["collections"] = list(collections)
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": [entry]}))
+        folder = self.fetch(items=items, answers=answers, meta={"page": META})
+        write_bytes(os.path.join(folder, "page.html"), page_with_mockups(MOCKS_292).encode("utf-8"))
+        fetched = os.path.join(self.tmp.name, "fetched-collections")
+        os.makedirs(fetched)
+        os.rename(folder, os.path.join(fetched, "page01"))
+        worktree = self.out("worktree")
+        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree), worktree
+
+
+class WaitingCollections(WaitingCollectionsRun):
+    """--all, a waiting-page entry whose own `collections` lacks `items` or `answers`: the picture check cannot read what it
+    needs, so the entry prints `<id>: checks unknown: collections lack <name>`, its copy is written and the exit is 2. The
+    unknown lines need no node, so these cases are not gated."""
+
+    def test_a_waiting_entry_without_items_is_named_unknown_and_exits_2(self):
+        r, worktree = self.run_all(("answers", "groups", "asks", "meta"), {ITEM_292["id"]: ITEM_292})
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "meta", "page.json")),
+                        "scope: the meta doc is not in the copy. Output:\n" + shown(r))
+        self.assertIn("page01: checks unknown: collections lack items", verdict_lines(r),
+                      "--all printed no `checks unknown: collections lack items` line: the picture check was skipped without a "
+                      "word, and the entry reads as a pass. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a waiting page whose check cannot run must exit 2. Output:\n" + shown(r))
+
+    def test_a_waiting_entry_without_answers_is_named_unknown_and_exits_2(self):
+        r, worktree = self.run_all(("items", "groups", "asks", "meta"), {ITEM_292["id"]: ITEM_292})
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "scope: item 292 is not in the copy. Output:\n" + shown(r))
+        self.assertIn("page01: checks unknown: collections lack answers", verdict_lines(r),
+                      "--all printed no `checks unknown: collections lack answers` line for a waiting page with no answers "
+                      "collection. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 2, "a waiting page whose check cannot run must exit 2. Output:\n" + shown(r))
+
+
+class WaitingCollectionsHold(WaitingCollectionsRun, PictureChecks):
+    """A waiting page without its answers collection holds no item the page draws as answered, and the control with the
+    answers read. Gated: the page's own check runs, so a node-less run skips here and CI fails it."""
+
+    def answered(self):
+        """Item 292 and an answers collection that holds a saved answer under its id: the page draws item 292 as answered."""
+        return {ITEM_292["id"]: ITEM_292}, {ITEM_292["id"]: {"pick": "a", "note": "Synthetic answer"}}
+
+    def test_a_waiting_entry_without_answers_holds_no_item_the_page_draws_as_answered(self):
+        items, answers = self.answered()
+        r, worktree = self.run_all(("items", "groups", "asks", "meta"), items, answers)
+        self.assertTrue(os.path.isfile(os.path.join(worktree, "waiting", "items", "3d-dummy-phone.json")),
+                        "scope: item 292 is not in the copy. Output:\n" + shown(r))
+        self.assertNotIn(292, [n for n, _ in held_lines(r)],
+                         "item 292 is held, though the page draws it as answered: the answers collection is not read, so the "
+                         "check holds an answered item. Output:\n" + shown(r))
+
+    def test_control_with_answers_read_the_answered_item_is_not_held_and_the_open_picture_is(self):
+        """Control: with the answers collection in the registry, item 292 is not held and an open picture is, so the check
+        ran. It holds on main as well."""
+        items, answers = self.answered()
+        items["open-picture"] = picture_item(313, "open-picture")
+        r, _worktree = self.run_all(None, items, answers)
+        self.assertIn((313, HELD_SENTENCE), held_lines(r),
+                      "scope: the open picture, item 313, is not held, so the check did not run. Output:\n" + shown(r))
+        self.assertNotIn(292, [n for n, _ in held_lines(r)],
+                         "item 292 is held though its answer is read. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 4, "a held item must exit 4. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":
