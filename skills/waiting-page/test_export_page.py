@@ -103,11 +103,19 @@ CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 # Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
 TIGHT_COMPACT = "tight-" + "compact"  # a plain option key: three vowels in twelve letters, and a run that joins at the hyphen
 ICON_COMPACT = "icon-" + "compact"  # a plain option key with four vowels
+PAGE_LENGTH_LIMIT = "page-" + "length-limit"  # a plain option key: the hyphen path's run check refuses `length`, which has four consonants in a row
+STRENGTH_METER = "strength-" + "meter"  # a plain option key: the run check refuses `strength`
+BRIGHT_LIGHTS_CITY = "bright-" + "lights-" + "city"  # a plain option key: the run check refuses `lights`
+TIGHT_SNAKE = "tight_" + "compact"  # the snake_case form has no hyphen, so the joined letters fail the vowel share and the run
+PAGE_SNAKE = "page_" + "length_" + "limit"  # the snake_case form has no hyphen, so the joined letters fail the run
 MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: fails the word form alone
 CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # lower case with no vowel: on the hyphen path it fails the consonant run alone, not the vowel share
 UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: the share and the joined run both refuse it today; the all-lower gate keeps it off the hyphen path, where each part passes the run
 RUN_PART = "aeixkcdo" + "-uaei"  # eight vowels, and a run of four consonants inside one part: fails the run alone
 SHORT_VOWELS = "bbabbab" + "bbabbb"  # three vowels in thirteen letters and no run: fails the vowel share alone
+RUN5_HYPHEN = "aeixkcdqo" + "-uaei"  # eight vowels, and a run of five consonants inside one part: fails the run alone
+RUN5_UNDERSCORE = "aeixkcdqo" + "_uaei"  # the same with an underscore: the joined run fails it, and the share passes
+FEW_VOWEL_WORD = "bcdafgh" + "ejklomnp"  # lower case, no separator, three vowels in fifteen letters and no run: fails the share alone
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -247,6 +255,9 @@ RED = [
     ("secret of a consonant run inside one word", "secret: '" + RUN_PART + "'", RUN_PART),
     ("secret of lower-case letters with no vowel", "secret: '" + CONSONANT_HYPHEN + "'", CONSONANT_HYPHEN),
     ("secret of upper-case three-letter parts joined by hyphens", "secret: '" + UPPER_HYPHEN + "'", UPPER_HYPHEN),
+    ("secret of five consonants in one hyphen part", "secret: '" + RUN5_HYPHEN + "'", RUN5_HYPHEN),
+    ("secret of five consonants in one part joined by an underscore", "secret: '" + RUN5_UNDERSCORE + "'", RUN5_UNDERSCORE),
+    ("secret of lower-case letters with few vowels and no separator", "secret: '" + FEW_VOWEL_WORD + "'", FEW_VOWEL_WORD),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -377,6 +388,12 @@ GREEN = [
     ("option key icon-compact", "key: '" + ICON_COMPACT + "'"),
     ("option key tight-compact", "key: '" + TIGHT_COMPACT + "'"),
     ("option key tight-compact in a JS object line", "{ key: '" + TIGHT_COMPACT + "', label: 'Tight' }"),
+    # A hyphen or underscore option key with a word of four consonants, and the snake_case form, is no secret.
+    ("option key page-length-limit", "key: '" + PAGE_LENGTH_LIMIT + "'"),
+    ("option key strength-meter", "key: '" + STRENGTH_METER + "'"),
+    ("option key bright-lights-city", "key: '" + BRIGHT_LIGHTS_CITY + "'"),
+    ("option key tight_compact in snake case", "key: '" + TIGHT_SNAKE + "'"),
+    ("option key page_length_limit in snake case", "key: '" + PAGE_SNAKE + "'"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
     ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
