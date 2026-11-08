@@ -18954,6 +18954,58 @@ for _tool, _input in READ_CALLS:
     for _shape, _id, _type in AGENT_SHAPES:
         add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
             raw=remote_call(_tool, _input, _id, _type))
+# The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
+# REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
+PINNED_OUTWARD_TOOLS = (
+    "mcp__claude-code-remote__create_session",
+    "mcp__claude-code-remote__send_message",
+    "mcp__claude-code-remote__archive_session",
+    "mcp__claude-code-remote__unarchive_session",
+    "mcp__claude-code-remote__interrupt_session",
+    "mcp__claude-code-remote__set_session_tags",
+    "mcp__claude-code-remote__set_session_title",
+    "mcp__claude-code-remote__create_trigger",
+    "mcp__claude-code-remote__update_trigger",
+    "mcp__claude-code-remote__delete_trigger",
+    "mcp__claude-code-remote__fire_trigger",
+    "mcp__claude-code-remote__send_later",
+    "mcp__claude-code-remote__watch_url",
+    "mcp__claude-code-remote__unwatch_url",
+    "mcp__claude-code-remote__subscribe_pr_activity",
+    "mcp__claude-code-remote__unsubscribe_pr_activity",
+    "mcp__claude-code-remote__add_repo",
+    "mcp__claude-code-remote__register_repo_root",
+    "mcp__claude-code-remote__confirm_repository_trust",
+    "mcp__claude-code-remote__request_computer_folder",
+)
+for _full in PINNED_OUTWARD_TOOLS:
+    _short = _full[len(REMOTE_PREFIX):]
+    outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
+                 _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
+
+
+def pinned_outward_check():
+    """REMOTE_OUTWARD_TOOLS in hooks/shared_names.py is the pinned set: it holds each pinned name, once, and no other.
+    It reads the copy beside this file, so a copy under test is the one checked."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_pinned", os.path.join(HERE, "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    constant = tuple(module.REMOTE_OUTWARD_TOOLS)
+    for name in PINNED_OUTWARD_TOOLS:
+        if name not in constant:
+            return False, "REMOTE_OUTWARD_TOOLS lacks %s" % name
+    for name in constant:
+        if name not in PINNED_OUTWARD_TOOLS:
+            return False, "REMOTE_OUTWARD_TOOLS holds %s, which is not pinned" % name
+    if len(set(constant)) != len(constant):
+        return False, "REMOTE_OUTWARD_TOOLS repeats a name"
+    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 20 pinned names"
+
+
+FIXTURELESS_CHECKS.add(pinned_outward_check)
+LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly the pinned outward names",
+                         pinned_outward_check))
 FAMILY = "rule9"  # the family the cases below had before this section
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
