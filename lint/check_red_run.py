@@ -20,23 +20,25 @@ mentions red-run mid-line is not judged. The failed form judges the label word o
 typo is not read as a failed form. `label_word(line)` is the one normaliser: it reads the text after `Red-run:`, takes the
 first word, and strips from both ends to a fixed point, so the order of nesting never matters: list markers (`-`, `+`,
 `>`, `1)`, `1.`), emphasis (`*`, `~`, `_`), backticks, quotes straight and curly, brackets, `#`, and a trailing `,` or `:`.
-It reads in lower case. A leading underscore that belongs to a name stays (`_build/run_tests.sh`, `__main__.py`,
-`_mutant.sh`): it goes only when the word closes with an underscore too, or its core is bare letters once wrappers and list markers go (`_mutant`, `_-mutant`).
-`mutant_like` and `refused_word` read only that word (and whether a colon ended it). This reads the label region of the
-line, not every word: a scan of the whole line flips 15 to 26 accepted main commits, such as 457071b62 with
-`(mutant: code_check.py:266 returns [])`. A mutant mention after a real first word still passes. First, it refuses a
-label word that starts with `mutant` or `mutation` (`mutants:`, `mutant(A)`, `mutant-A`, `mutant=x`, a no-colon
-`mutant A (...)`, `(mutant A)`, `_**mutant**_`), or is exactly `none` or `non` (`(none)`, `_(none)_`). Second, unless
-the word is an upper-case environment assignment (`NAME=value`, quoted or not, such as `MUTATE_ONLY=x` or main commit
-049f8d8c0's `MUTATE_ONLY="worktree-home: ..."`), it refuses a label word that starts with `mutat` or `mutan` (`mutate`,
-`mutate=x`, `mutan:`), or whose leading letters are one edit or one adjacent swap from `mutant` or `mutation` (`mutnat`,
-`mtuant`, `mutnt`, `mutaiton`). Any `NAME=` word, lower case too, stays exempt from the colon refusal: a label word
-that ended in a colon (`runner:`, `nonee:`) is refused otherwise. The valid `mutant:` and `none:` forms are routed to their
-own patterns before the failed form, so neither layer reads them. Real commands pass (`mutmut run`,
-`./mutation_probe.sh`, `_build/run_tests.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`,
-`(cd lint && python3 ...)`). Three main commits (408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form.
-Limits: a typo two edits away (`mtunat`), a mutant label after an env or assignment prefix, a mutant mention after a
-real first word, `./mutant`, a none typo beyond `none` and `non`, and prose first words pass.
+A leading underscore that belongs to a name stays (`_build/run_tests.sh`, `__main__.py`, `_mutant.sh`): it goes only when
+the word closes with an underscore too, or its core is bare letters once wrappers and list markers go (`_mutant`,
+`_-mutant`). It returns three fields of that one stripped word: the word in lower case, whether a colon ended it, and
+upper_env, True when the word before folding is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True).
+`mutant_like` and `refused_word` read those three fields and nothing else. This reads the label region of the line, not
+every word: a scan of the whole line flips 15 to 26 accepted main commits, such as one that wrote
+`(mutant: code_check.py:266 returns [])` after its command. A mutant mention after a real first word still passes. First,
+it refuses a label word that starts with `mutant` or `mutation` (`mutants:`, `mutant(A)`, `mutant-A`, `mutant=x`, a
+no-colon `mutant A (...)`, `(mutant A)`, `_**mutant**_`), or is exactly `none` or `non` (`(none)`, `_(none)_`). Second,
+unless upper_env is True (`MUTATE_ONLY=x`, or `MUTATE_ONLY="worktree-home: ..."` as a main commit wrote it), it refuses a
+label word that starts with `mutat` or `mutan` (`mutate`, `mutate=x`, `mutan:`), or whose leading letters are one edit or
+one adjacent swap from `mutant` or `mutation` (`mutnat`, `mtuant`, `mutnt`, `mutaiton`). Any `NAME=` word, lower case
+too, stays exempt from the colon refusal: a label word that ended in a colon (`runner:`, `nonee:`) is refused otherwise.
+The valid `mutant:` and `none:` forms are routed to their own patterns before the failed form, so neither layer reads
+them. Real commands pass (`mutmut run`, `./mutation_probe.sh`, `_build/run_tests.sh`, `NONE=1 python3 ...`,
+`env X=1 python3 ...`, `nonstop ...`, `(cd lint && python3 ...)`). Three main commits wrote the no-colon mutant form;
+decision `red-run-trailer-on-test-commits` names them. Limits: a typo two edits away (`mtunat`), a mutant label after an
+env or assignment prefix, a mutant mention after a real first word, `./mutant`, a none typo beyond `none` and `non`, and
+prose first words pass.
 
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
@@ -75,8 +77,8 @@ RED_KEY = re.compile(r"^red-run\s*:", re.IGNORECASE)  # a Red-run line in any ca
 # First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
 # keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
 REFUSED_NONE_WORDS = frozenset(("none", "non"))
-# An upper-case environment assignment as the label word (`MUTATE_ONLY=x`, `MUTATE_ONLY="a: b"`). It is a real command's
-# prefix, so the second layer of the word rule (`mutant_like`) does not read it.
+# An upper-case environment assignment as the label word (`MUTATE_ONLY=x`, `MUTATE_ONLY="a: b"`), read by `label_word`
+# on the stripped word before folding. It is a real command's prefix, so the second layer (`mutant_like`) skips it.
 UPPER_ENV_WORD = re.compile(r"^[A-Z_][A-Z0-9_]*=")
 # Any assignment as the label word. It is exempt from the colon refusal only (`lint_mode=on:`).
 ENV_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -104,11 +106,13 @@ def git(root, *args):
 
 def label_word(line):
     """The red-run label of a whole `Red-run:` line, the one normaliser the word rule reads: (word in lower case,
-    ended_in_colon). The word is the first word after `Red-run:` once wrappers are gone. Each word is stripped to a fixed
-    point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`, `_(none)_`). A
-    leading underscore is stripped only when the word closes with an underscore too, or its core is bare letters once
-    wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word that strips to
-    nothing (`-`, `>`, `1)`) is skipped. No word: ("", False). Pure."""
+    ended_in_colon, upper_env). The word is the first word after `Red-run:` once wrappers are gone. Each word is stripped
+    to a fixed point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`,
+    `_(none)_`). A leading underscore is stripped only when the word closes with an underscore too, or its core is bare
+    letters once wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word
+    that strips to nothing (`-`, `>`, `1)`) is skipped. upper_env is True when the same stripped word, before it is
+    folded to lower case, is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True). No word: ("", False,
+    False). Pure."""
     for token in RED_KEY.sub("", line, count=1).split():
         if LIST_NUMBER.match(token):
             continue
@@ -125,8 +129,8 @@ def label_word(line):
             if token == before:
                 break
         if token:
-            return token.casefold(), colon
-    return "", False
+            return token.casefold(), colon, bool(UPPER_ENV_WORD.match(token))
+    return "", False, False
 
 
 def within_one_edit(a, b):
@@ -159,16 +163,13 @@ def valid_line(line):
 def mutant_like(line):
     """True when the failed-form label word reads like the mutant keyword. Layer 1: its label word starts with
     `mutant` or `mutation` (an assignment too, so `mutant=x` stays refused). Layer 2, unless the label word is an
-    upper-case environment assignment (`MUTATE_ONLY=x`): it starts with `mutat` or `mutan`, or its leading letters are
-    one edit or adjacent swap from `mutant` or `mutation`. The one home of the mutant-like refusal and of the hint that
-    names the mutant form. Pure."""
-    word, _ = label_word(line)
+    upper-case environment assignment (upper_env, `MUTATE_ONLY=x`): it starts with `mutat` or `mutan`, or its leading letters are
+    one edit or adjacent swap from `mutant` or `mutation`. It reads only the three fields of `label_word`. The one home
+    of the mutant-like refusal and of the hint that names the mutant form. Pure."""
+    word, _, upper_env = label_word(line)
     if word.startswith(MUTANT_WORDS):
         return True
-    # The upper-case NAME= exemption needs the case `label_word` folds away. It reads the raw first token after
-    # `Red-run:` with an assignment test, so the label has no second parser.
-    raw = RED_KEY.sub("", line, count=1).split(None, 1)
-    if raw and UPPER_ENV_WORD.match(raw[0]):
+    if upper_env:
         return False
     if word.startswith(("mutat", "mutan")):
         return True
@@ -180,7 +181,7 @@ def refused_word(line):
     """True when the failed-form label word is a none typo (`none`, `non`), or, unless it is an environment assignment,
     ends in a colon: a keyword typo such as `runner:` or `nonee:`. The valid `mutant:` and `none:` lines are routed to
     their own forms before this is read. Pure."""
-    word, colon = label_word(line)
+    word, colon, _ = label_word(line)
     if word in REFUSED_NONE_WORDS:
         return True
     return colon and not ENV_WORD.match(word)
