@@ -13593,6 +13593,30 @@ for _name, _command in (
 # The same folder with *.py names test_a.py, so the find stays refused. It is the control beside the allows.
 sh("builder-test: shell write, find hooks for *.py piped to xargs, sed -i, is refused",
    "find hooks -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
+# A `--include` value is a name filter that the shell expands first: `*.{py,js}` is two globs and `\*.py`
+# is a glob with its star escaped. Both name test_a.py, so each grep of hooks is refused.
+for _name, _command in (
+    ("grep -rl over hooks, --include=*.{py,js} unquoted, sed -i", "grep -rl old hooks --include=*.{py,js} | xargs sed -i s/a/b/"),
+    ("grep -rl over hooks, --include=\\*.py escaped, sed -i", r"grep -rl old hooks --include=\*.py | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# Pins, each passing on 1d95bc71b. A `!` or `-not` inverts `-name`, so a find of hooks that holds one
+# reads test_a.py. Each pin is refused, and each mutant that drops the inverter goes red on it.
+for _name, _command in (
+    ("find hooks ! -name 'guard*.py', sed -i", "find hooks ! -name 'guard*.py' | xargs sed -i s/a/b/"),
+    ("find hooks -not -name 'guard*.py', sed -i", "find hooks -not -name 'guard*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# Pins, each passing on 1d95bc71b. docs holds gen.py and no test, so each walk of it reads product code only.
+DOCS_ABS = slash(os.path.join(DOTROOT, "docs"))
+for _name, _command in (
+    ("grep -rl over a brace list of docs twice, sed -i", "grep -rl old {docs,docs} | xargs sed -i s/a/b/"),
+    ("grep -rl over the absolute docs folder, sed -i", "grep -rl old " + DOCS_ABS + " | xargs sed -i s/a/b/"),
+    ("cd hooks, then grep -rl over ../docs, sed -i", "cd hooks && grep -rl old ../docs | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
 # Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
 # ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
 # test in tests/, so the case is refused.
