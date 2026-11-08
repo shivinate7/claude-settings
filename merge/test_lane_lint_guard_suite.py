@@ -244,6 +244,12 @@ class SuiteAfterInstall(Fixture):
         noted = [ln for ln in lines if ln.startswith("noted")]
         self.assertEqual(len(noted), 1, "want one noted line naming the skipped browser cases, got %d: %s" % (len(noted), out))
 
+    def test_a_browser_whose_executable_path_throws_reads_unknown_and_never_absent(self):
+        self.install_fixture(browser=False)
+        self.set_npm("playwright-core/index.js", "module.exports = {chromium: {executablePath: () => { throw new Error('fixture: no executable path'); }}};\n")
+        rc, lines, out = self.run_suite(install_step(), suite_step())
+        self.assert_probe_reads_unknown(rc, lines, out, "a browser stub whose executablePath throws")
+
     def test_a_failed_install_reads_unknown_naming_the_install_and_the_suite_does_not_run(self):
         self.install_fixture(ok=False)
         rc, lines, out = self.run_suite(install_step(), suite_step())
@@ -391,6 +397,14 @@ class LaneLintReadsSuite(Fixture):
         notes_printed = [ln for ln in printed.splitlines() if ln.startswith("not run")]
         self.assertEqual(notes_printed, [], "an install that left the folder missing reads as a not-run line: " + printed)
         self.assertEqual([(job, run.state) for job, _, run in result], [("lane", "unknown")], "the lane lint's read: %r" % (result,))
+
+    def test_the_lane_lint_read_of_the_suite_with_the_browser_absent_prints_the_skipped_cases_and_passes(self):
+        self.install_fixture(browser=False)
+        result, printed = self.lane_lint_read(install_step(), suite_step())
+        self.assertTrue(self.install_ran(), "the install did not run in the lane lint's read: " + printed)
+        self.assertEqual([(job, run.state) for job, _, run in result], [("lane", "pass")], "the lane lint's read: %r" % (result,))
+        skipped = [ln for ln in printed.splitlines() if "page-item-design" in ln and "CI runs them" in ln]
+        self.assertTrue(skipped, "the lane lint's output does not name the browser cases skipped with the browser absent: " + printed)
 
     def test_control_a_suite_with_no_install_step_is_one_not_run_line_through_the_lane_lint(self):
         result, printed = self.lane_lint_read(suite_step())
