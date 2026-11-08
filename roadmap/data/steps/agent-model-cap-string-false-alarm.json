@@ -1,9 +1,9 @@
 {
- "title": "Guard agent-model-cap stops asking on test strings passed to an interpreter",
- "phase": "now",
- "status": "doing",
- "order": 486,
- "why": "Incident, Nov 2 01:16 CST: in trial run gd a round-2 reviewer ran python3 -c with JSON test payloads piped into hooks/guard.py; guard agent-model-cap read one payload (a settings file raising the subagent model to Opus) as a real write and asked. Nothing writes settings, and the run stalled on a prompt only the owner can answer (Queue item 162). Same class as step env-heredoc-false-alarm: string data handed to an interpreter read as an act.",
- "note": "A guard verdict change: red first on this form. Share the fix with step env-heredoc-false-alarm if one rule covers both: interpreter string data that writes no file is not the act. Ready. Port: yes. Lane session_013NEJL3zgkU58DQSPkEYVkP, started by the coordinator Nov 3 16:57 CST. Also takes the env-heredoc-false-alarm leftover branches.",
- "updatedAt": "2026-11-03T23:10:00Z"
+  "title": "Guard agent-model-cap stops asking on test strings passed to an interpreter",
+  "phase": "now",
+  "status": "doing",
+  "order": 486,
+  "why": "Incident, Nov 2 01:16 CST: in trial run gd a round-2 reviewer ran python3 -c with JSON test payloads piped into hooks/guard.py; guard agent-model-cap read one payload (a settings file raising the subagent model to Opus) as a real write and asked. Nothing writes settings, and the run stalled on a prompt only the owner can answer (Queue item 162). Same class as step env-heredoc-false-alarm: string data handed to an interpreter read as an act.",
+  "note": "A guard verdict change: red first on this form. Share the fix with step env-heredoc-false-alarm if one rule covers both: interpreter string data that writes no file is not the act. Ready. Port: yes. Lane session_013NEJL3zgkU58DQSPkEYVkP, started by the coordinator Nov 3 16:57 CST. Also takes the env-heredoc-false-alarm leftover branches. Sighting (coordinator, 11:12 CST Nov 8): lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) has waited since 04:23 CST on an agent-model-cap prompt for a read-only `python3 - <<'PYEOF'` probe that only passes the string `CLAUDE_CODE_SUBAGENT_MODEL\":\"opus\"` to guard.cap_change(); no settings file is written (rule building-scanner-respects-strings).",
+  "updatedAt": "2026-11-08T11:14:00-06:00"
 }
