@@ -8770,7 +8770,7 @@ def incident_write_strip_case():
 FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and builds no fixture
 
 
-# ---- env false alarms and holes, env family. Decision env-file-stays-unread.
+# ---- env false alarms and safety holes, env family. Decision env-file-stays-unread.
 # An allow row names a folder called .env, or text that names one, and reads no env file. A deny row
 # reaches an env file by a form the guard misses. The walk rows need a folder that holds an env file,
 # so the three folders below are fixtures, each named so no name is a substring of another.
@@ -8783,6 +8783,7 @@ ENVWALK_NESTED = os.path.join(ROOT, "envwalk-nested")        # a top-level folde
 ENVWALK_LARGE = os.path.join(ROOT, "envwalk-large")          # one folder over the walk cap, no env file
 ENVWALK_BULK = os.path.join(ROOT, "envwalk-bulk")            # a clean repo whose .gitignore lists node_modules, which holds the bulk
 ENVWALK_MODULES_OPEN = os.path.join(ROOT, "envwalk-modules-open")  # the same bulk tree, with no .gitignore line
+ENVWALK_MODULES_ENV = os.path.join(ROOT, "envwalk-modules-env")    # an env file only under node_modules, and a README
 
 
 def build_envwalk_folders():
@@ -8843,6 +8844,15 @@ def build_envwalk_modules_open():
 lazy_fixture((ENVWALK_BULK,), build_envwalk_bulk)
 lazy_fixture((ENVWALK_MODULES_OPEN,), build_envwalk_modules_open)
 
+
+def build_envwalk_modules_env():
+    # The env file sits only under node_modules. A grep whose --exclude-dir names node_modules never enters it.
+    write(os.path.join(ENVWALK_MODULES_ENV, "node_modules", "pkg", ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_MODULES_ENV, "README.md"), "modules\n")
+
+
+lazy_fixture((ENVWALK_MODULES_ENV,), build_envwalk_modules_env)
+
 # Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
 for _tool, _cmd in (
     ("Bash", "source " + ENV + "/bin/activate"),
@@ -8854,16 +8864,16 @@ for _tool, _cmd in (
 
 # Refused. Each regex names an env file that the sample names do not cover, or a POSIX class that
 # Python reads as a nested set. The PowerShell tool passes the backslash of `\.env` differently from
-# Bash, which refuses the same text, so the PowerShell form is a hole of its own.
+# Bash, which refuses the same text, so the PowerShell form is a safety hole of its own.
 for _cmd in (
     r"ag --hidden -G '\.env\.prod$' K",
     r"ag --hidden -G '\.env\.qa$' K",
     r"ag --hidden -G '\.env\.ci$' K",
     r"ag --hidden -G '[[:alpha:]]' K",
 ):
-    sh("env: ag hidden hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+    sh("env: ag hidden safety hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
 _ag_plain = r"ag --hidden -G '\.env' K"
-sh("env: ag hidden hole, PowerShell form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
+sh("env: ag hidden safety hole, PowerShell form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
    tool="PowerShell", cwd=NOGIT)
 sh("env: ag hidden control, Bash form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
    cwd=NOGIT)
@@ -8871,7 +8881,7 @@ sh("env: ag hidden control, Bash form, refused: " + _ag_plain, _ag_plain, "deny"
 # A hidden search of a folder that holds an env file is refused. The same search of a folder with no
 # env file, or of an empty folder, is allowed.
 for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
-    sh("env: walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+    sh("env: walk safety hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_HELD)
     sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
     sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
@@ -8885,7 +8895,7 @@ for _cmd, _cwd in (
     ("grep -rl X .", ENVWALK_HELD),
     ("grep -R X " + slash(ENVWALK_HELD), NOGIT),
 ):
-    sh("env: grep walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+    sh("env: grep walk safety hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=_cwd)
 # The same ruling allows each form below. An env name as an exclude glob reads nothing, and a path
 # that holds no env file reads none, even from a folder that holds one.
@@ -8914,7 +8924,7 @@ sh("env: rg -u reads no dotfile, folder holds an env file, allowed: rg -u foo ."
 sh("env: rg -uu reads dotfiles, folder holds an env file, refused: rg -uu foo .", "rg -uu foo .", "deny",
    "env-file", cwd=ENVWALK_HELD)
 # A glob in the path names the folders it expands to. A hidden search of one that holds an env file reads it.
-sh("env: walk hole, glob names a folder that holds an env file, refused: rg --hidden foo *",
+sh("env: walk safety hole, glob names a folder that holds an env file, refused: rg --hidden foo *",
    "rg --hidden foo *", "deny", "env-file", cwd=ENVWALK_NESTED)
 sh("env: walk control, glob names no folder with an env file, allowed: rg --hidden foo *",
    "rg --hidden foo *", "allow", cwd=ENVWALK_CLEAN)
@@ -8938,11 +8948,62 @@ sh("env: walk over the cap, node_modules not ignored, folder too large to check,
 # A file regex that picks a dot-prefixed env name is refused. `[A-Z]*` may be empty, so `.env.md` is picked,
 # and `env\.prod$` picks `.env.prod`.
 for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.prod$' foo"):
-    sh("env: ag hidden regex hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+    sh("env: ag hidden regex safety hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
 # A regex that names no env prefix of its own is judged on the sample env names alone (the accepted limit
 # in guard_env.py). These two pick none of them, whatever their size or their POSIX class, so they are allowed.
 for _cmd in (r"ag --hidden -G '.*a.*b.*c.*d.*e.*f' foo", r"ag --hidden -G '[[:^alpha:]]x' foo"):
     sh("env: ag hidden regex, no sample env name it picks, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The forms below are safety holes: each reads an env file the guard lets through. A green control beside
+# each one runs on the same tree, so the change that closes a hole cannot refuse more than it should.
+
+# rg takes a value after some flags the guard does not list. The guard takes that value for the pattern and
+# the pattern for a folder, so no folder is walked. The env file here is not gitignored, so every form reads it.
+for _cmd in ("rg --hidden --sort path K", "rg --hidden -j 2 K", "rg --hidden -M 200 K", "rg --hidden -r X K",
+             "rg --hidden --color never K", "rg --hidden -T py K"):
+    sh("env: walk safety hole, rg value flag outside the lists, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_UNIGNORED)
+# With a folder named, the same flags walk it, so these are refused already. This pins that they still are.
+for _cmd in ("rg --hidden --sort path K .", "rg --hidden -j 2 K .", "rg --hidden -M 200 K ."):
+    sh("env: walk control, rg value flag with a folder named, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_UNIGNORED)
+
+# A positive glob names the files a search reads, and rg reads a gitignored file that a positive glob names,
+# because the glob overrides the ignore rules. The env file here is gitignored.
+for _cmd in ("rg -g '*env*' K", "rg --hidden -g '*env*' K", "rg --hidden --iglob '*env*' K"):
+    sh("env: walk safety hole, positive glob names a gitignored env file, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_IGNORED)
+sh("env: walk control, positive glob names no env file, allowed: rg --hidden -g '*.md' K",
+   "rg --hidden -g '*.md' K", "allow", cwd=ENVWALK_IGNORED)
+
+# The walk does not see a search behind a wrapper or a subshell, and it does not resolve a folder given as
+# `$(pwd)` or `$PWD`, so the folder is never walked.
+for _cmd in ("command rg --hidden K", "env X=1 rg --hidden K", "nice rg --hidden K", "(rg --hidden K)",
+             'grep -r K "$(pwd)"', 'grep -r K "$PWD"'):
+    sh("env: walk safety hole, search behind a wrapper or a substitution, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, wrapper over a folder with no env file, allowed: command rg --hidden K",
+   "command rg --hidden K", "allow", cwd=ENVWALK_CLEAN)
+
+# GNU grep decides each file by the last of its --include and --exclude options that matches it. An exclude
+# before an include re-includes the env file, so it is read. In the reverse order the exclude wins.
+sh("env: grep walk safety hole, exclude before include, refused: grep -r --exclude=.env --include='*' K .",
+   "grep -r --exclude=.env --include='*' K .", "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: grep walk control, include before exclude, allowed: grep -r --include='*' --exclude=.env K .",
+   "grep -r --include='*' --exclude=.env K .", "allow", cwd=ENVWALK_HELD)
+
+# False alarms, allowed: a whole exclude word in quotes, an unquoted brace list that bash expands to folder
+# names, and a file type or glob that picks no env file. Owner ruling 2026-11-08 06:03 CST: bash expands an
+# unquoted brace list and a quoted one stays literal, so the quoted form is not expanded and is refused.
+sh("env: false alarm, whole exclude word quoted, allowed: grep -r '--exclude=.env*' K .",
+   "grep -r '--exclude=.env*' K .", "allow", cwd=ENVWALK_HELD)
+sh("env: false alarm, unquoted brace list skips node_modules, allowed: grep -rn K --exclude-dir={node_modules,.git} .",
+   "grep -rn K --exclude-dir={node_modules,.git} .", "allow", cwd=ENVWALK_MODULES_ENV)
+_quoted_braces = "grep -rn K --exclude-dir='{node_modules,.git}' ."
+sh("env: quoted brace list stays literal, node_modules walked, refused: " + _quoted_braces, _quoted_braces,
+   "deny", "env-file", cwd=ENVWALK_MODULES_ENV)
+for _cmd in ("rg --hidden -t py K .", "rg -uu -g '*.py' K ."):
+    sh("env: false alarm, type or glob picks no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_HELD)
 
 
 # Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
