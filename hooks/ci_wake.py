@@ -489,11 +489,12 @@ def _split_flow(text):
 
 def _scalar(word):
     """One filter pattern as written, quoted or plain. Raises _Unparsed for a plain scalar this reader cannot read
-    exactly: a block scalar (`|`, `>`), an anchor (`&a`) or an alias (`*a`), which YAML resolves elsewhere."""
+    exactly: a block scalar (`|`, `>`), an anchor (`&a`) or an alias (`*a`), which YAML resolves elsewhere. A plain
+    scalar cannot start with `*` in YAML, so any such start is read as an alias."""
     word = word.strip()
     if word[:1] in ("'", '"'):
         return _unquote(word)
-    if word[:1] in ("|", ">", "&") or re.fullmatch(r"\*[\w-]+", word):
+    if word[:1] in ("|", ">", "&", "*"):
         raise _Unparsed(word)
     return word
 
@@ -516,7 +517,8 @@ def _filter_list(block, key):
     """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
     flow list (`[a, b]`, on one line or spread over lines), a lone scalar and a block list (`- a`). Raises _Unparsed
     for a flow list that never closes, a block list item with its value on the next line, a line under the key that
-    is no list item, and a scalar `_scalar` does not read."""
+    is no list item, a key that yields no item (its items all commented out, or the next key follows it), and a
+    scalar `_scalar` does not read. A list item is `-` then a space or a tab."""
     for n, (indent, content) in enumerate(block):
         head, colon, rest = content.partition(":")
         if head.strip() != key or not colon:
@@ -534,12 +536,15 @@ def _filter_list(block, key):
             return [_scalar(rest)]
         items = []
         for deeper, line in block[n + 1:]:
-            if deeper < indent or (deeper == indent and not line.startswith("- ")):
+            is_item = line[0] == "-" and line[1:2] in ("", " ", "\t")
+            if deeper < indent or (deeper == indent and not is_item):
                 break
-            if line == "-" or deeper > indent and not line.startswith("- "):
+            if line == "-" or deeper > indent and not is_item:
                 raise _Unparsed(key)
-            if line.startswith("- "):
-                items.append(_scalar(line[2:]))
+            if is_item:
+                items.append(_scalar(line[1:]))
+        if not items:
+            raise _Unparsed(key)
         return items
     return None
 
