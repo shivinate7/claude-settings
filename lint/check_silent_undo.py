@@ -738,9 +738,9 @@ def clauses(body):
 
 
 def held(clause, words, share=HELD):
-    """True when `words` hold at least `share` of the clause's content words and every one of its number tokens."""
+    """True when `words` hold at least `share` of the clause's content words and every one of its number and id tokens (any token with a digit)."""
     mine = content_words(clause)
-    numbers = {w for w in mine if w.isdigit()}
+    numbers = {w for w in mine if any(ch.isdigit() for ch in w)}  # an id such as `P5` or `Q4` is a claim as a bare number is
     return not mine or (numbers <= words and len(mine & words) >= share * len(mine))
 
 
