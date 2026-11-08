@@ -1157,8 +1157,8 @@ def stall_then_end_problems(shell):
 @posix_case
 def stalled_job_keeps_its_log_and_removes_its_beat_when_it_ends():
     """A1. a job that stalls, then ends: the STALL report reaches stdout with the pre-stall line in its
-    tail, and once the job ends its BEAT is removed while its LOG stays. Owner ruling, 2026-11-08 06:09 CST:
-    keep a stalled job's log for 7 days."""
+    tail, and once the job ends its BEAT is removed while its LOG stays. A stalled job's log is kept so the
+    STALL report's Log: path still names a file when the job has ended (decision stall-watch)."""
     problems = []
     for shell in shells():
         problems += ["%s: %s" % (shell, p) for p in stall_then_end_problems(shell)]
