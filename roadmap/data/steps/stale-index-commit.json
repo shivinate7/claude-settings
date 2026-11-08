@@ -1,0 +1,11 @@
+{
+  "title": "A commit whose index undoes the branch's own earlier commits is caught",
+  "why": "Lane red-run-pre-push's finding: a branch commit that undoes the branch's own earlier commits nets to no change against the base, so PR-mode check_silent_undo and #2136 miss it; only the --history audit reads it, and it exits 0 (lane silent-undo-checks-pr-base, 11:05 CST Nov 8). Open design question: a commit-time guard (the index base is not HEAD's tree) or a reversal read of the branch's own commits in check_silent_undo. Red cases first either way.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "silent-undo-checks-pr-base (session_013NEJL1Umc5vUUPV286bXnV)",
+  "status": "todo",
+  "order": 746,
+  "updatedAt": "2026-11-08T11:06:00-06:00"
+}

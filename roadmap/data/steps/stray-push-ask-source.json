@@ -1,0 +1,11 @@
+{
+  "title": "Find which push keeps raising the stray-branch ask, and make it name its destination",
+  "why": "Owner ask ask-mw8321blnx (11:05 CST Nov 8): the push-stray-branch ask reached him on \"Push the merged lane head\", and he asks why it keeps coming up in the past 36 h. Decision plain-push-asks (rulings 206 a and 207 a, 2026-11-03) asks on an implied push (`git push origin HEAD`, a bare push) whose name differs from the branch's upstream; an explicit `HEAD:<branch>` is silent. The rate and the sessions are unmeasured: guard.log on the Mac holds them.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "status": "todo",
+  "order": 747,
+  "updatedAt": "2026-11-08T11:06:00-06:00"
+}

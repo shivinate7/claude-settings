@@ -1,0 +1,11 @@
+{
+  "title": "--edit-last edits the caller's own newest record",
+  "why": "`--edit-last` reads the newest comment on the PR, not the newest one the caller posted, so it can rewrite another session's record (coordinator, 11:03 CST Nov 8).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "review-record-provenance (session_013NEJKzUe9U19voH62VbCNA)",
+  "status": "todo",
+  "order": 744,
+  "updatedAt": "2026-11-08T11:06:00-06:00"
+}

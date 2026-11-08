@@ -1,0 +1,11 @@
+{
+  "title": "A review-record edit reads the old body before it rewrites it",
+  "why": "Coordinator 11:03 CST Nov 8: lane review-record-provenance builds it as #2161.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "review-record-provenance (session_013NEJKzUe9U19voH62VbCNA)",
+  "status": "doing",
+  "order": 743,
+  "updatedAt": "2026-11-08T11:06:00-06:00"
+}

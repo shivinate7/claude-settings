@@ -1,0 +1,11 @@
+{
+  "title": "The record-edit refusal reads a comment id built by the shell",
+  "why": "A comment id given as `$(cmd)`, `$((..))` or `${ID:-x}` slips past the edit refusal in hooks/guard.py `_ROUTE_NUMBER`; the remedy says to write the number literally (coordinator, 11:03 CST Nov 8). The lane also checks whether #1751 covers a hand-written record posted by `gh pr comment`, and asks for a step if not.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "review-record-provenance (session_013NEJKzUe9U19voH62VbCNA)",
+  "status": "todo",
+  "order": 745,
+  "updatedAt": "2026-11-08T11:06:00-06:00"
+}

@@ -1,6 +1,6 @@
 {
   "added": "2026-11-08T16:15:00Z",
-  "context": "Goal: reviewed PRs merge, and planned work starts again once the queue drains.\nProblem (rule): your hold on new lanes names no end, so planned steps wait with nothing that restarts them.\nBased on (notes): 400 or more PRs are open, and one batch took 27 lanes in 43 h (coordinator, 10:11 CST Nov 8; no tool has counted it).\nBased on (ruling): record lane-inflow-hold (PR #1768) says \"Ends: the ruling names no end\"; on item 384 you picked none of its limits (50 or 20 reviewed PRs) and held with no limit.\nDeparts from: main, where the coordinator starts every ready step at once (rule parallelism-keep-going) \u2014 new lanes wait until the end you set here.\nMeanwhile: the hold stands; only your asks and gap fixes start lanes (items 387 a and 410 a).",
+  "context": "Goal: reviewed PRs merge, and planned work starts again once the queue drains.\nProblem (rule): your hold on new lanes names no end, so planned steps wait with nothing that restarts them.\nBased on (notes): 400 or more PRs are open, and one batch took 27 lanes in 43 h (coordinator, 10:11 CST Nov 8; no tool has counted it).\nBased on (ruling): record lane-inflow-hold (PR #1768) says \"Ends: the ruling names no end\"; on item 384 you picked none of its limits (50 or 20 reviewed PRs) and held with no limit.\nDeparts from: main, where the coordinator starts every ready step at once (rule parallelism-keep-going) — new lanes wait until the end you set here.\nMeanwhile: the hold stands; only your asks and gap fixes start lanes (items 387 a and 410 a).",
   "home": "lane-inflow-hold",
   "id": "lane-hold-end-trigger",
   "kind": "decision",
@@ -29,9 +29,12 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
+  "pick": "none",
   "ref": "record lane-inflow-hold (PR #1768); page items 384, 387, 410",
   "short": "Lane hold: when it ends",
-  "status": "open",
-  "title": "When should the hold on new lanes end?"
+  "status": "closed",
+  "title": "When should the hold on new lanes end?",
+  "answer": "none: as soon as we fix the underlying issue that caused piling up it immediately can be lifted",
+  "answeredAt": "2026-11-08T17:00:00Z",
+  "reply": "Routed 11:00 CST Nov 8 to the coordinator: the hold ends as soon as the cause of the pile-up is fixed. Home: record lane-inflow-hold (PR #1768), its Ends line; the coordinator names the fix step that lifts it."
 }
