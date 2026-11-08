@@ -952,10 +952,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=(), earlier=(), env_model="sonnet"):
+    def verdict(self, reply, spawns, denied=(), earlier=(), env_model="sonnet", compacted=False):
         """`spawns` and `earlier` take each spawn's input, or (input, resolved_model) for a spawn whose
-        result names the model it ran."""
+        result names the model it ran. `compacted` puts a compaction after `earlier`: the boundary, then
+        the summary record that starts the window."""
         records = prior_records(earlier)
+        if compacted:
+            records += [compact_boundary(), compact_summary()]
         for spawn in spawns:
             records += spawn_records(spawn)
         for spawn in denied:
@@ -1250,6 +1253,14 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict(NAMED_REPORT % "reviewer claude-haiku-5-5", [REVIEWER_SONNET])
         assert_blocks(self, out, "Model-name guard")
         assert_blocks(self, out, "matches no reviewer spawn")
+
+    # Roadmap step `report-model-across-compact`: a pre-compaction spawn's model is matched on the whole transcript.
+    def test_dm_green_named_spawn_before_compaction_counts(self):
+        reply = ("> **Done** BUILT the guard, PR #5 (reviewer sonnet, reviewer haiku)\n"
+                 "> **Deviations**\n> - Recovered: none\n> - Handoff gave: none\n"
+                 "> **Next** Unstarted: none")
+        out = self.verdict(reply, [REVIEWER_HAIKU], earlier=[REVIEWER_SONNET], compacted=True)
+        assert_no_model_block(self, out)
 
 
 class UnstartedItemsTests(unittest.TestCase):
