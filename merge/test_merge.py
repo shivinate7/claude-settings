@@ -12954,6 +12954,14 @@ class ReviewedList(ReviewEnv):
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
 
+    def unfiled_line(self, out, cause, tail="6h"):
+        """The line of pull request 7 for a done record whose Findings are not filed: `lane:` and the cause, and no round number, because the
+        lane owes no round. `tail` is the age the case set on the record, with ` RED` when it is past the limit. -> the line."""
+        line = list_line(self, out, 7)
+        self.assertNotRegex(line, r"\bround\b", "the line claims a round the lane does not owe, where its cause belongs:\n" + out)
+        self.assertEqual(line, f"#7 feat7 lane: {cause} {tail}", "the unfiled-findings line does not name its cause")
+        return line
+
     def test_the_newest_record_decides_the_line(self):
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
@@ -13071,10 +13079,10 @@ class ReviewedList(ReviewEnv):
     GREEN_CI = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the ready head's checks, so the head's own reads are the same in each case
     READY_READS = ["actions/runs", "issues/comments", "pulls"]  # the reads of one ready pull request's line with a green head, on this base
 
-    def this_pr(self, files, rounds=REVIEW_PASS, rc=0, **record):
-        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, and the pull request's files. The run
-        must exit `rc`. -> (host, out)."""
-        comments = [review_comment(1, 7, record_text(rounds=rounds, findings="2, this PR", **record))]
+    def this_pr(self, files, rounds=REVIEW_PASS, rc=0, created="2026-10-02T00:00:00Z", **record):
+        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, written at `created`, and the pull
+        request's files. The run must exit `rc`. -> (host, out)."""
+        comments = [review_comment(1, 7, record_text(rounds=rounds, findings="2, this PR", **record), created=created)]
         host, got, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, files={7: files}, count_gh=True)
         self.assertEqual(got, rc, out + err)
         return host, out
@@ -13121,17 +13129,16 @@ class ReviewedList(ReviewEnv):
 
     def test_findings_this_pr_with_no_debt_file_is_open(self):
         host, out = self.this_pr([pull_file("src/widget.py", status="modified", additions=3, deletions=1)])
-        line = list_line(self, out, 7)
-        self.assertRegex(line, r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "findings not filed: this PR")
         self.assertEqual(host.gh_calls.count("pulls/7/files"), 1, "the files were not read, so the open reason is not a read")
 
     def test_findings_this_pr_with_no_files_at_all_is_open(self):
         host, out = self.this_pr([])
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "findings not filed: this PR")
 
     def test_findings_this_pr_with_only_deleted_notes_lines_is_open(self):
         host, out = self.this_pr([pull_file("docs/debts/notes.md", status="modified", additions=0, deletions=3)])
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "findings not filed: this PR")
 
     def test_findings_this_pr_with_no_debt_file_added_is_open(self):
         # a debt file that was removed, changed, or filed beside the store, and a decision file: none is an added file under docs/debts/
@@ -13141,7 +13148,14 @@ class ReviewedList(ReviewEnv):
                     pull_file("docs/decisions/new-decision.md", status="added", additions=5)):
             with self.subTest(file=row["filename"], status=row["status"]):
                 host, out = self.this_pr([row])
-                self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+                self.unfiled_line(out, "findings not filed: this PR")
+
+    def test_findings_this_pr_unfiled_keeps_the_lane_round_age_limit(self):
+        # the act kind is still `lane round`, so its limit is the lane round limit: green one hour inside it, RED one hour past it
+        for hours, rc in ((inside("lane round"), 0), (past("lane round"), 1)):
+            with self.subTest(hours=hours):
+                host, out = self.this_pr([pull_file("src/widget.py", status="modified", additions=3, deletions=1)], rc=rc, created=ago(hours))
+                self.unfiled_line(out, "findings not filed: this PR", f"{hours}h" + (" RED" if rc else ""))
 
     def test_findings_this_pr_on_an_open_round_reads_no_files(self):
         host, out = self.this_pr([pull_file("docs/debts/x.md")], rounds=("Round 1: reviewer, sonnet, FAIL",))
@@ -13172,18 +13186,16 @@ class ReviewedList(ReviewEnv):
 
     def test_findings_follow_up_to_a_closed_unmerged_pr_is_open(self):
         host, out = self.follow_up("2, follow-up #8", closed={8: closed_pull(8, OTHER_SHA, merged=False)})
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "follow-up #8 closed unmerged")
 
     def test_findings_follow_up_to_this_pr_is_open(self):
         host, out = self.follow_up("2, follow-up #7")
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "follow-up #7 is this PR")
 
     def test_findings_follow_up_to_a_pr_that_does_not_exist_is_open_and_names_it(self):
         # no pull request 8: the read answers 404, so the record is not done, and its line names the missing number. The list still prints.
         host, out = self.follow_up("2, follow-up #8")
-        line = list_line(self, out, 7)
-        self.assertRegex(line, r"^#7 feat7 lane round \d+: follow-up #8 does not exist \d+h( RED)?$")
-        self.assertIn("#8", line, "the line does not name the follow-up pull request that does not exist")
+        self.unfiled_line(out, "follow-up #8 does not exist")
 
     def test_findings_follow_up_whose_read_fails_is_unknown_and_holds(self):
         # a read that cannot run is unknown, never clear (rule verification-report-unknown-reads). The record holds, and its line names the
@@ -13203,7 +13215,7 @@ class ReviewedList(ReviewEnv):
         host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True), batch_pull(9, OTHER_SHA, draft=True)])  # control: both open
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
         host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True)], closed={9: closed_pull(9, OTHER_SHA, merged=False)})
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.unfiled_line(out, "follow-up #9 closed unmerged")
 
     def test_findings_follow_up_on_an_open_round_reads_no_pull(self):
         host, out = self.follow_up("2, follow-up #8", rounds=("Round 1: reviewer, sonnet, FAIL",), pulls=[batch_pull(8, OTHER_SHA, draft=True)])
