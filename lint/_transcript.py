@@ -271,19 +271,43 @@ def peer_sender(rec):
     return found if isinstance(found, str) and found else None
 
 
-def last_incoming_index(records, acks=None):
+PEER_FRAME_RE = re.compile(r"<([\w-]+-message)\b[^>]*>(.*)</\1>", re.DOTALL)
+
+
+def peer_body(rec):
+    """The text a peer message record carries: origin.body, else the content inside its frame, else "".
+    An unreadable record gives "" (read as asking nothing)."""
+    origin = rec.get("origin")
+    body = origin.get("body") if isinstance(origin, dict) else None
+    if isinstance(body, str) and body:
+        return body
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content
+                            if isinstance(b, dict) and isinstance(b.get("text"), str))
+    found = PEER_FRAME_RE.search(content) if isinstance(content, str) else None
+    return found.group(2) if found else ""
+
+
+def last_incoming_index(records, acks=None, asks=None):
     """Index of the last incoming message (is_incoming), or None when the transcript has none.
 
     `acks` maps a sender id to the send targets that reach it. A peer message from that sender, after a
     send of the same turn to one of those targets, is the ack of that send: it starts no turn, and the
     sends before it stay in the turn. The ack uses up that sender's targets, so only its first reply is an
-    ack; a later message from it starts a turn."""
+    ack; a later message from it starts a turn. `asks(rec)` is true for a message that asks something: such
+    a reply is not an ack and starts a turn, but only the sends to its sender's targets stop counting; the
+    sends to other targets stay open for their own acks."""
     found, sent = None, set()
     for i, rec in enumerate(records):
         if is_incoming(rec):
             reach = acks.get(peer_sender(rec), set()) if acks else set()
             if reach & sent:
                 sent -= reach
+                if not (asks and asks(rec)):
+                    continue
+                found = i
                 continue
             found, sent = i, set()
         elif acks and not rec.get("isSidechain"):
