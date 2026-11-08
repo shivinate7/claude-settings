@@ -5516,6 +5516,9 @@ add("check-tail: env VAR=x then ci-job checks --lint piped to tail, backgrounded
 add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is refused",
     "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -W ignore bin/ci-job checks --lint | tail -5")
 add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="uv run python -m pytest | tail -5")
@@ -5565,6 +5568,8 @@ sh("check-tail: uv run python -m pytest piped to tail in the foreground is allow
    "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
 sh("check-tail: env VAR=x then verdict merge --lane-lint piped to tail in the foreground is allowed",
    "env FOO=1 verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: uv run verdict merge --lane-lint piped to tail in the foreground is allowed",
+   "uv run verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
 sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
    "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
@@ -5608,6 +5613,8 @@ sh("verdict-pipe-exit: verdict piped to sed -n, then && push, is refused",
 add("verdict-pipe-exit: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
     VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
+sh("verdict-pipe-exit: verdict.cmd piped to tail, then && push, is refused",
+   "verdict.cmd python3 lint/check_x.py | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
 
 sh("verdict-pipe-exit: a bare verdict call is allowed",
    "verdict python3 lint/check_x.py", "allow", cwd=NOGIT)
@@ -5621,6 +5628,9 @@ sh("verdict-pipe-exit: pipefail set earlier with set -o is allowed",
 sh("verdict-pipe-exit: pipefail set earlier in a combined set -euo is allowed",
    "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "allow",
    cwd=NOGIT)
+sh("verdict-pipe-exit: set +o pipefail undoes an earlier set -o, then && push, is refused",
+   "set -o pipefail; set +o pipefail; verdict python3 lint/check_x.py | tail -3 && git push",
+   "deny", VERDICT_PIPE, cwd=NOGIT)
 sh("verdict-pipe-exit: a pipe with no verdict in it is allowed",
    "cat x.log | tail -3 && echo ok", "allow", cwd=NOGIT)
 sh("verdict-pipe-exit: verdict inside quotes is not a call",
