@@ -9,6 +9,8 @@ The last two classes: the code-check step from a copied install, and a step quie
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 SuiteSteps: --lint runs a hooks/merge/lint suite step only when the selector picks it for the diff; a selector that cannot run exits 2.
+  SuiteSteps also covers a multi-line step with a preamble line, a suite with an argument, a suite that reaches a changed
+  module through an import, a selector that hangs, and a picked suite whose step is in another job.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -38,9 +40,12 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
 ENV.pop("VERDICT_LOG", None)
 
 
-def workflow(*steps):
-    return "name: t\non: push\njobs:\n  lane:\n    runs-on: ubuntu-latest\n    steps:\n" + "".join(steps) + \
-        "\n  other:\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 1\n"
+def workflow(*steps, job="lane", other=None):
+    """The workflow of one run: `job` runs `steps`, and a second job named `other` runs the `other` steps (by default one
+    step that exits 1)."""
+    other_steps = "".join(other) if other is not None else "      - run: exit 1\n"
+    return ("name: t\non: push\njobs:\n  %s:\n    runs-on: ubuntu-latest\n    steps:\n" % job) + "".join(steps) + \
+        "\n  other:\n    runs-on: ubuntu-latest\n    steps:\n" + other_steps
 
 
 def step(name, run=None, **keys):
@@ -71,17 +76,17 @@ class Job(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def job_call(self, *steps, args=(), env=None, script=CI_JOB):
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB, job="lane", other=None):
         """argv and env of one run of the job: its workflow is written into the throwaway repo."""
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(workflow(*steps))
+            f.write(workflow(*steps, job=job, other=other))
         env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
                **(env or {})}
-        return [sys.executable, script, "lane", "--workflow", path, *args], env
+        return [sys.executable, script, job, "--workflow", path, *args], env
 
-    def run_job(self, *steps, args=(), env=None, script=CI_JOB):
-        argv, env = self.job_call(*steps, args=args, env=env, script=script)
+    def run_job(self, *steps, args=(), env=None, script=CI_JOB, job="lane", other=None):
+        argv, env = self.job_call(*steps, args=args, env=env, script=script, job=job, other=other)
         done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
@@ -1007,6 +1012,107 @@ class SuiteSteps(Job):
         rc, lines, out = self.run_job(self.UNDO, args=self.LINT)
         self.assertEqual((rc, by_step(lines)), (0, {"Undo suite": "PASS"}),
                          "--lint must still run a suite that opens a file listed in REPORT_TARGETS\n" + out)
+    PREP_WIRING = step("Wiring suite", "echo prep\npython3 hooks/test_wiring.py")
+    WIRING_WITH_ARG = step("Wiring suite", "python3 hooks/test_wiring.py -v")
+    SELECTOR_LIMIT = 120  # seconds a hanging selector may hold ci-job before the case fails: a bound on the wait, not an assert on time
+
+    def stub_ci_job(self, selector):
+        """A copy of bin/ci-job in its own root, with `selector` as its hooks/mutate_guard.py: ci-job asks for the selector
+        beside its own folder, so the copy gets the stub and no other. Each other file it reads is a link to this checkout's."""
+        if os.name == "nt":
+            self.skipTest("the stub root links this checkout's files, and Windows grants no symlink here")
+        root = os.path.join(self.root, "stub")
+        for sub in ("bin", "hooks"):
+            os.makedirs(os.path.join(root, sub))
+        shutil.copy(CI_JOB, os.path.join(root, "bin", "ci-job"))
+        for sub, skipped in (("bin", "ci-job"), ("hooks", "mutate_guard.py")):
+            for name in os.listdir(os.path.join(CHECKOUT, sub)):
+                if name != skipped:
+                    os.symlink(os.path.join(CHECKOUT, sub, name), os.path.join(root, sub, name))
+        os.symlink(os.path.join(CHECKOUT, "lint"), os.path.join(root, "lint"))  # workflow_steps, the step parser
+        with open(os.path.join(root, "hooks", "mutate_guard.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(selector)
+        return os.path.join(root, "bin", "ci-job")
+
+    def test_a_picked_suite_under_a_multi_line_step_runs_the_whole_step_and_passes(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.PREP_WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "PASS"}),
+                         "--lint must run a picked suite whose step has a line before its python3 line, as CI runs the whole step\n" + out)
+
+    def test_a_picked_suite_under_a_multi_line_step_that_exits_one_reads_fail_and_the_job_exits_one(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",), code=1)},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.PREP_WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
+                         "--lint must read a picked suite's exit 1 under a multi-line step as FAIL, and exit 1\n" + out)
+
+    def test_a_picked_suite_whose_step_passes_it_an_argument_runs_and_passes(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.WIRING_WITH_ARG, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "PASS"}),
+                         "--lint must run a picked suite whose step passes it an argument\n" + out)
+
+    def test_a_suite_that_reaches_a_changed_module_through_an_import_runs_and_passes(self):
+        self.make_repo({"hooks/leaf.py": "V = 1\n", "hooks/entry.py": "import leaf\n\nVALUE = leaf.V\n",
+                        "hooks/test_wiring.py": suite_text(("entry.py",))},
+                       {"hooks/leaf.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py, which no suite opens by name")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "PASS"}),
+                         "--lint must run a suite that opens entry.py, which imports the changed leaf.py\n" + out)
+
+    def test_a_selector_that_hangs_reads_unknown_and_the_job_exits_two_within_the_bound(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        argv, env = self.job_call(self.WIRING, args=self.LINT, env={"PYTHONDONTWRITEBYTECODE": "1"},
+                                  script=self.stub_ci_job("import time\ntime.sleep(3600)\n"))
+        # Its own session, so the hung selector, a child of ci-job, is killed with it on every path.
+        proc = subprocess.Popen(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+                                start_new_session=True)
+        out = err = None
+        try:
+            out, err = proc.communicate(timeout=self.SELECTOR_LIMIT)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        if out is None:
+            self.fail("ci-job ran past %d s while its selector hung: it must print unknown and exit 2 within a bound"
+                      % self.SELECTOR_LIMIT)
+        lines = [ln for ln in out.splitlines() if not ln.startswith("log=")]
+        self.assertEqual((proc.returncode, by_step(lines)), (2, {"Wiring suite": "unknown"}),
+                         "a selector that hangs must read as unknown on the suite step, and the job must exit 2\n" + out + err)
+
+    def test_a_picked_suite_whose_step_is_only_in_another_job_is_one_not_run_line_that_names_it(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(step("Docs", "echo docs"), job="checks", other=[self.WIRING], args=self.LINT)
+        named = [ln for ln in lines if "Wiring suite" in ln or "hooks/test_wiring.py" in ln]
+        self.assertEqual(len(named), 1,
+                         "--lint must print one line for a picked suite whose step is only in job other, never silence\n" + out)
+        self.assertTrue(NOT_RUN.match(named[0]), "that line must start with `not run`\n" + out)
+        self.assertRegex(named[0], r"\bother\b", "that line must name job other\n" + out)
+        self.assertEqual(rc, 0, "a not-run line never moves the exit code\n" + out)
+
+    def test_the_same_suite_in_the_job_that_runs_is_run_and_passes(self):  # the control for the case above
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.WIRING, job="checks", other=[step("Docs", "echo docs")], args=self.LINT)
+        self.assertEqual((rc, by_step(lines).get("Wiring suite")), (0, "PASS"),
+                         "--lint must run a picked suite whose step is in the job asked for\n" + out)
 
 
 class Progress(Job):
