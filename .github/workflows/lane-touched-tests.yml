@@ -33,6 +33,8 @@ jobs:
     outputs:
       any: ${{ steps.select.outputs.any }}
       matrix: ${{ steps.select.outputs.matrix }}
+      commands_windows: ${{ steps.select.outputs.commands_windows }}
+      commands_macos: ${{ steps.select.outputs.commands_macos }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -48,14 +50,26 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python .github/scripts/touched-tests.py
+          # Through env, never in the script text: a branch name is the PR author's text.
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          # The integration PR is a draft too. Its draft run would run every lane's tests on the batch head, and a red
+          # check there would sit on the head the merge tool reads (decision draft-until-reviewed). The lane PRs are
+          # the runs that matter; ci-scope.sh's mutation_report skips on the same `batch-` prefix.
+          case "${HEAD_REF:-}" in
+            batch-*)
+              echo "touched-tests: the head branch starts with batch-, so this draft run selects no tests"
+              printf '%s\n' 'any=false' 'matrix={"include": []}' 'commands_windows={}' 'commands_macos={}' >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
+          python .github/scripts/touched-tests.py
 
   run:
     name: run (${{ matrix.os }})
     needs: touched
     if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60   # provisional, until 5 green runs (decision ci-job-caps)
+    timeout-minutes: 10   # provisional, 4 runs, slowest 4.7 min (decision ci-job-caps)
     # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
     strategy:
       fail-fast: false
@@ -81,28 +95,74 @@ jobs:
         shell: bash
         env:
           FILES: ${{ matrix.files }}
+          # This system's own map of path to interpreter.
+          COMMANDS: ${{ matrix.os == 'windows-latest' && needs.touched.outputs.commands_windows || needs.touched.outputs.commands_macos }}
         run: |
           set -u
-          # buffer.write keeps the newlines LF on Windows.
-          list=$(python -c 'import json, os, sys; sys.stdout.buffer.write(("\n".join(json.loads(os.environ["FILES"])) + "\n").encode())') || { echo "cannot read the file list"; exit 1; }
+          # Each line is "path<TAB>cmd", cmd being the interpreter the file's checks.yml run line starts with (this
+          # system's selector map). buffer.write keeps the newlines LF on Windows.
+          list=$(python -c 'import json, os, sys; c = json.loads(os.environ["COMMANDS"]); sys.stdout.buffer.write(("".join(f + "\t" + c.get(f, "") + "\n" for f in json.loads(os.environ["FILES"]))).encode())') || { echo "cannot read the file list"; exit 1; }
           [ -n "$list" ] || { echo "the file list is empty, but the selector said any=true"; exit 1; }
+          # The command is text from a workflow file, so only these fixed forms run, as an array and never through
+          # eval. Any other command is printed and the file is red.
+          pick_cmd() {
+            case "$1" in
+              sh|bash|node|python|python3) cmd=("$1") ;;
+              "node --test") cmd=(node --test) ;;
+              *) echo "no runner for the command '$1'"; return 1 ;;
+            esac
+          }
           run_one() {
             case "$1" in
-              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs) node "$1" ;;
-              skills/plain-english-map/tests/*.test.mjs) (cd skills/plain-english-map/tests && node --test "${1##*/}") ;;
-              *.test.mjs|*.test.js|*/test_*.mjs) node --test "$1" ;;
-              *.test.ps1) powershell -NoProfile -ExecutionPolicy Bypass -File "$1" ;;
-              *.py) python "$1" ;;
-              *.sh) bash "$1" ;;
+              mods/*.test.mjs|mods/*.test.js|mods/*/test_*.mjs|mods/*/check.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              skills/plain-english-map/tests/*.test.mjs) pick_cmd "$2" && (cd skills/plain-english-map/tests && "${cmd[@]}" "${1##*/}") ;;
+              *.test.mjs|*.test.js|*/test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              test_*.mjs) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              # 77 is a skip: on Windows the PowerShell step below runs it.
+              *.test.ps1) if [ "$RUNNER_OS" = Windows ]; then return 77; fi; echo "no PowerShell step on $RUNNER_OS"; return 1 ;;
+              *.py) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
+              *.sh) pick_cmd "$2" && "${cmd[@]}" "$1" ;;
               *) echo "no runner for $1"; return 1 ;;
             esac
           }
           failed=0
-          while IFS= read -r f; do
+          while IFS=$'\t' read -r f c; do
             echo "::group::$f"
             # No stdin from the loop: a test that reads it would eat the rest of the list.
-            if run_one "$f" < /dev/null; then rc=0; else rc=$?; fi
+            if run_one "$f" "$c" < /dev/null; then rc=0; else rc=$?; fi
             echo "::endgroup::"
-            if [ "$rc" -eq 0 ]; then echo "PASS $f"; else echo "FAIL $f (exit $rc)"; failed=1; fi
+            if [ "$rc" -eq 0 ]; then echo "PASS $f"; elif [ "$rc" -eq 77 ] && [ "${f%.test.ps1}" != "$f" ]; then echo "SKIP $f (runs in the PowerShell step)"; else echo "FAIL $f (exit $rc)"; failed=1; fi
           done <<< "$list"
           exit "$failed"
+
+      # The form checks.yml's pointer-windows job uses: shell powershell is Windows PowerShell 5.1. Each test runs in a
+      # child powershell and keeps its exit code. The command is text from a workflow file, so only powershell and
+      # pwsh run, with fixed arguments.
+      - name: Run the touched PowerShell tests
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: powershell
+        env:
+          FILES: ${{ matrix.files }}
+          COMMANDS: ${{ needs.touched.outputs.commands_windows }}
+        run: |
+          $commands = $env:COMMANDS | ConvertFrom-Json
+          $failed = $false
+          # Windows PowerShell 5.1 puts a whole JSON array on the pipeline as one object, so assign it before the loop.
+          $files = $env:FILES | ConvertFrom-Json
+          foreach ($path in @($files)) {
+            if (-not $path.EndsWith('.test.ps1')) { continue }
+            $property = $commands.PSObject.Properties[$path]
+            $cmd = if ($property) { [string]$property.Value } else { '' }
+            if ($cmd -ne 'powershell' -and $cmd -ne 'pwsh') {
+              Write-Host "FAIL ${path}: no runner for the command '$cmd'"
+              $failed = $true
+              continue
+            }
+            Write-Host "::group::$path"
+            # No stdin from the loop: a test that reads it must not eat anything else, as in the bash step.
+            $null | & $cmd -NoProfile -ExecutionPolicy Bypass -File $path
+            $rc = $LASTEXITCODE
+            Write-Host '::endgroup::'
+            if ($rc -eq 0) { Write-Host "PASS $path" } else { Write-Host "FAIL $path (exit $rc)"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
