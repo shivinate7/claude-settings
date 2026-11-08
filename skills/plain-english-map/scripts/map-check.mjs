@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import ts from './lib/lazy-typescript.mjs';
 import { blankComments, blankCommentsAndStrings, commentsOf } from './lib/source-text.mjs';
-import { citedIds, idKey, namesRecord, recordKeys } from './lib/decisions.mjs';
+import { citedIds, debtRecords, idKey, namesRecord, recordKeys, recordNaming } from './lib/decisions.mjs';
 import { importTargets } from './lib/import-reader.mjs';
 import { readFacts } from './lib/fact-readers.mjs';
 import { boundSeamReader, loadMapConfig, repoMapConfig, validateMapConfig } from './lib/map-config.mjs';
@@ -284,16 +284,19 @@ export const homeLines = (text) => parseHomes(text).homes;
 // A tested-by line is the same with `Tested by: ` and each test path from the repository root. Its label is found at any indent, so an unindented one is read, and fails.
 const DECISIONS_LABEL_RE = /^[ \t]+[-*+]\s+Decisions:/;
 const DECISIONS_LINE_RE = /^[ \t]+[-*+] Decisions: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
+// A debts line is the same with `Debts: ` and the slug of each debt record (its file name without `.md`). Only a map line of a non-code file reads it.
+const DEBTS_LABEL_RE = /^[ \t]+[-*+]\s+Debts:/;
+const DEBTS_LINE_RE = /^[ \t]+[-*+] Debts: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
 const TESTED_LABEL_RE = /^[ \t]*[-*+]\s+Tested by:/;
 const TESTED_LINE_RE = /^[ \t]+[-*+] Tested by: (`[^`]+`(?:, `[^`]+`)*)\s*$/;
 const backticked = (s) => [...s.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
 
 /**
  * The map lines of one docs/map/ page, as `entries`, each { file, line, code, ids, at, bad, tests, testsAt, testsBad }. `line` is the 1-based number of the map line.
- * A map line is a backtick list line outside a Tables or a Screens section. `code` is true when `re` accepts its path: only a code line reads decisions lines,
- * so MAP10 is the same for a file whose extension the config leaves out. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
+ * A map line is a backtick list line outside a Tables or a Screens section, or a code line in any section. `code` is true when `re` accepts its path.
+ * A non-code line's `ids` are the ids on its decisions line, and `decisionGaps` compares them with the records that name it. `slugs` are read for it alone. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
  * `ids` are the ids on its decisions lines, `at` is the number of the first one or null, and `bad` holds each decisions line that is not in the form: a bad line adds no id.
- * `tests`, `testsAt` and `testsBad` are the same for its tested-by lines.
+ * `tests`, `testsAt` and `testsBad` are the same for its tested-by lines. `slugs`, `slugsAt` and `slugsBad` are the same for its debts lines, read for a non-code file only.
  * `orphans` holds each tested-by line that sits under no `placed` map line (a table line, a screen line, a home and a line in another section included), as { line, text }.
  */
 export const subLineEntries = (text, re) => {
@@ -304,7 +307,7 @@ export const subLineEntries = (text, re) => {
     const mapLine = l.match(LIST_ITEM_TOKEN_RE);
     if (mapLine) {
       const code = re.test(mapLine[1]);
-      entry = inFiles || code ? { file: mapLine[1], line, code, placed: inCode, ids: [], at: null, bad: [], tests: [], testsAt: null, testsBad: [] } : null;
+      entry = inFiles || code ? { file: mapLine[1], line, sentence: afterDash(l.slice(mapLine[0].length)), code, placed: inCode, ids: [], at: null, bad: [], tests: [], testsAt: null, testsBad: [], slugs: [], slugsAt: null, slugsBad: [] } : null;
       if (entry) entries.push(entry);
       continue;
     }
@@ -315,7 +318,13 @@ export const subLineEntries = (text, re) => {
       else { entry.testsAt ??= line; entry.tests.push(...backticked(m[1])); }
       continue;
     }
-    if (!entry?.code || !DECISIONS_LABEL_RE.test(l)) continue;
+    if (entry && !entry.code && DEBTS_LABEL_RE.test(l)) {
+      const d = l.match(DEBTS_LINE_RE);
+      if (!d) entry.slugsBad.push({ line, text: l.trim() });
+      else { entry.slugsAt ??= line; entry.slugs.push(...backticked(d[1])); }
+      continue;
+    }
+    if (!entry || !DECISIONS_LABEL_RE.test(l)) continue;
     const m = l.match(DECISIONS_LINE_RE);
     if (!m) { entry.bad.push({ line, text: l.trim() }); continue; }
     entry.at ??= line;
@@ -1151,33 +1160,55 @@ const skip = (key, what) => ({ skipped: `map.config.json has no "${key}" setting
 // A check that no config has to turn on: `requireAllKeys` never makes its skip a fail.
 const optionalSkip = (key, what) => ({ ...skip(key, what), optional: true });
 
+/** The tracked non-code files that the records name, as a Map { file -> { decisions, debts } } (`recordNaming`). A code file keeps its own rules: MAP1 asks for its map line already. */
+export const namedNonCode = ({ cfg, root, read, all }) => {
+  const re = extRe(cfg);
+  const found = recordNaming({ root, read, all, decisionsDir: cfg.decisionsDir, idPattern: cfg.decisionIdPattern });
+  return new Map([...found].filter(([f]) => !re.test(f)));
+};
+
 /**
- * What MAP10 reads, for a config that sets both decision keys: `pages` is [[path, text]] of the docs/map/ pages, `all` the tracked files.
- * `missing` lists each tracked mapped file whose comments cite ids that name a record and that its decisions lines lack:
- * { file, page, line, at, ids }, where `line` is its map line and `at` its first decisions line or null. `map-fix.mjs` adds exactly these ids.
- * `unknown` lists each id on a decisions line that names no record. `bad` lists each decisions line that is not in the form.
+ * What MAP10 reads: `pages` is [[path, text]] of the docs/map/ pages, `all` the tracked files. A config with no decision keys reads debts only.
+ * `missing` lists each tracked mapped file that lacks ids or slugs: { file, page, line, at, ids, slugsAt, slugs, code }, where `line` is its map line and `at` its first decisions line or null.
+ * A code file's `ids` are the ids that name a record and that its comments cite. A non-code file's `ids` are the ids of the decision records that name it, and its `slugs`
+ * the debts that name it (`recordNaming`); a code file has no slugs. `map-fix.mjs` adds exactly these.
+ * `unknown` lists each id on a decisions line that names no record, and each slug on a debts line that names no debt record (`slug: true`). `bad` lists each decisions line or debts line that is not in the form.
  */
-export const decisionGaps = ({ cfg, root, read, all, pages }) => {
-  const keys = recordKeys(root, cfg.decisionsDir);
+export const decisionGaps = ({ cfg, root, read, all, pages, named = namedNonCode({ cfg, root, read, all }) }) => {
+  const keys = cfg.decisionsDir ? recordKeys(root, cfg.decisionsDir) : [];
+  const debts = new Set(debtRecords(root).slugs);
   const tracked = new Set(all);
   const re = extRe(cfg);
   const byFile = new Map();
   const unknown = [], bad = [];
   for (const [page, text] of pages) {
-    for (const e of subLineEntries(text, re).entries.filter((x) => x.code)) {
+    for (const e of subLineEntries(text, re).entries) {
       // A file with a map line on two pages is judged on the union of its ids, and fixed on its first line.
-      if (!byFile.has(e.file)) byFile.set(e.file, { file: e.file, page, line: e.line, at: e.at, ids: [] });
-      byFile.get(e.file).ids.push(...e.ids);
-      for (const b of e.bad) bad.push({ page, ...b });
-      for (const id of e.ids) if (!namesRecord(id, keys)) unknown.push({ page, line: e.at, file: e.file, id });
+      if (!byFile.has(e.file)) byFile.set(e.file, { file: e.file, page, line: e.line, at: e.at, slugsAt: e.slugsAt, code: e.code, ids: [], slugs: [] });
+      const home = byFile.get(e.file);
+      home.ids.push(...e.ids);
+      home.slugs.push(...e.slugs);
+      if (cfg.decisionsDir) {
+        for (const b of e.bad) bad.push({ page, ...b });
+        for (const id of e.ids) if (!namesRecord(id, keys)) unknown.push({ page, line: e.at, file: e.file, id });
+      }
+      if (e.code) continue;
+      for (const b of e.slugsBad) bad.push({ page, ...b, debts: true });
+      for (const slug of e.slugs) if (!debts.has(slug)) unknown.push({ page, line: e.slugsAt, file: e.file, id: slug, slug: true });
     }
   }
   const missing = [];
   for (const home of byFile.values()) {
     if (!tracked.has(home.file)) continue;
-    const have = new Set(home.ids.map(idKey));
-    const ids = citedIds(read(home.file), home.file, cfg.decisionIdPattern).filter((id) => namesRecord(id, keys) && !have.has(idKey(id)));
-    if (ids.length) missing.push({ file: home.file, page: home.page, line: home.line, at: home.at, ids });
+    const haveIds = new Set(home.ids.map(idKey));
+    let ids, slugs = [];
+    if (home.code) ids = cfg.decisionsDir ? citedIds(read(home.file), home.file, cfg.decisionIdPattern).filter((id) => namesRecord(id, keys) && !haveIds.has(idKey(id))) : [];
+    else {
+      const by = named.get(home.file);
+      ids = cfg.decisionsDir ? (by?.decisions ?? []).filter((id) => !haveIds.has(idKey(id))) : [];
+      slugs = (by?.debts ?? []).filter((x) => !home.slugs.includes(x));
+    }
+    if (ids.length || slugs.length) missing.push({ file: home.file, page: home.page, line: home.line, at: home.at, slugsAt: home.slugsAt, code: home.code, ids, slugs });
   }
   return { missing, unknown, bad };
 };
@@ -1236,6 +1267,14 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
     return { problems, pairs: [...pairs.values()], reqs: [...new Set([...tests, ...indexes])].map((file) => ({ file, op: 'loads' })) };
   };
 
+  // The files that the records name: MAP1 and MAP10 share one read of the records for each file list.
+  let naming = null;
+  const namedNow = () => {
+    const all = files();
+    if (naming?.all !== all) naming = { all, found: namedNonCode({ cfg, root, read, all }) };
+    return naming.found;
+  };
+
   // MAP9 reads the facts of the map, and MAP11 reads the tests of its tested-by lines. In one run the tree is read once (`files()` answers the same list),
   // so MAP9 reads both in one `readFacts` call and hands MAP11 its results: python3 starts once for the whole run. A host that gives each check
   // its own list, or runs MAP11 alone, gets one call for each.
@@ -1244,10 +1283,18 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
   return {
     MAP1: () => {
       const all = inMapPaths(trackedCodeFiles(files(), cfg), cfg);
-      const mapped = new Set(mapTexts().flatMap((t) => mapCodePaths(t, extRe(cfg))));
+      const texts = mapTexts();
+      const mapped = new Set(texts.flatMap((t) => mapCodePaths(t, extRe(cfg))));
       const missing = all.filter((f) => !mapped.has(f));
-      if (missing.length)
-        throw new Error(`${missing.length}/${all.length} tracked code files have no docs/map/ line — e.g. ${missing.slice(0, 5).join(', ')}`);
+      // A non-code file that a decision or debt record names needs a map line too, where `mapPaths` reaches it.
+      const listed = new Set(texts.flatMap((t) => subLineEntries(t, extRe(cfg)).entries.map((e) => e.file)));
+      const named = inMapPaths([...namedNow().keys()], cfg);
+      const unlisted = named.filter((f) => !listed.has(f));
+      const problems = [
+        missing.length && `${missing.length}/${all.length} tracked code files have no docs/map/ line — e.g. ${missing.slice(0, 5).join(', ')}`,
+        unlisted.length && `${unlisted.length}/${named.length} files that a decision or debt record names have no docs/map/ line — e.g. ${unlisted.slice(0, 5).join(', ')}`,
+      ].filter(Boolean);
+      if (problems.length) throw new Error(problems.join('; '));
       return true;
     },
 
@@ -1392,14 +1439,18 @@ export const mapChecks = ({ cfg, root, read, files = () => gitLsFiles(root) }) =
     },
 
     MAP10: () => {
-      if (!cfg.decisionsDir) return optionalSkip('decisionsDir', 'decisions folder');
+      // Debts need no decision keys: with neither key and no debts folder, there is nothing to check.
+      if (!cfg.decisionsDir && !debtRecords(root).exists) return optionalSkip('decisionsDir', 'decisions folder');
       const all = files();
       const pages = mapFilePaths(all).map((f) => [f, read(f)]);
-      const { missing, unknown, bad } = decisionGaps({ cfg, root, read, all, pages });
+      const { missing, unknown, bad } = decisionGaps({ cfg, root, read, all, pages, named: namedNow() });
       const problems = [
-        ...bad.map((b) => `${b.page}:${b.line} decisions line is not "- Decisions: \`ID\`, \`ID\`": ${b.text}`),
-        ...missing.map((m) => `${m.page}:${m.line} ${m.file} cites ${m.ids.join(', ')} in a comment, and its decisions line has no such id`),
-        ...unknown.map((u) => `${u.page}:${u.line} ${u.file} lists ${u.id}, and no record in ${cfg.decisionsDir} names it`),
+        ...bad.map((b) => (b.debts ? `${b.page}:${b.line} debts line is not "- Debts: \`SLUG\`, \`SLUG\`": ${b.text}` : `${b.page}:${b.line} decisions line is not "- Decisions: \`ID\`, \`ID\`": ${b.text}`)),
+        ...missing.flatMap((m) => [
+          m.ids.length && (m.code ? `${m.page}:${m.line} ${m.file} cites ${m.ids.join(', ')} in a comment, and its decisions line has no such id` : `${m.page}:${m.line} ${m.file} is named by the decision record ${m.ids.join(', ')}, and its decisions line has no such id`),
+          m.slugs.length && `${m.page}:${m.line} ${m.file} is named by the debt ${m.slugs.join(', ')}, and its debts line has no such slug`,
+        ].filter(Boolean)),
+        ...unknown.map((u) => (u.slug ? `${u.page}:${u.line} ${u.file} lists the debt ${u.id}, and no debt record in ${debtRecords(root).dir} names it` : `${u.page}:${u.line} ${u.file} lists ${u.id}, and no record in ${cfg.decisionsDir} names it`)),
       ];
       if (problems.length) throw new Error(problems.join('; '));
       return true;
