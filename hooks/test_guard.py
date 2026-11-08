@@ -7750,6 +7750,34 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
 
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
+# THE PREFIX FLAG, UNRESOLVED AND REPEATED. A prefix the guard cannot name (a shell variable, a command substitution,
+# a home path) must not hide the working folder: the walk from it still decides, so a linked folder stays refused.
+# The other forms of the flag (`--prefix=dir`, a relative dir, a repeated flag) name the folder npm installs into.
+nm_case('linked-nm: npm ci --prefix "$PWD" from a linked folder is refused',
+        'npm ci --prefix "$PWD"', "deny", NMLINKED)
+nm_case('linked-nm: npm ci --prefix "$(git rev-parse --show-toplevel)" from a linked folder is refused',
+        'npm ci --prefix "$(git rev-parse --show-toplevel)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ~/linked from a linked folder is refused",
+        "npm ci --prefix ~/linked", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix=<linked folder>, run from a real folder, is refused",
+        "npm ci --prefix=" + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci --prefix=<real folder>, run from a linked folder, is allowed",
+        "npm ci --prefix=" + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ../nmlinked, relative, run from a real folder, is refused",
+        "npm ci --prefix ../nmlinked", "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, from a real folder, is refused",
+        "npm ci --prefix " + slash(NMREAL) + " --prefix " + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
+
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
@@ -12976,7 +13004,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
