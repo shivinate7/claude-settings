@@ -2491,7 +2491,7 @@ BRIEF_LINE = "Write the brief to the task and the files only. Start with the poi
 BATCH_BASE = "**Batch.** Main may merge only by a pull request.<!-- rule:batch-merge -->\n"
 BATCH_GROWN = "**Batch.** Main, when the checks pass, may merge only by a pull request.<!-- rule:batch-merge -->\n"
 # Growth that adds "unless" or "except" changes what the rule allows, so it is a reword. Each word is its own case.
-# "without" is no negator (owner ruling 15:00 CST), so its growth is the case after the listing test.
+# "without" is no negator, so its growth is the case after the listing test.
 BRIEF_UNLESS = "**Brief.** Write the brief, unless the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
 BRIEF_EXCEPT = "**Brief.** Write the brief, except when the owner asks, to the task and the files only.<!-- rule:brief-scope -->\n"
 BRIEF_WITHOUT = ("**Brief.** Write the brief, without a note from the owner, to the task and the files only."
@@ -2540,7 +2540,7 @@ class RewordSkipTests(RewordCase):
                 self.assertEqual(rc, 1, out)
 
     def test_a_rule_grown_by_without_is_not_a_reword(self):
-        # Owner ruling 15:00 CST: "without" is no negator, so growth by it skips the reword check like other growth.
+        # "without" is no negator, so growth by it skips the reword check like other growth.
         self.assert_passes(self.reword(BRIEF_BASE, BRIEF_WITHOUT, BRIEF_LINE))
 
 

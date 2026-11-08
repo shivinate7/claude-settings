@@ -980,8 +980,6 @@ class OneHomeInRepoTests(unittest.TestCase):
         found, out = self.token_gloss_case(self.copy_floor() - 1)
         self.assertEqual(keyed(found), [CONTROL_FINDING], out)
 
-    # Review round 2, F3: word_runs.SPANS had no re.S, so a comment that runs over two lines was read as prose, and an
-    # exception marker over two lines went unseen.
     # word_runs.SPANS reads with re.S, so a comment that runs over two lines is no prose, and an exception marker over
     # two lines is seen.
     def test_a_two_line_comment_is_not_read_as_prose(self):
