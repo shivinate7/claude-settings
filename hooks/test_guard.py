@@ -19363,6 +19363,27 @@ repo_case("a merge piped to tee with 2>&1 is allowed", "allow", f"{MERGE_SHIM} 5
 repo_case("a merge with a > file and 2>&1 is allowed", "allow", f"{MERGE_SHIM} 5 --confirm > run.log 2>&1", REPO_A, TX_A)
 repo_case("a merge with a > file and 2>&1 that names another checkout is denied", "deny",
           f"{MERGE_SHIM} -C {REPO_B} 5 --confirm > run.log 2>&1", REPO_A, TX_A)
+# A reason flag's quoted value may hold `>` or `<`. The shell reads it as text, not as a redirect, so the merge is judged on its
+# arguments: the arrow or the `<` in the reason is allowed, and a -C naming another checkout beside it is still denied.
+repo_case("a quoted --base-red-ok reason with -> is allowed", "allow",
+          f'{MERGE_SHIM} 185 --confirm --base-red-ok "fix -> lane"', REPO_A, TX_A)
+repo_case("a --base-red-ok=value with -> in its quotes is allowed", "allow",
+          f'{MERGE_SHIM} 185 --confirm --base-red-ok="x -> y"', REPO_A, TX_A)
+repo_case("a single-quoted --base-red-ok reason with < is allowed", "allow",
+          "merge 185 --confirm --base-red-ok 'a < b'", REPO_A, TX_A)
+repo_case("a quoted --base-red-ok reason with -> beside -C another checkout is denied", "deny",
+          f'{MERGE_SHIM} -C {REPO_B} 185 --confirm --base-red-ok "fix -> lane"', REPO_A, TX_A)
+repo_case("a --base-red-ok=value with -> beside -C another checkout is denied", "deny",
+          f'{MERGE_SHIM} -C {REPO_B} 185 --confirm --base-red-ok="x -> y"', REPO_A, TX_A)
+repo_case("a single-quoted --base-red-ok reason with < beside -C another checkout is denied", "deny",
+          f"merge -C {REPO_B} 185 --confirm --base-red-ok 'a < b'", REPO_A, TX_A)
+# A -C after a quoted reason is still read: a fix that cut the command at the first quote would allow this one.
+repo_case("a -C after a quoted reason with -> names another checkout and is denied", "deny",
+          f'{MERGE_SHIM} --base-red-ok "a -> b" -C {REPO_B} 185 --confirm', REPO_A, TX_A)
+repo_case("an unquoted reason with a > file and 2>&1 is allowed", "allow",
+          f"{MERGE_SHIM} 185 --confirm --base-red-ok fixlane > run.log 2>&1", REPO_A, TX_A)
+repo_case("an unquoted reason with a > file and 2>&1 beside -C another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} 185 --confirm --base-red-ok fixlane > run.log 2>&1", REPO_A, TX_A)
 repo_case("a path with a hash names its checkout whole and is allowed", "allow", f"{MERGE_SHIM} --repo-dir {REPO_HASH} 5 --confirm",
           REPO_B, TX_A)
 repo_case("a runner that names claude-settings is allowed through the proxy's origin", "allow", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY,
