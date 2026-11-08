@@ -45,9 +45,14 @@ Cost: one python start per CI run, and no file written (unmeasured). It reads `l
 - A test named in the sentence pins nothing unless the counted thing is a code span it holds; a sentence that only names the test needs a mark.
 - The check does not tell "(not pinned)" from "(unmeasured)". The writer picks the mark.
 - A count whose noun comes first, as in "starts one `git diff`", is missed.
-- A plain word can be the pinned span when the test holds it. Debt note: `cost-count-hollow-pin`.
-- Secs, hrs, KiB, days, weeks, "line N of" and "N percent" are flagged as counts; the unit lists lack them. Debt note: `cost-count-units-gap`.
-- Seven to nine, twelve, fetch, stat, invocation, append and round trip as nouns, "two-process" and "a second time" are missed, and "up to date" or "at least" passes as a bound. Debt note: `cost-count-misses`.
+- A plain word, or another claim's span, can be the pinned span when the test holds it. Note: `cost-count-hollow-pin`.
+- Secs, hrs, KiB, days, weeks, "line N of" and "N percent" are flagged as counts; the unit lists lack them. Note: `cost-count-units-gap`.
+- Seven to nine, twelve, fetch, stat, invocation, append and round trip as nouns, "two-process" and "a second time" are missed, and "up to date" or "at least" passes as a bound. Note: `cost-count-misses`.
+- "maximum of", "less than", "not more than", "bounded by", "limited to" and "up-to" are not bounds. Note: `cost-count-bound-list`.
+- "no one reads", "each one runs" and "once the session ends" are flagged. Note: `cost-count-pronoun-forms`.
+- Digits in a link URL read as counts. Note: `cost-count-link-digits`.
+- "100% of runs", "Python 3 start", "O(1) reads" and "zero processes" are flagged. Note: `cost-count-other-false-alarms`.
+- A mark can silence a claim that a test does pin. Note: `cost-mark-over-pin`.
 - A leading once, twice or thrice is no claim.
 - A trailing once, twice, thrice or Nx counts only after a verb of work, with at most three words between.
 - A refusal reason in ordinary prose is not read. Fix: none in this lane. Triage holds it as a separate finding.
