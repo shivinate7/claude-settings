@@ -287,6 +287,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import ast
 import difflib
 import importlib
 import importlib.machinery
@@ -1533,7 +1534,8 @@ TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", 
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. They are not test paths, so a builder's edit is not refused by path; a builder
-# may only ADD to hooks/mutate_guard.py (BUILDER_ADD_ONLY). Case folds as in `is_test_rel`.
+# may only ADD to each file here (BUILDER_ADD_ONLY) and ADD a name to this set, never remove or change one
+# (`builder_set_breach`). Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
@@ -1960,8 +1962,11 @@ def builder_test_path(path: str, cwd: str) -> bool:
 
 
 # A builder may ADD to a file here, never remove or change a line of it: one edited helper or import can
-# weaken every mutant the file holds. Named one by one, case folded, as AUTHOR_MUTATION_TESTS is.
-BUILDER_ADD_ONLY = {"hooks/mutate_guard.py"}
+# weaken every mutant the file holds. The set is AUTHOR_MUTATION_TESTS, one home (coordinator rulings, 2026-11-07
+# 18:44 and 18:54 CST). The set's own names are guarded too: see `builder_set_breach`.
+BUILDER_ADD_ONLY = AUTHOR_MUTATION_TESTS
+# The file that holds AUTHOR_MUTATION_TESTS. A builder may add a name to the set, never remove or change one.
+AUTHOR_SET_FILE = "hooks/guard.py"
 
 
 def builder_add_only_path(path: str, cwd: str) -> bool:
@@ -2009,38 +2014,105 @@ def _head_text(full: str):
     return shown.stdout
 
 
-def builder_add_only_breach(tool_input, full: str) -> bool:
-    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line HEAD
-    holds (coordinator pick, 2026-11-07 18:27 CST: an existing line is a line committed at HEAD, so the
-    builder may change its own uncommitted adds). The edits are applied to the file on disk, the way the
-    tool would, and the result is read against HEAD's text. An edit the tool would fail (text not on disk)
-    changes nothing. HEAD unreadable: refuse, never pass."""
+def _edited_text(tool_input, full: str):
+    """The text `full` holds after a builder's Edit, MultiEdit or Write, the way the tool would apply it:
+    the edits run on the file on disk, and an edit the tool would fail (text not on disk) changes nothing.
+    None when the call or the file cannot be read."""
     if not isinstance(tool_input, dict):
-        return False
-    head = _head_text(full)
-    if head is None:
-        return True
+        return None
     edits = tool_input.get("edits")
     if not isinstance(edits, list):
         edits = [tool_input] if "old_string" in tool_input or "new_string" in tool_input else []
     if isinstance(tool_input.get("content"), str) and not edits:
-        return not _lines_kept(head, tool_input["content"])
+        return tool_input["content"]
     try:
         with open(full, encoding="utf-8", errors="replace") as handle:
             result = handle.read()
     except Exception:
-        return True
+        return None
     for edit in edits:
         if not isinstance(edit, dict):
-            return True
+            return None
         old, new = edit.get("old_string"), edit.get("new_string")
         if not isinstance(old, str) or not isinstance(new, str):
-            return True
+            return None
         if not old or old not in result:
             continue
         replace_all = bool(edit.get("replace_all", tool_input.get("replace_all")))
         result = result.replace(old, new) if replace_all else result.replace(old, new, 1)
+    return result
+
+
+def builder_add_only_breach(tool_input, full: str) -> bool:
+    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line HEAD
+    holds (coordinator pick, 2026-11-07 18:27 CST: an existing line is a line committed at HEAD, so the
+    builder may change its own uncommitted adds). The result is read against HEAD's text. HEAD or the
+    call unreadable: refuse, never pass."""
+    if not isinstance(tool_input, dict):
+        return False
+    head = _head_text(full)
+    result = _edited_text(tool_input, full)
+    if head is None or result is None:
+        return True
     return not _lines_kept(head, result)
+
+
+def author_set_names(text: str):
+    """The names `AUTHOR_MUTATION_TESTS` holds in `text`, as a set: empty when the file has no such
+    assignment or holds `set()`. None when the text does not parse or the assignment is no literal set,
+    list or tuple of strings (the names cannot be read)."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        elif isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        else:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "AUTHOR_MUTATION_TESTS" for t in targets):
+            continue
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in ("set", "frozenset"):
+            if not value.args and not value.keywords:
+                return set()
+            value = value.args[0] if len(value.args) == 1 and not value.keywords else None
+        if isinstance(value, (ast.Set, ast.List, ast.Tuple)) and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return {e.value for e in value.elts}
+        return None
+    return set()
+
+
+def set_names_dropped(old: str, new: str, strict: bool) -> bool:
+    """True when `new` removes or changes a name `old` holds in AUTHOR_MUTATION_TESTS. `old` unreadable:
+    nothing to judge. `new` unreadable: refused when `strict` (a commit or stop, which holds a whole file),
+    and passed otherwise, since an edit may leave a file half-written; the next judge reads it whole."""
+    before = author_set_names(old)
+    if not before:
+        return False
+    after = author_set_names(new)
+    if after is None:
+        return strict
+    return not before <= after
+
+
+def builder_set_breach(tool_input, full: str) -> bool:
+    """True when a builder's Edit, MultiEdit or Write of the file that holds AUTHOR_MUTATION_TESTS removes
+    or changes a name HEAD's set holds. A name added passes. HEAD unreadable: refuse, never pass."""
+    if not isinstance(tool_input, dict):
+        return False
+    head = _head_text(full)
+    result = _edited_text(tool_input, full)
+    if head is None or result is None:
+        return True
+    return set_names_dropped(head, result, strict=False)
+
+
+def builder_set_path(path: str, cwd: str) -> bool:
+    rel = repo_rel(path, cwd)
+    return rel is not None and norm(rel).lstrip("/").lower() == AUTHOR_SET_FILE
 
 
 # A command that rewrites a file it names, though `writes_to` reads it as a mention: a restore from git, a
@@ -2136,6 +2208,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     if builder_test_path(target, cwd):
         return target
     if builder_add_only_path(target, cwd) and builder_add_only_breach(tool_input, _expanded(target, cwd)):
+        return target
+    if builder_set_path(target, cwd) and builder_set_breach(tool_input, _expanded(target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2384,6 +2458,8 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
             bad = any(is_test_rel(n) for n in names) or (
                 any(norm(n).lstrip("/").lower() in BUILDER_ADD_ONLY for n in names)
                 and not _lines_kept(text_at(root, old, rel), text_at(root, new, rel))) or (
+                any(norm(n).lstrip("/").lower() == AUTHOR_SET_FILE for n in names)
+                and set_names_dropped(text_at(root, old, rel), text_at(root, new, rel), strict=True)) or (
                 is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
