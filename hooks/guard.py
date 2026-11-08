@@ -996,6 +996,7 @@ OTHER_CHECKOUT_CD_REASON = (
 OTHER_CLONE_DETAIL = "write into another clone: "
 OTHER_CLONE_CD_DETAIL = "cd into another clone: "
 OTHER_CLONE_GIT_DETAIL = "git write into another clone: "
+OTHER_CHECKOUT_GIT_DETAIL = "git write into another checkout: "
 OTHER_CLONE_REMEDY = (
     "Remedy: change files only in your home checkout. To read another clone, use "
     "`git -C <dir> log` or `git -C <dir> show`, or a path."
@@ -4437,6 +4438,26 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
 RED_RUN_ROOT_VERBS = ("cp",)
 
 
+def _python_write_may_hit(raw: str, where: str) -> bool:
+    """True when a python or node script in RAW writes a path whose nearest `.git` is not the cwd's,
+    so it is worth the one `git worktree list`. The scripts are read by interpreter_write_hit, the
+    one reader frozen-path uses; the path test is stat and small file reads, no git."""
+    # The text scan runs first: the checkout root and the stranded test (a `.git` file and
+    # `commondir` read) are read once, and only when a script names a path it opens for writing.
+    found = {}
+
+    def reaches_elsewhere(path, at):
+        if not found:
+            own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
+            found["root"] = own_root
+            found["stranded"] = bool(own_root) and _clone_scope(None, own_root)[2]
+        own_root = found["root"]
+        if not own_root:
+            return False
+        return found["stranded"] or _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)
+    return bool(interpreter_write_hit(raw, where, reaches_elsewhere))
+
+
 def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
     """True when PATH is inside the caller's own test-author red-run folder
     `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
@@ -4461,6 +4482,17 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
         folder = parent
 
 
+def _own_agent_worktree(payload, primary: str, path: str) -> bool:
+    """True when PATH is at or inside the caller's own agent worktree
+    `<primary>/.claude/worktrees/agent-<its agent id>`. The id and the separator after it match
+    whole (`path_is_inside`), so `agent-<id>b` and the red-run folder `agent-<id>-<suffix>` do not
+    pass. PRIMARY is the primary checkout alone. No file read, no git."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not primary or not path:
+        return False
+    return path_is_inside(path, os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)) is True
+
+
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
                        payload=None,
                        has_agent: bool = True) -> str:
@@ -4474,7 +4506,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
-    refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
+    refused the same way; the clone check spawns no git. A `git -C` verb that changes files is refused
+    into another checkout only for a call with an `agent_id`, and never into that agent's own
+    worktree (`_own_agent_worktree`); a top-level session is refused only into
+    a separate clone. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     moves = []
@@ -4488,7 +4523,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
-        writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+        writes = (writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+                  or _python_write_may_hit(raw, where))
     else:
         return ""
     if moves:
@@ -4537,14 +4573,29 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        if not hit and writes:
+            # A python or node script that opens a path for writing: the one reader is frozen-path's.
+            hit = interpreter_write_hit(raw, where, elsewhere)
         if not hit:
-            # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
-            # reader of such verbs is session_home_git_hit; only the folder test differs.
-            def in_clone(folder, _at):
-                elsewhere(folder, folder)
-                return clone_hit.get(folder, False)
-            verb = session_home_git_hit(command, where, in_clone) if "git" in command else ""
-            return OTHER_CLONE_GIT_DETAIL + verb if verb else ""
+            # A git verb that changes files, run in another checkout or clone, or from a stranded cwd.
+            # The one reader of such verbs is session_home_git_hit; only the folder test differs.
+            folders = []
+
+            def in_other(folder, _at):
+                # A top-level session keeps the clone-only refusal: a git command run with -C into
+                # another checkout is no write there (decision an-agent-outside-its-home-tree-must-stop).
+                # An agent's git -C into its own worktree is the pointer rule's remedy, so it passes;
+                # a separate clone stays refused.
+                if elsewhere(folder, folder) and (
+                        clone_hit.get(folder)
+                        or (has_agent and not _own_agent_worktree(payload, roots[0], folder))):
+                    folders.append(folder)
+                    return True
+                return False
+            verb = session_home_git_hit(command, where, in_other) if "git" in command else ""
+            if not verb:
+                return ""
+            return (OTHER_CLONE_GIT_DETAIL if clone_hit.get(folders[-1]) else OTHER_CHECKOUT_GIT_DETAIL) + verb
         return ("shell write into another clone: " if clone_hit.get(hit) else
                 "shell write into another checkout: ") + hit
     for target in targets:
@@ -4566,7 +4617,7 @@ SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean", "add", "rm", "mv")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
