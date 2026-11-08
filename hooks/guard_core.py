@@ -1011,8 +1011,10 @@ def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
     if _UNRESOLVED_WORD.search(words[0]):
         return False
     script = words[0] if len(words) == 1 else _run_script_arg(words)
-    return script is not None and not _UNRESOLVED_WORD.search(script) \
-        and sources.get(_plain_words([script])[0]) is not None
+    if script is None or _UNRESOLVED_WORD.search(script):
+        return False
+    plain = _plain_words([script])   # empty for a word like `1a=b`, which names no file: it fails closed
+    return bool(plain) and sources.get(plain[0]) is not None
 
 
 def _body_runs_nothing_unseen(body: str, sources) -> bool:
@@ -1031,13 +1033,26 @@ def _script_runs(text: str):
                     yield word, words[at + script]
 
 
+# What a script source names when it loads code: an import, a require, a perl `do`, a ruby `load`. The word
+# `load` also matches `json.load`, a false alarm that keeps every body, the safe side.
+_LOADS_CODE = re.compile(r"\b(?:import|require|load|do|__import__|importlib)\b").search
+
+
+def _source_loads_code(source: str, written) -> bool:
+    """True when SOURCE loads code (`_LOADS_CODE`) or names the stem of a file in WRITTEN, the file names a
+    heredoc wrote: it may run a body no word of it shows."""
+    stems = {name.rsplit("/", 1)[-1].rsplit(".", 1)[0] for name in written}
+    return bool(_LOADS_CODE(source)) or any(stem and stem in source for stem in stems)
+
+
 def _script_body_runs_nothing(text: str, header: str, sources) -> bool:
     """True when every interpreter in TEXT that runs HEADER's file as its script reads a source the guard can
-    see and that runs nothing (`script_source_is_text`). Such a source may reach a written file through a name
-    no word shows (`glob`, `listdir`, `readdirSync`, `exec(open(f).read())`), so one that can run anything keeps
-    every body."""
+    see, that runs nothing (`script_source_is_text`) and that loads no code (`_source_loads_code`). Such a
+    source may reach a written file through a name no word shows (`glob`, `listdir`, `readdirSync`,
+    `exec(open(f).read())`, an import), so one that can run or load anything keeps every body."""
     names = set(_plain_words(_WRITE_TARGET.findall(header)))
     return all(sources.get(name) is not None and script_source_is_text(word, sources[name])
+               and not _source_loads_code(sources[name], set(sources) - {name})
                for word, name in _script_runs(text) if name in names)
 
 
@@ -1064,18 +1079,22 @@ def _kept_headers(text: str, bodies) -> set:
     body stays, as the top-level run does (`_written_file_use`). The test runs on the closed set, so a chained
     script's body is read too. A kept body an interpreter runs as its script file is not shell text: it must
     run nothing (`_script_body_runs_nothing`), else every body stays."""
-    first = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
-    kept = _kept_closure(first, bodies)
-    sources = heredoc_sources(bodies)
-    for _, body, header in bodies:
-        if header not in kept:
-            continue
-        if _written_file_use(text, [header], bodies) == "script":
-            seen = _script_body_runs_nothing(text, header, sources)
-        else:
-            seen = _body_runs_nothing_unseen(body, sources)
-        if not seen:
-            return {header for _, _, header in bodies}
+    every = {header for _, _, header in bodies}
+    try:
+        first = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
+        kept = _kept_closure(first, bodies)
+        sources = heredoc_sources(bodies)
+        for _, body, header in bodies:
+            if header not in kept:
+                continue
+            if _written_file_use(text, [header], bodies) == "script":
+                seen = _script_body_runs_nothing(text, header, sources)
+            else:
+                seen = _body_runs_nothing_unseen(body, sources)
+            if not seen:
+                return every
+    except Exception:   # a body the reader cannot judge fails closed: every body stays in view, as main does
+        return every
     return kept
 
 
