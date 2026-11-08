@@ -528,8 +528,10 @@ MUTATIONS = [
      '        if False:\n            return "& disown"', "guard",
      "detached: disown right after a job whose pid is captured"),
     ("detached-launch: a bare trailing background job no longer denies",
-     '            if tokens[i] == "&":\n                return tokens[i - 1] + " &"',
-     '            if False:\n                return tokens[i - 1] + " &"', "guard",
+     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
+     '        if matched:\n            return matched',
+     '        matched = backgrounding_amp(segment, tokens, _skip_assignments_and_keywords(tokens))\n'
+     '        if False:\n            return matched', "guard",
      "detached: a bare trailing background job with no pid captured, "
      "MEASURED zero harmless matches in 16571 local Bash commands"),
     ("detached-launch: a background job before another line no longer denies (last segment only)",
@@ -1893,20 +1895,24 @@ MUTATIONS = [
      '            if (word not in FILE_WRITER_STAGES) if any_filter else',
      "guard", 'merge --lane-lint through tee.exe with nothing after it'),
     ('check-tail: a separator no longer ends the pipeline',
-     '        if end != "|":\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
-     '        if False:\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
+     '        if end != "|":\n            list_amp = end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1)',
+     '        if False:\n            list_amp = end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1)',
      "guard", 'a semicolon ends the pipeline, so a tail after it reads no live stream'),
     ('check-tail: a pipeline closed by a separator is never read',
-     'any_filter)\n            if hit:\n                return hit\n            stages = []',
-     'any_filter)\n            if False:\n                return hit\n            stages = []',
+     'any_filter, list_amp)\n            if hit:\n                return hit\n            stages = []',
+     'any_filter, list_amp)\n            if False:\n                return hit\n            stages = []',
      "guard", 'merge --lane-lint piped to tail, then a background &, is refused'),
+    ('check-tail: a && list is never ended by a job, so its trailing & reads as no job',
+     '    for segment, end in zip(segments[after:], ends[after:]):',
+     '    for segment, end in ():',
+     "guard", 'ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused'),
     ('check-tail: ci-job is refused in the foreground too',
      '        return basename(tokens[index]) if background else ""',
      '        return basename(tokens[index])',
      "guard", 'ci-job piped to tail in the foreground is allowed'),
     ('check-tail: a trailing & no longer makes a ci-job a backgrounded run',
-     '        if tokens and backgrounding_amp(segment, tokens):\n            return True',
-     '        if False:\n            return True',
+     '    for segment in stages[first:]:\n        tokens = segment_tokens(segment)\n        if tokens and backgrounding_amp(segment, tokens):',
+     '    for segment in stages[first:]:\n        tokens = segment_tokens(segment)\n        if False:',
      "guard", 'ci-job checks --lint piped to grep, then a trailing background &'),
     ('background-amp: a & glued to the last word is no background job, for check-tail and detached-launch',
      '        if kind == "redirect":\n            continue\n        words = segment_tokens(',
@@ -3193,6 +3199,14 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # MUTATE_ONLY=<label> runs just that mutation, after every anchor above has passed. run_suite sets
+    # MUTATE_ONLY for each suite itself, so this variable is read only here.
+    only = os.environ.get("MUTATE_ONLY", "")
+    chosen = [entry for entry in MUTATIONS if not only or mutation_parts(entry)[0] == only]
+    if only and not chosen:
+        print("ERROR MUTATE_ONLY names no mutation: %s" % only)
+        return 1
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -3212,7 +3226,7 @@ def main() -> int:
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            chosen, lambda entry: run_mutant(sources, work, entry))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

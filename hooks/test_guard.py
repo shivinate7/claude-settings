@@ -5787,6 +5787,33 @@ sh("check-tail: ci-job checks | tail -3 # a& b, a glued & after a comment's #, i
 sh("check-tail: ci-job checks | grep \"x& y\" over a newline \"z\", a glued & inside a multi-line quote, is allowed",
    'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
 
+# A `&` glued to a word that starts no job. PowerShell's call operator takes an `&` before a command
+# (`& $tool x`, `&$tool $_`). In Bash, a `&` inside `$(( ))` or `(( ))` is bitwise and, and a `&` in a
+# `${s//&/and}` pattern is a character. detached-launch reads each glued `&` as a backgrounded job and refuses
+# it, so each of these is allowed. The deny controls after them keep the three real background jobs refused.
+sh("detached-launch: (& $tool x).Count, a call operator in a grouped expression, is allowed",
+   "(& $tool x).Count", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $a = @(& $tool x), a call operator inside @(), is allowed",
+   "$a = @(& $tool x)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: 1..3 | ForEach-Object {&$tool $_}, a glued call operator in a scriptblock, is allowed",
+   "1..3 | ForEach-Object {&$tool $_}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $r = (& ci-job checks), a call operator on a roster command, is allowed",
+   "$r = (& ci-job checks)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: $x = (& git rev-parse HEAD), a call operator on git, is allowed",
+   "$x = (& git rev-parse HEAD)", "allow", tool="PowerShell", cwd=NOGIT)
+sh("detached-launch: echo $((5&3)), a bitwise & in arithmetic expansion, is allowed",
+   "echo $((5&3))", "allow", cwd=NOGIT)
+sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmetic test, is allowed",
+   "if (( n&1 )); then echo odd; fi", "allow", cwd=NOGIT)
+sh("detached-launch: echo ${s//&/and}, a & in a parameter pattern, is allowed",
+   "echo ${s//&/and}", "allow", cwd=NOGIT)
+sh("detached-launch: ci-job x | tail -3&, the & glued to the word, is refused",
+   "ci-job x | tail -3&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: (ci-job x | tail)&, a subshell backgrounded by a glued &, is refused",
+   "(ci-job x | tail)&", "deny", "detached-launch", cwd=NOGIT)
+sh("detached-launch: cmd 2>&1&, a redirect's & then a glued background &, is refused",
+   "cmd 2>&1&", "deny", "detached-launch", cwd=NOGIT)
+
 # A quoted lone `&` ends no job (decision detached-launch-refused), so each of these is allowed. The quotes keep
 # the `&` from reading as a spaced background `&`, and a `&` that is a word of a grep or a cut is no job.
 sh("check-tail: grep '&' file, a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
