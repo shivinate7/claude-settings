@@ -1916,17 +1916,18 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
                 self.assert_blocked_for(out, NO_TRY, line)
 
-    def test_cc_red_a_url_form_merge_success_cancels_a_failed_merge_by_number(self):
-        # Catches: a merge success whose target is the PR's URL read as another target, so the failed `gh pr merge 12` still
-        # counted as unrecovered and the past-tense line about it blocked. A later success of the same PR cancels the failure.
+    def test_cc_red_a_url_merge_success_cancels_a_failed_merge_by_number_of_its_repo(self):
+        # Catches: a merge success whose target is the PR's URL keyed by its number alone, so the failed `gh pr merge 12
+        # --repo o/r` was not cancelled by a later success of that PR by URL, and the past-tense line about it blocked. A
+        # URL keys by its repo and number, so it cancels a failure whose --repo is the URL's repo.
         line = "I could not merge PR 12 at first."
-        by_number = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
-                     *ok_bash("gh pr merge 12", "tu_m2"), landed_reply(line)]
-        by_url = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m1"),
+        by_number = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/r", "tu_m1"),
+                     *ok_bash("gh pr merge 12 --repo o/r", "tu_m2"), landed_reply(line)]
+        by_url = [trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/r", "tu_m1"),
                   *ok_bash("gh pr merge https://github.com/o/r/pull/12", "tu_m2"), landed_reply(line)]
         # Scope first (P7): the number form is the control, so the URL form is the only change between the two runs.
-        self.assert_passes(self.stop(by_number), "the control: a later success of PR 12 by number cancels its failure")
-        self.assert_passes(self.stop(by_url), "a later success of PR 12 by its URL does not cancel its failure")
+        self.assert_passes(self.stop(by_number), "the control: a later success of PR 12 by number and --repo o/r cancels it")
+        self.assert_passes(self.stop(by_url), "a later success of PR 12 by its URL cancels a failure whose --repo is o/r")
 
 
 if __name__ == "__main__":
