@@ -67,7 +67,10 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 def _load_hooks_module(name):
     """The hooks/<name>.py module, loaded by path under a private name: a stale module of the same name in sys.modules (a copy-mode install) cannot shadow it."""
-    spec = importlib.util.spec_from_file_location("merge_" + name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", name + ".py"))
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", name + ".py")
+    if not os.path.isfile(path):
+        raise ImportError(f"merge: cannot load hooks/{name}.py: no such file at {os.path.normpath(path)}")  # an importer handles ImportError, not FileNotFoundError
+    spec = importlib.util.spec_from_file_location("merge_" + name, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
