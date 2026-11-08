@@ -9020,6 +9020,19 @@ sh("draft-pr: a python file and a perl file written in one call, the perl file's
 sh("draft-pr: a body written to f.py and run by perl, whose backtick span holds gh pr create, is refused",
    "\n".join(["cat > f.py <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.py"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A heredoc's header judges only its own body. A python word elsewhere on the header line, or beside a second
+# heredoc, does not make a perl body read as python: the perl span is a shell command, so its gh call is refused.
+sh("draft-pr: a perl body with a backtick gh pr create span, under a python3 -V header, run from a written file, is refused",
+   "\n".join(["python3 -V && cat > f.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body and a python body share one header line, the perl body's backtick span holds gh pr create, "
+   "run from a written file, is refused",
+   "\n".join(["cat > g.pl <<'B' && python3 - <<'A'", TICK_BODY["perl"], "B", PY_PLAIN_BODY, "A", "perl g.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Pins the fed form under the same python header: perl reads the body, so the span stays in view and is refused.
+sh("draft-pr: a perl body fed to perl under a python3 -V header, whose backtick span holds gh pr create, is refused",
+   "\n".join(["python3 -V && perl - <<'EOF'", TICK_BODY["perl"], "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A `$( )` or `<( )` nested in a backtick span is a shell substitution, and perl, ruby and node run the span
 # as a shell, so the gh call inside it runs. Each body carries the gh call only in that nested form.
 sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, fed to perl, is refused",
