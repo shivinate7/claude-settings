@@ -81,13 +81,16 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             path) whose sentence names a symbol the cited lines do not hold. Range mode reads the lines the range ADDS to
             governed Markdown (the same set and path rules as STALE010; `anchor_name_cites`, a sibling of
             `dead_name_cites` that shares its head reads); --tree reads every line, and an anchor that is STALE004 gets
-            STALE004 only. A line is split into sentences with SENTENCE_END, a name pairs only with an anchor of its own
-            sentence, the nearest by characters, and a cite of a path the range removed or renamed is STALE001's. A name
-            is a backticked identifier (`name`, `name()`; a dotted `A.b` counts each part) or a bare word holding an
-            underscore, and counts only when the cited .py at head binds it anywhere (`AnchorFacts`, read with `ast`: a
-            def or class at any depth, or a Name store). A cite passes when a def or class span of a paired name overlaps
-            N-ANCHOR_SLACK..M+ANCHOR_SLACK, or a line there holds the name as a whole word; it fails when it has paired
-            names and none passes. The message names the cite and the line(s) where the name is defined. An anchor past
+            STALE004 only. A line is split into sentences with SENTENCE_END (code spans and comments blanked; an HTML
+            comment mark inside a code span hides nothing), and a cite of a path the range removed or renamed is
+            STALE001's. A name is a backticked identifier (`name`, `name()`, a call `name(args)` with balanced
+            parentheses; a dotted `A.b` counts each part) or a bare word holding an underscore, and counts only when the
+            cited .py at head binds it anywhere (`AnchorFacts`, read with `ast`: a def or class at any depth, or a Name
+            store). In one sentence a name is PLACED when it holds at some anchored .py cite of that sentence (a def or
+            class span of it overlaps N-ANCHOR_SLACK..M+ANCHOR_SLACK, or a line there holds it as a whole word), each cite
+            judged against its own file. A cite fails when (a) some name of its sentence is bound by its file, (b) no
+            such name holds at this cite, and (c) at least one such name is placed at no cite of the sentence. The
+            message names the cite and the line(s) where the name is defined. An anchor past
             the file's end in range mode is judged the same way. A cited .py absent at head is no finding; one that does
             not parse at head is one unknown line. Fenced lines count as prose.
             A line marked `<!-- ste-disable-line STALE011 -->` is left out.
@@ -1388,7 +1391,7 @@ def dead_name_cites(rng):
 
 
 ANCHOR_SLACK = 3  # STALE011: lines either side of a cited range that still count as the range
-NAME_SPAN = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\(\))?\Z")  # a backticked `name`, `name()` or `A.b`
+NAME_SPAN = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(\(.*\))?\Z", re.S)  # a backticked `name`, `A.b`, or a call `name(args)`
 BARE_NAME = re.compile(r"(?<![\w./@+~:-])(?=\w*_)[A-Za-z_]\w*(?![\w/@+~-]|\.\w)")  # a bare word holding an underscore
 
 
@@ -1444,43 +1447,67 @@ def line_anchors(line, resolve):
     return found
 
 
+def call_name(body):
+    """The dotted name a backticked body offers, or None. `name`, `A.b`, `name()` and a call `name(args)` (parentheses
+    balanced, the first one closing at the end of the body) give their name; a source file name gives none."""
+    match = NAME_SPAN.match(body)
+    if match is None or SOURCE_SPAN.match(match.group(1)):
+        return None
+    args = match.group(2) or ""
+    depth = 0
+    for position, char in enumerate(args):
+        depth += (char == "(") - (char == ")")
+        if depth < 0 or (depth == 0 and position < len(args) - 1):
+            return None
+    return match.group(1) if depth == 0 else None
+
+
 def anchor_names(sentence, offset):
     """[(start, end, name)] of each name a sentence offers, offsets in the line: a backticked identifier (`name`,
-    `name()`, a dotted `A.b` gives each part) and a bare word holding an underscore outside a code span."""
+    `name(args)`, a dotted `A.b` gives each part) and a bare word holding an underscore outside a code span."""
     found = []
     for span in CODE_SPAN.finditer(sentence):
         ticks = len(span.group(1))
-        body = sentence[span.start() + ticks:span.end() - ticks].strip()
-        if NAME_SPAN.match(body) and not SOURCE_SPAN.match(body):
-            found += [(offset + span.start(), offset + span.end(), part) for part in body.replace("()", "").split(".")]
+        name = call_name(sentence[span.start() + ticks:span.end() - ticks].strip())
+        if name is not None:
+            found += [(offset + span.start(), offset + span.end(), part) for part in name.split(".")]
     masked = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), sentence)
     found += [(offset + m.start(), offset + m.end(), m.group(0)) for m in BARE_NAME.finditer(masked)]
     return found
 
 
+def blank_comments(line):
+    """`line` with each HTML comment outside a code span blanked. A `<!--` or `-->` inside a code span hides nothing."""
+    masked = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line)
+    chars = list(line)
+    for comment in HTML_COMMENT.finditer(masked):
+        chars[comment.start():comment.end()] = " " * len(comment.group(0))
+    return "".join(chars)
+
+
 def anchor_drift(line, anchors, facts_of):
-    """STALE011 messages for one line: each anchor with a name paired to it, none of whose paired names the cited lines
-    hold. The line is split into sentences with SENTENCE_END (code spans and comments blanked, so none ends one inside).
-    A name pairs only with an anchor of its own sentence, the nearest by characters from the name's start to the anchor's end (a cite is read as ending where its anchor does). `facts_of(path)` is the
-    `AnchorFacts` of a cited file, or None for one this run does not judge; it is asked only for an anchor with a name."""
-    blank = HTML_COMMENT.sub(lambda m: " " * len(m.group(0)), line)
+    """STALE011 messages for one line, one per failing cite. The line is split into sentences with SENTENCE_END (code
+    spans and comments blanked, so none ends one inside). In a sentence, a name is PLACED when it holds at some anchored
+    cite of that sentence (`AnchorFacts.holds` of N-ANCHOR_SLACK..M+ANCHOR_SLACK), each cite judged against its own file.
+    A cite fails when (a) some name of its sentence is bound by its file, (b) none of those names holds at this cite, and
+    (c) at least one of them is placed at no cite of the sentence. `facts_of(path)` is the `AnchorFacts` of a cited file,
+    or None for one this run does not judge (it places nothing); it is asked only in a sentence that has a name."""
+    blank = blank_comments(line)
     shape = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), blank)
     messages, start = [], 0
     for end in [m.end() for m in SENTENCE_END.finditer(shape)] + [len(line)]:
         here = [a for a in anchors if start <= a[0] < end]
-        names = anchor_names(blank[start:end], start) if here else []
-        paired = {}
-        for n_start, n_end, name in names:
-            nearest = min(here, key=lambda a: abs(n_start - a[1]))  # the name's start to the anchor's end
-            paired.setdefault(nearest, [])
-            if name not in paired[nearest]:
-                paired[nearest].append(name)
-        for anchor, wanted in paired.items():
-            a_start, a_end, path, first, last = anchor
-            facts = facts_of(path)
-            bound = [name for name in wanted if facts is not None and name in facts.spans]
-            low, high = first - ANCHOR_SLACK, last + ANCHOR_SLACK
-            if not bound or any(facts.holds(name, low, high) for name in bound):
+        wanted = list(dict.fromkeys(name for _, _, name in anchor_names(blank[start:end], start))) if here else []
+        cites = []  # (anchor, facts, low, high, the names that hold at the cite)
+        for anchor in here if wanted else []:
+            facts = facts_of(anchor[2])
+            if facts is not None:
+                low, high = anchor[3] - ANCHOR_SLACK, anchor[4] + ANCHOR_SLACK
+                cites.append((anchor, facts, low, high, [name for name in wanted if facts.holds(name, low, high)]))
+        placed = {name for *_, holding in cites for name in holding}
+        for (a_start, a_end, _, _, _), facts, low, high, holding in cites:
+            bound = [name for name in wanted if name in facts.spans]
+            if not bound or any(name in holding for name in bound) or all(name in placed for name in bound):
                 continue
             where = ["%s (line%s %s)" % (name, "s" if len({a for a, _ in facts.spans[name]}) > 1 else "",
                                          ", ".join(str(n) for n in sorted({a for a, _ in facts.spans[name]})[:5]))
