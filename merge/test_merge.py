@@ -145,10 +145,10 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
-        self.changed, self.files_error = [("README.md", "modified")], None  # changed: the (path, status) pairs pr_files reports; files_error: raised by pr_files instead
+        self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
 
-    def pr_files(self, n, changed=None):  # the (path, status) pairs of the pull request, as Host.pr_files reports them
+    def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
             raise merge.Stop(self.files_error)
         return list(self.changed)
@@ -11013,9 +11013,10 @@ def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:
     """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
     return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
 
-def pr_file(name, previous=None, status="modified"):
-    """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then."""
-    d = {"filename": name, "status": status}
+def pr_file(name, previous=None, status="modified", additions=0):
+    """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then.
+    `additions` is the lines the file adds; a file with only removed lines has 0."""
+    d = {"filename": name, "status": status, "additions": additions}
     if previous is not None:
         d["previous_filename"] = previous
     return d
@@ -12940,24 +12941,29 @@ class ReviewGuardTestPaths(unittest.TestCase):
                          "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
 
 class ReviewGuardKinds(unittest.TestCase):
-    """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status) pairs of the diff. docs-only: each path not
-    ending in .md. delete-only: each path whose status is not removed. normal: none."""
+    """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
+    each path not ending in .md. delete-only: each path that adds lines (additions above 0), or is new (status added, renamed or copied). normal: none."""
 
     def test_normal_owes_no_kind_check(self):
-        self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified"), ("x.py", "removed")]), [])
+        self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified", 4), ("x.py", "removed", 0)]), [])
 
     def test_docs_only_names_each_path_not_ending_in_md_sorted(self):
-        files = [("lint/x.py", "modified"), ("docs/a.md", "modified"), ("hooks/y.txt", "modified"), ("docs/b.md", "removed")]
+        files = [("lint/x.py", "modified", 2), ("docs/a.md", "modified", 1), ("hooks/y.txt", "modified", 0), ("docs/b.md", "removed", 0)]
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
 
-    def test_delete_only_names_each_path_not_removed_sorted(self):
-        files = [("hooks/a.py", "removed"), ("README.md", "modified"), ("docs/moved.md", "renamed"), ("docs/old.md", "removed")]
-        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", files), ["README.md", "docs/moved.md"])
+    def test_delete_only_names_each_path_that_adds_or_is_new_sorted(self):
+        files = [("hooks/a.py", "removed", 0), ("README.md", "modified", 3), ("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0),
+                 ("new.py", "added", 0), ("c.py", "copied", 0), ("m.py", "modified", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", files), ["README.md", "c.py", "docs/moved.md", "new.py"])
+
+    def test_a_modified_path_with_no_additions_is_a_delete_only_change(self):
+        # a file with only removed lines has status modified and adds nothing: a delete, not a misfit
+        self.assertEqual(review_fn(self, "kind_misfits")("delete-only", [("a.py", "modified", 0), ("b.py", "removed", 0)]), [])
 
     def test_a_clean_diff_and_an_empty_one_name_nothing(self):
         kind_misfits = review_fn(self, "kind_misfits")
-        self.assertEqual(kind_misfits("docs-only", [("docs/a.md", "modified"), ("docs/b.md", "added")]), [])
-        self.assertEqual(kind_misfits("delete-only", [("docs/a.md", "removed"), ("docs/b.md", "removed")]), [])
+        self.assertEqual(kind_misfits("docs-only", [("docs/a.md", "modified", 1), ("docs/b.md", "added", 3)]), [])
+        self.assertEqual(kind_misfits("delete-only", [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]), [])
         self.assertEqual(kind_misfits("docs-only", []), [])
         self.assertEqual(kind_misfits("delete-only", []), [])
 
@@ -12978,39 +12984,40 @@ class ReviewGuardEnv(ReviewEnv):
 
 class ReviewGuardRefusal(ReviewGuardEnv):
     """`--review-record --guard no` refuses a pull request with a changed path under merge.GUARD_PATHS, and a kind refuses a diff that breaks it
-    (merge.kind_misfits). A clean diff prints the record as before, and --guard yes prints it with a guard hit. The fake host reports (path, status)."""
+    (merge.kind_misfits). A clean diff prints the record as before, and --guard yes prints it with a guard hit. The fake host reports
+    (path, status, additions) triples, with additions 0 unless a case gives more."""
 
     def test_guard_no_refuses_a_hit_under_each_entry(self):
         for entry, path in GUARD_EXAMPLES.items():
             with self.subTest(entry=entry):
-                self.host.changed = [(path, "modified")]
+                self.host.changed = [(path, "modified", 0)]
                 self.assert_refused(*self.run_args(*self.review_argv()), path)
 
     def test_a_hooks_markdown_file_refuses(self):
-        self.host.changed = [("hooks/README.md", "modified")]
+        self.host.changed = [("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
 
     def test_docs_only_on_a_guard_path_refuses(self):
         # the guard path is markdown, so the docs-only kind holds and only the guard refuses
-        self.host.changed = [("docs/notes.md", "modified"), ("hooks/README.md", "modified")]
+        self.host.changed = [("docs/notes.md", "modified", 0), ("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "hooks/README.md")
 
     def test_delete_only_on_a_guard_path_refuses(self):
-        self.host.changed = [("bin/merge", "removed")]
+        self.host.changed = [("bin/merge", "removed", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "bin/merge")
 
     def test_every_hit_path_is_named(self):
-        self.host.changed = [("hooks/a.py", "modified"), ("README.md", "modified"), ("lint/b.py", "modified")]
+        self.host.changed = [("hooks/a.py", "modified", 0), ("README.md", "modified", 0), ("lint/b.py", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/a.py", "lint/b.py")
 
     def test_guard_no_on_a_test_only_diff_under_hooks_prints_the_record(self):
-        self.host.changed = [("hooks/test_guard.py", "modified")]
+        self.host.changed = [("hooks/test_guard.py", "modified", 0)]
         rc, out, err = self.run_args(*self.review_argv())
         self.assertEqual(rc, 0, "a test-only diff was refused as a guard change:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
 
     def test_a_mixed_diff_refuses_on_the_check_and_does_not_name_the_test_file(self):
-        self.host.changed = [("hooks/test_guard.py", "modified"), ("hooks/guard.py", "modified")]
+        self.host.changed = [("hooks/test_guard.py", "modified", 0), ("hooks/guard.py", "modified", 0)]
         rc, out, err = self.run_args(*self.review_argv())
         self.assert_refused(rc, out, err, "hooks/guard.py")
         self.assertNotIn("hooks/test_guard.py", err, "the refusal names the test file hooks/test_guard.py, which is no guard change")
@@ -13021,13 +13028,13 @@ class ReviewGuardRefusal(ReviewGuardEnv):
         self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
 
     def test_docs_only_with_no_hit_prints_the_record(self):
-        self.host.changed = [("docs/notes.md", "modified")]
+        self.host.changed = [("docs/notes.md", "modified", 0)]
         rc, out, err = self.run_args(*self.review_argv("docs-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
 
     def test_guard_yes_with_a_hit_still_prints_the_record(self):
-        self.host.changed = [("hooks/guard.py", "modified")]
+        self.host.changed = [("hooks/guard.py", "modified", 0)]
         rc, out, err = self.run_args(*self.review_argv(guard="yes"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
@@ -13047,34 +13054,35 @@ class ReviewGuardRefusal(ReviewGuardEnv):
                 self.assertIn("pulls/7/files", err)
 
     def test_docs_only_with_a_py_path_refuses_on_kind(self):
-        self.host.changed = [("docs/tool.py", "modified")]
+        self.host.changed = [("docs/tool.py", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/tool.py", holds="Kind")
 
     def test_docs_only_refusal_names_each_non_md_path(self):
-        self.host.changed = [("docs/a.md", "modified"), ("docs/b.py", "modified"), ("docs/c.txt", "modified")]
+        self.host.changed = [("docs/a.md", "modified", 0), ("docs/b.py", "modified", 0), ("docs/c.txt", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/b.py", "docs/c.txt", holds="Kind")
 
-    def test_delete_only_with_a_modified_path_refuses_on_kind(self):
-        self.host.changed = [("README.md", "modified")]
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        # the path is modified with 3 added lines: it adds something, so it is no delete-only change
+        self.host.changed = [("README.md", "modified", 3)]
         self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "README.md", holds="Kind")
 
     def test_delete_only_with_a_renamed_path_refuses_on_kind(self):
         # a rename gives its new path as renamed and its old path as removed; only the new path breaks delete-only
-        self.host.changed = [("docs/moved.md", "renamed"), ("docs/old.md", "removed")]
+        self.host.changed = [("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("delete-only")), "docs/moved.md", holds="Kind")
 
     def test_a_kind_misfit_refuses_whatever_the_guard(self):
-        self.host.changed = [("README.md", "modified")]
+        self.host.changed = [("README.md", "modified", 3)]
         self.assert_refused(*self.run_args(*self.review_argv("delete-only", guard="yes")), "README.md", holds="Kind")
 
     def test_a_clean_docs_only_diff_prints_the_record(self):
-        self.host.changed = [("docs/a.md", "modified"), ("docs/b.md", "added")]
+        self.host.changed = [("docs/a.md", "modified", 1), ("docs/b.md", "added", 4)]
         rc, out, err = self.run_args(*self.review_argv("docs-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
 
     def test_a_clean_delete_only_diff_prints_the_record(self):
-        self.host.changed = [("docs/a.md", "removed"), ("docs/b.md", "removed")]
+        self.host.changed = [("docs/a.md", "removed", 0), ("docs/b.md", "removed", 0)]
         rc, out, err = self.run_args(*self.review_argv("delete-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
@@ -13103,8 +13111,26 @@ class ReviewGuardFiles(ReviewGuardEnv):
         self.assert_refused(*self.run_record([pr_file("hooks/old.py", status="removed")], kind="delete-only"), "hooks/old.py")
 
     def test_a_delete_only_rename_refuses_on_kind_by_its_new_name(self):
-        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="docs/old.md", status="renamed")], kind="delete-only"),
+        # a rename with no added lines still moves a path to a new name: the new name breaks delete-only, the old one does not
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="docs/old.md", status="renamed", additions=0)], kind="delete-only"),
                             "docs/moved.md", holds="Kind")
+
+    def test_delete_only_with_a_modified_path_and_no_additions_prints_the_record(self):
+        # a file with only removed lines: status modified, 0 additions. It is a delete-only change, so the record prints
+        rc, out, err = self.run_record([pr_file("a.py", status="modified", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, "a modified path with no additions was refused on kind delete-only:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_delete_only_with_a_modified_path_that_adds_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("a.py", status="modified", additions=3)], kind="delete-only"), "a.py", holds="Kind")
+
+    def test_delete_only_with_an_added_path_refuses_on_kind(self):
+        self.assert_refused(*self.run_record([pr_file("new.py", status="added", additions=0)], kind="delete-only"), "new.py", holds="Kind")
+
+    def test_a_removed_path_with_no_additions_prints_as_delete_only(self):
+        rc, out, err = self.run_record([pr_file("old.py", status="removed", additions=0)], kind="delete-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
 
     def test_a_docs_only_rename_of_md_files_prints_the_record(self):
         rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")], kind="docs-only")
@@ -13141,30 +13167,38 @@ class ReviewGuardFiles(ReviewGuardEnv):
 
 class ReviewGuardHostFiles(unittest.TestCase):
     """merge.Host.pr_files(n, changed) and Host.pr(n) over the real Host and a scripted gh. pr_files reads pulls/<n>/files page by page, one call per page of 100, as
-    (path, status) pairs: each filename with its status, and for a rename also its previous_filename as removed. The list must hold `changed`
-    file entries, the pull request's changed_files count, or it is a Stop. GitHub caps the list at 3000 entries. A failed read is a Stop."""
+    (path, status, additions) triples: each filename with its status and the lines it adds, and for a rename also its previous_filename as
+    removed with 0 additions. The list must hold `changed` file entries, the pull request's changed_files count, or it is a Stop. GitHub caps
+    the list at 3000 entries. A failed read is a Stop."""
 
     def host(self, files=None, files_error=None, changed_files=None):
         return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed_files)
 
-    def test_lists_each_filename_with_its_status(self):
-        fn = pr_files_of(self, self.host([pr_file("hooks/a.py"), pr_file("README.md")]))
-        self.assertEqual(sorted(fn(7, 2)), [("README.md", "modified"), ("hooks/a.py", "modified")])
+    def test_lists_each_filename_with_its_status_and_additions(self):
+        fn = pr_files_of(self, self.host([pr_file("hooks/a.py", additions=3), pr_file("README.md", additions=0)]))
+        self.assertEqual(sorted(fn(7, 2)), [("README.md", "modified", 0), ("hooks/a.py", "modified", 3)])
+
+    def test_an_entry_with_no_additions_key_counts_zero(self):
+        # the API entry may leave additions out: the path then counts as adding nothing
+        fn = pr_files_of(self, self.host([{"filename": "a.py", "status": "modified"}]))
+        self.assertEqual(fn(7, 1), [("a.py", "modified", 0)], "a file entry with no additions key must count 0 additions")
 
     def test_a_rename_lists_its_new_path_and_its_old_path_as_removed(self):
-        # one rename is one changed file: the count is 1, and the two tuples are not two entries
-        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")]))
-        self.assertEqual(sorted(fn(7, 1)), [("docs/moved.md", "renamed"), ("hooks/moved.md", "removed")])
+        # one rename is one changed file: the count is 1, and the two tuples are not two entries. The old path adds nothing.
+        fn = pr_files_of(self, self.host([pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)]))
+        self.assertEqual(sorted(fn(7, 1)), [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
 
     def test_no_files_is_an_empty_list(self):
         self.assertEqual(pr_files_of(self, self.host([]))(7, 0), [])
 
     def test_every_page_is_read(self):
-        # 250 files: GitHub pages them 100 to a page, so the list takes three reads, one per page. The rename is on the last page, so its
-        # previous_filename is listed from the third read.
+        # 250 files: GitHub pages them 100 to a page, so the list takes three reads, one per page. A file on the middle page adds 5 lines, and
+        # the rename on the last page adds 2, so additions are read from every page. The rename's old path adds nothing.
         names = [f"docs/p{i}.md" for i in range(249)]
-        host = self.host([pr_file(n) for n in names] + [pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed")])
-        want = sorted([(n, "modified") for n in names] + [("docs/moved.md", "renamed"), ("hooks/moved.md", "removed")])
+        added = {"docs/p150.md": 5}
+        host = self.host([pr_file(n, additions=added.get(n, 0)) for n in names]
+                         + [pr_file("docs/moved.md", previous="hooks/moved.md", status="renamed", additions=2)])
+        want = sorted([(n, "modified", added.get(n, 0)) for n in names] + [("docs/moved.md", "renamed", 2), ("hooks/moved.md", "removed", 0)])
         self.assertEqual(sorted(pr_files_of(self, host)(7, 250)), want, "every filename and every previous_filename, from every page")
         self.assertEqual(host.gh_calls, ["pulls/7/files"] * 3, "one read per page of 100: 250 files are three pages")
 
