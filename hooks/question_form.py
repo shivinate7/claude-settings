@@ -187,6 +187,9 @@ DEPARTS_REASON = ("A question to the owner says how the work departs from main, 
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+# The hint that departs_hit adds to the placeholder miss. A Stop refusal (lint/report_guard.py) shows the miss
+# without it, since the owner reads that refusal (decision guard-remedy-not-to-owner).
+PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
@@ -214,7 +217,7 @@ def departs_hit(text) -> str:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
-            return "Departs from line with a side that is only a placeholder: write the real text"
+            return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
