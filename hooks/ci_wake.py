@@ -349,8 +349,9 @@ class Budget:
 
 
 def git_out(args, cwd, timeout, what):
-    """-> (returncode, stdout) of one local git read in the folder, the one home of the Stop-side git reads. A
-    raised Unknown when the read itself failed (the tool is missing, timed out or could not start); `what` names the
+    """-> (returncode, stdout) of one local git read in the folder, the one home of the Stop-side git reads. Not
+    git_reads._git: that one has a fixed 10 s timeout and returns None on failure, and these reads need the Budget's
+    timeout and a raised Unknown. A raised Unknown when the read itself failed (the tool is missing, timed out or could not start); `what` names the
     read in that message."""
     try:
         import _nowindow
@@ -422,26 +423,54 @@ def _unquote(word):
     return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"" else word
 
 
+def _strip_comment(raw):
+    """A workflow line without its comment: a `#` at a line start or after a space ends the line, unless a quoted
+    string holds it. A quote opens only where a value starts (after a space, `[`, `{`, `,` or the line start), so a lone
+    apostrophe inside a word is text."""
+    quote = None
+    for i, ch in enumerate(raw):
+        before = raw[i - 1] if i else " "
+        if quote:
+            if ch == quote and not (quote == '"' and before == "\\"):
+                quote = None
+        elif ch in "'\"" and before in " \t[{,":
+            quote = ch
+        elif ch == "#" and before in " \t":
+            return raw[:i].rstrip()
+    return raw.rstrip()
+
+
 def _workflow_lines(text):
-    """-> [(indent, content)] of a workflow's non-blank lines, comments dropped (a `#` at a line start or after a space)."""
+    """-> [(indent, content)] of a workflow's non-blank lines, comments dropped (see `_strip_comment`)."""
     lines = []
     for raw in text.splitlines():
-        content = re.sub(r"(^|\s)#.*$", "", raw).rstrip()
+        content = _strip_comment(raw)
         if content.strip():
             lines.append((len(content) - len(content.lstrip()), content.strip()))
     return lines
 
 
+class _Unparsed(Exception):
+    """A filter form this reader does not parse: the run stays due."""
+
+
 def _filter_list(block, key):
     """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
-    flow list (`[a, b]`), a lone scalar and a block list (`- a`)."""
+    flow list (`[a, b]`, on one line or spread over lines), a lone scalar and a block list (`- a`). Raises _Unparsed
+    for a flow list that never closes."""
     for n, (indent, content) in enumerate(block):
         head, colon, rest = content.partition(":")
         if head.strip() != key or not colon:
             continue
         rest = rest.strip()
         if rest.startswith("["):
-            return [_unquote(w) for w in rest.strip("[]").split(",") if w.strip()]
+            text, later = rest, iter(block[n + 1:])
+            while not text.endswith("]"):
+                nxt = next(later, None)
+                if nxt is None:
+                    raise _Unparsed(key)
+                text += " " + nxt[1]
+            return [_unquote(w) for w in text[1:-1].split(",") if w.strip()]
         if rest:
             return [_unquote(rest)]
         items = []
@@ -489,7 +518,10 @@ def workflow_runs_for(text, files):
         return True
     if "push" not in events:
         return False
-    paths, ignore = _filter_list(push_block, "paths"), _filter_list(push_block, "paths-ignore")
+    try:
+        paths, ignore = _filter_list(push_block, "paths"), _filter_list(push_block, "paths-ignore")
+    except _Unparsed:
+        return True
     if (paths is None) == (ignore is None):
         return True
     if paths is not None:
@@ -505,11 +537,11 @@ def push_may_start_run(full, old, cwd, budget):
     if not old:
         return True
     try:
-        code, out = git_out(["diff", "--name-only", "-z", old, full], cwd, budget.next_timeout(), "the push's files")
+        code, out = git_out(["diff", "--name-only", "--no-renames", "-z", old, full], cwd, budget.next_timeout(), "the push's files")
         files = [f for f in out.split("\0") if f]
         if code != 0:
             return True
-        code, out = git_out(["ls-tree", "--name-only", "-z", full, WORKFLOW_DIR + "/"], cwd, budget.next_timeout(),
+        code, out = git_out(["ls-tree", "--name-only", "--full-tree", "-z", full, WORKFLOW_DIR + "/"], cwd, budget.next_timeout(),
                             "the workflow files")
         names = [n for n in out.split("\0") if n.endswith((".yml", ".yaml"))]
         if code != 0 or not names:
