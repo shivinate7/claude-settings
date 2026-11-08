@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint stays within its time bound when a hub file is changed",
+  "why": "Lane lane-lint-hook-suites, 12:05 CST Nov 8: a change to a hub file such as hooks/_nowindow.py picks 99 suites and runs 36 of 37 suite steps in the checks job; that may pass the 1200 s bound, so lane lint reads unknown. Time unmeasured; measure first.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 777,
+  "updatedAt": "2026-11-08T12:07:00-06:00"
+}

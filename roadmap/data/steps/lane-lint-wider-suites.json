@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint runs the picked suites outside hooks/, merge/ and lint/",
+  "why": "Lane lane-lint-hook-suites (session_013NEJL3JoPTyn7Ny4jUb88L), from #1895 fresh round 1, 12:05 CST Nov 8: seven suites in the checks job are picked but not run (janitor/test_sweep.py, janitor/test_prove_agent_end_reap.py, skills/waiting-page/test_stale_pages.py, skills/roadmap/test_build.py, skills/project-ops/tests/test_scaffold.py, skills/ios-apps/tests/test_new_app.py, actions/code-check/test_action.py); #1895 prints a true `picked, not run: outside lane lint's scope` line for each.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 776,
+  "updatedAt": "2026-11-08T12:07:00-06:00"
+}
