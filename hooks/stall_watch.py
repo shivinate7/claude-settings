@@ -547,11 +547,16 @@ def agent_transcripts(session, agent, output):
     return paths
 
 
+OPEN_CALL_CAP = 900  # seconds: Bash's 600 s maximum plus a margin; an older open Bash call is stuck
+CAPPED_TOOLS = ("Bash", "PowerShell")  # the only tools with a known maximum; others (Agent, Task, MCP) read busy
+
+
 def open_call(path, size):
-    """True when any tool_use in the read window has no tool_result yet: the agent is in
-    one long call, not stalled. Reads only the end of the file: TAIL_BYTES, doubled until the window
-    holds a whole last record (the first line of a window that starts mid-file is cut and dropped).
-    An empty file, or one with every tool_use answered, is not an open call."""
+    """Every tool_use in the read window with no tool_result yet, as a list of (tool name, epoch seconds of its
+    assistant record or None, run_in_background is true): the agent is in a call, not stalled. The list is
+    empty for an empty file or one with every tool_use answered. Reads only the end of the file: TAIL_BYTES,
+    doubled until the window holds a whole last record (the first line of a window that starts mid-file is
+    cut and dropped)."""
     window = TAIL_BYTES
     with open(path, "rb") as f:
         while True:
@@ -564,7 +569,7 @@ def open_call(path, size):
             if lines or start == 0 or window >= TAIL_MAX:
                 break
             window *= 2
-    pending = set()
+    pending = {}
     for line in lines:
         try:
             rec = json.loads(line)
@@ -575,12 +580,14 @@ def open_call(path, size):
                 if not isinstance(b, dict):
                     continue
                 if rec.get("type") == "assistant" and b.get("type") == "tool_use":
-                    pending.add(b.get("id"))
+                    given = b.get("input")
+                    pending[b.get("id")] = (b.get("name"), parse_time(rec.get("timestamp")),
+                                            isinstance(given, dict) and given.get("run_in_background") is True)
                 elif rec.get("type") == "user" and b.get("type") == "tool_result":
-                    pending.discard(b.get("tool_use_id"))
+                    pending.pop(b.get("tool_use_id"), None)
         except Exception:  # a bad or half-written line is skipped
             continue
-    return bool(pending)
+    return list(pending.values())
 
 
 def stop():
@@ -615,15 +622,25 @@ def stop():
                     job, what, path or "(path not recorded)", until, " " + AGENT_REMEDY if agent else ""))
                 continue
             idle = now - st.st_mtime
-            if agent:  # a transcript has no named logs; one long tool call is not a stall
-                if idle >= quiet and not (prev_stop is not None and now - idle + quiet <= prev_stop):
+            if agent:  # a transcript has no named logs
+                if idle >= quiet:
                     try:
-                        busy = open_call(real, st.st_size)
+                        calls = open_call(real, st.st_size)
                     except OSError:
-                        busy = False
-                    if not busy:
-                        rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
-                            job, idle, real, until, AGENT_REMEDY))
+                        calls = []
+                    foreground = [c for c in calls if not c[2]]
+                    if not foreground:  # no open call, or only ones started in the background: quiet
+                        if not (prev_stop is not None and now - idle + quiet <= prev_stop):
+                            rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
+                                job, idle, real, until, AGENT_REMEDY))
+                    else:  # an open call is busy, unless the oldest timed capped-tool call is past the cap
+                        timed = [c for c in foreground if c[0] in CAPPED_TOOLS and c[1] is not None]
+                        oldest = min(timed, key=lambda c: c[1]) if timed else None
+                        cross = oldest and max(oldest[1] + OPEN_CALL_CAP, now - idle + quiet)
+                        if oldest and now - oldest[1] >= OPEN_CALL_CAP and not (
+                                prev_stop is not None and cross <= prev_stop):
+                            rows.append("%s: background agent, stuck in one tool call (%s) for %ds: %s%s %s" % (
+                                job, oldest[0], now - oldest[1], real, until, AGENT_REMEDY))
                 continue
             for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
