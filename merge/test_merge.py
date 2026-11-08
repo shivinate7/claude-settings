@@ -12597,6 +12597,16 @@ class RepoDirFlag(RepoDirRuns, Env):
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
         self.assert_merged_in_named(*self.run_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
 
+    def test_c_alone_with_reviewed_reads_the_named_checkout(self):
+        """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
+        reads (the lock root). The host is scripted, as PullsHost does for --reviewed, so the process directory would show as self.co."""
+        head = hex_head("7")
+        host = PullsHost([batch_pull(7, head)], {head: green()}, comments=[record_of(7, head)])
+        rc, out, seen = self.run_from(self.co, ["--reviewed", "-C", self.b_co], host=host)
+        self.assertEqual(rc, 0, "-C alone with --reviewed was refused or failed:\n" + out)
+        self.assertEqual(seen["locks"], [self.b_co], "--reviewed read the process directory's checkout, not the -C one: %r" % (seen["locks"],))
+        self.assertTrue(any(line.startswith("#7 ") for line in out.splitlines()), "--reviewed printed no line for #7:\n" + out)
+
     def test_a_path_that_is_no_checkout_stops_before_any_read(self):
         probe = subprocess.run(["git", "-C", self.plain, "rev-parse", "--show-toplevel"], capture_output=True)
         self.assertNotEqual(probe.returncode, 0, "fixture: the plain folder sits inside a checkout")
@@ -13927,6 +13937,17 @@ unexpected(method + " " + rel)
                      ("--reviewed", "--root", self.alpha, "7")):
             with self.subTest(argv=argv):
                 self.assert_usage_error(*argv)
+
+    def test_c_with_root_is_a_usage_error_before_any_read(self):
+        # -C names the one checkout a run reads, and each --root names its own, so the two together are refused at the parser, before any root
+        # is read. The flags' order does not matter: argparse hands both to main the same way.
+        for argv in (("-C", self.co, "--root", self.alpha), ("--root", self.alpha, "-C", self.co)):
+            with self.subTest(argv=argv):
+                hosts = {self.alpha: root_host("o/alpha")}
+                rc, out, err = self.run_roots("--reviewed", *argv, hosts=hosts)
+                self.assertEqual(rc, 2, "-C with --root is not a usage error (rc %r):\n%s%s" % (rc, out, err))
+                self.assertIn("-C does not go with --root", err, "the usage error does not name the refusal:\n" + err)
+                self.assertEqual(hosts[self.alpha].list_calls, [], "merge read a root before the usage error:\n" + out)
 
     def test_root_repeats_under_reviewed(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: root_host("o/bravo")}
