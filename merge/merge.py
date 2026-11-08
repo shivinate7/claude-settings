@@ -996,13 +996,15 @@ class Host:
 
     def compare_files(self, base, head):
         """-> {status, ahead_by, behind_by, files} of GitHub's compare of base...head: ONE read, never paged, so `files` holds at most COMPARE_FILE_CAP
-        entries (each a dict with filename, status and, for a rename, previous_filename). Any failed or malformed read raises Stop."""
+        entries (each a dict with filename, status and, for a rename, previous_filename). A missing or non-list `files` is a malformed read. Any failed or malformed read raises Stop."""
         c, out = self.api(f"compare/{base}...{head}")
         try:
             if c:
                 raise ValueError(out)
             reply = json.loads(out)
-            found = {"status": reply["status"], "ahead_by": int(reply["ahead_by"]), "behind_by": int(reply["behind_by"]), "files": list(reply.get("files") or [])}
+            found = {"status": reply["status"], "ahead_by": int(reply["ahead_by"]), "behind_by": int(reply["behind_by"]), "files": reply["files"]}
+            if not isinstance(found["files"], list):
+                raise ValueError("`files` is not a list")
             if not all(isinstance(f, dict) and isinstance(f.get("filename"), str) for f in found["files"]):
                 raise ValueError("a file entry has no filename")
             return found
