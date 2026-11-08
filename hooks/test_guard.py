@@ -13490,6 +13490,16 @@ sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDI
    cwd=GITMAIN)
 sh("builder-test: --agent builder with no agent_id shell write of a test is allowed",
    RULE_AUDIT_EDIT, "allow", agent_type="builder", cwd=GITMAIN)
+# A whole-file test config is refused to a builder's shell write, as a test file is. A partly-owned
+# manifest passes the shell step: its owned parts are judged at commit, push and stop.
+sh("builder-test: shell write of pytest.ini, echo redirect, is refused", 'echo "[pytest]" > pytest.ini',
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: test-author shell write of pytest.ini, echo redirect, is allowed",
+   'echo "[pytest]" > pytest.ini', "allow", **A)
+sh("builder-test: shell append to package.json passes the shell step", "echo x >> package.json",
+   "allow", **BR)
+sh("builder-test: shell recovery by git restore of pytest.ini is allowed", "git restore pytest.ini",
+   "allow", **BR)
 
 # Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
 # heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
@@ -13679,6 +13689,75 @@ add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 sh("builder-diff: push after COMMITTING a test change is denied", PUSH, "deny", rule=BDIFF,
    cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# ---- test config a builder may not change: a whole file, and the owned parts of a partly-owned file
+# (package.json: the jest key and the test scripts; pyproject.toml: the [tool.pytest*] sections). The
+# Edit cases run in a checkout that holds those files, so each old_string is the file's own text.
+OWNED_PKG = '''{
+  "name": "x",
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "testEnvironment": "node"
+  },
+  "dependencies": {
+    "a": "1"
+  },
+  "devDependencies": {
+    "b": "1"
+  }
+}
+'''
+# The `[tool.pytest.ini_options]` line inside the `notes` string is text, not a section. The string's
+# value differs from the real section's, so each old_string below is unique in the file.
+OWNED_PYPROJECT = '''[project]
+name = 'x'
+description = "use # here, don't"
+notes = """
+[tool.pytest.ini_options]
+minversion = '6'
+"""
+
+[tool.pytest.ini_options]
+minversion = '7'
+'''
+OWNED_FILES = {"pytest.ini": "[pytest]\nminversion = 7.0\n", "setup.cfg": "[flake8]\nmax-line-length = 88\n",
+               "package.json": OWNED_PKG, "pyproject.toml": OWNED_PYPROJECT}
+_owned = diff_repo("b-owned-edit", lambda w: None, files={**BASE_FILES, **OWNED_FILES})
+OWN = dict(B, cwd=_owned)
+PKG_ADDS = (OWNED_PKG.replace('"test": "jest"', '"build": "tsc",\n    "test": "jest"')
+            .replace('"a": "1"', '"a": "1",\n    "left-pad": "1.3.0"')
+            .replace('"b": "1"', '"b": "1",\n    "eslint": "9.0.0"'))
+add("builder-test: Edit of pytest.ini that adds no disabling line is refused", "deny", rule=BT,
+    tool="Edit", file_path="pytest.ini", old_string="[pytest]\nminversion = 7.0",
+    new_string="[pytest]\nminversion = 8.0", **OWN)
+add("builder-test: Edit of package.json that changes the jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='  "jest": {\n    "testEnvironment": "node"\n  },',
+    new_string='  "jest": {\n    "testEnvironment": "jsdom"\n  },', **OWN)
+add("builder-test: Edit of pyproject.toml that changes a [tool.pytest] section is refused", "deny",
+    rule=BT, tool="Edit", file_path="pyproject.toml", old_string="[tool.pytest.ini_options]\nminversion = '7'",
+    new_string="[tool.pytest.ini_options]\nminversion = '8'", **OWN)
+add("builder-test: Edit of package.json that adds a dependency, a devDependency and a build script is allowed",
+    "allow", tool="Edit", file_path="package.json", old_string=OWNED_PKG, new_string=PKG_ADDS, **OWN)
+add("builder-test: Edit of pyproject.toml that adds a [project] line is allowed", "allow", tool="Edit",
+    file_path="pyproject.toml", old_string="name = 'x'", new_string="name = 'x'\nrequires-python = '>=3.11'",
+    **OWN)
+add("builder-test: Edit of setup.cfg that changes [flake8] is allowed", "allow", tool="Edit",
+    file_path="setup.cfg", old_string="max-line-length = 88", new_string="max-line-length = 100", **OWN)
+add("builder-test: Edit of a pyproject.toml string that holds a [tool.pytest] line is allowed", "allow",
+    tool="Edit", file_path="pyproject.toml", old_string="minversion = '6'", new_string="minversion = '5'",
+    **OWN)
+add("builder-test: Edit of a pyproject.toml string with # and a lone quote is allowed", "allow",
+    tool="Edit", file_path="pyproject.toml", old_string='description = "use # here, don\'t"',
+    new_string='description = "use # there, don\'t"', **OWN)
+add("test-author: Write of pytest.ini is allowed", "allow", tool="Write", file_path="pytest.ini", **A)
+# A builder commit holding a jest config change that disables no test is refused (builder-diff). The
+# base holds the file, so the commit changes it.
+_repo = diff_repo("b-jest-config-plain", _put("jest.config.js", "module.exports = {verbose: true}\n"),
+                  commit=True, files={**BASE_FILES, "jest.config.js": "module.exports = {verbose: false}\n"})
+sh("builder-diff: commit with a jest.config.js change that disables no test is denied", COMMIT, "deny",
+   rule=BDIFF, cwd=_repo, agent_id="bld1", agent_type="builder")
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))
