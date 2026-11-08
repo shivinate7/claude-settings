@@ -13791,34 +13791,64 @@ BT_FRAGMENT = "A builder does not change tests"
 _CKOUT = {}
 
 
-def _checkout_fixture():
-    """(worktree, old): the agent worktree at primary/.claude/worktrees/agent-<id>, and the sha of main's first
-    commit, which holds the older copy of both files. Built once, on first use."""
-    if not _CKOUT:
-        primary, worktree, problems = _home_fixture(
-            CKOUT_AGENT,
-            files={CKOUT_TEST: "# older copy\n", CKOUT_PRODUCT: "# older copy\n"},
-            agent_type="builder",
-            newer={CKOUT_TEST: "# newer copy\n", CKOUT_PRODUCT: "# newer copy\n"})
+CKOUT_WORKTREE = os.path.join(ROOT, "wthome_" + CKOUT_AGENT + "_primary", ".claude", "worktrees",
+                              "agent-" + CKOUT_AGENT)
+
+
+def _older_copy_fixture(key, agent_id, files, newer, probe):
+    """(worktree, old): the agent worktree at primary/.claude/worktrees/agent-<id>, cut from main's newer
+    commit, and the sha of main's first commit. `probe` (path, text) is what that first commit must hold.
+    Built once per `key`, on first use."""
+    if key not in _CKOUT:
+        primary, worktree, problems = _home_fixture(agent_id, files=files, agent_type="builder", newer=newer)
         if problems:
             sys.exit("fixture setup failed: %s" % "; ".join(problems))
         old = run_vcs(primary, "rev-parse", "HEAD~1").stdout.strip()
-        if run_vcs(primary, "show", old + ":" + CKOUT_TEST).stdout != "# older copy\n":
+        if run_vcs(primary, "show", old + ":" + probe[0]).stdout != probe[1]:
             sys.exit("fixture setup failed: the first commit %r does not hold the older copy" % old)
-        _CKOUT.update(worktree=worktree, old=old)
-    return _CKOUT["worktree"], _CKOUT["old"]
+        _CKOUT[key] = (worktree, old)
+    return _CKOUT[key]
 
 
-def _ckout_call(command_of, agent_type, agent_id=CKOUT_AGENT):
-    """(decision, reason) of one Bash call from the agent worktree. `command_of` takes the older copy's sha."""
-    worktree, old = _checkout_fixture()
+def _checkout_fixture():
+    """Main's fixture: a test file and a product file, each with an older copy in the first commit."""
+    return _older_copy_fixture(
+        "test", CKOUT_AGENT,
+        files={CKOUT_TEST: "# older copy\n", CKOUT_PRODUCT: "# older copy\n"},
+        newer={CKOUT_TEST: "# newer copy\n", CKOUT_PRODUCT: "# newer copy\n"},
+        probe=(CKOUT_TEST, "# older copy\n"))
+
+
+def _no_test_fixture():
+    """A second agent worktree whose hooks/ folder holds no test file, for the directory control."""
+    return _older_copy_fixture(
+        "notest", "bldckout2",
+        files={CKOUT_PRODUCT: "# older copy\n", "src/app.py": "print(1)\n"},
+        newer={CKOUT_PRODUCT: "# newer copy\n"},
+        probe=(CKOUT_PRODUCT, "# older copy\n"))
+
+
+def _ckout_call(command_of, agent_type, agent_id=CKOUT_AGENT, fixture=None):
+    """(decision, reason) of one Bash call from an agent worktree. `command_of` takes the older copy's sha.
+    `fixture` names the worktree (a fixture function); the default is main's."""
+    worktree, old = (fixture or _checkout_fixture)()
     return _decide_full("Bash", worktree, agent_id=agent_id, agent_type=agent_type, command=command_of(old))
 
 
-def _ckout_refused(command_of):
+def _ckout_allowed(command_of, fixture=None):
+    """Control: a builder's call of this form is allowed by every rule."""
+    def check():
+        got, reason = _ckout_call(command_of, "builder", fixture=fixture)
+        if got != "allow":
+            return False, "expected allow, got %s (%s)" % (got, reason[:100])
+        return True, "allowed"
+    return check
+
+
+def _ckout_refused(command_of, fixture=None):
     """A builder's call of this form is denied by the builder test rule, and by no other."""
     def check():
-        got, reason = _ckout_call(command_of, "builder")
+        got, reason = _ckout_call(command_of, "builder", fixture=fixture)
         if got != "deny":
             return False, "expected deny, got %s (%s)" % (got, reason[:100])
         if BT_RULE not in reason or BT_FRAGMENT not in reason:
@@ -13894,6 +13924,33 @@ CKOUT_CHECKS = (
      _ckout_test_file_allowed("test-author")),
     ("builder-checkout: control, an orchestrator's git checkout of an older test file (no agent) is not "
      "the builder test rule", _ckout_not_builder_rule(None, agent_id=None)),
+    # Round 2. A form with no `--`, a `git -C` into the worktree and a `cd hooks` before the call are pins.
+    ("builder-checkout: a builder's git checkout of an older test file with no double dash is refused as "
+     "builder-test-edit", _ckout_refused(lambda old: VCS + " checkout " + old + " " + CKOUT_TEST)),
+    ("builder-checkout: a builder's git -C checkout of an older test file is refused as builder-test-edit",
+     _ckout_refused(lambda old: VCS + " -C " + slash(CKOUT_WORKTREE) + " checkout " + old + " -- " + CKOUT_TEST)),
+    ("builder-checkout: a builder's cd into hooks, then git checkout of an older test file, is refused as "
+     "builder-test-edit", _ckout_refused(lambda old: "cd hooks && " + VCS + " checkout " + old + " -- test_guard.py")),
+    # Round 2, red on the head that has the fix: a directory and the whole tree hold the test file.
+    ("builder-checkout: a builder's git checkout of an older hooks folder that holds a test file is refused "
+     "as builder-test-edit", _ckout_refused(lambda old: VCS + " checkout " + old + " -- hooks/")),
+    ("builder-checkout: a builder's git checkout of an older whole tree that holds a test file is refused "
+     "as builder-test-edit", _ckout_refused(lambda old: VCS + " checkout " + old + " -- .")),
+    # Round 2 controls: a restore with no source, a branch switch or a checkout with no revision are allowed.
+    ("builder-checkout: control, a builder's git restore of a test file with no source is allowed",
+     _ckout_allowed(lambda old: VCS + " restore " + CKOUT_TEST)),
+    ("builder-checkout: control, a builder's git restore --staged of a test file is allowed",
+     _ckout_allowed(lambda old: VCS + " restore --staged " + CKOUT_TEST)),
+    ("builder-checkout: control, a builder's git checkout -- of a test file with no revision is allowed",
+     _ckout_allowed(lambda old: VCS + " checkout -- " + CKOUT_TEST)),
+    ("builder-checkout: control, a builder's git checkout -b of a new branch is allowed",
+     _ckout_allowed(lambda old: VCS + " checkout -b new origin/main")),
+    ("builder-checkout: control, a builder's git checkout -B of a branch is allowed",
+     _ckout_allowed(lambda old: VCS + " checkout -B lane/x FETCH_HEAD")),
+    ("builder-checkout: control, a builder's git switch to main is allowed",
+     _ckout_allowed(lambda old: VCS + " switch main")),
+    ("builder-checkout: control, a builder's git checkout of an older hooks folder with no test file is allowed",
+     _ckout_allowed(lambda old: VCS + " checkout " + old + " -- hooks/", fixture=_no_test_fixture)),
 )
 for _label, _check in CKOUT_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
