@@ -1283,14 +1283,14 @@ RESUME_MAIN = "main"
 RESUME_ISOLATIONS = ("worktree", "remote")
 # One reason for every role: it names the role, so the remedy names a fresh agent of that same role.
 RESUME_REASON = (
-    "resume-finished-reviewer: this %(role)s has finished, so it has no worktree any more and a resume runs with no "
+    "this %(role)s has finished, so it has no worktree any more and a resume runs with no "
     "tree%(model)s. Spawn a fresh %(role)s and pass it the prior report. "
     "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
 )
 # A reviewer or design-reviewer is refused even with no worktree: a resume runs on the parent's model.
 RESUME_MODEL_CLAUSE = ", and it runs on the parent's model, which can give a wrong verdict"
 RESUME_ASK_REASON = (
-    "resume-finished-reviewer: the guard cannot tell whether this %(role)s has finished. A finished one that ran in a "
+    "the guard cannot tell whether this %(role)s has finished. A finished one that ran in a "
     "worktree has no worktree, so a resume runs with no tree; then spawn a fresh %(role)s and pass it the prior report. "
     "Allow this send only if the %(role)s is still running. (rule roles-resume-by-name)"
 )
@@ -1299,7 +1299,7 @@ RESUME_ASK_REASON = (
 RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule of a send whose transcript could not be read
 RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
 RESUME_UNPARSED_REASON = (
-    "resume-finished-reviewer: the guard read a record in this session's transcript that has the wrong shape, so it "
+    "the guard read a record in this session's transcript that has the wrong shape, so it "
     "cannot tell whether this agent has finished. A finished one that ran in a worktree has no worktree, so a resume runs "
     "with no tree; then spawn a fresh agent of the same role and pass it the prior report. "
     "Allow this send only if the agent is still running. "
