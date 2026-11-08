@@ -50,7 +50,9 @@ unlaned's: the branch equals a live session step exactly.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
-that can never be judged reads `hold (<reason>; lane <session id>)`, is never archived, and is left out of the row's count.
+not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
+cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
+landed; the last clears when the step moves or closes.
 A lane that waits (step not done, open pull, open item) prints no line.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
@@ -155,7 +157,8 @@ IDLE_LANES_LINE = "lanes to archive"
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
 TODO_STATUS = ("todo", "ready")
-KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
+RUNNING_STATUS = ("doing", "active")
+KNOWN_STATUS = TODO_STATUS + RUNNING_STATUS + ("done",)
 TOP = 5
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
@@ -1099,7 +1102,7 @@ def laneless(open_, marks, work):
         return why, []
     out = []
     for k, d in open_:
-        if d.get("status") in ("doing", "active") and not lane_live(work, k):
+        if d.get("status") in RUNNING_STATUS and not lane_live(work, k):
             if k in marks and is_feel(d) and device_check(d) != "valid":
                 continue  # the device row lists it; it must not read "set to done" before a device check
             out.append((k, marks[k] if k in marks else "todo"))
@@ -1240,7 +1243,7 @@ def dated_claims(open_, today):
     out = []
     for k, d in open_:
         note = d.get("note")
-        if d.get("status") not in ("doing", "active") or not isinstance(note, str):
+        if d.get("status") not in RUNNING_STATUS or not isinstance(note, str):
             continue
         newest = None  # (date, as written)
         for m in CLAIM.finditer(note):
@@ -1292,9 +1295,10 @@ def unfiled(steps, work):
 
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
-    `hold (<reason>; lane <session id>)` for a lane that can never be judged, which is never archived: no cs-step tag,
-    or a step that is neither on the record branch nor named by a Step trailer on main. A lane that waits (step not
-    done, open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
+    `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
+    record branch nor named by a Step trailer on main, or a record-branch step whose `lane` is this session and that
+    is still doing or active and not landed (this hold clears when the step moves or closes). A lane that waits (step
+    not done, open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
@@ -1365,6 +1369,11 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
             continue
         if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
+            continue
+        doing = sorted(k for k, d in steps.items()
+                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks)
+        if doing:
+            out.append("hold (step %s still doing under this lane; lane %s)" % (" ".join(doing), sid))
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
