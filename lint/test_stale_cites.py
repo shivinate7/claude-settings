@@ -3823,11 +3823,12 @@ class NameCiteTests(StaleCase):
         self.assertEqual(subs.count("log"), 1, subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
-    def test_a_near_folder_cite_with_its_corrected_path_at_head_is_checked_at_head_and_starts_at_most_one_git_log_past_the_four(self):
+    def test_a_near_folder_cite_with_its_corrected_path_at_head_is_checked_at_head_and_no_git_log_starts(self):
         """`lnt` is one edit from the tracked `lint`, and its corrected path `lint/x.py` is at head, so the cite is a likely
         typo and is checked as a normal cite (decision record-cites-live-code). `lnt/x.py` is absent at head, so the cite
         is a finding. The corrected path is read through `head_has`, from the one `cat-file` the run holds. `lnt` is absent
-        at head, so the history read may start one git log, and no other process."""
+        at head, but the typo clause decides the cite before the history clause runs, so no git log starts and no other
+        process starts either."""
         rng, flagged = self.route_range([("- (lnt/x.py check)", True)])
         self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
         self.assertNotIn("lnt", top_folders(rng))  # scope: lnt is no tracked top folder
@@ -3841,10 +3842,11 @@ class NameCiteTests(StaleCase):
                          "the typo cite was not checked as a normal cite of lnt/x.py\n%s" % out)
         subs = [command.split()[0] for command in commands]
         # The four starts of a Markdown range that adds a folder .py cite: rev-parse, merge-base, diff and one cat-file.
-        # head_has reads lint/x.py through that cat-file, so a git process of its own would be a fifth start. The one
-        # exception is the history read: `lnt` is absent at head, so the rule allows one git log, and no more.
+        # head_has reads lint/x.py through that cat-file, so a git process of its own would be a fifth start. No git log
+        # starts either: history is read only for a folder that is in neither place (decision record-cites-live-code).
         self.assertEqual(sorted(s for s in subs if s != "log"), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
-        self.assertLessEqual(subs.count("log"), 1, subs)
+        self.assertEqual(subs.count("log"), 0,
+                         "a git log started for a near-folder cite whose corrected path is at head\n%s" % subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
     def test_a_cite_into_a_tracked_top_folder_with_a_missing_name_is_still_stale010_beside_the_untracked_ones(self):
