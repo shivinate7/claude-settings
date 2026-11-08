@@ -1627,11 +1627,42 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_a_create_cancelled_by_another_head_does_not_cancel_the_first(self):
         # Catches: two creates with empty targets cancelling each other, so the failed create of b1 backed no claim. A create is
-        # cancelled only by a success for its own --head.
+        # cancelled only by a success for its own --head; a create with no --head has no target, so no success cancels it
+        # (the flagless case is the next test).
         line = "I could not open the PR for b1 at first."
         out = self.stop([trg.human("open the PR for b1"), *failed_bash("gh pr create --draft --head b1", "tu_1"),
                          *ok_bash("gh pr create --head b2", "tu_2"), landed_reply(line)])
         self.assert_blocks(out, line)
+
+    def test_cc_red_a_flagless_create_is_cancelled_by_no_success(self):
+        # Catches: two creates with no --head, each with an empty target, cancelling each other, so the failed create backed
+        # no claim and its failure passed. A create with no --head names no target, so no success cancels it.
+        line = "I could not open the PR for b1 at first, so please open it yourself."
+        out = self.stop([trg.human("open the PR for b1"), *failed_bash("gh pr create --draft", "tu_1"),
+                         *ok_bash("gh pr create --base main", "tu_2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_merge_on_another_repo_does_not_cancel_a_flagless_merge(self):
+        # Catches: a merge with --repo read as the same PR as a merge with no repo, so its success cancelled the failed merge.
+        line = "I could not merge PR 12 at first."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
+                         *ok_bash("gh pr merge --repo other/x 12", "tu_2"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_prose_check_word_about_another_act_names_no_check(self):
+        # Catches: "failed" in a sentence about a push read as naming the check of a merge claim, so a refused merge passed.
+        line = "I could not merge PR 12."
+        reply = "The push failed. " + line
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(reply)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_status_sent_or_came_back_names_the_check(self):
+        # Catches: "sent back" and "came back" before a status count read as a reason verb or a check word, so a refused
+        # merge whose status was named blocked.
+        for line in ("I could not merge PR 12: the server sent back 403.", "I could not merge PR 12: it came back 403."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a refused merge whose status is named after sent back or came back")
 
     def test_cc_red_network_checks_failing_is_an_outage_for_a_merge_claim(self):
         # Catches: "the network checks are failing" read as a CI check blocker, so the merge claim beside it passed. A network
