@@ -346,8 +346,10 @@ def waiter_verdict(segments, background: bool, monitor: bool = False) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     `monitor` marks a Monitor call, which the harness hands to the guard as a Bash call that carries
-    `timeout_ms` (decision agents-wait-with-monitor). Monitor is the wait the record allows, so its loops
-    and pauses pass. `gh run watch` and `timeout /t` stay refused, as they are under run_in_background.
+    `timeout_ms` (decision agents-wait-with-monitor). Monitor is the wait the record allows, so its poll
+    loops and pauses of any length pass. `gh run watch`, `gh pr checks --watch` and `timeout /t` stay
+    refused. The two watchers serve a cached status wherever they run. The guard trusts `timeout_ms`
+    because the Bash schema allows no such key.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
@@ -382,7 +384,7 @@ def waiter_verdict(segments, background: bool, monitor: bool = False) -> str:
         elif waiter_hit(segment):
             return waiter_hit(segment)
     if monitor:
-        return run_watch
+        return run_watch or watcher
     if background and clock_loop(token_rows):
         # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
         # that time, so only its pauses are judged.
