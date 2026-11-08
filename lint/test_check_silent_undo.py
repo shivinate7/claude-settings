@@ -395,6 +395,29 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
 
+    # Some bodies end with the session URL alone in its own paragraph, after the attribution. It is a closing paragraph
+    # too: a trailer above the attribution and the URL still counts. The URL is the session id of FOOT.
+    SESSION = "https://claude.ai/code/session_01MVD32PXm1757wMqHinaZZG"
+
+    def test_a_trailer_above_the_attribution_and_a_lone_session_url_excuses_its_path(self):
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        for body in ("Summary.\n\n%s\n\n%s\n\n%s\n" % (L, A, S),
+                     "Summary.\n\n%s\n\n%s\n\n%s\n\n\n" % (L, A, S),
+                     "Summary.\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A, S)):
+            with self.subTest(body=body):
+                ok, why = self.excused(body)
+                self.assertTrue(ok, f"a lone session URL below the attribution hid the trailer above them: {why}")
+
+    def test_last_paragraph_skips_a_lone_session_url_and_the_attribution(self):
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        self.assertEqual(C.last_paragraph("Summary.\n\n%s\n\n%s\n\n%s\n" % (L, A, S)), L,
+                         "the reader did not skip the session URL and the attribution to reach the key-line paragraph")
+
+    def test_a_session_url_inside_a_prose_paragraph_is_not_skipped(self):  # control
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        self.assert_nothing_excused(["Summary.\n\n%s\n\nSee %s\n" % (L, S),
+                                     "Summary.\n\n%s\n\n%s\n%s\n" % (L, A, S)])  # the URL shares the attribution's paragraph
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 

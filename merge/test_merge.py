@@ -8508,6 +8508,7 @@ class DraftLaneLines(RecordsEnv):
     LANE_A = f"Retire the gap.\n\n{RETIRE}\n{DROPS}\nLane A prose only.\n\n{ATTRIB}"
     LANE_B = f"Lane B prose only.\n\n{ATTRIB}"
     DECOY = "Decoy row.\n\nDrops-lines: debts/decoy.md -- the integration row, not a lane"  # the integration row's body: no lane holds this line
+    SESSION = "https://claude.ai/code/session_01MVD32PXm1757wMqHinaZZG"  # the session URL some bodies end with, alone in its paragraph
 
     def setUp(self):
         super().setUp()
@@ -8594,6 +8595,29 @@ class DraftLaneLines(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.body_writes(), [], "the body was written with no lane key line to copy")
         self.assertEqual(self.host.readies, [7])
+
+    def test_a_failed_lane_read_stops_before_any_body_write_or_ready_mark(self):
+        # lane_tips swallows a failed git read and returns no lanes, so the step would mark the PR ready with nothing copied.
+        self.make_batch(self.LANE_A, self.LANE_B, self.BATCH)
+        with unittest.mock.patch.object(merge, "read_lanes", side_effect=ValueError("git log failed: fatal: bad object")):
+            rc, out = self.draft_confirm()
+        self.assertEqual(rc, 1, "a failed lane read did not stop the draft step\n" + out)
+        self.assertEqual(self.body_writes(), [], "the body was written after a failed lane read")
+        self.assertEqual(self.host.readies, [], "the ready mark was set after a failed lane read")
+
+    def test_the_copied_lines_land_above_the_attribution_and_the_session_url(self):
+        body = f"Batch of lanes a and b.\n\n{self.OWN}\n\n{self.ATTRIB}\n\n{self.SESSION}"
+        self.make_batch(self.LANE_A, self.LANE_B, body)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        final = self.host.body
+        for line in (self.RETIRE, self.DROPS):
+            self.assertIn(line, final, f"{line!r} was not copied into the integration body")
+            self.assertLess(final.index(line), final.index(self.ATTRIB), f"{line!r} landed below the attribution")
+            self.assertLess(final.index(line), final.index(self.SESSION), f"{line!r} landed below the session URL")
+        self.assertTrue(final.rstrip().endswith(self.SESSION), "the session URL is no longer the last line of the body")
+        self.assertEqual(sorted(self.counted(final)), sorted([self.OWN, self.RETIRE, self.DROPS]),
+                         "the last counted paragraph is not the key-line paragraph above both closing paragraphs")
 
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
