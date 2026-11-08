@@ -6,10 +6,12 @@ The `encoded-retry-after-refusal` rule in `hooks/guard_encoded.py` refuses a Bas
 
 - The call decodes text and runs it, or its command word is built from escapes:
   - a decode piped into a shell with no `-c`. A decode is `base64 -d`, `printf` or `echo -e` with an escape, or `echo` of an ANSI-C `$'...'` word. The shell may sit in a subshell, as `(sh)`;
-  - a shell handed decoded text as its script: the word after `-c`, a process substitution `<(...)`, or a herestring, when it holds a substitution that decodes or a variable set from one earlier in the call;
+  - a shell handed decoded text as its script. The script is the word after `-c`, a process substitution `<(...)`, a herestring, or the file its stdin reads, as `sh < <(...)`. It holds a substitution that decodes, or a variable set from one earlier in the call;
   - `eval`, `source` or `.` of such a substitution or variable;
-  - a command word that is an ANSI-C `$'...'` word with an escape, or a substitution that decodes;
-  - the decode forms above inside the script text of `sh -c` or `eval`.
+  - a command word that is an ANSI-C `$'...'` word with an escape, a substitution that decodes, or a variable set from one;
+  - the decode forms above inside the script text of `sh -c` or `eval`, and inside any substitution: `$(...)`, backticks, `<(...)` or `>(...)`.
+
+  A variable is set from a decode by `NAME=$(...)`, alone or after `export`, `declare`, `local`, `readonly` or `typeset`.
 - Its own session had a refusal in the last ten minutes: a row in the session's refusal state file, or a guard.log deny row of the session.
 
 A state row that names an agent counts only for that agent's calls. A row that names none counts for the whole session. A guard.log row names no agent, so it counts for the whole session, the orchestrator included.
@@ -24,7 +26,9 @@ Passes:
 - Text in quotes, a comment or a heredoc body.
 - Any call with no refusal in the window, and any PowerShell call.
 
-The state is read only after the call's shape matches, so an ordinary call costs no file read, no new file, no log and no process. The clock is `local_time.clock()`.
+The state is read only after the call's shape matches, so an ordinary call costs no file read, no new file, no log and no process. The clock is `local_time.clock()`. The shape read is linear in the call's length.
+
+A fault in the shape read fails this rule open and no other. The guard's later rules still judge the call.
 
 The refusal tells the agent to report and does not name the form as a remedy. One line in `COMMON` in `hooks/agent_brief.py` gives the same rule to every agent brief, reviewers included.
 
@@ -32,7 +36,7 @@ Mistake it stops: an agent met a refusal of a command, then sent the same comman
 
 Outcome protected: a refusal stays final, so the owner or the orchestrator decides the next step.
 
-False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent).
+False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too (accepted, a note).
 
 Not read:
 
@@ -40,6 +44,7 @@ Not read:
 - A decode through `openssl`, `xxd` or a language runtime.
 - An ANSI-C word inside the script of `eval` or `bash -c`.
 - A glob spelling of a command word.
+- A substitution after a backtick that never closes. Bash runs no part of that call.
 - A PowerShell call.
 
 Kind: process
