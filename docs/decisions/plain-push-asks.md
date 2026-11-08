@@ -13,7 +13,10 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
-  literal, `main` and `master`. The remote's HEAD is not read.
+  literal, `main` and `master`. The remote's HEAD is not read. It asks only for a network remote
+  (https, http, ssh, git, or `host:path`). A remote with no URL, or a local path or `file://`
+  URL, is silent: git refuses the first, and the second is a test fixture, not GitHub. Source:
+  coordinator, 2026-11-08 10:03 CST, item 410 a, after a push-main ask on a fixture repo.
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
@@ -44,7 +47,8 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
   itself.
 
 Cost: no new process or file. The reads run per push, in the guard's own run. A literal
-destination reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
+destination reads nothing new, except a push to main or master, which reads the remote's URL
+with one `config`. A remote given as a URL or path reads nothing. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
 A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
 `hooks/test_guard.py` proves the counts.
 
