@@ -13,6 +13,50 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
+_TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
+_TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
+_TERMINAL = ("completed", "failed", "killed", "stopped")
+
+
+def closed_by_notice(text: object) -> list:
+    """The ids of the task-notification blocks in text with a terminal status."""
+    if not isinstance(text, str):
+        return []
+    ids = []
+    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
+        tid, st = _TASK_ID.search(note), _TASK_STATUS.search(note)
+        if tid and st and st.group(1).strip().lower() in _TERMINAL:
+            ids.append(tid.group(1).strip())
+    return ids
+
+
+def notice_closes(rec: object) -> list:
+    """The job ids a transcript record's terminal task notices close. A notice comes as a queued_command
+    attachment's prompt, or in a user message: its text, or the text and string tool_result content of its blocks.
+    hooks/stall_watch.py closes a job by it, and lint/report_guard.py a background agent."""
+    if not isinstance(rec, dict):
+        return []
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        return closed_by_notice(att.get("prompt") if isinstance(att, dict) else None)
+    if rec.get("type") != "user":
+        return []
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
+        content = "\n".join(p for p in parts if isinstance(p, str))
+    return closed_by_notice(content)
+
+
+def async_launch(tool_use_result: object) -> Optional[tuple]:
+    """(agentId, outputFile or None) when a tool result record's toolUseResult is a background agent's launch:
+    isAsync true, status async_launched and an agentId. Else None. The agent runs until a notice closes its id."""
+    tur = tool_use_result
+    if not (isinstance(tur, dict) and tur.get("isAsync") is True and tur.get("status") == "async_launched"
+            and isinstance(tur.get("agentId"), str)):
+        return None
+    out = tur.get("outputFile")
+    return tur["agentId"], out if isinstance(out, str) else None
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
 # mid-turn one. The tag name ends at `>` or whitespace.
 _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")

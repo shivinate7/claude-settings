@@ -626,6 +626,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
+    expanded = _expanded_names(cmd)   # before `_resolve_vars` swaps a `$X` for its value
     cmd = _resolve_vars(cmd)
     ends = []
     segments = split_segments(cmd, ends)
@@ -653,7 +654,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
-        assigned = set() if _SINGLE_QUOTED_DOLLAR.search(cmd) else _quoted_assignments(raw)
+        assigned = _quoted_assignments(raw, expanded)
         for index, word in enumerate(raw):
             if index in assigned:
                 words.append(_ASSIGNMENT_STAND_IN)
@@ -690,19 +691,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 # word inside it (`copy`, a path) is no command and no write target. A value that can run (`$`, a backtick,
 # a process substitution) stays in view. The stand-in is an assignment, so the command word still resolves.
 _ASSIGNMENT_STAND_IN = "V=d"
-# A single-quoted `$` is passed unexpanded to a later shell (`sh -c '$X'`, `eval '$X'`), which can run the
-# value. A command that holds one makes no stand-in, so the value stays in view as on main.
-_SINGLE_QUOTED_DOLLAR = re.compile(r"'[^']*\$")
+# An expansion of a name, in any form: `$X`, `${X}`, `${X:-}`, `${#X}`, `${!X}`. The name runs to its last word character.
+_EXPANSION = re.compile(r"\$\{?[#!]?([A-Za-z_]\w*)")
 
 
-def _quoted_assignments(raw):
-    """The indexes of the words of a segment that are quoted `NAME=value` assignments before its command."""
+def _expanded_names(cmd: str) -> set:
+    """The names a command expands anywhere, read word by word with the shell word reader. A quoted expansion
+    counts too: a later shell (`sh -c '$X'`, `eval "\\$X"`) expands it and can run the value. An assignment
+    whose name is here stays in view, as on main."""
+    return {m.group(1) for word in _quoted_words(cmd, True) for m in _EXPANSION.finditer(word)}
+
+
+def _quoted_assignments(raw, expanded=frozenset()):
+    """The indexes of the words of a segment that are quoted `NAME=value` assignments before its command,
+    whose name the command never expands (`expanded`)."""
     words = [_unquoted(word) for word in raw]
     command = resolve_command(tuple(words))
     end = len(raw) if command is None else command
     return {index for index in range(end)
             if _ASSIGNMENT.match(raw[index]) and ("'" in raw[index] or '"' in raw[index])
-            and not _UNSAFE_MARK.search(raw[index]) and "$" not in raw[index]}
+            and not _UNSAFE_MARK.search(raw[index]) and "$" not in raw[index]
+            and raw[index].split("=", 1)[0].rstrip("+") not in expanded}
 
 
 def _segment_command(words):

@@ -99,9 +99,16 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
-    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
+    # The one home of the notice tag, the notice read and the background agent launch read (lint/report_guard.py reads them too).
+    from shared_names import TASK_NOTIFICATION_TAG, async_launch, notice_closes
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
+
+    def async_launch(tool_use_result):
+        return None
+
+    def notice_closes(rec):
+        return []
 # The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
 NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 
@@ -375,11 +382,8 @@ def hook():
     return 0
 
 
-TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
-TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
 STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
-TERMINAL = ("completed", "failed", "killed", "stopped")
 
 
 def text_of(content):
@@ -435,26 +439,21 @@ def scan_jobs(transcript):
                         blocked = bool(rec.get("hookErrors")) or rec.get("preventedContinuation") is True
                     continue
                 if kind == "attachment":  # a completion notice that arrives as a queued command
-                    att = rec.get("attachment")
-                    notice = att.get("prompt") if isinstance(att, dict) else None
-                    if isinstance(notice, str):
-                        done.update(closed_by_notice(notice))
+                    done.update(notice_closes(rec))
                     continue
                 content = rec["message"]["content"]
                 text = text_of(content)
             except Exception:  # a bad or half-written line is skipped
                 continue
             tur = rec.get("toolUseResult")
-            jid = None
+            jid, launch = None, async_launch(tur)
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 jid = tur["backgroundTaskId"]
                 m = RESULT_PATH.search(text)
                 jobs.setdefault(jid, m.group(1) if m else None)
-            elif (isinstance(tur, dict) and tur.get("isAsync") is True and tur.get("status") == "async_launched"
-                  and isinstance(tur.get("agentId"), str)):
-                jid = tur["agentId"]
-                out = tur.get("outputFile")
-                jobs.setdefault(jid, out if isinstance(out, str) else None)
+            elif launch:
+                jid, out = launch
+                jobs.setdefault(jid, out)
                 agents.add(jid)
             if jid is not None:
                 began.setdefault(jid, when)
@@ -474,7 +473,7 @@ def scan_jobs(transcript):
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
             elif kind == "user":
-                done.update(closed_by_notice(text))
+                done.update(notice_closes(rec))
                 if isinstance(content, list):  # only the result of a TaskStop call of this session
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
@@ -482,18 +481,6 @@ def scan_jobs(transcript):
     return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
                 k in agents)
              for k, v in jobs.items() if k not in done}, prev_stop)
-
-
-def closed_by_notice(text):
-    """The ids of the <task-notification> blocks in text with a terminal status."""
-    ids = []
-    if not TASK_NOTIFICATION_TAG:
-        return ids
-    for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
-        tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip().lower() in TERMINAL:
-            ids.append(tid.group(1).strip())
-    return ids
 
 
 def stopped_ids(content):

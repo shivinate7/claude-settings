@@ -603,39 +603,63 @@ def agent_pin(role):
     return ""
 
 
-def _spawn_finished(records, i, use, result_ids):
-    """True when the spawn `use`, in records[i], has its tool result. A real tool use carries an id
-    that its result names. A use with no id has none to match, so the record right after it must
-    be a tool result."""
+def _agent_readers():
+    """hooks/shared_names.py's background agent launch read and notice read, the ones hooks/stall_watch.py uses.
+    None when it cannot load: each tool result then counts as a finished spawn."""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from shared_names import async_launch, notice_closes
+    except ImportError:
+        return None
+    return async_launch, notice_closes
+
+
+def _spawn_finished(records, i, use, results, readers):
+    """True when the spawn `use`, in records[i], has finished: its tool result is in, and, for a background
+    agent (a launch result, `async_launched`), a terminal task notice closed its agent id. A real tool use
+    carries an id that its result names. A use with no id has none to match, so the record right after it
+    must be its tool result."""
     if use.get("id") is not None:
-        return use["id"] in result_ids
-    nxt = records[i + 1] if i + 1 < len(records) else {}
-    return any(True for _ in tool_results(nxt))
+        result = results.get(use["id"])
+    else:
+        nxt = records[i + 1] if i + 1 < len(records) else {}
+        result = nxt if any(True for _ in tool_results(nxt)) else None
+    if result is None:
+        return False
+    if readers is None:
+        return True
+    async_launch, notice_closes = readers
+    launch = async_launch(result.get("toolUseResult"))
+    if launch is None:
+        return True
+    return any(launch[0] in notice_closes(rec) for rec in records)
 
 
 def spawn_models(records, finished_only=False):
     """Map each named role spawned in `records` to the set of model families it ran on.
 
-    With `finished_only`, a spawn whose tool result has not come back (the agent still runs) is
-    left out: it has built and reviewed nothing yet, so Done owes no model for it.
+    With `finished_only`, a spawn that has not finished (no tool result yet, or a background launch with
+    no terminal notice) is left out: the agent still runs and has built and reviewed nothing yet, so Done
+    owes no model for it.
 
     A spawn's model is its call's `model` field, else its agent file's pin, else
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
     """
     failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
-    result_ids = set()
+    results = {}
     for rec in records:
         for b in tool_results(rec):
-            result_ids.add(b.get("tool_use_id"))
+            results.setdefault(b.get("tool_use_id"), rec)
             if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
+    readers = _agent_readers() if finished_only else None
     found = {}
     for i, rec in enumerate(records):
         for b in tool_uses(rec):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
                 continue
-            if finished_only and not _spawn_finished(records, i, b, result_ids):
+            if finished_only and not _spawn_finished(records, i, b, results, readers):
                 continue
             inp = b.get("input") or {}
             role = str(inp.get("subagent_type") or "").lower()
