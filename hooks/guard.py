@@ -2040,10 +2040,10 @@ MESSAGE_VERB_LEADS = {"to", "please", "then", "now", "also", "just", "only", "si
                       "you", "we", "i", "they", "must", "should", "will", "can", "could", "would", "shall", "may",
                       "might", "let's", "and", "or", "but", "so", "still", "always", "ever", "even",
                       "not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
-# A participle right before `at` or `in` makes the path where something was seen, not what is edited
-# (`Fix the failure reported at X:120`).
-MESSAGE_LOCATOR_PARTICIPLES = {"reported", "raised", "shown", "logged", "seen", "printed", "thrown", "flagged",
-                               "listed", "found", "noted", "cited", "returned", "emitted", "named"}
+# A participle right before `at` makes the path where something was seen, not what is edited
+# (`Fix the failure reported at X:120`). Before `in`, the path stays the object. Lane ruling 2026-11-08 13:03 CST,
+# process-only.
+MESSAGE_LOCATOR_PARTICIPLES = {"reported", "raised", "shown", "logged", "seen"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
                            "one", "no", "any", "each", "every", "some"}
@@ -2139,17 +2139,18 @@ def _message_words(clause: str):
 
 
 def _message_noun_use(words, at: int) -> bool:
-    """True when the noun-verb at `at` (`fix`, `update`, `change`) ends a noun phrase: walking back through the words
-    before it reaches a determiner or a preposition with no verb lead, edit verb, read verb or comma on the way."""
-    if words[at][0] not in MESSAGE_NOUN_VERBS:
+    """True when the noun-verb at `at` (`fix`, `update`, `change`) ends a noun phrase (`the guard fix`, `a bug fix`).
+    No path follows it, and the words right before it are nouns back to a determiner. A noun here has no path, no comma
+    and no verb lead, verb, preposition, actor or green word. `red fix X`, `In X fix` and `case in X update` stay verbs."""
+    if words[at][0] not in MESSAGE_NOUN_VERBS or (at + 1 < len(words) and words[at + 1][1]):
         return False
     for back in range(at - 1, -1, -1):
-        word = words[back][0]
-        if (word in MESSAGE_VERB_LEADS or word in MESSAGE_EDIT_VERBS or word in MESSAGE_READ_VERBS
-                or words[back][2] or word in MESSAGE_OTHER_ACTORS):
-            return False
-        if word in MESSAGE_NOT_VERB_BEFORE or word in MESSAGE_PREPOSITIONS:
+        word, path, stop = words[back]
+        if word in MESSAGE_NOT_VERB_BEFORE:
             return True
+        if (path or stop or word in MESSAGE_VERB_LEADS or word in MESSAGE_EDIT_VERBS or word in MESSAGE_READ_VERBS
+                or word in MESSAGE_PREPOSITIONS or word in MESSAGE_OTHER_ACTORS or word in MESSAGE_GREEN):
+            return False
     return False
 
 
@@ -2265,7 +2266,7 @@ def _message_edits(words):
             direct = joined or all(w in MESSAGE_DIRECT for w, _, _ in words[verb_at + 1:at])
             if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
                 continue
-            if before in ("at", "in") and at > 1 and words[at - 2][0] in MESSAGE_LOCATOR_PARTICIPLES:
+            if before == "at" and at > 1 and words[at - 2][0] in MESSAGE_LOCATOR_PARTICIPLES:
                 continue
             ahead = tuple(w for w, _, _ in words[at + 1:at + 5])
             if any(ahead[:len(tail)] == tail for tail in MESSAGE_NOT_YOURS):
