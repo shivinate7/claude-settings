@@ -242,7 +242,9 @@ Other tools, in `judge` order:
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
-                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       deny. A role's write outside its scope. A builder's shell write to a test path or
+                       a workflow file also counts as builder-test-edit; the workflow reason points to the
+                       Edit tool. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1573,6 +1575,11 @@ BUILDER_TEST_REASON = (
     " A merge conflict in a test file takes the same route."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
+BUILDER_WORKFLOW_SHELL_REASON = (
+    "A builder changes a workflow file with the Edit tool, which judges what the change does to the test "
+    "steps. A shell write to a workflow file is not judged. Use the Edit tool for the change."
+    " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
+)
 AUTHOR_SCOPE_REASON = (
     "A test-author changes only tests and test config. Report the needed product change in your "
     "report. The orchestrator assigns it to a builder."
@@ -1940,13 +1947,12 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
     return full if outside else None
 
 
-def builder_test_path(path: str, cwd: str) -> bool:
-    """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
-    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
-    disables tests is judged on content, so only the Edit tools read it."""
+def builder_repo_rel(path: str, cwd: str):
+    """`path` relative to its repository root for a builder's write check, else None when it is read as no
+    path of this repository. The one reading behind `builder_test_path` and `builder_shell_path`."""
     rel = repo_rel(path, cwd)
     if rel is None:
-        return False
+        return None
     # From a call that runs in a repository, a path in no repository is no test of it, as for the test-author
     # in role_write_hit. From a call in no repository nothing says which paths are outside, so the shape decides.
     # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
@@ -1954,18 +1960,47 @@ def builder_test_path(path: str, cwd: str) -> bool:
     where = drive_form_cwd(cwd)
     if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
             and repo_rel(path, where, outside=False) is None):
-        return False
-    return is_test_rel(rel)
+        return None
+    return rel
+
+
+def builder_test_path(path: str, cwd: str) -> bool:
+    """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
+    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
+    disables tests is judged on content, so only the Edit tools read it."""
+    rel = builder_repo_rel(path, cwd)
+    return rel is not None and is_test_rel(rel)
+
+
+def builder_shell_path(path: str, cwd: str) -> bool:
+    """True when a builder's shell write to `path` is refused: a test path, or a workflow file. A shell
+    command cannot be judged on a workflow's content, as the Edit tools judge it (`workflow_pairs` in
+    `role_write_hit`), so every shell write to one is refused and its reason points to the Edit tool."""
+    rel = builder_repo_rel(path, cwd)
+    return rel is not None and (is_test_rel(rel) or is_workflow_rel(rel))
+
+
+def builder_shell_hit(raw: str, stripped: str, cwd: str):
+    """(path, reason) of the test or workflow path a builder's shell command writes, else ('', ''). Two
+    readings: the plain forms (a redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped
+    command, with the paths that `find`, `xargs`, a `for` list and a substitution feed to a writer read
+    too (`read_fed`), and the python or node script a heredoc body or `-c` / `-e` holds, on the raw
+    command. A test path keeps BUILDER_TEST_REASON, also when the command writes a workflow file first;
+    a workflow path alone gets the Edit-tool reason."""
+    def scan(predicate):
+        return (_shell_write_hit(stripped, cwd, predicate, follow_cd=True, command_position=True,
+                                 read_fed=True)
+                or interpreter_write_hit(raw, cwd, predicate))
+
+    hit = scan(builder_shell_path)
+    if not hit or builder_test_path(hit, cwd) or scan(builder_test_path):
+        return hit, BUILDER_TEST_REASON if hit else ""
+    return hit, BUILDER_WORKFLOW_SHELL_REASON
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
-    """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
-    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, with the paths
-    that `find`, `xargs`, a `for` list and a substitution feed to a writer read too (`read_fed`), and
-    the python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
-    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True,
-                             read_fed=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+    """The test or workflow path a builder's shell command writes, else '' (`builder_shell_hit`)."""
+    return builder_shell_hit(raw, stripped, cwd)[0]
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -3591,9 +3626,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
     # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
-        matched = builder_shell_test_hit(raw, stripped, cwd)
+        matched, why = builder_shell_hit(raw, stripped, cwd)
         if matched:
-            refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
+            refuse(tool, "deny", "builder-test-edit", why, matched)
 
     # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
     # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
