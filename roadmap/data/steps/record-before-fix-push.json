@@ -5,6 +5,6 @@
   "order": 268.63,
   "owner": "coordinator",
   "why": "Lanes lint-before-record-push (#1755, 21:30 CST) and archive-refuses-unpr-branch (#1744, about 20:57 CST) each pushed a fix before posting the round's record, so the tool could not write a fix-check record and a fresh round was needed.",
-  "note": "Related: reviewed-head-push-ask (#1725) asks only when a record with a Fix check exists; this is the no-record-yet case. fix-push-needs-fail-record covers a FAIL round with no record; this covers a PASS round. Coordinator 21:31 CST Nov 7; filed 21:33 CST. Incident 3: lane auto-merge-refused (#1763) had no review record after rounds 1 and 2 (coordinator, 21:41 CST Nov 7).",
-  "updatedAt": "2026-11-07T21:43:00-06:00"
+  "note": "Related: reviewed-head-push-ask (#1725) asks only when a record with a Fix check exists; this is the no-record-yet case. fix-push-needs-fail-record covers a FAIL round with no record; this covers a PASS round. Coordinator 21:31 CST Nov 7; filed 21:33 CST. Incident 3: lane auto-merge-refused (#1763) had no review record after rounds 1 and 2 (coordinator, 21:41 CST Nov 7). Incident 4: lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8) pushed a notes fix on #1733 before posting its round-3 record; merge --review-record refused both heads, which cost one extra sonnet recheck. Guard candidate: the merge refusal names the order, record first, then the push (coordinator, 22:20 CST Nov 7).",
+  "updatedAt": "2026-11-07T22:20:00-06:00"
 }
