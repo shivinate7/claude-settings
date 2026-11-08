@@ -1,11 +1,11 @@
 {
   "title": "Text after pwsh -c in a Bash call is read by Bash rules, so a smart-quoted path inside it is judged right",
   "phase": "now",
-  "status": "todo",
+  "status": "ready",
   "order": 1.071,
   "owner": "coordinator",
   "lane": "notes-fix-large-1",
   "why": "_resolve_vars in hooks/guard_frozen.py keeps the PowerShell type for pwsh -c text inside a Bash call, so a smart-quoted path inside it is read by PowerShell rules.",
-  "note": "Queued by lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m) on the coordinator's word, 20:27 CST Nov 7. Red first, after #1724 and #1731 hand off; stacks on #1731. The lane also adds one notes line: _resolve_vars quote injection, Fix: none, attacker-only form (guard-guards-mistakes-only), Until 2026-11-21. Touch into frozen paths is covered by #1633 (MUTATING_COMMAND gains touch). Filed 20:29 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:29:00-06:00"
+  "note": "Queued by lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m) on the coordinator's word, 20:27 CST Nov 7. Red first, after #1724 and #1731 hand off; stacks on #1731. The lane also adds one notes line: _resolve_vars quote injection, Fix: none, attacker-only form (guard-guards-mistakes-only), Until 2026-11-21. Touch into frozen paths is covered by #1633 (MUTATING_COMMAND gains touch). Filed 20:29 CST Nov 7. Built as #1774 (head 576542cd6), stacked on #1731, with runner 8; adds notes line resolve-vars-quote-injection, attacker-only, until 2026-11-21 (lane notes-fix-large-1, 00:10 CST Nov 8).",
+  "updatedAt": "2026-11-08T00:15:00-06:00"
 }
