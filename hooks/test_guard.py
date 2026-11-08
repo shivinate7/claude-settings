@@ -5636,9 +5636,23 @@ add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refuse
 add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
+add("check-tail: ci-job checks --lint piped to grep, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint | grep FAIL")
 add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 7 2>&1 | tee lint.log")
+# A lone tee.exe, Tee-Object or Out-File with nothing after it is allowed too: each writes the output
+# to a file the agent reads back, so no filter cuts it.
+add("check-tail: merge --lane-lint through tee.exe with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | tee.exe lint.log")
+add("check-tail: merge --lane-lint through Tee-Object with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | Tee-Object -FilePath lint.log")
+add("check-tail: merge --lane-lint through Out-File with nothing after it, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | Out-File lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='grep -n "--lane-lint" merge/merge.py | tail -20')
