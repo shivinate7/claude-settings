@@ -1,0 +1,11 @@
+{
+  "title": "Five follow-ups from round 3 of the frozen-path crash fix: a missing test row, a quadratic judge, two false alarms and a slash-part miss",
+  "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 16:49 CST Nov 8; Merge after: #2269 (frozen-crash-residuals, round 3 PASS, net value positive). (1) Test gap: no row feeds a write through a load of a capped name. The mutant \"_py_load_is_harmless returns True\" (hooks/guard_core.py about line 2634) turns 0 of 58 rows red. Suggested row 59: 60 `/ \"a\"` links, then p = v59 / \".claude\" / \"hooks\" / \"x.py\" and open(p, \"w\"), want deny. (2) Speed: _py_cap_hit_is_harmless (about lines 2610-2632) judges every load at each cap hit, which is quadratic. 2000 pairs of `p = p / \"x\"` and `print(p)` take 17.7 s against 4.7 s on the base, and reach the 60 s timeout near 4000 lines. Fix: judge each target name once per script. (3) False alarm: foo(p) on a capped name, with frozen text elsewhere, is denied; it needs a chain of 50 links or more. (4) Miss on head, base and main: _crash_parts_hit (hooks/guard_frozen.py about lines 960-990) skips slash-prefixed parts. Repro: 60 x `p += \"/.\"`, then \"/.claude\", \"/hooks\", \"/x.py\", then open(p, \"w\"), which is allowed. (5) False alarm, also on the base: an unused 10-link chain under ~/.claude/hooks plus a print is denied.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 840,
+  "updatedAt": "2026-11-08T16:50:00-06:00"
+}

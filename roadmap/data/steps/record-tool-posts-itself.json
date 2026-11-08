@@ -1,11 +1,11 @@
 {
   "title": "`merge --review-record` posts the review record itself, so no lane posts it by hand",
   "why": "Coordinator 13:12 CST Nov 8: `merge --review-record` prints the record and a lane posts it by hand. Lane session_013NEJKzXyKNARtJsbz3Q1R2 added prose after the CI line on three posts (#1755, #2032), which parse_review rejects at batch time. Fix the cause: the tool posts the comment itself, so no hand step is left. This covers the lane's proposed record-post-shape-check; review-record-parse-warn and review-record-post-check stay as the read-side checks.",
-  "note": "Parked (coordinator 13:13 CST Nov 8): #1706 (open, head 85de59e54) already refuses a record body at post time that does not parse, which is the harm this step targets. Reopen only if a malformed record gets posted after #1706 merges (rule building-guard-needs-incident).",
+  "note": "Parked (coordinator 13:13 CST Nov 8): #1706 (open, head 85de59e54) already refuses a record body at post time that does not parse, which is the harm this step targets. Reopen only if a malformed record gets posted after #1706 merges (rule building-guard-needs-incident). Incident (lane bg-tail-loses-verdict, its own mistake, 16:48 CST Nov 8; it asked for step record-print-then-post, folded here): it ran `merge --review-record ... > rec.md; printf footer >> rec.md; gh api .../comments -F body=@rec.md`. The record print refused (rc 2), but `;` still ran the post with a body that held only the footer. The content filter emptied the body, so nothing was posted. Interim guard it proposed: check-tail, or a sibling rule, refuses `;` or a newline between a `--review-record` print and the post, and requires `&&`. A tool that posts the record itself removes the hand chain.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 802,
-  "updatedAt": "2026-11-08T13:15:00-06:00"
+  "updatedAt": "2026-11-08T16:50:00-06:00"
 }
