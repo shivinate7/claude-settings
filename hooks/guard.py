@@ -1962,8 +1962,7 @@ def builder_test_path(path: str, cwd: str) -> bool:
 
 
 # A builder may ADD to a file here, never remove or change a line of it: one edited helper or import can
-# weaken every mutant the file holds. The set is AUTHOR_MUTATION_TESTS, one home (coordinator rulings, 2026-11-07
-# 18:44 and 18:54 CST). The set's own names are guarded too: see `builder_set_breach`.
+# weaken every mutant the file holds. The set is AUTHOR_MUTATION_TESTS, one home (decision builders-cannot-edit-tests). The set's own names are guarded too: see `builder_set_breach`.
 BUILDER_ADD_ONLY = AUTHOR_MUTATION_TESTS
 # The file that holds AUTHOR_MUTATION_TESTS. A builder may add a name to the set, never remove or change one.
 AUTHOR_SET_FILE = "hooks/guard.py"
@@ -2045,7 +2044,7 @@ def _edited_text(tool_input, full: str):
 
 def builder_add_only_breach(tool_input, full: str) -> bool:
     """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line HEAD
-    holds (coordinator pick, 2026-11-07 18:27 CST: an existing line is a line committed at HEAD, so the
+    holds (decision builders-cannot-edit-tests: an existing line is a line committed at HEAD, so the
     builder may change its own uncommitted adds). The result is read against HEAD's text. HEAD or the
     call unreadable: refuse, never pass."""
     if not isinstance(tool_input, dict):
