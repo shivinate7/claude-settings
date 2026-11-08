@@ -14897,6 +14897,79 @@ for _label, _check in (
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
 FAMILY = "paths"
+# ---- a builder's find past the walk cap, judged in process. A cap is a module global of guard_frozen, which
+# `_first_test_under` reads on each call, so mock.patch lowers it and no tree of thousands of files is built. The
+# subprocess cases above cannot be patched, so these judge in this process. CAP_BUILDER holds the payload fields of
+# a builder's call, as `B` does above. MUTATE_ONLY="builder-cap:" runs these three alone.
+CAP_BUILDER = {"agent_id": "bld1", "agent_type": "builder"}
+
+
+def _cap_judge(command, cwd, **kw):
+    """One builder's Bash call, judged in this process on this machine (judge_in_process, local)."""
+    return judge_in_process(command, cwd, extra=CAP_BUILDER, local=True, **kw)
+
+
+def builder_cap_too_large_check():
+    """A builder's find that hits _WALK_LIMIT in a checkout with a test is refused as too large to check, not as the
+    test write. FINDDEEP's test is two folders down, past a one-entry cap, so the walk stops before it. Under the
+    default cap the same find meets that test and is refused as the test write (the control)."""
+    guard = _load_guard_module()
+    command = "find . | xargs sed -i s/a/b/"
+    calls = {("guard_frozen", "_may_hold_a_test"): None}
+    decision, reason, _took = _cap_judge(command, FINDDEEP, patches={"guard_frozen": {"_WALK_LIMIT": 1}}, calls=calls)
+    if not calls[("guard_frozen", "_may_hold_a_test")].call_args_list:
+        return False, "the walk never reached its cap: _may_hold_a_test was not called"
+    if decision != "deny" or guard.BUILDER_TOO_LARGE_REASON not in reason:
+        return False, "the capped find got %s %r, want deny with BUILDER_TOO_LARGE_REASON" % (decision, reason)
+    control, control_reason, _took = _cap_judge(command, FINDDEEP)
+    if control != "deny" or guard.BUILDER_TEST_REASON not in control_reason:
+        return False, ("the same find under the default cap got %s %r, want deny with BUILDER_TEST_REASON"
+                       % (control, control_reason))
+    return True, "a capped builder find is refused as too large to check; the default cap meets the test"
+
+
+def builder_cap_outside_allowed_check():
+    """An unfiltered find past _WALK_LIMIT over a tree outside every checkout is allowed. No checkout lies inside
+    that tree, so `_may_hold_a_test` answers no, and nothing past the cap can be a test."""
+    materialize(SCRATCHSMALL)
+    command = "find %s | xargs rm -f" % SCRATCHSMALL
+    calls = {("guard_frozen", "_may_hold_a_test"): None}
+    decision, reason, _took = _cap_judge(command, GITMAIN, patches={"guard_frozen": {"_WALK_LIMIT": 1}}, calls=calls)
+    if not calls[("guard_frozen", "_may_hold_a_test")].call_args_list:
+        return False, "the walk never reached its cap: _may_hold_a_test was not called"
+    if decision != "allow":
+        return False, ("the unfiltered find past the cap over a tree outside every checkout got %s %r, want allow"
+                       % (decision, reason))
+    return True, "an unfiltered find past the walk cap over a tree outside every checkout is allowed"
+
+
+def builder_cap_list_limit_check():
+    """A filtered find past _LIST_LIMIT, in a checkout with a test, is refused as too large to check. The name filter
+    lists only *.pyc, but the list cap counts every entry the walk lists, so the cap decides, not the judged files.
+    Under the default cap the same find lists no .pyc and is allowed (the control)."""
+    guard = _load_guard_module()
+    command = "find . -name '*.pyc' | xargs rm -f"
+    calls = {("guard_frozen", "_first_test_under"): None}
+    decision, reason, _took = _cap_judge(command, FINDDEEP, patches={"guard_frozen": {"_LIST_LIMIT": 0}}, calls=calls)
+    named = [call for call in calls[("guard_frozen", "_first_test_under")].call_args_list
+             if len(call.args) > 3 and call.args[3] is not None]
+    if not named:
+        return False, "the find's name filter never reached the walk"
+    if decision != "deny" or guard.BUILDER_TOO_LARGE_REASON not in reason:
+        return False, ("the filtered find past the list cap got %s %r, want deny with BUILDER_TOO_LARGE_REASON"
+                       % (decision, reason))
+    control, control_reason, _took = _cap_judge(command, FINDDEEP)
+    if control != "allow":
+        return False, "the same find under the default list cap got %s %r, want allow" % (control, control_reason)
+    return True, "a filtered find past the list cap in a checkout with a test is refused as too large to check"
+
+
+LOG_CHECKS_EXTRA.append(("builder-cap: a builder's find past the walk cap is too large to check, not a test write",
+                         builder_cap_too_large_check))
+LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered find past the walk cap over a tree outside every checkout is allowed",
+                         builder_cap_outside_allowed_check))
+LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap in a checkout with a test is too large to check",
+                         builder_cap_list_limit_check))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
@@ -23891,27 +23964,60 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
 # captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
 # fixture config for the call and then restored.
-def judge_in_process(command, cwd):
-    """Return (decision, reason, CPU seconds) for one Bash call judged in this process."""
+# The walk-cap pins (`builder_cap_*`, below) patch the guard's cap constants and read the calls the guard makes to
+# them, so this helper also takes the payload's agent fields (`extra`), the patches and reads (`patches`, `calls`),
+# and `local`. `local` judges the call as decide() judges it on this machine: the cloud, lane and project variables
+# are dropped, and the load is read as LB_NORMAL. A call without these arguments is judged as before.
+LOCAL_DROPPED_ENV = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID",
+                     "CLAUDE_PROJECT_DIR")
+
+
+def judge_in_process(command, cwd, extra=None, patches=None, calls=None, local=False):
+    """Return (decision, reason, CPU seconds) for one Bash call judged in this process.
+
+    `extra` adds payload fields, such as an agent's agent_id and agent_type. `patches` is {module: {name: value}}:
+    each value is set on the loaded guard module ("guard") or on a guard_<family> module, for this call only. `calls`
+    is {(module, name): None}: each name is replaced by a mock that wraps it, and the mock is stored back in `calls`,
+    so the case reads the calls the guard made to it."""
     materialize(cwd)
     guard = _load_guard_module()
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
-    printed = io.StringIO()
-    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    payload.update(extra or {})
+    modules = {"guard": guard}
+    wanted = {module: dict(names) for module, names in (patches or {}).items()}
+    if local:
+        wanted.setdefault("guard", {})["read_load"] = lambda: dict(LB_NORMAL)
+    keep = ["CLAUDE_CONFIG_DIR"] + (["CLAUDE_GUARD_ROOT_PID"] + list(LOCAL_DROPPED_ENV) if local else [])
+    saved = {name: os.environ.get(name) for name in keep}
     os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    if local:
+        for name in LOCAL_DROPPED_ENV:
+            os.environ.pop(name, None)
+        os.environ["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`, as decide() sets it
+    printed = io.StringIO()
     try:
-        started = time.process_time()
-        try:
-            with contextlib.redirect_stdout(printed):
-                guard.judge(payload)
-        except SystemExit:
-            pass
-        took = time.process_time() - started
+        with contextlib.ExitStack() as stack:
+            for module, names in wanted.items():
+                target = modules.get(module) or sys.modules[module]
+                for name, value in names.items():
+                    stack.enter_context(mock.patch.object(target, name, value))
+            for module, name in list(calls or {}):
+                target = modules.get(module) or sys.modules[module]
+                calls[(module, name)] = stack.enter_context(
+                    mock.patch.object(target, name, wraps=getattr(target, name)))
+            started = time.process_time()
+            try:
+                with contextlib.redirect_stdout(printed):
+                    guard.judge(payload)
+            except SystemExit:
+                pass
+            took = time.process_time() - started
     finally:
-        if saved is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = saved
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
     text = printed.getvalue().strip()
     if not text:
         return "allow", "", took
