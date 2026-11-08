@@ -27,9 +27,12 @@ a turn end in these cases:
     task item homed to a step. A file home (Homes.problem, _judge) skips a repo whose layout or git
     cannot be read (LayoutError, _GitFailure). A step or closed-note home (Homes._held) skips a repo
     whose git read fails only. A readable repo still decides; the block reason names each skipped repo
-    (Homes.unread_note). A repo whose rev-parse exits non-zero is dropped unnamed (Homes._root). Only
-    when no repo reads (neither folder is in a git repo, or every repo is unreadable) do these homes
-    pass unchecked, and a systemMessage says so;
+    (Homes.unread_note). A repo whose rev-parse exits non-zero is dropped unnamed (Homes._root), for a
+    relative home only: an absolute home under such a repo still blocks as "in no git repo"
+    (Homes._locate). These homes pass unchecked, and a systemMessage says so, in two cases. No repo reads
+    (neither folder is in a git repo, or every repo is unreadable). Or a rev-parse times out or finds no
+    git binary: it raises _GitFailure, which escapes Homes._root and Homes._repos, so the whole check
+    fails open even when the other repo reads;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
