@@ -505,10 +505,11 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     def label_run(self, *argv, label_error=None):
         """-> (rc, out, err, posts) of merge in the lane checkout, with a host that records every gh call. posts holds each REST POST to a
-        labels route as (its argv and payload as one text, the lint runs seen when it was sent)."""
+        labels route as (the route under the repo, such as issues/7/labels; its argv and payload as one text; the lint runs seen when it was sent)."""
         self.host = LabelPost(self.host, label_error=label_error, lint_runs=lambda: len(self.lint_calls()))
         rc, out, err = self.run_main(*argv, CLAUDE_CODE_REMOTE=None)
-        posts = [(" ".join(args) + payload, seen) for args, payload, seen in self.host.calls if "POST" in args and "/labels" in " ".join(args)]
+        posts = [(re.sub(r"^repos/[^/]+/[^/]+/", "", args[1]), " ".join(args) + payload, seen)
+                 for args, payload, seen in self.host.calls if "POST" in args and "/labels" in " ".join(args)]
         return rc, out, err, posts
 
     def test_integration_on_a_passing_lint_posts_one_batch_label_after_the_lint(self):
@@ -516,7 +517,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration")
         self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + out + err)
         self.assertEqual(len(posts), 1, "want one label POST, got %d:\n%s" % (len(posts), out + err))
-        text, seen = posts[0]
+        route, text, seen = posts[0]
+        self.assertEqual(route, "issues/7/labels", "the label POST went to %s, not to #7, the pull request the lint was given: %s" % (route, text))
         self.assertIn("batch", text, "the label POST does not name batch: " + text)
         self.assertEqual(seen, 1, "the label POST went out before the lint ran")
         self.assertEqual(rc, 0, out + err)
@@ -548,6 +550,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration", label_error="HTTP 422: Validation Failed: label does not exist")
         text = out + err
         self.assertEqual(len(posts), 1, "no label POST was sent:\n" + text)
+        self.assertEqual(posts[0][0], "issues/7/labels", "the failed label POST went to %s, not to #7, the pull request the lint was given" % posts[0][0])
         self.assertRegex(text, r"(?i)unknown", "the failed label POST does not say the label is unknown:\n" + text)
         self.assertEqual(len(pass_lines(out)), 1, "the lint's PASS line was not kept:\n" + text)
         self.assertEqual(rc, 0, text)
