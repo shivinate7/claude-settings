@@ -851,12 +851,16 @@ class SessionEndFetchThrottle(unittest.TestCase):
     def session_end(self, cwd):
         self.hook.handle({"hook_event_name": "SessionEnd", "cwd": cwd}, elapsed_seconds=0.0)
 
+    @contextlib.contextmanager
     def pinned_clock(self):
-        """The sweep's wall clock, pinned to PINNED_WALL_CLOCK. A fixture stamped from that value and the
-        sweep that judges it read one instant, so a stall between the stamp and the judge cannot flip it."""
+        """The sweep's wall clock (`time`) is pinned to PINNED_WALL_CLOCK, and its monotonic deadline
+        clock (`_now`) to a fixed reading, so a stall cannot end a pass at its deadline. A fixture stamped
+        from the wall value and the sweep that judges it read one instant."""
         pinned = mock.MagicMock(wraps=time)
         pinned.time.return_value = self.PINNED_WALL_CLOCK
-        return mock.patch.object(self.sweep, "time", pinned)
+        with mock.patch.object(self.sweep, "time", pinned), \
+                mock.patch.object(self.sweep, "_now", lambda: 0.0):
+            yield
 
     def counts(self, repo):
         where = os.path.normcase(os.path.realpath(repo))
@@ -1019,7 +1023,7 @@ class SessionEndFetchThrottle(unittest.TestCase):
         # a throttled run cannot know that from a ref up to 10 minutes old: it is kept too.
         repo = self.repo("throttle_stale_remote")
         remote = repo + "_remote.git"
-        with self.pinned_clock():  # every record and every judge in this case reads one clock
+        with self.pinned_clock():  # every record, judge and deadline check in this case reads the pinned clocks
             self.session_end(repo)  # fetches, records the time
             self.pushed_branch(repo, "gone-upstream")
             self.pushed_branch(repo, "still-pushed")
