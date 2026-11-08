@@ -49,6 +49,7 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
+import ast
 import json
 import os
 import re
@@ -1492,6 +1493,255 @@ class TestsForTests(unittest.TestCase):
                 self.assertIn(call, show(REPO, "HEAD", suite), "the fixture: %s calls its loader with %s" % (suite, target))
                 self.assertIn(suite, printed[target],
                               "%s loads %s through a parameter, so --tests-for %s must print it" % (suite, target, target))
+
+
+# The `_loads_module` table, called directly. Each row is a form's name and a Python text, read with the stem `widget`.
+# A text is the shared header, then the form's own lines. A text that does not parse reads False too, so each row
+# asserts that it parses before it asserts False.
+def loads_source(*lines):
+    """Python text: the shared header, then each line."""
+    return SPEC_HEADER + "\n" + "\n".join(lines) + "\n"
+
+
+def kwargs_copy_source(local):
+    """A `**kwargs` loader that copies the keyword `path` into the local `local`, then loads the local. The call passes
+    `path=` by keyword, so only the local's name decides whether the loader follows the copy."""
+    return loads_source(
+        "def load(**kwargs):",
+        '    %s = kwargs["path"]' % local,
+        '    return importlib.util.spec_from_file_location(kwargs["name"], %s)' % local,
+        "",
+        "",
+        'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
+    )
+
+
+FOLLOWED_FORMS = (
+    ("a positional argument", TESTS_FOR_LOADS["tests/test_form_wrapper_second.py"]),
+    ("a keyword argument", TESTS_FOR_LOADS["tests/test_form_wrapper_keyword.py"]),
+    ("a bound name", TESTS_FOR_LOADS["tests/test_form_spec_named.py"]),
+    ("a **kwargs loader that copies the keyword into a local of the same name", kwargs_copy_source("path")),
+)
+UNFOLLOWED_FORMS = (
+    ("an imported loader", loads_source(
+        "from loaders import load_widget",
+        "",
+        'MODULE = load_widget("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a wrapper called through another wrapper", loads_source(
+        "def inner(path, name):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "def outer(path, name):",
+        "    return inner(path, name)",
+        "",
+        "",
+        'WIDGET = outer(os.path.join(HERE, "widget.py"), "x_under_test")',
+    )),
+    ("an attribute call, obj.load(...)", loads_source(
+        "class Loader:",
+        "    def load(self, name, path):",
+        "        return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "LOADER = Loader()",
+        'MODULE = LOADER.load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a self call, self.load(...)", loads_source(
+        "class Loader:",
+        "    def load(self, name, path):",
+        "        return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "    def run(self):",
+        '        return self.load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a default literal, path=WIDGET", loads_source(
+        'WIDGET = os.path.join(HERE, "widget.py")',
+        "",
+        "",
+        "def load(name, path=WIDGET):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'MODULE = load("x_under_test")',
+    )),
+    ("a lambda loader", loads_source(
+        "load = lambda name, path: importlib.util.spec_from_file_location(name, path)",
+        'MODULE = load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a bare alias, helper = load", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        "helper = load",
+        'MODULE = helper("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a loader that takes *args", loads_source(
+        "def load(*args):",
+        "    return importlib.util.spec_from_file_location(args[0], args[1])",
+        "",
+        "",
+        'MODULE = load("x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("a loader that takes **kwargs, read inline", loads_source(
+        "def load(**kwargs):",
+        '    return importlib.util.spec_from_file_location(kwargs["name"], kwargs["path"])',
+        "",
+        "",
+        'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
+    )),
+    ("a **kwargs loader that copies the keyword into a differently named local", kwargs_copy_source("p")),
+    ("a call that spreads the path in, *names", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'NAMES = ["x_under_test"]',
+        'MODULE = load(*NAMES, os.path.join(HERE, "widget.py"))',
+    )),
+    ("a call that spreads a dict, **{...}", loads_source(
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'MODULE = load("x_under_test", **{"path": os.path.join(HERE, "widget.py")})',
+    )),
+    ("a for target", loads_source(
+        'for path in [os.path.join(HERE, "widget.py")]:',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", path)',
+    )),
+    ("a comprehension target", loads_source(
+        "MODULES = [",
+        '    importlib.util.spec_from_file_location("x_under_test", path)',
+        '    for path in [os.path.join(HERE, "widget.py")]',
+        "]",
+    )),
+    ("a tuple unpacking", loads_source(
+        'PATH, MODE = os.path.join(HERE, "widget.py"), "r"',
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("an augmented assignment", loads_source(
+        'PATH = os.path.join(HERE, "widget")',
+        'PATH += ".py"',
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("a with ... as target", loads_source(
+        "import contextlib",
+        "",
+        'with contextlib.nullcontext(os.path.join(HERE, "widget.py")) as PATH:',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("an attribute store, self.path = ...", loads_source(
+        "class Holder:",
+        "    def __init__(self):",
+        '        self.path = os.path.join(HERE, "widget.py")',
+        "",
+        "    def run(self):",
+        '        return importlib.util.spec_from_file_location("x_under_test", self.path)',
+    )),
+    ("a class constructor that takes the path", loads_source(
+        "class Loader:",
+        "    def __init__(self, path):",
+        '        self.module = importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        "",
+        'LOADER = Loader(os.path.join(HERE, "widget.py"))',
+    )),
+    ("functools.partial", loads_source(
+        "import functools",
+        "",
+        "",
+        "def load(name, path):",
+        "    return importlib.util.spec_from_file_location(name, path)",
+        "",
+        "",
+        'LOAD_WIDGET = functools.partial(load, "x_under_test", os.path.join(HERE, "widget.py"))',
+    )),
+    ("map", loads_source(
+        "def load(path):",
+        '    return importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        "",
+        'MODULES = list(map(load, [os.path.join(HERE, "widget.py")]))',
+    )),
+    ("a walrus binding", loads_source(
+        'if (PATH := os.path.join(HERE, "widget.py")):',
+        '    MODULE = importlib.util.spec_from_file_location("x_under_test", PATH)',
+    )),
+    ("a split literal", loads_source(
+        'MODULE = importlib.util.spec_from_file_location("x_under_test", os.path.join(HERE, "widget" + ".py"))',
+    )),
+)
+
+
+def shift_source(call):
+    """The method-shift fixture: a module-level `load` that returns a basename, and `Reader.load`, whose second parameter
+    is the path. Only `call` differs between the subject and its control."""
+    return loads_source(
+        "def load(name, path):",
+        "    return os.path.basename(path)",
+        "",
+        "",
+        "class Reader:",
+        "    def load(self, path):",
+        '        return importlib.util.spec_from_file_location("x_under_test", path)',
+        "",
+        call,
+    )
+
+
+class LoadsModuleTests(unittest.TestCase):
+    """`_loads_module(text, stem)` in hooks/mutate_guard.py, called directly. The followed forms read True. The unfollowed
+    forms its docstring names read False. A text that fails to parse also reads False, so each row asserts it parses."""
+
+    def assert_parses(self, name, text):
+        try:
+            ast.parse(text)
+        except SyntaxError as error:
+            self.fail("%s does not parse, so its False proves nothing: %s" % (name, error))
+
+    def test_a_followed_form_reads_as_a_load(self):
+        for name, text in FOLLOWED_FORMS:
+            with self.subTest(form=name):
+                self.assert_parses(name, text)
+                self.assertTrue(mutate_guard._loads_module(text, "widget"),
+                                "%s loads widget.py, so _loads_module reads True" % name)
+
+    def test_an_unfollowed_form_reads_as_not_a_load(self):
+        for name, text in UNFOLLOWED_FORMS:
+            with self.subTest(form=name):
+                self.assert_parses(name, text)
+                self.assertFalse(mutate_guard._loads_module(text, "widget"),
+                                 "%s is not followed, so _loads_module reads False" % name)
+
+    def test_an_empty_text_reads_as_not_a_load(self):
+        self.assertFalse(mutate_guard._loads_module("", "widget"), "an empty text loads nothing")
+
+    def test_a_positional_bare_call_feeds_a_same_named_method_and_reads_true(self):
+        # A known false selection, pinned as the docstring states it. The bare call `load("x", "widget.py")` also feeds
+        # `Reader.load`, since every def of that name takes the call, and its second parameter is the path. The control
+        # passes another module, so the True comes from the bare call's literal and not from the method's own text.
+        control = shift_source('LOADED = load("x", "other_module.py")')
+        subject = shift_source('LOADED = load("x", "widget.py")')
+        self.assert_parses("the control", control)
+        self.assertFalse(mutate_guard._loads_module(control, "widget"),
+                         "the control passes another module, so _loads_module reads False")
+        self.assert_parses("the subject", subject)
+        self.assertTrue(mutate_guard._loads_module(subject, "widget"),
+                        "the known false selection: the bare call feeds Reader.load, so _loads_module reads True")
+
+    def test_a_keyword_bare_call_feeds_the_same_method_and_reads_true(self):
+        # The docstring's own example, `load(path=X)`: the keyword feeds the method's path as well.
+        control = shift_source('LOADED = load(path="other_module.py")')
+        subject = shift_source('LOADED = load(path="widget.py")')
+        self.assert_parses("the control", control)
+        self.assertFalse(mutate_guard._loads_module(control, "widget"),
+                         "the control passes another module, so _loads_module reads False")
+        self.assert_parses("the subject", subject)
+        self.assertTrue(mutate_guard._loads_module(subject, "widget"),
+                        "the known false selection: the keyword call feeds Reader.load, so _loads_module reads True")
 
 
 if __name__ == "__main__":
