@@ -24,7 +24,7 @@ Dropped with the old judges, by the same ruling:
 
 Risk kind: likely risk. A session puts a question with no goal, no problem or no stated gain and loss to the owner in normal work. Landed 2026-10-22.
 
-Cost, per question with options: one `call_judge.py` process. A box that fails the code check makes no model call. Any other box costs one Opus call, capped at 60 s. Per `ArtifactData` call: one process. It exits at once unless the action is `set`, `update`, `str_replace` or `batch`. It makes one Opus call only for an item write that passes the code check. The write carries `options` or `context` (a decision), or `context`, `steps` or `options` (a task). Or it is a `str_replace` on `context` or `options`. A closed item and a title-only update make no call. A lone task write costs one Opus call; a task in a batch joins the batch's one call. The bound stays one call per `ArtifactData` call.
+Cost, per question with options: one `call_judge.py` process (`hooks/test_call_judge.py` runs it once per payload). A box that fails the code check makes no model call. Any other box costs one Opus call, capped at 60 s. Per `ArtifactData` call: one process. It exits at once unless the action is `set`, `update`, `str_replace` or `batch`. It makes one Opus call only for an item write that passes the code check. The write carries `options` or `context` (a decision), or `context`, `steps` or `options` (a task). Or it is a `str_replace` on `context` or `options`. A closed item and a title-only update make no call. A lone task write costs one Opus call; a task in a batch joins the batch's one call. The bound stays one call per `ArtifactData` call.
 
 Kind: process
 Home: settings.json
