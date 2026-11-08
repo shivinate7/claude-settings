@@ -70,7 +70,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
    each lane PR closes as replaced.
    `merge <integration PR> --confirm` on the draft copies each lane's `Retire-run:` and `Drops-lines:`
-   lines into the integration body's last paragraph, before the ready mark.
+   lines into the integration body's last counted paragraph, before the ready mark.
    When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
    that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each

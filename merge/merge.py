@@ -265,11 +265,28 @@ def lift_message(lifts):
     """-> the merge commit message for the lifts of this run, one line per flag, or None when no check was lifted (GitHub's default message stays)."""
     return "\n".join(f"Reason flag: {flag}: {reason}" for flag, reason in lifts.items()) or None
 
-def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
+class CiteReader:
+    """The run reader of the cite checks: called with a run URL it reads that run (Host.cited_run). Its head_run reads the head's own
+    checks run (Host.head_checks_run), which holds a cite deferred to merge. One object, so each check that takes a reader gets both."""
+
+    def __init__(self, host):
+        self.host = host
+
+    def __call__(self, url):
+        return self.host.cited_run(url)
+
+    def head_run(self, sha):
+        return self.host.head_checks_run(sha)
+
+def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None, head_run=None):
     """The shared silent-undo lint (lint/check_silent_undo.py), run on the branch before anything is pushed.
     A finding refuses. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
-    git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None."""
+    git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None.
+    head_run(sha) reads the head's own checks run: a Retire-run cite on a lane tip the head contains is held on it. It defaults to the
+    run_state reader's own head_run (CiteReader); with neither, the head has no run, so such a cite is refused, never deferred."""
+    head_run = head_run or getattr(run_state, "head_run", None) or (lambda sha: None)
+    kw = {"head_run": head_run} if run_state is not None else {}  # with no run reader no cite is read, and no mode is needed
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_silent_undo as undo
     # The scan is slow on a merge-heavy branch and merge runs it twice. Its answer depends only on the head, the base tip, the PR body,
@@ -291,7 +308,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
             beater = threading.Thread(target=beat, daemon=True)
             beater.start()
             try:
-                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body, run_state=run_state, retire_head=retire_head)  # a base with no generator: the page is judged by the generator that rebuilds it
+                UNDO_MEMO[key] = undo.check(wt, base_ref, "HEAD", tool=RECORDS, pr_body=pr_body, run_state=run_state, retire_head=retire_head, **kw)  # a base with no generator: the page is judged by the generator that rebuilds it
             finally:  # the beat stops, and is joined, before any line below: no beat prints after "scan done"
                 done.set()
                 beater.join()
@@ -321,7 +338,7 @@ def debt_check(wt, base_ref, host, info):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
-        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
+        found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=CiteReader(host), isolate=True, head_run=host.head_checks_run)
     except debt.Unknown as e:
         raise Dropped(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
     if found:
@@ -816,6 +833,15 @@ class Host:
         c, out = self.api(f"pulls/{n}", method="PATCH", body={"body": body})
         if c:
             raise Stop(f"writing the body of #{n} to GitHub failed: {out}")
+
+    def head_checks_run(self, sha):
+        """-> (conclusion, html_url) of the latest `checks.yml` workflow run on the commit `sha`, or None when it has none. The conclusion is None
+        while the run is pending. The latest is the newest created, a re-run included. A failed read is a Stop, never "no run"."""
+        runs = self.pages("actions/workflows/checks.yml/runs", "workflow_runs", {"head_sha": sha})
+        if not runs:
+            return None
+        run = max(runs, key=lambda r: (r.get("created_at") or "", r.get("run_number") or 0))
+        return run.get("conclusion"), run.get("html_url")
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
@@ -2724,7 +2750,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
         try:
-            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
+            undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), CiteReader(host), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
@@ -2806,8 +2832,7 @@ def lane_key_lines(wt, base_ref, sha, host, n, body):
         tips, dropped = read_lanes(wt, base_ref, sha)
     except Exception as e:
         raise Stop(f"the lanes of the batch could not be read ({type(e).__name__}: {e}). {nothing}")
-    squash = lambda line: " ".join(line.split())
-    have = {squash(x) for x in debt.key_lines(body)}
+    have = {debt.line_key(x) for x in debt.key_lines(body)}  # what the body already says: a cited slug, an excused path, or a bare line
     rows, want = [], []
     for tip in tips:
         if tip in dropped:
@@ -2818,8 +2843,8 @@ def lane_key_lines(wt, base_ref, sha, host, n, body):
         rows += mine
     for row in sorted(rows, key=lambda r: r["number"]):
         for line in debt.key_lines(row.get("body") or ""):
-            if squash(line) not in have:
-                have.add(squash(line))
+            if debt.line_key(line) not in have:
+                have.add(debt.line_key(line))
                 want.append(line)
     if not want:
         return None
@@ -2832,7 +2857,7 @@ def lane_key_lines(wt, base_ref, sha, host, n, body):
     end = at + len(para)
     added = "\n".join(want)
     new = text[:end] + "\n" + added + text[end:] if para else added + ("\n\n" + text if text.strip() else "")
-    if not {squash(x) for x in want} <= {squash(x) for x in debt.key_lines(new)}:
+    if not {debt.line_key(x) for x in want} <= {debt.line_key(x) for x in debt.key_lines(new)}:
         raise Stop(f"the lane key lines would not be in the last counted paragraph of the body of #{n}. {nothing}")
     return new.replace("\n", "\r\n") if crlf else new
 
@@ -2882,6 +2907,8 @@ def draft_step(root, cfg, n, host, info):
     finally:
         drop_worktree(root, tmp, wt)
     if body is not None:
+        if host.pr(n)["body"] != info.get("body", ""):  # a person edited it while the lanes were read: a write would drop that edit
+            raise Stop(f"the body of #{n} changed while the lane key lines were read. Nothing was written and #{n} was not marked ready. Run --confirm again.")
         host.set_body(n, body)
         say(f"merge: the lane key lines were copied into the body of #{n}.")
     ok, why = host.ready(n)
@@ -2920,7 +2947,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
-        record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
+        record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), CiteReader(host), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
@@ -2994,7 +3021,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if c:  # never check against a stale base tip
                     stop(f"cannot fetch origin {base}, so the claim cannot be proved fresh {BASE_CITE}:\n" + out)
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
-                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
+                    record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), CiteReader(host), info["head"]))
                     debt_check(wt, base_ref, host, info)
                 except Stop as e:
                     stop(str(e), Liftable if isinstance(e, Liftable) else Stop)

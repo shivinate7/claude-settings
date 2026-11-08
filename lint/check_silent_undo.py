@@ -29,7 +29,8 @@ Blank lines and whitespace never count. The escape is a trailer in a commit mess
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
 excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
-(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
+(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. A green run on a lane tip the head
+contains is deferred to merge: here it excuses with a note, and the merge tool holds it on the head's own checks run. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
 body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, built
@@ -128,16 +129,30 @@ def last_paragraph(pr_body):
     return paras[-1]
 
 
+def drop_of(value):
+    """(path, reason) of the text after `Drops-lines:`, or None: a line with no reason excuses nothing. The one home of that parse."""
+    m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", value)
+    return (m.group(1), m.group(2)) if m else None
+
+
+def body_drops(pr_body):
+    """{path: reason} from the `Drops-lines:` lines of pr_body's last_paragraph. The last line for a path wins."""
+    res = {}
+    for value in re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII):
+        if (got := drop_of(value)):
+            res[got[0]] = got[1]
+    return res
+
+
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
     _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
-    body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
     res = {}
-    for line in out.splitlines() + body:
-        m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
-        if m:
-            res[m.group(1)] = m.group(2)
+    for line in out.splitlines():
+        if (got := drop_of(line)):
+            res[got[0]] = got[1]
+    res.update(body_drops(pr_body))
     return res
 
 
@@ -603,21 +618,23 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
+def retire_excuses(cwd, upstream, head, pr_body, run_state, paths, head_run=None):
     """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
-    debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing."""
+    debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing.
+    head_run is the merge tool's read of the head's own checks run. With it a cite on a lane tip the head contains is held on that run.
+    Without it (CI) such a cite is deferred to merge and excuses, with a note."""
     if run_state is None:
         return {}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import check_debt_retire  # lazy: it imports this module at its top
-        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths)
+        got = check_debt_retire.retired(cwd, upstream, head, pr_body, run_state, isolate=True, paths=paths, head_run=head_run, defer=head_run is None)
     except Exception:  # ImportError, its Unknown, any failed read: a finding stays
         return {}
     return {p: why for p, why in got.items() if p in paths}
 
 
-def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
+def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None, head_run=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
@@ -652,7 +669,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
     open_paths = {p for p, _ in items if p not in ok}
     if open_paths:
-        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
+        ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths, head_run), **ok)
     bad, notes = judge(items, ok)
     return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 

@@ -11,7 +11,8 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             A missing interpreter, a failed start, or a timeout is unknown.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
+            green and on the PR head or a commit above it. A run on a commit the head contains (a lane tip of a batch) is
+            deferred to merge: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
@@ -109,18 +110,56 @@ def key_lines(pr_body):
     return [m.group(0).rstrip() for m in re.finditer(r"^(?:%s|%s):.*$" % (CITE, undo.TRAILER), undo.last_paragraph(pr_body), re.I | re.M | re.ASCII)]
 
 
+def cite_of(value):
+    """(slug, run URL) of the text after `Retire-run:`, or None. The one home of that parse."""
+    m = CITE_LINE.match(value)
+    return (m.group(1), m.group(2)) if m else None
+
+
 def cites(pr_body):
     """{debt slug: run URL} from the `Retire-run: <slug> -- <url>` lines of the PR body's last paragraph. The last cite of a slug wins."""
     res = {}
     for line in re.findall(r"^" + CITE + r":(.*)$", undo.last_paragraph(pr_body), re.I | re.M | re.ASCII):
-        m = CITE_LINE.match(line)
-        if m:
-            res[m.group(1)] = m.group(2)
+        if (got := cite_of(line)):
+            res[got[0]] = got[1]
     return res
 
 
-def judge_run(wt, head, url, run_state):
-    """(kind, text) for a cited run, or None when it is green on the head or a commit above it."""
+def line_key(line):
+    """What a key line says, so two lines that say the same thing compare equal: ("retire", slug) for a cite, ("drops", path) for an
+    excuse, and ("line", the text) for a key line with no reason, which excuses nothing."""
+    name, _, value = line.partition(":")
+    got = cite_of(value) if name.strip().lower() == CITE.lower() else undo.drop_of(value)
+    return (("retire" if name.strip().lower() == CITE.lower() else "drops"), got[0]) if got else ("line", " ".join(line.split()))
+
+
+class Deferred:
+    """A cite held for the merge: the run is green on `sha`, a strict ancestor of the head. Neither a Finding nor a pass."""
+
+    def __init__(self, sha):
+        self.sha = str(sha)
+
+
+def judge_head_run(head, url, head_run):
+    """(kind, text) when the head's own checks run does not hold a deferred cite, else None. head_run(sha) -> (conclusion, url) or None."""
+    try:
+        got = head_run(head)
+    except Exception as e:  # a failed read: the head's run is unknown, never clear
+        return "unknown", "the cite %s is deferred to merge, and the head's own checks run could not be read: %s" % (url, " ".join(str(e).split()))
+    if got is None:
+        return "unknown", "the cite %s is deferred to merge, and the PR head %s has no checks run" % (url, head[:9])
+    conclusion, run = got
+    if conclusion is None:
+        return "unknown", "the cite %s is deferred to merge, and the head's own checks run %s is still pending" % (url, run)
+    if conclusion != "success":
+        return "red", "the cite %s is deferred to merge, and the head's own checks run %s ended %s, not success" % (url, run, conclusion)
+    return None
+
+
+def judge_run(wt, head, url, run_state, head_run=None, defer=False):
+    """(kind, text) for a cited run, None when it is green on the head or a commit above it, or a Deferred when it is green on a
+    strict ancestor of the head and the mode defers. Merge mode (head_run given) holds that cite on the head's own checks run: None when
+    it ended success, else (kind, text) that names the run. CI mode (defer, no head_run) returns the Deferred. With neither, it is red."""
     if run_state is None:
         return "unknown", "no reader for the cited run %s" % url
     try:
@@ -133,6 +172,8 @@ def judge_run(wt, head, url, run_state):
     if rc == 0:
         return None
     if rc == 1:
+        if (head_run is not None or defer) and _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", str(sha), head], capture_output=True).returncode == 0:
+            return judge_head_run(head, url, head_run) if head_run is not None else Deferred(sha)
         return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, str(sha)[:9], head[:9])
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
 
@@ -157,8 +198,8 @@ def closes(wt, base_ref, head):
     return debt, closed, head, mb, tracked
 
 
-def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout):
-    """The one judgment of a closed debt: a Finding, None when its Retire holds, or SKIP when the rename is no close."""
+def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run=None, defer=False):
+    """The one judgment of a closed debt: a Finding, None when its Retire holds, a Deferred when only a deferred cite holds it, or SKIP when the rename is no close."""
     slug = os.path.basename(old)[:-3]
     try:
         lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
@@ -178,15 +219,16 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
                 break
             got = got or one  # an unknown sticks: only a red outranks it, whatever the order
         if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
-            if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
-                return None
+            cite = judge_run(wt, head, cited[slug], run_state, head_run, defer)
+            if cite is None or isinstance(cite, Deferred):
+                return cite
             got = cite
         if got:
             return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
         return None
-    got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
-    if got is None:
-        return None
+    got = judge_run(wt, head, cited[slug], run_state, head_run, defer) if slug in cited else ("prose", None)
+    if got is None or isinstance(got, Deferred):
+        return got
     if got[0] == "prose":
         got = "prose", ("debt %s closes with a Retire that names no runnable check. Retire: %s\n"
                         "Name a test file in backticks in the Retire line, or cite a passing run in the PR body: `%s: %s -- <run URL>`."
@@ -196,9 +238,12 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
     return Finding(slug, *got)
 
 
-def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
+def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False, head_run=None, defer=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
+    head_run(sha) -> (conclusion, run URL) of the head's own checks run, None when it has none, or raises: merge mode. A cite on a strict
+    ancestor of the head holds only when that run ended success. defer: CI mode. With no head_run, that cite is deferred to merge and is no finding.
+    With neither, it is red (a deferral is never assumed).
     isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
     off, a test runs in `wt` itself."""
     got = closes(wt, base_ref, head)
@@ -208,17 +253,17 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     cited = cites(pr_body)
     found = []
     for old, new in closed:
-        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout)
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run, defer)
         if isinstance(one, Finding):
             found.append(one)
     return found
 
 
-def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None):
+def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False, timeout=TIMEOUT, paths=None, head_run=None, defer=False):
     """{debt path at base: reason} for each deleted debt whose slug the PR body cites and whose judgment gives no Finding (the
     silent-undo check excuses that path's delete). A rename out of the folder is no delete: the file's lines live on at the new
     path. paths, when given, limits the judged closes: an unflagged or uncited close is never judged, so its run is never read.
-    Raises Unknown."""
+    A deferred cite (see check) is excused with a reason that says `deferred to merge` and names the lane tip. Raises Unknown."""
     cited = cites(pr_body)
     got = closes(wt, base_ref, head) if cited else None
     if not got:
@@ -227,8 +272,13 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
     res = {}
     for old, new in closed:
         slug = os.path.basename(old)[:-3]
-        if new == old and slug in cited and (paths is None or old in paths) and judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout) is None:
+        if new != old or slug not in cited or (paths is not None and old not in paths):
+            continue
+        one = judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_state, isolate, timeout, head_run, defer)
+        if one is None:
             res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
+        elif isinstance(one, Deferred):
+            res[old] = "%s: %s -- %s, deferred to merge: the run is on %s, which the PR head contains" % (CITE, slug, cited[slug], one.sha[:9])
     return res
 
 
