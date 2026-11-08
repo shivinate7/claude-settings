@@ -3900,6 +3900,24 @@ def case_one_shot_grant_reason_offers_the_once_home():
           bool(reason) and "bars" not in reason and "standing" not in reason.lower(), reason)
 
 
+def case_one_shot_grant_with_a_bare_or_closed_once_item_keeps_the_grant_reason():
+    """A one-shot grant with a bare `once:` item, or a closed `once:<act>` item, gets the grant reason with no standing
+    wording. Neither item is a home, and no standing word bars a once: home here, so a guard that bars on the item alone
+    fails here."""
+    mod = guard_module()
+    for label, line in (("bare once: item", "- fb-0958-4 [note] -> once:"),
+                        ("closed once: item", "- fb-0958-5 [note] -> once:merge-prs [closed]")):
+        blocks = mod.parse(render_block(ONE_SHOT_TEXT, items=(line,)))
+        out = mod.problems(blocks, "")
+        reason = next((s for s in out if "has no home" in s), "")
+        check("one-shot grant, %s: the reason is present" % label, bool(reason), out)
+        want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
+            blocks[0]["stamp"], ONE_SHOT_TEXT[:40], mod.GRANT_HOMES)
+        check("one-shot grant, %s: the reason is the grant reason" % label, want in out, out)
+        check("one-shot grant, %s: no standing word bars the reason" % label,
+              "standing" not in reason.lower() and "bars" not in reason.lower(), reason)
+
+
 def case_standing_grant_without_a_once_item_keeps_today_reason():
     """Standing text with no once: item gets the reason the guard gives today, with no items and with a [note] whose
     home is not once:. This pins that reason and does not judge it. The standing bar names a once: home only."""
@@ -4088,6 +4106,7 @@ CASES = (
     case_once_home_does_not_pass_a_standing_grant_however_worded,
     case_standing_grant_reason_names_the_once_bar,
     case_one_shot_grant_reason_offers_the_once_home,
+    case_one_shot_grant_with_a_bare_or_closed_once_item_keeps_the_grant_reason,
     case_standing_grant_without_a_once_item_keeps_today_reason,
 )
 
