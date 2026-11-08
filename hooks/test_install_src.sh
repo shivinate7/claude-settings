@@ -4063,10 +4063,10 @@ guardset1() {
 }
 
 guardset3() {
-  name="guardset3: the guard set holds question_form.py and precompact_handoff.py, the modules guard.py imports for the question form, each equal to the flat copy"
+  name="guardset3: the guard set holds question_form.py, precompact_handoff.py, proc_env.py and reread_check.py, each equal to the flat copy"
   guardset_install guardset3
   missing=""
-  for m in question_form.py precompact_handoff.py; do
+  for m in question_form.py precompact_handoff.py proc_env.py reread_check.py; do
     if [ ! -f "$cfg/hooks/guard.d/$set_id/$m" ]; then
       missing="$missing $m (not in the set)"
     elif ! cmp -s "$cfg/hooks/guard.d/$set_id/$m" "$cfg/hooks/$m"; then
