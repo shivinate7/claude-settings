@@ -95,8 +95,15 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-# enable_pr_auto_merge takes the same owner, repo and pullNumber keys, and merges the head once its checks pass.
-MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
+# The host tools that turn auto-merge on. Rule auto-merge refuses each by name before merge-checks reads it, and
+# settings.json must match each of them so the guard sees the call.
+AUTO_MERGE_TOOLS = ("mcp__github__enable_pr_auto_merge",)
+MERGE_TOOLS = ("mcp__github__merge_pull_request",) + AUTO_MERGE_TOOLS
+# `gh api` flags that carry a `key=value` field; the same four everywhere a guard reads a field.
+GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+AUTO_MERGE_MUTATION = "enablePullRequestAutoMerge"
+# gh api names the merge endpoint `repos/{owner}/{repo}/pulls/<n>/merge`; the braces are gh's own placeholders.
+MERGE_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/pulls/(\d+)/merge/?")
 CREATE_PR_TOOL = "mcp__github__create_pull_request"
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
@@ -134,20 +141,99 @@ def pr_call_target(args, value_flags):
     return selector, repo
 
 
-def merge_call_of(segment: str):
-    """Return (selector, repo) for a `gh pr merge` segment, else None.
+def _api_method(args):
+    """The HTTP method a `gh api` call names (-X M, -XM, --method M, --method=M), upper-cased; the last one wins.
+    '' when none is named."""
+    method, index = "", 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-X", "--method"):
+            method = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--method="):
+            method = arg[len("--method="):]
+        elif arg.startswith("-X") and not arg.startswith("--"):
+            method = arg[2:].lstrip("=")
+    return method.upper()
 
-    `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
-    judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
-    merges at once.
-    """
-    rest = gh_call_of(segment)
+
+def _api_fields(args):
+    """The (key, value) pairs of the -f, -F, --field and --raw-field arguments of a `gh api` call, in each
+    spelling gh reads: `-f k=v`, `-fk=v`, `--field k=v` and `--field=k=v`."""
+    pairs, index = [], 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        flag, equals, glued = arg.partition("=")
+        if arg in GH_API_FIELD_FLAGS:
+            value = args[index] if index < len(args) else ""
+            index += 1
+        elif flag in ("--field", "--raw-field") and equals:
+            value = glued
+        elif re.match(r"^-[fF][^-]", arg):
+            value = arg[2:]
+        else:
+            continue
+        key, _, text = value.partition("=")
+        pairs.append((key, text))
+    return pairs
+
+
+def _pr_merge_args(rest):
+    """The arguments after `pr merge` of a gh call, else None (not a merge, or a help call, which merges nothing)."""
     if rest is None or rest[:2] != ["pr", "merge"]:
         return None
     args = rest[2:]
-    if "-h" in args or "--help" in args:
-        return None   # help merges nothing
-    return pr_call_target(args, MERGE_VALUE_FLAGS)
+    return None if "-h" in args or "--help" in args else args
+
+
+def auto_merge_call_of(segment: str) -> bool:
+    """True when the segment's command word is gh and the call turns auto-merge on: `gh pr merge --auto`, or a
+    `gh api graphql` call whose `query=` field holds the enable mutation. Only those argument shapes are read, so a
+    quoted word, a heredoc body or a comment that names them is text. `--disable-auto` is another flag."""
+    rest = gh_call_of(segment)
+    if rest is None:
+        return False
+    args = _pr_merge_args(rest)
+    if args is not None:
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            index += 1
+            if arg in MERGE_VALUE_FLAGS:
+                index += 1   # its value is data, even a word that spells a flag
+            elif arg == "--auto" or arg.startswith("--auto="):
+                return arg == "--auto" or arg.split("=", 1)[1] in GH_TRUE
+        return False
+    if rest[:1] == ["api"] and ("graphql" in rest or "/graphql" in rest):
+        return any(key == "query" and AUTO_MERGE_MUTATION in text for key, text in _api_fields(rest[1:]))
+    return False
+
+
+def merge_call_of(segment: str):
+    """Return (selector, repo) for a `gh pr merge` segment, or for a `gh api` PUT of a pull request's merge route,
+    else None.
+
+    `selector` is the first positional word, '' for the current branch's pull request; for the route it is the
+    pull request's number. `--disable-auto` merges nothing, so it is no merge. `--auto` is read here too, but rule
+    auto-merge refuses it before merge-checks judges anything.
+    """
+    rest = gh_call_of(segment)
+    if rest is None:
+        return None
+    args = _pr_merge_args(rest)
+    if args is not None:
+        if "--disable-auto" in args:
+            return None
+        return pr_call_target(args, MERGE_VALUE_FLAGS)
+    if rest[:1] == ["api"] and _api_method(rest[1:]) == "PUT":
+        for arg in rest[1:]:
+            found = MERGE_ROUTE.fullmatch(arg)
+            if found:
+                repo = found.group(1)
+                return found.group(2), "" if "{" in repo else repo   # a placeholder names the folder's own repo
+    return None
 
 
 _MERGE_MODULE = []
@@ -283,6 +369,15 @@ BARE_MERGE_REASON = (
     "leaves the local main behind origin. "
     "Remedy: run the merge tool, `merge <pr> --confirm`. If the tool is broken, confirm this call. "
     "(decision bare-merge-asks, a bare merge in a merge-tool repo asks the owner)"
+)
+
+
+# The remedy names the merge tool only: the refused forms are never offered back (rule git-remedy-never-names-target).
+AUTO_MERGE_REASON = (
+    "Rule (Git): auto-merge skips the merge tool's records rebuild, and the owner presses the merge button. "
+    "Remedy: run the merge tool, `merge <pr> --confirm`, which waits on the required checks, then merges the "
+    "head it waited on. "
+    "(decision no-merge-during-batch-ci, auto-merge is refused in every repo)"
 )
 
 
