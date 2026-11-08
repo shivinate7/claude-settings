@@ -2174,7 +2174,7 @@ def owed_round(num, bodies, sha):
     fix = rec["fix"] if rec else None
     if fix and fix[3] != "PASS":  # review_state reads a failed fix check open at any round, and the third round again would not cover the fix (decision hold-unsafe-after-round-3)
         return "fix", f"changes a guard or check and its fix check failed ({why})"
-    if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND and not (fix and fix[3] != "PASS"):
+    if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND:
         return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
     return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})"
 
@@ -2198,7 +2198,7 @@ def head_in_history(root, head, tip):
 def stale_guard_round(num, bodies, live, new_to_batch, own=False):
     """-> (kind, why) when pull request `num` has records that name none of the `live` heads (the lane tips and the pull request's own head) and its newest record has Guard or
     check yes, else None. A push after the review made that record stale, and a stale yes does not shed the guard or check owing: the third round is
-    owed on the new head (kind "round"). For another pull request's record the head must also be new to the batch (`new_to_batch(head)`: in the history of the pull request's own head and not on
+    owed on the new head (kind "round"), unless the record is held (kind "held") or has a failed fix check (kind "fix"), the kinds owed_round gives. For another pull request's record the head must also be new to the batch (`new_to_batch(head)`: in the history of the pull request's own head and not on
     its base): a head outside that history belongs to a pull request that is no part of this batch, and one on the base to a pull request merged earlier. `own`: `num` is the pull
     request being merged. Its record is its own whatever its history, because an amend and a force push leave the reviewed head outside it, so the history test is skipped.
     A done record covers only the head it names. For `own` it still refuses, with kind "newhead": the new head needs a fix check or a new review. For another pull request
@@ -2209,10 +2209,16 @@ def stale_guard_round(num, bodies, live, new_to_batch, own=False):
     rec = parse_review(bodies[-1])
     if not (rec and rec["n"] == num and rec["guard"] == "yes"):
         return None
-    if review_state(rec, rec["head"])[0] == "done":
+    state, why = review_state(rec, rec["head"])
+    if state == "done":
         return ("newhead", f"has a done record for head {rec['head'][:9]}, and the new head has no fix check and no new review") if own else None
-    if own or new_to_batch(rec["head"]):
-        return "round", f"round {REVIEW_LAST_ROUND} is owed on the new head (its newest record is for head {rec['head'][:9]})"
+    if not (own or new_to_batch(rec["head"])):
+        return None
+    if state == "held":  # the same kinds and remedies as owed_round
+        return "held", f"changes a guard or check and is held for the owner ({why}; its newest record is for head {rec['head'][:9]})"
+    if rec["fix"] and rec["fix"][3] != "PASS":
+        return "fix", f"changes a guard or check and its fix check failed ({why}; its newest record is for head {rec['head'][:9]})"
+    return "round", f"the third round is owed on the new head (its newest record is for head {rec['head'][:9]})"
 
 def oldest_new_since(root, base_ref, head):
     """-> the `since` for review_comments: the oldest committer date of the commits in `base_ref`..`head`, from local git, less one day (a lane's first
