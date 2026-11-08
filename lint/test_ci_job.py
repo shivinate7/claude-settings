@@ -626,7 +626,7 @@ class RunHeaderComments(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
                          "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
 
-    # Controls: each passes on main and must still hold.
+    # Controls: behaviour the check already has, which must still hold.
     def test_a_failing_body_under_a_header_comment_still_fails(self):
         rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),

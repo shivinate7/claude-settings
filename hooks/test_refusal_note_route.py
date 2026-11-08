@@ -187,7 +187,7 @@ class RouteNoteTests(base.HookCase):
 class RouteMatchLimitTests(unittest.TestCase):
     """hooks/route_match.py's two size limits, MAX_PATTERN_CHARS (500) and MAX_TARGET_CHARS (4000). Each limit is
     driven at its value and one past it. The limits are pinned as literal lengths, so a change to either one moves the
-    boundary these cases check. No case here is red on the base code: they pin behaviour the code already has."""
+    boundary these cases check. They pin behaviour the code already has."""
 
     def row(self, pattern):
         return {"id": "r1", "act": "a", "route": "b", "surface": "local", "outcome": "works", "pattern": pattern}
