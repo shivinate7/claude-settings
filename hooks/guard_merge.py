@@ -13,7 +13,7 @@ from guard_core import (
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import LANE_TAG, MERGE_SCRIPTS, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -823,7 +823,7 @@ def role_call_of(segment: str):
     rest = tokens[index + 1:]
     if word.startswith("python"):
         script = next((t for t in rest if not t.startswith("-")), None)
-        if script is None or basename(script) not in ("merge.py", "launch.py") \
+        if script is None or basename(script) not in MERGE_SCRIPTS \
                 or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
             return None
         rest = rest[rest.index(script) + 1:]
@@ -881,18 +881,25 @@ RECORD_REASON = (
 )
 
 
-def _own_tier_proved(transcript: str, tier: str) -> bool:
-    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
-    follows it. Fails closed: no env id, no transcript or any read error is False."""
+def _own_tiers_proved(transcript: str, tiers) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> for any of `tiers` and no
+    set_session_tags call follows it. One read of the record tests every tier. Fails closed: no env id,
+    no transcript or any read error is False."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
-            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+            return tags is not None and not tagged_after and any(ROLE_TAG_PREFIX + tier in tags for tier in tiers)
     except Exception:
         pass
     return False
+
+
+def _own_tier_proved(transcript: str, tier: str) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    return _own_tiers_proved(transcript, (tier,))
 
 
 def _command_words(args):

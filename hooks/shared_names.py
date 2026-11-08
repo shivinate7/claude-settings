@@ -41,6 +41,9 @@ BACKLOG_ITEM = "Backlog"
 # The three Backlog fields, in report order: PRs reviewed and waiting past one batch cycle, open PRs with no next act, lanes to archive.
 BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", IDLE_LANES_LINE)
 REVIEWED_WAIT_LABEL = "longest wait since a done record"
+# The python scripts, in the folder `merge/`, that run the merge tool. hooks/guard_merge.py role_call_of and lint/report_guard.py
+# MERGE_PROGRAM_RE both read this tuple, so a new entry point is named once.
+MERGE_SCRIPTS = ("merge.py", "launch.py")
 
 
 def reviewed_summary(wait: int, none: int, past: int) -> str:

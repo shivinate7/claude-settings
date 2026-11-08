@@ -120,11 +120,12 @@ must equal the newest read in the transcript after the newest `compact_boundary`
 `merge --reviewed` summary line, count three from the newest `merge --idle-lanes` summary line (shared_names holds both
 writers and patterns). A read is a Bash run whose own program is merge, past the wrappers verdict, `timeout N`, env and
 `python3 [-I]` (the guard's shell reader splits it, so quoted text, a heredoc or a grep that names the flag is no read). A run
-through verdict is read from the log its FAIL line names; a PASS verdict of `merge --reviewed` has no RED line, so both its
-counts read 0; a PASS verdict of `merge --idle-lanes` names no log, so it reads unknown. No read, or a failed one, means
+through verdict is read from the log its FAIL line names; a PASS verdict line that names `merge --reviewed` as the command it ran has no RED line, so both its
+counts read 0 (a PASS of another command in the same call is no read); a PASS verdict of `merge --idle-lanes` names no log, so it reads unknown. No read, or a failed one, means
 `unknown`. `unknown` always passes. A count blocks once: the correction after the block is not checked. Cost: no process and
-no network call. The transcript is already read; only for a tagged session with a report shape: the own-record read (the
-guard_merge import) and at most two verdict log reads, the newest log of each command, never one per run. No file written,
+no network call. The transcript is already read. On every Stop with a report shape: one own-record read (the guard_merge
+import), which tests both tags. Only for a tagged session: at most two verdict log reads, the newest log of each command,
+never one per run. No file written,
 no timer, no log.
 
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
@@ -1915,10 +1916,12 @@ def _backlog_item(block):
 
 
 LEDGER_FLAGS = {"reviewed": "--reviewed", "idle": "--idle-lanes"}
-# The merge program as a command word: bare `merge`, a path ending `bin/merge`, or a path ending `merge/merge.py`.
-MERGE_PROGRAM_RE = re.compile(r"^merge$|(?:^|/)bin/merge$|(?:^|/)merge/merge\.py$")
+# The merge program as a command word: bare `merge`, a path ending `bin/merge`, or a path ending `merge/<script>` for each of
+# shared_names.MERGE_SCRIPTS (the list hooks/guard_merge.py role_call_of reads too).
+MERGE_PROGRAM_RE = re.compile(r"^merge$|(?:^|/)bin/merge$|(?:^|/)merge/(?:%s)$" % "|".join(re.escape(s) for s in shared_names.MERGE_SCRIPTS))
 PYTHON_WORD_RE = re.compile(r"^python[\d.]*(?:\.exe)?$")
-VERDICT_PASS_RE = re.compile(r"^PASS \S", re.M)
+# bin/verdict's PASS line: `PASS <the command it ran> (<secs>s)`.
+VERDICT_PASS_RE = re.compile(r"^PASS (.+) \(\d+(?:\.\d+)?s\)\s*$", re.M)
 
 
 def _ledger_kinds(command):
@@ -1978,8 +1981,8 @@ def backlog_reads(records):
         sums = shared_names.REVIEWED_SUMMARY_RE.findall(body_of(shown))
         if sums:
             reviewed = (int(sums[-1][2]), int(sums[-1][1]))
-        elif VERDICT_PASS_RE.search(shown) and not VERDICT_LOG_RE.search(shown):
-            reviewed = (0, 0)  # a PASS ledger has no RED line: none past a cycle, none without a next act
+        elif not VERDICT_LOG_RE.search(shown) and any("reviewed" in _ledger_kinds(ran) for ran in VERDICT_PASS_RE.findall(shown)):
+            reviewed = (0, 0)  # a PASS of the merge command itself: no RED line, so none past a cycle, none without a next act
     if "idle" in newest:
         lanes = shared_names.IDLE_LANES_SUMMARY_RE.findall(body_of(newest["idle"]))
         if lanes:
@@ -1994,22 +1997,23 @@ def backlog_problem(hook, records, text):
             return ""
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         import guard_merge
-        if not any(guard_merge._own_tier_proved(hook.get("transcript_path"), tier) for tier in BACKLOG_TIERS + guard_merge.ROLE_TIERS):
+        if not guard_merge._own_tiers_proved(hook.get("transcript_path"), BACKLOG_TIERS + guard_merge.ROLE_TIERS):
             return ""
+        item = shared_names.BACKLOG_ITEM
         labels = shared_names.BACKLOG_FIELDS
-        form = "`Backlog: %s <N>; %s <N>; %s <N>`, each a whole number or `unknown`" % labels
+        form = "`%s: %s <N>; %s <N>; %s <N>`, each a whole number or `unknown`" % ((item,) + labels)
         found, counts = _backlog_item(block_text(text))
         if not found:
-            return "Backlog guard: a coordinator's or batch runner's report must hold a Backlog line. Add %s, inside the report blockquote (rule reports-backlog-counts)." % form
+            return "%s guard: a coordinator's or batch runner's report must hold a %s line. Add %s, inside the report blockquote (rule reports-backlog-counts)." % (item, item, form)
         if counts is None:
-            return "Backlog guard: the Backlog line is not %s (rule reports-backlog-counts)." % form
+            return "%s guard: the %s line is not %s (rule reports-backlog-counts)." % (item, item, form)
         reviewed, idle = backlog_reads(records)
         expected = [reviewed and reviewed[0], reviewed and reviewed[1], idle]
         wrong = ["%s %d, but the newest read gives %s" % (label, got, "unknown" if want is None else want)
                  for label, got, want in zip(labels, counts, expected) if got is not None and got != want]
         if not wrong:
             return ""
-        return "Backlog guard: %s. A count with no read behind it says `unknown` (rule reports-backlog-counts)." % "; ".join(wrong)
+        return "%s guard: %s. A count with no read behind it says `unknown` (rule reports-backlog-counts)." % (item, "; ".join(wrong))
     except Exception as exc:
         print("backlog check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return ""
