@@ -29,6 +29,7 @@ and lint/test_report_guard.py (one home each). Run with:
 
     python3 lint/test_report_guard_idle_hold.py -v
 """
+import itertools
 import json
 import os
 import sys
@@ -115,6 +116,21 @@ def completion(use_id, task_id, output_file):
               % (task_id, use_id, output_file))
     return {"type": "attachment", "isSidechain": False,
             "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
+_MESSAGE_IDS = itertools.count(1)
+
+
+def one_message(*runs):
+    """One assistant message that issues each (command, result) run in order, then one user record that returns their
+    results in the reverse order. Only the order of the tool_use blocks says which call came first."""
+    uses, results = [], []
+    for command, result in runs:
+        use_id = "toolu_msg%d" % next(_MESSAGE_IDS)
+        uses.append({"type": "tool_use", "id": use_id, "name": "Bash", "input": {"command": command}})
+        results.append({"type": "tool_result", "tool_use_id": use_id, "content": result, "is_error": False})
+    return [{"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": uses}},
+            {"type": "user", "isSidechain": False, "message": {"role": "user", "content": results[::-1]}}]
 
 
 class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
@@ -410,6 +426,89 @@ class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
         self.assertLessEqual(opens, trs.BASE_OPENS,
                              "the Stop opened its transcript %d times; a plain Stop opens it %d times, and a runner "
                              "Stop with no merge line may add none" % (opens, trs.BASE_OPENS))
+
+    # Round 1 review findings. Each case pins one: a merged line that another command prints, a sweep that never swept
+    # or was refused, the order of calls in one message, and the correction tail on a report with its own defect.
+
+    def test_idle_r1_merged_line_quoted_by_a_grep_holds_nothing(self):
+        # Catches: a merged line that another command prints (a grep of a log) holds the runner as a merge of its own.
+        self.held_on_merge(self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                             assistant_text(WELL_FORMED)]))  # precondition: the merge run holds
+        out = self.runner_stop([human("wake"), *self.runner(),
+                                *bash_call("git log --oneline | grep merge", MERGED_64), assistant_text(WELL_FORMED)])
+        self.released(out)
+
+    def test_idle_r1_merged_line_of_another_pr_holds_nothing(self):
+        # Catches: a merged line for #64 that a run for merge 65 prints holds the runner on a merge it did not make.
+        self.held_on_merge(self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                             assistant_text(WELL_FORMED)]))  # precondition: the merge run holds
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call("merge 65 --confirm", MERGED_64),
+                                assistant_text(WELL_FORMED)])
+        self.released(out)
+
+    def test_idle_r1_merge_by_path_or_quoted_path_holds(self):
+        # Catches: a merge named by its path, a quoted path or a cd prefix is read as no merge, so it never holds.
+        for command in ("~/.claude/bin/merge 64 --confirm", '"/opt/tools/merge" 64 --confirm',
+                        "cd repo && python3 merge/merge.py 64 --confirm"):
+            out = self.runner_stop([human("wake"), *self.runner(), *bash_call(command, MERGED_64),
+                                    assistant_text(WELL_FORMED)])
+            self.held_on_merge(out)
+
+    def test_idle_r1_comment_that_names_the_sweep_does_not_release(self):
+        # Catches: a comment whose body names the sweep command releases the merge, so its lane is never archived.
+        comment = 'gh pr comment 64 --body "next: merge --idle-lanes --live live.md"'
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                *bash_call(comment, IDLE_DONE), assistant_text(WELL_FORMED)])
+        self.held_on_merge(out)
+
+    def test_idle_r1_refused_sweep_does_not_release(self):
+        # Catches: a sweep the hook refused counts as a sweep, so the merge is released with no lane list made.
+        refusal = "PreToolUse:Bash hook error: the call was refused. To allow this act, type `override 15m`."
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                *bash_call(IDLE_CMD, refusal, is_error=True), assistant_text(WELL_FORMED)])
+        self.held_on_merge(out)
+
+    def test_idle_r1_sweep_with_no_summary_does_not_release(self):
+        # Catches: a sweep that dies with a traceback and no summary releases the merge, as if it had read the lanes.
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                *bash_call(IDLE_CMD, "Traceback (most recent call last):"),
+                                assistant_text(WELL_FORMED)])
+        self.held_on_merge(out)
+
+    def test_idle_r1_sweep_that_made_no_list_releases(self):
+        # Catches: a sweep that exits 1 with "No list was made" leaves the merge held, so a runner that cannot read its lanes is stuck.
+        no_list = "merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made."
+        records = [human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64), assistant_text(WELL_FORMED)]
+        self.held_on_merge(self.runner_stop(records))  # precondition: the merge stands before the sweep
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                                *bash_call(IDLE_CMD, no_list, is_error=True), assistant_text(WELL_FORMED)])
+        self.released(out)
+
+    def test_idle_r1_sweep_issued_before_the_merge_in_one_message_holds(self):
+        # Catches: results are read in record order, so a sweep issued before a merge in one message is taken as after it.
+        out = self.runner_stop([human("wake"), *self.runner(),
+                                *one_message((IDLE_CMD, IDLE_DONE), (MERGE_CMD, MERGED_64)),
+                                assistant_text(WELL_FORMED)])
+        self.held_on_merge(out)
+
+    def test_idle_r1_sweep_issued_after_the_merge_in_one_message_releases(self):
+        # Catches: results are read in record order, so a sweep issued after a merge in one message does not clear it.
+        self.held_on_merge(self.runner_stop([human("wake"), *self.runner(), *one_message((MERGE_CMD, MERGED_64)),
+                                             assistant_text(WELL_FORMED)]))  # precondition: a lone merge in a message holds
+        out = self.runner_stop([human("wake"), *self.runner(),
+                                *one_message((MERGE_CMD, MERGED_64), (IDLE_CMD, IDLE_DONE)),
+                                assistant_text(WELL_FORMED)])
+        self.released(out)
+
+    def test_idle_r1_held_stop_with_another_defect_keeps_the_correction_tail(self):
+        # Catches: a held Stop whose report has its own defect drops the correction tail, so the defect is never sent back.
+        bad_done = "\n".join(["> **Done** BUILT merge landed", "> **Deviations** none", "> **Input Needed** none",
+                              "> **Next** wait"])
+        out = self.runner_stop([human("wake"), *self.runner(), *bash_call("git commit -m x", "[main abc1234] x"),
+                                *bash_call(MERGE_CMD, MERGED_64), assistant_text(bad_done)])
+        self.held_on_merge(out)
+        for tail in CORRECTION_TAILS:
+            self.assertIn(tail, out["reason"], "the report has a defect of its own, but the tail %r is gone" % tail)
 
 
 if __name__ == "__main__":
