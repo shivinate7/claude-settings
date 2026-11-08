@@ -5654,6 +5654,13 @@ sh("waiter: a 30 s sleep ahead of a later call is refused", "cd a && sleep 30; g
    "deny", "waiter", cwd=NOGIT)
 sh("waiter: an until-loop waiting on a file is refused", "until [ -s f ]; do sleep 2; done",
    "deny", "waiter", cwd=NOGIT)
+# The Bash form of the same wait, at 5 s, is refused: the record refuses a loop that pauses in bash.
+sh("waiter: a foreground until-loop with sleep 5 is refused", "until test -e d; do sleep 5; done; echo done",
+   "deny", "waiter", cwd=NOGIT)
+# The Monitor tool is the wait the record allows (decision agents-wait-with-monitor). No guard matcher
+# judges a Monitor call today, so this passes; it pins that the waiter rule never refuses one.
+add("waiter: a Monitor call with an until-loop that sleeps 2 is allowed", "allow", tool="Monitor",
+    cwd=NOGIT, command="until test -e /tmp/x; do sleep 2; done; echo done", description="wait for a directory")
 sh("waiter: two sleeps, each followed by a check, are refused",
    "sleep 5; gh run view 1; sleep 5; gh run view 1", "deny", "waiter", cwd=NOGIT)
 sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "allow",
@@ -5701,6 +5708,29 @@ sh("waiter: a loop inside a heredoc body is allowed",
    "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
+
+# An interpreter heredoc's body is the program's text, and the loop it quotes is data. The body is kept
+# in view, because the interpreter may run shell, so the scanner must read each quote in it. MEASURED on
+# origin/main 422cbbdfe: an escaped apostrophe in a Python single-quoted string ends the shell's quote
+# early, and the loop after it is read as a call.
+sh("waiter: a python heredoc string with an escaped apostrophe holds a loop as text, allowed",
+   "python3 - <<'EOF'\ns = 'it\\'s: until test -e d; do sleep 2; done'\nEOF", "allow", cwd=NOGIT)
+# The scanner pins for the same body: a comment opener, a multi-line string, a lone apostrophe in a
+# comment, and an apostrophe inside a double-quoted string. Each holds the loop as text and is allowed.
+for _name, _body in (
+    ("a comment opener inside the string", 's = "# note: until test -e d; do sleep 2; done"'),
+    ("a multi-line string", 's = """\nuntil test -e d; do sleep 2; done\n"""'),
+    ("a lone apostrophe in a comment", "# don't\ns = \"until test -e d; do sleep 2; done\""),
+    ("an apostrophe inside a double-quoted string", 's = "it\'s: until test -e d; do sleep 2; done"'),
+    ("a single-quoted string", "s = 'until test -e d; do sleep 2; done'"),
+):
+    sh("waiter: a python heredoc with " + _name + " holds a loop as text, allowed",
+       "python3 - <<'EOF'\n" + _body + "\nEOF", "allow", cwd=NOGIT)
+# A shell heredoc's body is run by the shell, so the same loop bare in it is refused.
+sh("waiter: a bash heredoc whose body is an until-loop is refused",
+   "bash <<'EOF'\nuntil test -e d; do sleep 2; done\nEOF", "deny", "waiter", cwd=NOGIT)
+add("waiter: an until-loop with sleep 5 under run_in_background is refused", "deny", "waiter", cwd=NOGIT,
+    command="until test -e d; do sleep 5; done; echo done", run_in_background=True)
 
 # Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
