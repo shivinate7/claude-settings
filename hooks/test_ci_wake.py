@@ -1591,7 +1591,7 @@ def case_exported_gh_repo_names_the_pr_repo():
 def case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder():
     """A GH_REPO the hook cannot expand (`$repo`, `$REPO`, `$(x)`, a backtick) names no repo, so the hook's own
     gh calls go to the folder's repo, as with no GH_REPO. `$null` clears it, and so does `Remove-Item Env:GH_REPO`
-    after a set. `unset OTHER` leaves GH_REPO set (control). The folder holds PR 214 in the fallback rows, so a
+    after a set. `unset OTHER` leaves GH_REPO set (control). The folder holds one open PR in the fallback rows, so a
     wrong repo finds nothing. Scope first (the PR read's path), then the verdict."""
     home = fixture([pr(214, repo=REPO_HOME)], [in_repo(GREEN, REPO_HOME)], cwd_repo=REPO_HOME,
                    workflows=[wf(repo=REPO_HOME)])
