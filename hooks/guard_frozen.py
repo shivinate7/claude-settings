@@ -287,6 +287,19 @@ def _reads_only(command: str, words) -> bool:
     return False
 
 
+def _runs_test_files(command: str, words) -> bool:
+    """True when the command runs test files (`pytest`, `python -m pytest`, `uv run pytest`, `npm test`).
+    `_reads_only` counts these as readers of their path words, but a runner loads `conftest.py` and the
+    tests, so a file the same call wrote may run."""
+    if command == "uv":
+        inner, inner_words = _uv_inner(words)
+        return bool(inner) and _runs_test_files(inner, inner_words)
+    if _PYTHON.fullmatch(command):
+        words = words[1:] if words[:1] and _PY_VERSION.fullmatch(words[0]) else words
+        return list(words[:2]) == ["-m", "pytest"]
+    return command == "pytest" or (command in _TEST_RUNNERS and list(words[:1]) == ["test"])
+
+
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -448,6 +461,7 @@ _SED_FLAGS = re.compile(r"-[nErsz]+|--quiet|--silent|--regexp-extended|--posix|-
 _SED_SCRIPT = re.compile(
     r"(?:(?:[\d$,!\s]|/[^/]*/)*[pdq=][\s;]*|s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gpiI\d]*[\s;]*)+")
 _AWK_RUNS = re.compile(r"system|getline|close|[>|<@]|ENVIRON")
+_AWK_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')   # text between quotes in an awk program is printed, not run
 
 
 def _sed_filters(args) -> bool:
@@ -474,7 +488,7 @@ def _awk_filters(args) -> bool:
             return False
         elif script is None:
             script = arg
-    return script is not None and not _AWK_RUNS.search(script)
+    return script is not None and not _AWK_RUNS.search(_AWK_STRING.sub('""', script))
 
 
 def _kind(words, plain: str) -> str:
@@ -502,11 +516,55 @@ def _kind(words, plain: str) -> str:
     return ""
 
 
+_SORT_OUT_CLUSTER = re.compile(r"-[A-Za-z]*o")
+_UNIQ_VALUE_FLAGS = frozenset(("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"))
+
+
+def _sorts_or_uniqs_to_a_file(words) -> bool:
+    """True for `sort -o FILE` (also `-oFILE`, `--output FILE`, `--output=FILE`) and for `uniq [IN] OUT`,
+    which write their output onto a file as a redirect does, not onto a null device."""
+    if not words:
+        return False
+    name = _name(words[0])
+
+    def real(target: str) -> bool:
+        return target.strip("'\"").lower() not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target)
+
+    if name == "sort":
+        for index, word in enumerate(words[1:], 1):
+            nxt = words[index + 1] if index + 1 < len(words) else ""
+            if word == "--output" or _SORT_OUT_CLUSTER.fullmatch(word):
+                if nxt and real(nxt):
+                    return True
+            elif word.startswith("--output="):
+                if real(word[len("--output="):]):
+                    return True
+            elif re.fullmatch(r"-o.+", word):
+                if real(word[2:]):
+                    return True
+        return False
+    if name == "uniq":
+        operands, skip = [], False
+        for word in words[1:]:
+            if skip:
+                skip = False
+            elif word in _UNIQ_VALUE_FLAGS:
+                skip = True
+            elif word.startswith("-") and len(word) > 1:
+                continue
+            else:
+                operands.append(word)
+        return len(operands) >= 2 and real(operands[1])
+    return False
+
+
 def _writes_a_file(words) -> bool:
     """True when the segment redirects output onto a file, or tees it to one, not a null device or a
     descriptor."""
     if words and _name(words[0]) == "tee" and any(
             not w.startswith("-") and w.strip("'\"").lower() not in _NULL_TARGETS for w in words[1:]):
+        return True
+    if _sorts_or_uniqs_to_a_file(words):
         return True
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
@@ -701,7 +759,8 @@ def _parse_call(cmd: str):
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     may_run = any(words and kind not in ("printer", "cd", "filter")
-                  and not _reads_only(*_segment_command([_unquoted(w) for w in words]))
+                  and (not _reads_only(*_segment_command([_unquoted(w) for w in words]))
+                       or _runs_test_files(*_segment_command([_unquoted(w) for w in words])))
                   for kind, words in zip(kinds, parsed))
     return segments, ends, parsed, scans, closed, kinds, may_run
 
