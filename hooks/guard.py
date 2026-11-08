@@ -120,6 +120,22 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  message-time-matches-clock
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
+                       update or batch write to collection items (inline, through `file_path`, one local file read
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; the last literal double-quoted `updatedAt` in a Bash command, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       a judged value is present. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -397,7 +413,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -5182,6 +5198,16 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
+    stamped = stamp_hit(tool, tool_input)
+    if stamped:
+        refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input, cwd)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
