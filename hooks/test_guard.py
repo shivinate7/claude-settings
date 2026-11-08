@@ -3982,8 +3982,8 @@ def _build_pltree():
     _st_git(PL_B, "pull", "-q", "--ff-only")
     _st_must(_st_head(PL_B) != lane_head, "%r: the pull did not move HEAD" % PL_B)
     _st_must(_st_newest(PL_B)[0] == _st_head(PL_B), "%r: the pull left no HEAD entry for the new HEAD" % PL_B)
-    # The fast-forward touched n2.txt only, so f.txt is still the stale copy: the pull's entry is what
-    # keeps the rule from reading the lane commit as X.
+    # The fast-forward touched n2.txt only, so f.txt is still the stale copy. The pull's old value is the
+    # moved tip, not the new value of the entry before it, so the gap marks the move and X is the lane commit.
     _st_require_entry(PL_B, "f.txt", "base\n", "moved\n", "pull")
 
 
@@ -4199,6 +4199,12 @@ _st_refuse("commit -o -m x F of a stale file edited in the work tree is refused"
            VCS + " commit -o -m x f.txt", EU_B)
 _st_refuse("commit -- F of a file the move deleted is refused while the stale index holds it",
            VCS + " commit -m x -- f.txt", DL_B)
+# A gap in the HEAD log marks the move (decision stale-tree-commit, ruling in 272a666e9): each entry here
+# gaps against the one before it, so X is the lane commit, and f.txt stays stale in the index.
+_st_refuse("a commit after git pull --ff-only in the same tree is refused while f.txt stays stale",
+           VCS + " commit -m x", PL_B)
+_st_refuse("a commit after commit --amend on a moved tip is refused while the stale index holds f.txt",
+           VCS + " commit -m x", AM_B)
 
 # THE CONTROLS. The same commands in the fresh checkouts, and a -C or cd that names one from a stale cwd.
 _st_allow("control: the same commit in the fresh checkout is allowed", VCS + " commit -m x", ST_A)
@@ -4216,11 +4222,9 @@ _st_allow("control: commit -- F of the deleted file, in its fresh checkout, is a
           VCS + " commit -m x -- f.txt", DL_A)
 
 # THE PASSES. Each act that leaves no X, or an X the index does not hold, and the reads that must not refuse.
-_st_allow("a commit after git pull --ff-only in the same tree is allowed", VCS + " commit -m x", PL_B)
 _st_allow("a commit after a merge in the same tree is allowed", VCS + " commit -m x", MG_B)
 _st_allow("a commit after a rebase in the same tree is allowed", VCS + " commit -m x", RB_B)
 _st_allow("a squash back to an older commit (reset --soft HEAD~3) is allowed", VCS + " commit -m x", SQ)
-_st_allow("a commit after commit --amend in the same tree is allowed", VCS + " commit -m x", AM_B)
 _st_allow("a commit after reset --mixed, which syncs the index, is allowed", VCS + " commit -m x", RM_B)
 _st_allow("a detached HEAD is allowed", VCS + " commit -m x", DT_B)
 _st_allow("a worktree with no HEAD reflog file is allowed", VCS + " commit -m x", RF_B)
