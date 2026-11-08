@@ -13245,6 +13245,8 @@ class LaneLintMarker(ReviewEnv):
             self.assertNotEqual(rc, 0, out + err)
         with self.subTest("no record is printed"):
             self.assertNotIn(REVIEW_MARKER, out, "a record printed with no lint marker for its head")
+        with self.subTest("the refusal names the remedy, merge --lane-lint"):  # the refusal is printed on stderr, so both streams are read
+            self.assertIn("--lane-lint", out + err, "a refusal with no lint marker that does not name merge --lane-lint")
 
     def test_no_marker_for_the_head_refuses_and_prints_no_record(self):
         os.remove(lane_lint_marker(self.review_cfg, self.head()))
