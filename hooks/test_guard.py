@@ -20622,6 +20622,35 @@ def worktree_home_cross_checkout_heredoc_text_case():
           command="python3 - <<'PY'\nimport json\nopen('notes.json','w').write(json.dumps("
                   "{'n': 'cp x %s/y'}))\nPY" % other)
 
+    # A shell runs a python heredoc's printed copy when the text reaches it through a pipe, a brace group,
+    # a loop, a function, or a subshell that writes it to a script the same call runs. The heredoc's own
+    # header can pipe its output to a shell too. A lone quote in a comment before the form does not hide it.
+    py_print = "python3 - <<'PY'\nprint('cp x %s/y')\nPY" % other
+    check("a lone quote in a comment, then sh -c runs what a python heredoc prints into another checkout",
+          "deny", "Bash", lane_a, command="# don't\nsh -c \"$(\n%s\n)\"" % py_print)
+    check("a brace group pipes what a python heredoc prints into another checkout to sh", "deny",
+          "Bash", lane_a, command="{\n%s\n} | sh" % py_print)
+    check("a subshell writes what a python heredoc prints into another checkout to gen.sh, then sh runs it",
+          "deny", "Bash", lane_a, command="(\n%s\n) > gen.sh; sh gen.sh" % py_print)
+    check("a for loop pipes what a python heredoc prints into another checkout to sh", "deny", "Bash",
+          lane_a, command="for i in 1; do\n%s\ndone | sh" % py_print)
+    check("a shell function pipes what a python heredoc prints into another checkout, then runs it",
+          "deny", "Bash", lane_a, command="f() {\n%s\n}; f | sh" % py_print)
+    check("a python heredoc whose header pipes its output to sh, and prints a copy into another checkout",
+          "deny", "Bash", lane_a, command="python3 - <<'PY' | sh\nprint('cp x %s/y')\nPY" % other)
+    # A python body that writes a runnable file holding a copy into another checkout is refused. The file
+    # name does not matter: a .js, a .py and an extensionless file each count, with a run or without one.
+    check("a python heredoc writes gen.js holding a copy into another checkout, then node runs it by glob",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.js','w').write(\"require('child_process')"
+                  ".execSync('cp x %s/y')\")\nPY\nnode *.js" % other)
+    check("a python heredoc writes gen.py holding a copy into another checkout, with no run in the call",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.py','w').write(\"import os; os.system('cp x %s/y')\")\nPY"
+                  % other)
+    check("a python heredoc writes an extensionless gen holding a copy into another checkout, alone",
+          "deny", "Bash", lane_a, command="python3 - <<'PY'\nopen('gen','w').write('cp x %s/y')\nPY" % other)
+
     if problems:
         return False, "; ".join(problems)
     return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
