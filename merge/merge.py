@@ -66,6 +66,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -2450,7 +2451,8 @@ def ci_job_run(wt, *args):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
-    lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
+    lines: on a pass, each ci-job line that holds the pin note marker (a stale pin; the draft step ignores them); else the FAIL or
+    unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
@@ -2460,7 +2462,7 @@ def ci_job_run(wt, *args):
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
-        return "pass", [], log, False
+        return "pass", [l.rstrip() for l in lines if PIN_NOTE_MARKER in l], log, False
     if c == 1:
         return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
@@ -2486,7 +2488,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if state == "pass":
-        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.", *lines)
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))

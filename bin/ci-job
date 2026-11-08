@@ -55,7 +55,8 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # The ste-lint action step runs bin/ste-changed with STE_CHANGED_PIN_NOTE=1: a stale pin of this repo's ste-lint or zizmor
-# action never fails a passing lint, and its PASS line ends `; pin note: <the drift line, first sentence>`. A failing lint is FAIL.
+# action never fails a passing lint, and its PASS line ends `; ste-changed: pin note: <the whole drift line>` (hooks/pin_note.py).
+# No other step gets the variable, even when the caller exports it. A failing lint is FAIL.
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
@@ -66,6 +67,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
@@ -206,8 +208,7 @@ KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
-PIN_NOTE_ENV = "STE_CHANGED_PIN_NOTE"  # bin/ste-changed reads it: drift is a note, not exit 3
-PIN_NOTE = re.compile(r"^ste-changed: pin note: (.+?)(?:\. |$)", re.M)  # NOTE in bin/ste-changed: the lead of its drift line
+PIN_NOTE = re.compile(r"^%s.+$" % re.escape(PIN_NOTE_MARKER), re.M)  # a whole drift line of bin/ste-changed, marker first
 
 
 def action_file(top, step, rel):
@@ -263,11 +264,11 @@ def is_install(step):
 
 
 def pin_notes(log, start):
-    """The drift lines bin/ste-changed printed in this run's part of the log, each cut at its first sentence."""
+    """The drift lines bin/ste-changed printed in this run's part of the log, each whole, marker first."""
     try:
         with open(log, "rb") as f:
             f.seek(start)
-            return PIN_NOTE.findall(f.read().decode("utf-8", "replace"))
+            return [n.rstrip() for n in PIN_NOTE.findall(f.read().decode("utf-8", "replace"))]
     except OSError:
         return []
 
@@ -473,7 +474,7 @@ def main(argv):
             with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                                  cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
-                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
+                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
@@ -508,7 +509,7 @@ def main(argv):
                 first = "%s; also tool missing (%s)" % (first, "; ".join(unstarted))
             notes = pin_notes(log, start) if state == "PASS" and known_action(step) == "ste-lint" else []
             if notes:  # a passing lint with a stale pin: the lane keeps its place and moves the pin in a lane of its own
-                first = "%s; pin note: %s" % (first, "; ".join(notes))
+                first = "%s; %s" % (first, "; ".join(notes))
         tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
         blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
         print("%-15s %s: %s" % (state, name, first))
