@@ -3,9 +3,12 @@
 
 Run: python3 merge/test_idle_lanes.py
 
-WHAT IT PROVES. The command prints one line per lane to archive, then one summary line. It takes its steps, marks and
-repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud
-session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one.
+WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per lane that can never be
+judged, then one summary line that counts both. A hold line is a lane with no cs-step tag, or an absent step with no Step
+trailer on main; it is never archived. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and
+exits 1. It takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other
+flag, and no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never
+reads as an empty one.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -33,6 +36,8 @@ SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then ar
 SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it."
 SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
+HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each alone, then archive it."
+MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each alone, then archive it."
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -48,7 +53,9 @@ def tearDownModule():
 
 
 def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
-    return roadmap.session_row(sid, status, "cs-build:lane", "cs-step:" + step, REPO, status_bucket=bucket)
+    """A lane row of this repo. step=None leaves out the cs-step tag."""
+    step_tags = ("cs-step:" + step,) if step else ()
+    return roadmap.session_row(sid, status, "cs-build:lane", *step_tags, REPO, status_bucket=bucket)
 
 
 class IdleLanesCli(unittest.TestCase):
@@ -91,6 +98,48 @@ class IdleLanesCli(unittest.TestCase):
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines(), [SUMMARY_ZERO], out)
+
+    def test_only_hold_lines_print_exit_0_and_a_summary_that_counts_the_holds(self):
+        # The step is not on the record branch and main holds no Step trailer for it, so the lane is held and not listed.
+        self.publish([lane("session_orphan", "ghost")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, "held lanes alone exit %d, so a caller reads them as an unread list: stderr %r" % (code, err))
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 2, out)
+        self.assertTrue(lines[0].startswith("hold (") and lines[0].endswith("; lane session_orphan)"), out)
+        self.assertIn("ghost", lines[0])
+        self.assertEqual(lines[1], HELD_ONE, out)
+
+    def test_lane_with_no_cs_step_prints_a_hold_line_and_exit_0(self):
+        self.publish([lane("session_nostep", None)])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 2, out)
+        self.assertTrue(lines[0].startswith("hold (") and lines[0].endswith("; lane session_nostep)"), out)
+        self.assertIn("no cs-step tag", lines[0])
+        self.assertEqual(lines[1], HELD_ONE, out)
+
+    def test_archive_lines_and_hold_lines_are_counted_together(self):
+        # The control is session_a, listed on c1. The held lane counts as held, never as a lane to archive.
+        self.publish([lane("session_a", "c1"), lane("session_orphan", "ghost")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        lines = out.splitlines()
+        self.assertIn("session_a (c1; topic -)", lines, out)
+        self.assertEqual(sum(line.startswith("hold (") for line in lines), 1, out)
+        self.assertEqual(lines[-1:], [MIXED], out)
+
+    def test_empty_record_exits_1_with_one_unknown_line_and_no_summary(self):
+        # No step file on the record branch means no lane can be judged. The list reads unknown and exits 1, so a caller
+        # never reads it as an empty list.
+        roadmap.git(self.repo, "rm", "-rq", "roadmap/data/steps")
+        roadmap.git(self.repo, "commit", "-q", "-m", "drop every step")
+        self.publish([lane("session_x", "x")])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(out.splitlines(), ["unknown (the record branch has no steps)"], "out: %r, err: %r" % (out, err))
+        self.assertEqual(code, 1, "an empty record exits %d, so a caller reads the list as read: %s" % (code, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
 
     def test_stale_live_file_prints_one_unknown_line_and_no_empty_summary(self):
         self.publish([lane("session_a", "c1")], read_at=roadmap.iso_ago(120))
