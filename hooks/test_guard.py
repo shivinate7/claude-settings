@@ -1032,8 +1032,10 @@ else:
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
-        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
-                       base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
+        # Every row names its repos, as GitHub does: the base is y/x, and a row's head is y/x unless it names head_repo (a fork).
+        others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False),
+                       head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"], "repo": {"full_name": o.get("head_repo", "y/x")}},
+                       base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main"), "full_name": "y/x"}},
                        state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
@@ -1130,7 +1132,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
-               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base},
+               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234", "repo": {"full_name": "y/x"}},
+               "base": {"ref": base, "repo": {"full_name": "y/x"}},
                "created_at": "2026-11-01T09:00:00Z"},
         "number": 12,
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
@@ -13960,7 +13963,9 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 # Rule reviewed-head-push. The incident: a lane pushed onto the head of a reviewed pull request whose one fix check
 # was already used. The merge tool writes one fix check per record, so it can write no fix check for the new head, and
 # the lane hand-wrote one. A `git push` that would land on the head of an open pull request ASKS, when that head's
-# newest review record is done and already carries its fix check. The ask says to stack the change on a new branch.
+# newest review record carries its fix check and that record is done, its fix check FAILed, or it is held (net value
+# negative). Further work on such a head belongs on a new branch. The ask says to stack the change on a new branch.
+# A pull request whose head comes from a fork never asks: its head is not this repo's branch.
 # The reader is guard_merge's helper, on the merge tool's own parser and state rule. Every record a case reads is
 # built by the tool's own review_body.
 #
@@ -13980,6 +13985,10 @@ RPUSH_BOTH = (RPUSH_PULLS, RPUSH_COMMENTS)
 RPUSH_ROUND = (1, "reviewer", "sonnet", "PASS")
 RPUSH_FIX = (RPUSH_PREFIX, "reviewer", "sonnet", "PASS")  # a fix check that passed, on the live head
 RPUSH_FIX_FAILED = (RPUSH_PREFIX, "reviewer", "sonnet", "FAIL")
+RPUSH_THREE = ((1, "reviewer", "sonnet", "PASS"), (2, "reviewer", "sonnet", "PASS"), (3, "reviewer", "sonnet", "PASS"))  # round 3 done
+RPUSH_HELD = {"guard": "yes", "net": "negative", "rounds": RPUSH_THREE}  # a held record: round 3 done, net value negative
+RPUSH_OPEN_ROUND = ((1, "reviewer", "sonnet", "FAIL"),)  # an open record: round 1 failed, nothing passed since
+RPUSH_FORKED = "forker/x"  # the repo a fork's pull request head comes from, not the base repo y/x
 RPUSH_CHATTER = "looks fine to me"  # an issue comment that is no review record
 RPUSH_ROOT = os.path.join(ROOT, "reviewed-head-push")
 _RPUSH_TOOL = []
@@ -13996,9 +14005,9 @@ def rpush_tool():
     return _RPUSH_TOOL[0]
 
 
-def rpush_record(head=RPUSH_LIVE, fix=None, rounds=(RPUSH_ROUND,), n=RPUSH_N):
-    """One review record: the reviewed `head`, its round lines, and the fix check or None."""
-    return rpush_tool().review_body(n, head, "normal", "no", list(rounds), "not owed", fix=fix)
+def rpush_record(head=RPUSH_LIVE, fix=None, rounds=(RPUSH_ROUND,), n=RPUSH_N, guard="no", net="not owed"):
+    """One review record: the reviewed `head`, its round lines, the fix check or None, and the guard and net-value fields."""
+    return rpush_tool().review_body(n, head, "normal", guard, list(rounds), net, fix=fix)
 
 
 def rpush_comment(body, n=RPUSH_N):
@@ -14109,12 +14118,23 @@ rpush_case("reviewed-head-push: a newer fix check after an older record without 
 rpush_case("reviewed-head-push: a record on page two of the comments still asks",
            "ask", (RPUSH_PULLS, RPUSH_COMMENTS, RPUSH_COMMENTS), page_cap=2,
            comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
+# A used fix check also asks when it FAILed, or when its record is held: the fix is taken, so the work goes on a new branch.
+rpush_case("reviewed-head-push: a newest record whose fix check failed on the live head asks, after both reads",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX_FAILED}))
+rpush_case("reviewed-head-push: a held record with a passed fix check on the live head asks, after both reads",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX)))
+rpush_case("reviewed-head-push: a held record with a failed fix check on the live head asks, after both reads",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD, fix=RPUSH_FIX_FAILED)))
 
 # The allow controls. Each names its two reads, so it cannot pass on a read that never happened.
 rpush_case("reviewed-head-push: a done record with no fix check allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({}))
-rpush_case("reviewed-head-push: a fix check that failed allows, after both reads",
-           "allow", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX_FAILED}))
+rpush_case("reviewed-head-push: a held record with no fix check allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments(dict(RPUSH_HELD)))
+rpush_case("reviewed-head-push: an open record with no fix check allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"rounds": RPUSH_OPEN_ROUND}))
+rpush_case("reviewed-head-push: a stale record with a failed fix check allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"head": RPUSH_OLD, "fix": RPUSH_FIX_FAILED}))
 rpush_case("reviewed-head-push: a record for an older head allows, after both reads",
            "allow", RPUSH_BOTH, comments=rpush_record_comments({"head": RPUSH_OLD, "fix": RPUSH_FIX}))
 rpush_case("reviewed-head-push: a record that names another pull request allows, after both reads",
@@ -14129,6 +14149,11 @@ rpush_case("reviewed-head-push: a closed pull request on the branch allows, afte
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
 rpush_case("reviewed-head-push: a branch with no pull request allows, after the list read only",
            "allow", (RPUSH_PULLS,), command=VCS + " push origin HEAD:lane-without-pr",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+# A pull request whose head comes from a fork is not this repo's branch, even with the same head name. It never asks,
+# and its record is never read.
+rpush_case("reviewed-head-push: a fork's pull request with the lane's head name allows, after the list read only",
+           "allow", (RPUSH_PULLS,), others=[dict(RPUSH_OPEN, head_repo=RPUSH_FORKED)],
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
 
 # The fail-open reads. A read that fails allows the push and prints exactly one line, naming the rule.
