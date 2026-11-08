@@ -5,9 +5,9 @@
 The coordinator starts no new lane while the hold stands, except the lanes that the owner's words below let start.
 
 - The hold: owner, 2026-11-07 21:42 CST, in chat, on page item 384 (lane-inflow-hold, should new lanes wait): "ill allow holding off on spawning new lanes but u shd still be able to spawn the lanes that will result in these fixes landing". He picked none of the item's queue-size limits.
-- Owner asks: owner, 2026-11-07 22:24 CST, page item 387 (hold-covers-owner-asks, do your own asks still start), pick a: "A lane for an ask you made starts during the hold, as the queue-fix lanes do."
+- Owner asks: owner, 2026-11-07 22:24 CST, page item 387 (hold-covers-owner-asks, do your own asks still start), pick a, whose option text reads: "A lane for an ask you made starts during the hold, as the queue-fix lanes do."
 - Waits: every other ready-not-started step. Rule `parallelism-keep-going` (start each queued item the owner asked for when a lane ends) yields to this ruling while it holds.
-- Ends: the ruling names no end. It holds until the owner rules on it again.
+- Ends: the ruling names no end.
 
 Kind: process
 Home: rule:parallelism-keep-going
