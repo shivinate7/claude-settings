@@ -5522,6 +5522,15 @@ add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed
 add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run -w pytest ci-job checks --lint | tail -5")
+add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
+add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
 
 # Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
 # not refused in the foreground, and neither is a verdict call.
@@ -5556,6 +5565,13 @@ sh("check-tail: uv run python -m pytest piped to tail in the foreground is allow
    "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
 sh("check-tail: env VAR=x then verdict merge --lane-lint piped to tail in the foreground is allowed",
    "env FOO=1 verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
+   "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
+   "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
+   "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
 
 # --- a verdict call piped into a later stage, then && || or ; (rule verdict-pipe-exit)
 #
