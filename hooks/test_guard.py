@@ -13565,6 +13565,11 @@ sh("builder-test: scanner, a lone apostrophe in echo ahead of a no-i sed w on te
    "echo don't; sed -n 'w tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: scanner, a multi-line no-i sed script whose w line names tests/a.py, is refused",
    "sed -n 'p\nw tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# A # inside a quoted no-i sed script is text, so the w in the next command is still judged.
+sh("builder-test: scanner, a # in a quoted no-i sed script ahead of a no-i sed w on tests/a.py, is refused",
+   "sed -n 's/#x/y/' src/x.py; sed -n 'w tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a # in a quoted no-i sed script on src/x.py, is allowed",
+   "sed -n 's/#x/y/' src/x.py", "allow", **BR)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
