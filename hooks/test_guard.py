@@ -10595,8 +10595,8 @@ lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcrip
 # An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
 archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
               role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
-# An agent whose own record is a lane with an open records pull request: refused, for that pull request. Old code reads
-# only the main transcript, finds no record, and refuses for that instead, so the reason pin is what it fails on.
+# An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
+# proves the agent's record was read: a guard that missed it would refuse for having no record.
 archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
                role_path("agent-own-lane"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
                carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
