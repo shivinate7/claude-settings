@@ -273,7 +273,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`;
+    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`. A step off the record branch has landed only by its trailer;
   - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
@@ -281,8 +281,9 @@ After each build the roadmap build script prints the upkeep list for the triage 
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
     The page writes `open` and `closed` only, so only `closed` releases a lane.
 
-  A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
-  branch; lane <session id>)`. A live file with no `items` list makes the row unknown. An `items` row with the
+  An idle lane that cannot be archived reads `hold (<reason>; lane <session id>)`. The reason is `no cs-step tag`
+  (the archive guard refuses such a lane), or a step id that is off the record branch with no `Step:` trailer on
+  main (naming any other `cs-repo:` tag the lane carries). The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
