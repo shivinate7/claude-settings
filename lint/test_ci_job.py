@@ -7,6 +7,8 @@ None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each st
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
+JobReaders reads a job's own timeout-minutes and runs-on: a quoted or commented value reads as its value; a timeout that is
+  not a whole number above zero, an expression, an absent key and a step's key read as None.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 SignalKilled: a step whose run ends by a signal, or whose verdict is killed first, reads unknown, never FAIL.
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
@@ -31,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import MISSING_INSTALL_LINE, run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import MISSING_INSTALL_LINE, job_runs_on, job_timeout_minutes, run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -656,6 +658,70 @@ class StepMaps(unittest.TestCase):
     def test_a_single_quoted_value_with_a_doubled_quote_keeps_its_hash_and_drops_the_comment(self):
         value = step_env(mapped("env", "          MSG: 'it''s # x' # y\n"))
         self.assertEqual(value.get("MSG"), "'it''s # x'", "the quoted env: value was cut at its inner # or kept the comment")
+
+
+def job_with(*lines):
+    """A job block of the lines given, its own keys at 4 spaces, then one step, as checks.yml writes a job."""
+    return "".join(lines) + "    steps:\n      - run: exit 0\n"
+
+
+class JobReaders(unittest.TestCase):
+    """job_timeout_minutes and job_runs_on read a job's own key, as merge --lane-lint reads the other job of a lane. A quoted
+    value, or one followed by a comment, reads as its value. A timeout that is not a whole number above zero, a runs-on that
+    is an expression, an absent key and a key nested under steps read as None, never as a guess."""
+
+    def test_a_double_quoted_timeout_reads_its_number(self):
+        self.assertEqual(job_timeout_minutes(job_with('    timeout-minutes: "30"\n')), 30, 'timeout-minutes: "30" did not read as 30')
+
+    def test_a_single_quoted_timeout_with_a_comment_reads_its_number(self):
+        self.assertEqual(job_timeout_minutes(job_with("    timeout-minutes: '30' # c\n")), 30, "timeout-minutes: '30' # c did not read as 30")
+
+    def test_a_timeout_followed_by_a_comment_reads_its_number(self):
+        self.assertEqual(job_timeout_minutes(job_with("    timeout-minutes: 30 # cap\n")), 30, "timeout-minutes: 30 # cap did not read as 30")
+
+    def test_a_zero_timeout_reads_none(self):
+        self.assertIsNone(job_timeout_minutes(job_with("    timeout-minutes: 0\n")), "timeout-minutes: 0 read as a cap, not as no number")
+
+    def test_a_negative_timeout_reads_none(self):
+        self.assertIsNone(job_timeout_minutes(job_with("    timeout-minutes: -5\n")), "timeout-minutes: -5 read as a cap, not as no number")
+
+    def test_an_exponent_timeout_reads_none(self):
+        self.assertIsNone(job_timeout_minutes(job_with("    timeout-minutes: 1e3\n")), "timeout-minutes: 1e3 read as a cap, not as no number")
+
+    def test_an_expression_timeout_reads_none(self):
+        self.assertIsNone(job_timeout_minutes(job_with("    timeout-minutes: ${{ x }}\n")), "an expression timeout-minutes read as a cap")
+
+    def test_an_absent_timeout_reads_none(self):
+        block = job_with()
+        self.assertNotIn("timeout-minutes", block, "the fixture has a timeout-minutes line, so the absent case is not absent")
+        self.assertIsNone(job_timeout_minutes(block), "a job with no timeout-minutes read as a cap")
+
+    def test_a_step_timeout_nested_under_steps_reads_none(self):
+        block = "    steps:\n      - name: x\n        timeout-minutes: 5\n"
+        self.assertIn("        timeout-minutes: 5\n", block, "the fixture lost the step's timeout-minutes line")
+        self.assertIsNone(job_timeout_minutes(block), "a step's timeout-minutes: 5 read as the job's cap")
+
+    def test_a_double_quoted_runs_on_reads_its_label(self):
+        self.assertEqual(job_runs_on(job_with('    runs-on: "ubuntu-latest"\n')), "ubuntu-latest", 'runs-on: "ubuntu-latest" did not read its label')
+
+    def test_a_single_quoted_runs_on_with_a_comment_reads_its_label(self):
+        self.assertEqual(job_runs_on(job_with("    runs-on: 'ubuntu-22.04' # c\n")), "ubuntu-22.04", "runs-on: 'ubuntu-22.04' # c did not read its label")
+
+    def test_a_runs_on_followed_by_a_comment_reads_its_label(self):
+        self.assertEqual(job_runs_on(job_with("    runs-on: ubuntu-latest # c\n")), "ubuntu-latest", "runs-on: ubuntu-latest # c kept its comment")
+
+    def test_an_expression_runs_on_reads_none(self):
+        self.assertIsNone(job_runs_on(job_with("    runs-on: ${{ matrix.os }}\n")), "an expression runs-on read as a label, not as unknown")
+
+    def test_an_absent_runs_on_reads_none(self):
+        block = job_with()
+        self.assertNotIn("runs-on", block, "the fixture has a runs-on line, so the absent case is not absent")
+        self.assertIsNone(job_runs_on(block), "a job with no runs-on read as a label")
+
+    def test_a_step_runs_on_nested_under_steps_reads_none(self):
+        block = "    steps:\n      - name: x\n        runs-on: ubuntu-latest\n"
+        self.assertIn("        runs-on: ubuntu-latest\n", block, "the fixture lost the step's runs-on line")
+        self.assertIsNone(job_runs_on(block), "a step's runs-on read as the job's label")
 
 
 def run_as_yaml_reads_it(step):
