@@ -106,7 +106,8 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 - An answered ask folds to one row: the check, the ask (one line, two on a phone), "Answered <time>" and "Show answer".
   The whole row is one button, 48px tall.
 - An answer stays open while it is new to this viewer. It shows "New answer".
-  The page keeps a seen mark per viewer in `localStorage` `waiting.askSeen`, an ISO time, set when the page is hidden.
+  The page keeps a seen mark per viewer in `localStorage` `waiting.askSeen`, an ISO time.
+  It is set when the tab hides or the page closes, only while `#asks` is on screen. A pagehide of a hidden tab leaves it at the hide time.
   When storage fails, answers from the last 24 hours stay open and older ones fold.
 - A fold happens only at a page load or at a press. A row never folds while the owner looks at it.
 - Fold and Show answer sit at the same spot, the right end of the first line. Focus goes to the control at that spot after a press.
