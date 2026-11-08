@@ -388,7 +388,7 @@ class LintBase(Job):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def lane_adds_narration(self, origin=True):
-        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py", "actions/code-check/standard.json"):
+        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py", "lint/code_check_standard.json"):
             os.makedirs(os.path.join(self.root, os.path.dirname(rel)), exist_ok=True)
             shutil.copy(os.path.join(HERE, "..", rel), os.path.join(self.root, rel))
         self.git("add", ".")
@@ -1040,11 +1040,15 @@ class LintTools(Job):
 
     def setUp(self):
         super().setUp()
-        # CI's checkout has actions/code-check and the root ruff.toml that sets its ruff rules. A local uses: runs the
-        # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
+        # CI's checkout has actions/code-check, the table it reads from lint/, and the root ruff.toml that sets its ruff
+        # rules. A local uses: runs the repo under test's own copy. The base carries all three (lane commits them), so
+        # the diff under test has none of them.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
                         os.path.join(self.root, "actions", "code-check"))
         shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
+        os.makedirs(os.path.join(self.root, "lint"))
+        shutil.copyfile(os.path.join(CHECKOUT, "lint", "code_check_standard.json"),
+                        os.path.join(self.root, "lint", "code_check_standard.json"))
         shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
 
     def git(self, *a):
@@ -1174,10 +1178,10 @@ class LintTools(Job):
 @functools.lru_cache(maxsize=None)
 def pipx_runs_pinned_ruff():
     """True when pipx can run code_check's pinned ruff. The probe is `pipx run ruff==<pin> --version`, the pin read from
-    standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
+    code_check_standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
     if not shutil.which("pipx"):
         return False
-    with open(os.path.join(CHECKOUT, "actions", "code-check", "standard.json"), encoding="utf-8") as f:
+    with open(os.path.join(CHECKOUT, "lint", "code_check_standard.json"), encoding="utf-8") as f:
         pin = json.load(f)["tools"]["ruff"]
     try:
         return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
