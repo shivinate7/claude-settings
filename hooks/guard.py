@@ -2882,6 +2882,7 @@ BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mu
 BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
 BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"X\s*,\s*(?:(?:and|or|nor)\s+)*(?=X(?!\w)|$)", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -2941,7 +2942,10 @@ def _brief_prohibits(before: str) -> bool:
     """True when a negator sits in the same clause as the command, within 4 words before it; "avoid" and "without"
     count only as the word directly before it."""
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
-    words = _brief_words(re.split(r"[;.,]", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))[-1])
+    # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
+    # from the negator's window; a comma before plain words ends the clause
+    listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))
+    words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
         or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
 
@@ -2956,10 +2960,26 @@ def _brief_target(segment: str, moved):
     return (moved if own is None else own), moved
 
 
+def _brief_spawns(tool: str, tool_input):
+    """Yield each spawn whose brief this rule reads, as (`subagent_type`, `prompt`). Unlike spawn_inputs, a Workflow
+    agent() call counts whatever its model (none, or held in a variable). An agentType the scan cannot read is the
+    default role, which writes, so its brief is judged. A prompt the scan cannot read yields nothing."""
+    if tool == "Workflow" and isinstance(tool_input.get("script"), str):
+        for prompt, bodies in script_agent_calls(tool_input["script"]):
+            keys, unseen = {}, set()
+            for k, u, _ in bodies:
+                keys.update(k)
+                unseen |= u
+            if prompt is not None:
+                yield {"subagent_type": None if "agentType" in unseen else keys.get("agentType"), "prompt": prompt}
+    else:
+        yield from spawn_inputs(tool, tool_input)
+
+
 def brief_destructive_hit(tool: str, tool_input) -> str:
     """The first command an Agent, Task or Workflow brief orders that discards a working tree, or ""."""
     read_only = {role.lower() for role in READ_ONLY}
-    for spawn in spawn_inputs(tool, tool_input):
+    for spawn in _brief_spawns(tool, tool_input):
         prompt = spawn.get("prompt")
         role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]   # plugin prefix: my-plugin:reviewer
         if not isinstance(prompt, str) or role in read_only:
