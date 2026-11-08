@@ -1943,19 +1943,22 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
     return full if outside else None
 
 
-def builder_test_path(path: str, cwd: str) -> bool:
+def builder_test_path(path: str, cwd: str, call_cwd: str = None) -> bool:
     """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
     tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
-    disables tests is judged on content, so only the Edit tools read it."""
+    disables tests is judged on content, so only the Edit tools read it. `cwd` is where `path` resolves
+    (a shell write passes the folder after a `cd`); `call_cwd` is where the call itself runs (default
+    `cwd`) and alone decides whether it runs in a repository."""
     rel = repo_rel(path, cwd)
     if rel is None:
         return False
     # From a call that runs in a repository, a path in no repository is no test of it, as for the test-author
     # in role_write_hit. From a call in no repository nothing says which paths are outside, so the shape decides.
-    # Both reads take cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
+    # Both reads take their cwd in drive form: a `/c/` cwd read raw hides its own repo from the target
     # read but not from the probe, and the target would then count as outside.
     where = drive_form_cwd(cwd)
-    if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
+    probe = drive_form_cwd(call_cwd if call_cwd is not None else cwd)
+    if (repo_rel(os.path.join(probe or "", "x"), probe, outside=False) is not None
             and repo_rel(path, where, outside=False) is None):
         return False
     return is_test_rel(rel)
@@ -1965,7 +1968,8 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
-    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
+    return (_shell_write_hit(stripped, cwd, lambda p, at: builder_test_path(p, at, call_cwd=cwd),
+                             follow_cd=True, command_position=True)
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
 
