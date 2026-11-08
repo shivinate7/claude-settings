@@ -104,6 +104,9 @@ CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
 # Two hundred letters, one 16-letter block repeated 12 times and 8 more: a digit after them sits at offset 200, past a lookahead of 20 characters.
 LETTERS_200 = LETTERS_16 * 12 + "xKqPzLmR"
+# Three hundred letters, 16 letters repeated 18 times and 12 more, with no digit: only the letters side of the long-value shape reads it.
+LETTERS_300 = LETTERS_16 * 18 + LETTERS_12
+assert len(LETTERS_300) == 300, "LETTERS_300 must hold 300 letters"
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
 PROSE_SECRET = "correcthorsebatterystaple"  # letters only, no digit, symbol or hump: only the prose rule can refuse it
 # A digit at index 256 of a credential value: refused, and it must stay refused.
@@ -449,6 +452,9 @@ GREEN = [
     ("a long run of letters with a digit at index 1000, and no credential name", DIGIT_AT_1000),
     # 300 digits and no letter is no secret: the long-value shape refuses only a value with a letter and a digit.
     ("API_KEY of 300 digits and no letter", "API_KEY=" + DIGITS_300),
+    # 300 letters and no digit is no secret: the long-value shape refuses only a value with a letter and a digit. A fix that
+    # refuses any letter in a long value turns this row red.
+    ("token with 300 letters and more words", "token: " + LETTERS_300 + " and more words"),
     ("prose with the word secret before a name", "the secret santa list"),
     # A letters-only value of 12 or more characters after a credential name refuses today. These three are placeholder and
     # label text, not secrets, so each is red on main. The RED rows above hold a random value after the same names.
