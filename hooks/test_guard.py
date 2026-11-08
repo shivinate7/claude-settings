@@ -24458,7 +24458,7 @@ LOG_CHECKS_EXTRA.append(("override: a missing-module deny says that no override 
                          ov_fail_closed_says_no_override))
 
 
-# THE VETO SETTER, WHEN GUARD_CORE LACKS IT (override-veto-core-unwrapped). judge() registers the veto with
+# THE VETO SETTER, WHEN GUARD_CORE LACKS IT. judge() registers the veto with
 # guard_core.set_override_veto, unwrapped, where set_override_context is wrapped. A guard_core that predates
 # the setter raised inside judge(), main() failed open, and the call was allowed. With the setter gone the
 # guard must still judge each call as it does with the setter present. A builder's commit is the other call
