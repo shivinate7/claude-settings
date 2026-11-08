@@ -465,6 +465,7 @@ def _page_tracked(top):
 
 
 _GENERATOR = "hook_catalog.py"
+_GENERATOR_READS = {"--check", "--print"}   # the two modes that write no page, for a run with no parser to read it
 _PYTHON_VALUE_FLAGS = {"-X", "-W"}
 
 
@@ -487,8 +488,8 @@ def _generator_root(args):
     generator then writes the repo it is in). The generator's own parser reads the arguments, so a prefix or a
     `--root=` form is read as the generator reads it."""
     parser = _generator_parser()
-    if parser is None:
-        return ""
+    if parser is None:   # no parser: main's exact rule, `--check` and `--print` read as no run, any other run counts
+        return None if _GENERATOR_READS & set(args) else ""
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         try:
             parsed = parser.parse_args(args)
@@ -538,13 +539,15 @@ def _runs_generator(segment):
     names, "" for none; the segment's tokens, for `_env_chdir`). A run is the command word being the generator,
     or a python interpreter whose script argument is it, with arguments that `_generator_root` reads as a
     write. The shell consumes a redirect (`_strip_redirects`, read on shlex words, so a quoted target with a
-    space is one) and a closing subshell `)`, so neither reaches the generator's parser: a token the shell
-    consumes never turns a run into no run. A segment shlex cannot read that names the generator and holds a
+    space is one), a backgrounding `&` with the words after it, and a closing subshell `)`, so none reaches the
+    generator's parser: a token the shell consumes never turns a run into no run. A segment shlex cannot read that names the generator and holds a
     redirect counts as a run with no --root: the guard fails toward a hit. The caller passes no git call."""
     read = segment_tokens(segment)
     if read is None:
         return ("", []) if _GENERATOR in segment and re.search(r"[<>]", segment) else None
     tokens = _strip_redirects(list(read))
+    if "&" in tokens:
+        tokens = tokens[:tokens.index("&")]   # a backgrounding `&` ends the command; the words after it are the shell's
     while tokens and tokens[-1].strip(")") == "":
         tokens.pop()
     if tokens and tokens[-1].endswith(")"):

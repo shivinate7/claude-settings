@@ -342,7 +342,7 @@ def set_waiting_page(root, url):
     if not ARTIFACT_URL.fullmatch(url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if _common_dir(root) is None:  # a mistyped root must not get a new .claude folder
-        raise LayoutError("%s: not a git repository (a missing folder, or a folder with no .git)" % root)
+        raise LayoutError("%s: not a repo root (no .git here): pass the repo's top folder" % root)
     if has_extras(root):
         data = _read(_extras(root))
         held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
