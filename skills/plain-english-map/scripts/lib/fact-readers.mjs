@@ -7,8 +7,9 @@
 // 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
 // { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root.
 // A join call whose pieces after the first are string literals names a file too: path.join, path.posix.join, path.resolve, or a bare join or
-// resolve imported from 'path'. A literal anchor makes it one more such string. Any other anchor must be a known place: `__dirname`, or a
-// top-level const bound to it, through joins of literal pieces too. The join then resolves from that place only. Any other anchor, or a piece
+// resolve imported from 'path'. A literal anchor makes it one more such string. Any other anchor must be a known place: `__dirname`, `__filename`,
+// `import.meta.dirname` or `.filename`, `fileURLToPath(import.meta.url)`, `fileURLToPath(new URL('<literal>', import.meta.url))`, `path.dirname` of a
+// place, a join of a place, or a top-level const bound to one. The join then resolves from that place only. Any other anchor, or a piece
 // that a resolve call resets on, makes it name none).
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
@@ -203,6 +204,8 @@ const joinedStrings = (sf, file, files) => {
   const places = [];
   if (!callees.size) return { strings, places };
   const counts = declarationCounts(sf);
+  // `URL` is the global unless the file binds it: an import of it from `url` or `node:url` is that same global, and the one binding.
+  const globalUrl = !counts.has('URL') || (counts.get('URL') === 1 && namedUrl.get('URL') === 'URL');
   const consts = new Map();
   for (const st of sf.statements) {
     if (ts.isVariableStatement(st) && st.declarationList.flags & ts.NodeFlags.Const)
@@ -242,7 +245,7 @@ const joinedStrings = (sf, file, files) => {
       }
       if (urlFns.has(callee)) {
         if (importMeta(arg, 'url')) return file;
-        const url = ts.isNewExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'URL' && !counts.has('URL') && arg.arguments?.length === 2 ? arg.arguments : null;
+        const url = ts.isNewExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'URL' && globalUrl && arg.arguments?.length === 2 ? arg.arguments : null;
         // A relative URL with no scheme, query or escape is a plain path from the file's folder. The empty one is the file itself.
         if (url && isStringPiece(url[0]) && importMeta(url[1], 'url') && !/^[a-z][a-z0-9+.-]*:|^[/\\]|[?#%\\]/i.test(url[0].text))
           return url[0].text === '' ? file : inside(path.posix.join(folder, url[0].text).replace(/\/+$/, '') || '.');
