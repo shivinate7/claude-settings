@@ -1552,11 +1552,12 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|failing|running|pending|in\s+progress)"
-    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed|fail(?:ed|s)")
+    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed|fail(?:ed|s)(?!\s+to\s+(?:connect|start|run|load|reach)\b)")
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL),
+    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
+     % _BLOCKER_TAIL),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
     (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
@@ -1606,8 +1607,8 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
     ("pr-open", re.compile(
-        r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?:and|or)\s+\w+)?(?:\s+(?!(?:%s|and|or)(?![\w-]))\S+){0,4}?\s+%s\b"
-        % (_PREPOSITION, _PR), re.I)),
+        r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-])|(?:and|or)\s+%s\b)\S+){0,4}?\s+%s\b"
+        % (_PREPOSITION, _PR, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -2001,12 +2002,15 @@ def _cited(line, refused):
     return bool(ids) and _route_verdict(ids)[0] == "ok"
 
 
+CANNOT_MERGE_TOOL_RE = re.compile(r"\bthe\s+merge\s+tool\b", re.I)  # the repo's merge tool, named in prose
+
+
 def _backed(tries, act, sentence):
     """True when a failed try of `act` backs `sentence`. A try read from a command's name (a script, a make target; its key
     starts with "script") backs only a line that names it: the name as a whole token. A name that is only the act word
     (merge, push) is named only inside a backtick span, since the prose of any such claim holds that word."""
     for key in tries.get(act, ()):
-        if key[0] != "script":
+        if key[0] != "script" or key[1] == "merge" and CANNOT_MERGE_TOOL_RE.search(sentence):
             return True
         token = r"(?<![\w.-])%s(?![\w-])" % re.escape(key[1])
         if re.search(r"`[^`\n]*%s[^`\n]*`" % token if re.fullmatch(r"\w+", key[1]) else token, sentence, re.I):
