@@ -412,7 +412,9 @@ def _resolve_vars(cmd: str) -> str:
 # `split_segments`, never raw text. Each of these keeps today's literal reading (the word stays as written):
 #  - a list word holds `$` or a backtick, or has white space inside its quotes, or is a redirect;
 #  - the body assigns NAME, uses `$NAME` as part of a word (`"$f.md"`, `$(cmd "$f")`), as the command word, or as a
-#    redirect target; or a loop nests inside it, or no `done` closes it, or the list is empty;
+#    redirect target; or a `for` loop nests inside it, or no `done` closes it, or the list is empty;
+#    An inner `while` or `until` is not seen as a loop: `_command_start` skips its keyword, so its `done` closes the outer
+#    `for`, and a `$NAME` after that `done` keeps the literal reading.
 #  - a brace is a `{a..b}` range (the word is kept whole), or an expansion goes past 32 words.
 # A PowerShell command is not read: its braces and `for` are another syntax.
 _LOOP_OPENERS = frozenset(("for", "while", "until", "select"))
