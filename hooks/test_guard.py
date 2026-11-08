@@ -3959,6 +3959,10 @@ hm_allow("a repo under the guard's temp folder adds a variable's path, and the t
          "S=../hmtmp-sibling; " + HMADD + '"$S"', cwd=HMTMPREPO)
 hm_allow("an agent sets a variable to its own red-run folder, as the red run does, and adds it, passes",
          "R=" + HMAGENT_OWN_RED + "; " + HMADD + '--detach "$R" HEAD', **HMAG)
+# A variable the command never sets, in a throwaway repo: the throwaway rule judges the repo first, so the
+# unknown target passes there. The refusal for an unknown target sits after that rule.
+hm_allow("a repo under the guard's temp folder runs a variable target no command sets, and the throwaway rule passes it",
+         HMADD + '"$S/lane"', cwd=HMTMPREPO)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
