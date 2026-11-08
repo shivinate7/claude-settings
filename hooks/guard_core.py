@@ -2488,22 +2488,44 @@ def _js_extent(code: str, mask, start: int, stop: str = "") -> int:
 
 
 def _js_rules_out_env(code: str, mask, test) -> bool:
-    """True when a prefix test `(name, literal, start, end)` is a plain `!name.startsWith('.env')`: the
-    env-file base name, one `!` and no more, and no `||` next to it or anywhere in its `if` condition
-    (`!f.startsWith('.env') || x` is true for an env name)."""
+    """True when a prefix test `(name, literal, start, end)` is a plain `!name.startsWith('.env')`, or the
+    same in redundant parens `!(name.startsWith('.env'))` (nothing else inside them): the env-file base
+    name, one `!` and no more. It must be a conjunct of what holds it: no `||` next to it, and none at
+    the level of any group around it up to the `if` condition (`!f.startsWith('.env') || x` is true for
+    an env name). An `||` inside a later group, `!f.startsWith('.env') && (a || b)`, does not matter."""
     from guard_env import ENV_PREFIX   # imported late: guard_env imports this file
     name, literal, start, end = test
     before = code[:start].rstrip()
+    after = code[end:].lstrip()
+    tail = end
+    if before.endswith("!("):
+        if not (after.startswith(")") and mask[len(code) - len(after)] == 1):
+            return False
+        before, tail = before[:-1].rstrip(), len(code) - len(after) + 1
     if not (name and literal == ENV_PREFIX and code[start:].startswith(name + ".startsWith")
             and before.endswith("!") and not before[:-1].rstrip().endswith(("!", "||"))
-            and not code[end:].lstrip().startswith("||")):
+            and not code[tail:].lstrip().startswith("||")):
         return False
     opened = [m for m in JS_IF_OPEN.finditer(code, 0, start) if mask[m.start()] == 1]
     if opened:
         first = opened[-1].end()
         close = _js_close(code, mask, first - 1)
-        if close >= end and any(mask[at] == 1 and code.startswith("||", at) for at in range(first, close)):
-            return False
+        if close >= end:
+            # Each group is [holds ||]; `around` is the groups open at the test, the `if` condition first.
+            groups, around = [[False]], None
+            for at in range(first, close):
+                if at == start:
+                    around = list(groups)
+                if mask[at] != 1:
+                    continue
+                if code[at] in "([{":
+                    groups.append([False])
+                elif code[at] in ")]}" and len(groups) > 1:
+                    groups.pop()
+                elif code.startswith("||", at):
+                    groups[-1][0] = True
+            if any(group[0] for group in around or ()):
+                return False
     return True
 
 
