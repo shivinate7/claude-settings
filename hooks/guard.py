@@ -2644,7 +2644,8 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # verdict word right after the colon. Or a report's leading verdict, `FAIL, round <n> of 3, ...`. A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote. The regex reads only that shape. The exemptions are made first, in
 # Python, by brief_blind_verdict_text: it blanks each backtick span (a quote, so a finding that quotes `verdict: FAIL`
-# passes) but keeps a span that holds only a verdict word (``Round 1: `FAIL` `` is a verdict), splits each line at its sentence ends so each sentence starts its own line, and blanks a verdict-word choice list
+# passes) but keeps a span that holds only a verdict word (``Prior verdict: `FAIL` `` is a verdict). It splits each line
+# at its sentence ends so each sentence starts its own line, and blanks a verdict-word choice list
 # that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format line). An
 # exemption hides only its own span or sentence, never the rest of its line: `Give a verdict: PASS or FAIL. Prior verdict:
 # FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon. Some
