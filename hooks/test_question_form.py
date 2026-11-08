@@ -1572,6 +1572,19 @@ def case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line():
              entry_of(task_item(["Check the output of `%s`" % span])), refused)
 
 
+def case_step_foreach_cmdlet_is_a_shell_line():
+    # `ForEach` is neither a Titlecase verb nor in PS_VERBS, so SHELL_CMDLET passes the bare `ForEach-Object { $_ }`:
+    # that pass is the red. `ForEach-Object -Process {}` is refused by the span-flag rule, so it guards that rule.
+    # The control `JavaScript-heavy` is hyphenated CamelCase prose and stays text.
+    refused = ("command-in-item", "shell line")
+    page("a step holding `ForEach-Object { $_ }` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `ForEach-Object { $_ }`"])), refused)
+    page("a step holding `ForEach-Object -Process {}` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `ForEach-Object -Process {}`"])), refused)
+    page("a step holding `JavaScript-heavy` alone is text and passes, a control", "set",
+         entry_of(task_item(["Check the output of `JavaScript-heavy`"])), None)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2293,7 +2306,7 @@ def main():
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
                  case_step_backslash_cmdlet_path_after_a_prefix_is_a_shell_line,
                  case_step_span_flag_after_a_prose_determiner_is_text, case_step_camel_verb_cmdlet_is_a_shell_line,
-                 case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line,
+                 case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line, case_step_foreach_cmdlet_is_a_shell_line,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
