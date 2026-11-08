@@ -1256,15 +1256,20 @@ def pipe_at_line_end_runs_the_cd_in_a_subshell():
     ])
 
 
-def log_folders_after(shell, script):
-    """Run script under shell in a fresh start folder that holds a folder x. Return the folders, of
-    start and x, that hold a file named log once the script ends. The exit code is not read."""
+def log_folders_after(shell, script, nested=()):
+    """Run script under shell in a fresh start folder that holds a folder x, and each folder in nested
+    (a path under x, made before the script runs). Return the folders, named start, x or the nested
+    path, that hold a file named log once the script ends. The exit code is not read."""
     start = new_dir()
     x = os.path.join(start, "x")
     os.mkdir(x)
+    folders = {"start": start, "x": x}
+    for rel in nested:
+        os.makedirs(os.path.join(x, rel))
+        folders[os.path.join("x", rel)] = os.path.join(x, rel)
     subprocess.run([shell, "-c", script], cwd=start, stdin=subprocess.DEVNULL,
                    capture_output=True, timeout=20)
-    return {name for name, d in (("start", start), ("x", x)) if os.path.exists(os.path.join(d, "log"))}
+    return {name for name, d in folders.items() if os.path.exists(os.path.join(d, "log"))}
 
 
 @posix_case
@@ -1331,6 +1336,75 @@ def same_line_pipe_forms_read_the_start_folder():
     got = log_folders_after("/bin/bash", "cd x |& echo hi > log")
     if got != {"start"}:
         problems.append(f"/bin/bash: 'cd x |& echo hi > log' left the log in {sorted(got)}, want ['start']")
+    return problems
+
+
+@posix_case
+def backslash_newline_after_and_continues_the_list():
+    """27q. a backslash-newline after && continues the list, so the cd after it is read and its log resolves in the cd's folder"""
+    problems = read_rows_problems([
+        ("export A=1 && \\\n cd /x && \\\n make > log", ["/x/log"], []),
+        ("export A=1 && \n cd /x && \n make > log", ["/x/log"], []),  # control: a newline with no backslash
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so the cd runs in x
+        got = log_folders_after(shell, "export A=1 && \\\n cd x && \\\n make > log")
+        if got != {"x"}:
+            problems.append(f"{shell}: export A=1 && \\ cd x && \\ make > log left the log in {sorted(got)}, want ['x']")
+    return problems
+
+
+@posix_case
+def backslash_newline_after_semicolon_continues_the_list():
+    """27r. a backslash-newline after ; continues the command line, so the cd after it is read and its log resolves in the cd's folder"""
+    problems = read_rows_problems([
+        ("set -e; \\\n cd /x; make > log", ["/x/log"], []),
+        ("set -e; \n cd /x; make > log", ["/x/log"], []),  # control: a newline with no backslash
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so the cd runs in x
+        got = log_folders_after(shell, "set -e; \\\n cd x; make > log")
+        if got != {"x"}:
+            problems.append(f"{shell}: set -e; \\ cd x; make > log left the log in {sorted(got)}, want ['x']")
+    return problems
+
+
+@posix_case
+def backslash_newline_before_a_second_cd_continues_the_list():
+    """27s. a backslash-newline after && before a cd continues the list, so the second cd is read and its log resolves in its folder"""
+    problems = read_rows_problems([
+        ("cd /x && \\\n cd b && make > log", ["/x/b/log"], []),
+        ("cd /x && \n cd b && make > log", ["/x/b/log"], []),  # control: a newline with no backslash
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so cd b runs in x
+        got = log_folders_after(shell, "cd x && \\\n cd b && make > log", nested=("b",))
+        if got != {"x/b"}:
+            problems.append(f"{shell}: cd x && \\ cd b && make > log left the log in {sorted(got)}, want ['x/b']")
+    return problems
+
+
+@posix_case
+def backslash_newline_after_pipe_continues_the_pipeline():
+    """27t. a backslash-newline after | continues the pipeline, so the tee after it is read and its log stays in the start folder"""
+    problems = read_rows_problems([
+        ("make 2>&1 | \\\n tee log", ["log"], []),
+        ("make 2>&1 | \n tee log", ["log"], []),  # control: a newline with no backslash
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so tee runs after the pipe
+        got = log_folders_after(shell, "make 2>&1 | \\\n tee log")
+        if got != {"start"}:
+            problems.append(f"{shell}: make 2>&1 | \\ tee log left the log in {sorted(got)}, want ['start']")
+    return problems
+
+
+@posix_case
+def word_that_is_one_backslash_is_not_a_continuation():
+    """27u. a word in quotes that is one backslash is still a word: its newline ends the command, so the cd on the next line is read"""
+    problems = read_rows_problems([
+        (r'cd /x && echo "\\"' + "\ncd b && make > log", ["/x/b/log"], []),  # control: green at head and at base
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: the newline ends the list, so cd b runs in x
+        got = log_folders_after(shell, 'cd x && echo "\\\\"\ncd b && echo ok > log', nested=("b",))
+        if got != {"x/b"}:
+            problems.append(f"{shell}: cd x && echo a quoted backslash, newline, cd b && echo ok > log left the log in {sorted(got)}, want ['x/b']")
     return problems
 
 
