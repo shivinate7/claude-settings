@@ -15380,18 +15380,17 @@ PROD_DONE = diff_repo("ta-prod-done", _product_merge_commit, files=MIXED_FILES)
 CI_MID = diff_repo("ta-ci-mixed-mid", _mixed_workflow_mid_merge, files=CI_FILES)
 AUTH_PROD = dict(agent_id="auth1", agent_type="test-author", cwd=PROD_MID)
 AUTH_CI = dict(agent_id="auth1", agent_type="test-author", cwd=CI_MID)
-# Case 9 (red on 2add0d3cf; main refuses it): a product-only merge. The test-author's Edit of the conflicted product
-# file is refused, because no test path is conflicted and the merge route has no product path to give.
+# Case 9: a product-only conflict merge. The test-author's Edit of the conflicted product file is refused,
+# because no test path is conflicted and the merge route has no product path to give.
 add("test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused", "deny",
     rule=TA, tool="Edit", file_path=os.path.join(PROD_MID, "src/app.py"), new_string="x = 7\n",
     carries=("builder", "Report"), **AUTH_PROD)
-# Case 10 (red on 2add0d3cf; main logs it): the same product-only merge, resolved in the test-author's merge commit,
-# logs author-diff for the product path.
+# Case 10: that product-only conflict merge's commit logs author-diff for the product path.
 LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a product-only conflict logs "
                          "author-diff",
                          logged_case("ta-prod-done", "test-author", "auth1", "author-diff")))
-# Case 11 (red on 2add0d3cf; main refuses it): a mixed merge that conflicts a test file and ci.yml. An Edit of ci.yml
-# that changes a non-test step is refused. The merge route covers product paths only: a workflow keeps its content check.
+# Case 11: a mixed merge that conflicts a test file and ci.yml. An Edit of ci.yml that changes a non-test step is
+# refused. The merge route covers product paths only: a workflow keeps its content check.
 add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
     tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
     new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
