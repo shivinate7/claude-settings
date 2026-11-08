@@ -542,24 +542,37 @@ def answered_problem(text):
 # list) exempts it. A clause ends at a conjunction, "as" and "which" as well as at the answered check's breaks.
 # A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
+PRE_END_OF_NOUN = r"(?=\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also|is|was|are|were|that|and|but|so|because|as)\b))"
 PRE_DESCRIBES_AFTER_RE = re.compile(
     r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b"
-    r"|(?:[\w-]+\s+)?(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red)\b)", re.I)
+    # A plural word before the noun ("tests error out") is a modifier head, so only a singular word may sit there.
+    r"|(?:(?![\w-]*[^s\W]s\b)[\w-]+\s+)?"
+    r"(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red|issues?|problems?|bugs?|defects?)\b"
+    + PRE_END_OF_NOUN + ")", re.I)
+# "a line that calls a failure pre-existing" describes a rule. An indefinite object marks a mention, not a claim.
+PRE_MENTION_BEFORE_RE = re.compile(
+    r"\b(?:that|when|if|whenever)\s+(?:\w+\s+){0,3}?(?:calls?|says?|labels?|names?|marks?|claims?|treats?)"
+    r"\s+(?:an?|any|every|each)\s+[\w-]+\s+$", re.I)
+PRE_NEGATED_AFTER_RE = re.compile(r"\s*(?:none|no|nothing|nil|zero|0)\b", re.I)
 PRE_DESCRIBES_BEFORE_RE = re.compile(
     r"\b(?:is|was|are|were|be|been|it|them)\s+(?:(?!(?:an?|the|this|that|its|my|our)\b)\w+\s+)?$", re.I)
 ALREADY_RE = re.compile(r"\balready\s+(?:red|fail\w*|broken|there|present)\b", re.I)
 FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
 SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
 BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
-BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE_REF, re.I)
+# A base used as a ref ("on main", "main is"), not a noun modifier ("the main job").
+BASE_WORD_RE = re.compile(
+    r"\b(?:on|at|from|of|in)\s+{b}\b|\b{b}\s+(?:is|was|has\s+been|had\s+been)\b"
+    r"|\bbefore\s+(?:this|the|my)\s+change\b".format(b=BASE_REF), re.I)
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 PRE_CLAUSE_BREAK_RE = re.compile(
     ANSWERED_CLAUSE_BREAK_RE.pattern
     + r"|\b(?:and|but|so|while|because|since|although|which)\b|\bas\b(?!\s+well\b)", re.I)
+PRE_CLAUSE_SPLIT_RE = re.compile("(" + PRE_CLAUSE_BREAK_RE.pattern + ")", re.I)
 SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
 MAIN_RUN_RE = re.compile(
-    r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
+    r"\bon\s+{b}\s+(?:(?:at|tip)\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
 ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
@@ -586,9 +599,17 @@ def _claims_pre_existing(sentence):
         return False
     names_base = bool(BASE_WORD_RE.search(plain))
     earlier_fail = False
-    for clause in PRE_CLAUSE_BREAK_RE.split(plain):
+    parts = PRE_CLAUSE_SPLIT_RE.split(plain)  # clauses at the even places, the breaks between them at the odd
+    for i in range(0, len(parts), 2):
+        clause = parts[i]
+        # "Pre-existing failures: none." says there are none: a colon, semicolon or dash then a negator. "It is
+        # pre-existing: none of it is ours" still claims, so a word like is or was before the claim voids this.
+        negated_after = (i + 2 < len(parts) and parts[i + 1].strip() in (":", ";", "-", "--", "—", "–")
+                         and PRE_NEGATED_AFTER_RE.match(parts[i + 2]))
         for m in PRE_EXISTING_RE.finditer(clause):
-            if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
+            if (_pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start())
+                    and not (negated_after and not PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
+                    and not PRE_MENTION_BEFORE_RE.search(clause[:m.start()])):
                 return True
         for m in ALREADY_RE.finditer(clause):
             if names_base and _unnegated(clause, m.start()):
