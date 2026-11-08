@@ -20142,7 +20142,8 @@ lane_cost_check("lane-repo-tag: a Read call starts no git process",
 
 
 # ---- Lane start settings. A create_session that tags a lane names the model the lane starts on and the repo it
-# starts from (`source_url`). A lane call with no model, or no source_url, or either as an empty string, is denied.
+# starts from (`source_url`). A lane call with no model, or no source_url, or either as an empty or blank string or as
+# a value that is not text (null, a number, a list), is denied.
 # A lane call with both passes. A call with no lane tag is never judged by this rule. Each lane case below carries
 # the effort command and the origin repo tag, so the older lane rules pass it and only this rule decides it.
 add("lane-start-settings: lane tag with no model is denied", "deny", "lane-start-settings",
@@ -20166,6 +20167,30 @@ add("lane-start-settings: lane tag with a whitespace-only model is denied", "den
 add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
     model="sonnet", source_url=" \t\n ")
+add("lane-start-settings: lane tag with a non-text model (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=None, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=5, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=["x"], source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text source_url (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=None)
+add("lane-start-settings: lane tag with a non-text source_url (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=5)
+add("lane-start-settings: lane tag with a non-text source_url (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=["x"])
+add("lane-start-settings: lane tag with a no-break-space-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="\u00a0", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a no-break-space-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url="\u00a0")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
