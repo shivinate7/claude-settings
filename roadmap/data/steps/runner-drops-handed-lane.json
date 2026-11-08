@@ -1,11 +1,11 @@
 {
   "title": "A batch runner says so when a handed-over lane is left out of a batch",
   "why": "Coordinator 11:45 CST Nov 8: degen #438's handed-lane check, filed here. A runner can drop a lane that was handed to it with no word to the lane or the coordinator; this is the same gap as the earlier finding that runners drop lanes without a word. Fix: a check that each lane PR handed to the runner is in the batch, or named as left out with a reason.",
-  "note": "Coordinator started its lane 11:49 CST Nov 8.",
+  "note": "Coordinator started its lane 11:49 CST Nov 8. Owner ruling 11:57 CST Nov 8, typed in degen lane session_013NEJKzoN2eD5oih2K39Be8's chat (relayed by the coordinator): the lane-drop guard goes in claude-settings, in this step; home: the merge tool. No new step.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKyzg9A9SDZ926jRCSU",
   "status": "doing",
   "order": 768,
-  "updatedAt": "2026-11-08T11:52:00-06:00"
+  "updatedAt": "2026-11-08T11:58:00-06:00"
 }

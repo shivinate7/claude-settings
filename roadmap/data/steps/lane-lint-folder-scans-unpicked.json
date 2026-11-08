@@ -1,11 +1,11 @@
 {
   "title": "Lane lint picks a folder-scan suite when a new file lands in its folder",
   "why": "Suites that scan one folder (workflows for test_ci_job, agents, hooks/guard*.py) are not picked for a new file there, so a defect in a new file passes lane lint and goes red in batch CI (debt lane-lint-folder-scans-unpicked on #2120).",
-  "note": "Filed 10:46 CST Nov 8 from lane lane-lint-cloud-time-limit (session_013NEJL1PUcS4Dxhd9Rr1sk2). Under item 386 it rides in that lane unless off topic. Related: lane-lint-tree-scan-picked (#2120). Lane 10:47 CST Nov 8: branch lane-lint-folder-scans on #2120 head, Merge after: #2120; red cases first.",
+  "note": "Filed 10:46 CST Nov 8 from lane lane-lint-cloud-time-limit (session_013NEJL1PUcS4Dxhd9Rr1sk2). Under item 386 it rides in that lane unless off topic. Related: lane-lint-tree-scan-picked (#2120). Lane 10:47 CST Nov 8: branch lane-lint-folder-scans on #2120 head, Merge after: #2120; red cases first. Lane 11:57 CST Nov 8: #2162 handed to runner 8 (merges after #2120); round 3 sonnet PASS, net value positive, lane lint PASS. Three round-3 notes in roadmap/outbox/triage.md.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "lane-lint-tree-scan-picked (session_013NEJL1PUcS4Dxhd9Rr1sk2)",
-  "status": "doing",
+  "status": "ready",
   "order": 742,
-  "updatedAt": "2026-11-08T10:50:00-06:00"
+  "updatedAt": "2026-11-08T11:58:00-06:00"
 }
