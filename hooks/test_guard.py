@@ -13519,6 +13519,13 @@ SHELL_TEST_WRITES = (
     ("sed e command runs touch on tests/x, sed -i on src/app.py", "sed -i 'e touch tests/x' src/app.py"),
     ("sed -Ei on tests/a.py", "sed -Ei s/a/b/ tests/a.py"),
     ("sed -ni on tests/a.py", "sed -ni s/a/b/ tests/a.py"),
+    # With no -i, sed still writes a file through its w command and the w flag of s, so a test named
+    # there is a test write (decision builders-cannot-edit-tests). The -n and -e forms count too.
+    ("sed -n w command writes tests/a.py, no -i, on src/x.py", "sed -n 'w tests/a.py' src/x.py"),
+    ("sed s flag w writes tests/a.py, no -i, on src/x.py", "sed 's/a/b/w tests/a.py' src/x.py"),
+    ("sed -e w command on line 1 writes tests/a.py, no -i, on src/x.py", "sed -e '1w tests/a.py' src/x.py"),
+    ("sed -n w command after an address writes tests/a.py, no -i, on src/x.py",
+     "sed -n '/x/w tests/a.py' src/x.py"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13553,6 +13560,11 @@ sh("builder-test: scanner, a multi-line sed script on src/app.py, is allowed",
    "sed -i '1i\\\nnote' src/app.py", "allow", **BR)
 sh("builder-test: scanner, a lone apostrophe in echo ahead of a sed -i on tests/a.py, is refused",
    "echo don't; sed -i s/a/b/ tests/a.py", "deny", rule=BT, carries=("test-author",), **BR)
+# The same scanner pins for a sed with no -i, whose w command still names a test.
+sh("builder-test: scanner, a lone apostrophe in echo ahead of a no-i sed w on tests/a.py, is refused",
+   "echo don't; sed -n 'w tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a multi-line no-i sed script whose w line names tests/a.py, is refused",
+   "sed -n 'p\nw tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
@@ -13618,6 +13630,10 @@ SHELL_TEST_ALLOWS = (
     ("cp of a into /tmp/$(basename tests/a.py)", "cp a /tmp/$(basename tests/a.py)"),
     # A sed pattern that holds --in-place is text, and -n writes nothing: the file is only read.
     ("sed -n with --in-place in its pattern, on tests/a.py", "sed -n \"/--in-place/p\" tests/a.py"),
+    # The controls for the no-i w forms: a p command writes nothing, and a w flag that names a non-test file
+    # writes that file, which a builder may do.
+    ("sed -n p, no -i, on src/x.py", "sed -n 'p' src/x.py"),
+    ("sed s flag w writes out.txt, a non-test file, no -i, on src/x.py", "sed 's/a/b/w out.txt' src/x.py"),
     # Pins: a sed -f script file is read, an inserted or substituted test name is text, and the file
     # sed -i writes is src/app.py.
     ("sed -i -f reads tests/s.sed, on src/app.py", "sed -i -f tests/s.sed src/app.py"),
