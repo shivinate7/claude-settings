@@ -15067,7 +15067,7 @@ def _invalid_byte_open(w):
     _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
 
 
-# A gitlink (a submodule entry) and a mode-only change under a test path are refused, as on main. A gitlink has no
+# A gitlink (a submodule entry) and a mode-only change under a test path are refused. A gitlink has no
 # bytes in this repository, and a mode-only change keeps the same bytes, so only the mode can refuse either. The rows
 # check a gitlink to a commit the clone lacks, a gitlink to a commit the clone holds, and a mode-only change. The
 # fixtures read each change back with git first: a change that did not land would give an allow for the wrong reason.
@@ -15540,8 +15540,8 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resol
                          logged_builder_case("bd-i1-rebase-ours")))
 
 # A builder never writes test content. A test file that still holds git's conflict markers is a builder's test change,
-# so the builder's commit is refused while the file is unresolved, as on main. The test-author resolves that file. The
-# same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+# so the builder's commit is refused while the file is unresolved. The rows check that refusal. The test-author resolves
+# that file. The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
 _bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
 sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
    "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
