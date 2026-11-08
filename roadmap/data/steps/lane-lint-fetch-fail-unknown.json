@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint reads unknown when the fetch of its target fails, instead of linting a stale head",
+  "phase": "next",
+  "status": "todo",
+  "order": 654,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "In merge/merge.py lane_lint (about line 2458 at #1916's head), a failed fetch of a named lane target is ignored, and lane lint then lints the stale origin/<branch>, so a lane can pass lint on an old head. The unshallow fetch from #1831 (about line 2568) has no collision retry (lane lane-lint-hook-suites, 07:28 CST Nov 8).",
+  "note": "Done check: a red test where a failed target fetch, after the collision retries, makes lane lint print unknown, not PASS; the unshallow fetch gets the same retry. #1916's next round adds a control test that pins today's behaviour. A fix for a found gap (item 410 a). Title by triage.",
+  "updatedAt": "2026-11-08T07:28:00-06:00"
+}
