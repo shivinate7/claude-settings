@@ -167,8 +167,8 @@ def call(name, *args):
         return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
-def guard_hit(op, entry):
-    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+def guard_hit(op, entry, repo=PAGE_REPO):
+    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), repo)
 
 
 def verdict(name, got, want):
@@ -335,6 +335,43 @@ def case_older_rules_keep_their_ids():
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
 
 
+# ------------------------------------------------------------------ a press link needs a string label
+
+def case_press_link_label_is_a_string():
+    # Row press-link-unlabelled-link (the notes file): a link counts when it has a url, but the page draws a link
+    # only when its label is a string too (skills/waiting-page/page.html isLink). A press whose only link has no
+    # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
+    # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
+    # the page beside it does not save the press.
+    pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
+    # The option names PR #374, so a link must reach that page: with no number in the text any link passes.
+    base = copy.deepcopy(ITEM92["options"])
+    base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
+
+    def with_links(links):
+        options = copy.deepcopy(base)
+        options[1]["links"] = links
+        return entry_of(page_item(options=options))
+
+    page("a press whose link to the page has no label is refused as press-link", "set",
+         with_links([{"url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a null label is refused as press-link", "set",
+         with_links([{"label": None, "url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a numeric label is refused as press-link", "set",
+         with_links([{"label": 5, "url": pr}]), ("press-link", None))
+    page("a press with an unlabelled link to the page beside a labelled link to another PR is refused as press-link",
+         "set", with_links([{"label": "the other pull request", "url": other}, {"url": pr}]), ("press-link", None))
+    page("a press with only a labelled link to another PR stays refused as press-link", "set",
+         with_links([{"label": "the other pull request", "url": other}]), ("press-link", None))
+    page("a press whose link to the page has an empty-string label passes", "set",
+         with_links([{"label": "", "url": pr}]), None)
+    task = task_item(["Open PR #374 on GitHub", "Press Merge."], links=[{"url": pr}])
+    page("a task whose step presses in GitHub, with an unlabelled link to the page, is refused as press-link", "set",
+         entry_of(task), ("press-link", None))
+    page("a task whose step presses in GitHub, with a labelled link to the page, passes", "set",
+         entry_of(dict(task, links=[{"label": "PR #374", "url": pr}])), None)
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -398,6 +435,20 @@ def case_batch():
     verdict("page guard: a batch of items that meet the form passes", batch([good, dict(good, doc_id="second")]), None)
     verdict("page guard: a batch whose second write has no Problem line is refused", batch([good, bad]),
             (FORM_RULE, "Problem"))
+
+
+# ------------------------------------------------------------------ a str_replace that says an item is being reworked
+
+def text_edit(new):
+    """A str_replace on a context line of item DOC that adds `new`. It carries no status or kind."""
+    return {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Context.", "new_str": new}
+
+
+def case_str_replace_rework_is_refused():
+    # Rule rework-off-page judges every kind of item, since a str_replace carries no status or kind (decision
+    # rework-leaves-page). Main refuses a rework line on any item, and the refusal stays.
+    page("a str_replace that adds 'being reworked' is refused as rework-off-page", "str_replace",
+         text_edit("The lane is being reworked."), ("rework-off-page", "being reworked"))
 
 
 # ------------------------------------------------------------------ chat only
@@ -958,6 +1009,60 @@ def case_command_in_item_spans():
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
+# ------------------------------------------------------------------ a PowerShell string and a step's shell span
+
+def ps_task(ps, mac="git log -1"):
+    """A task whose command is {powershell: ps, mac}, with no gh in either, so only the bash-operator check judges it."""
+    return task_item(["Open PowerShell", "Paste the command below and run it"], command={"powershell": ps, "mac": mac})
+
+
+def case_powershell_bash_forms():
+    # Row ps-command-misses-bash (the debt file): PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export, so a
+    # bash form in a PowerShell string passes. Each bash form is refused, and its PowerShell twin passes. The traps
+    # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
+    # backslash path that ends a line.
+    for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
+                     ("a leading NAME=value", "FOO=1 git push"),
+                     ("a bracket test", "if [ -f x ]; then git push; fi"),
+                     ("a backslash line end", "git push origin \\\nmain")):
+        page("a PowerShell command with %s is refused as a bash operator" % name, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
+    for name, ps in (("cd to a backslash", "cd \\"), ("Set-Location to a backslash", "Set-Location \\"),
+                     ("dir of a backslash", "dir \\")):
+        page("a PowerShell command, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A backslash with a line after it is a continuation, and refuses.
+    page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
+         entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
+    for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
+                     ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
+                     ("a PowerShell if test", "if (Test-Path x) { git push }"),
+                     ("a backtick line continuation", "git push origin `\nmain")):
+        page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
+                     ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
+                     ("a pipe inside a string", 'Write-Host "a | head"'),
+                     ("a pipe after a comment opener", "git log # | head"),
+                     ("a here-string holding a pipe", "@'\n| head\n'@")):
+        page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_step_shell_programs_partial():
+    # Row step-shell-programs-partial (the debt file): a single-span step is a shell line only when its first word is in
+    # SHELL_PROGRAMS, so a cloud CLI, a span with a flag after its word, or chmod passes. Each of the six spans the debt
+    # names is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
+    # stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    for span in ("kubectl", "--force", "a - b"):
+        page("a step holding `%s` alone is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
+         ("command-in-item", "shell line"))
+
+
 # ------------------------------------------------------------------ a question says how it departs from main
 #
 # Rule question-departs: a question is asked only when the work departs from main. A line that restates
@@ -1509,6 +1614,8 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_press_link_label_is_a_string, case_str_replace_rework_is_refused,
+                 case_powershell_bash_forms, case_step_shell_programs_partial,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
         try:
             case()
