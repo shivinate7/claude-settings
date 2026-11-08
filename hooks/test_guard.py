@@ -7998,6 +7998,37 @@ sh("env: a dot-slash Windows path is still a path", "cat .\\" + ENV, "deny", "en
 sh("env: an absolute path through a dot segment", "cat C:\\Users\\me\\.config\\" + ENV, "deny",
    "env-file", cwd=NOGIT)
 
+# PowerShell reads a smart quote as a quote mark, so a path in one holds its space as one name. The
+# guard splits the word at that space, and an env name in the tail is the only one it reads. A backslash
+# path whose head holds a space is no path to it (ENV_PATH_PREFIX), so the ASCII form is read the same
+# way. A # between a quote pair is text, not a comment. Bash reads a smart quote as literal text, so the
+# `.env` between a smart pair is a word of its own, and it still denies.
+SMART_DQ, SMART_DQ_END = "\u201c", "\u201d"
+SMART_SQ, SMART_SQ_END = "\u2018", "\u2019"
+DIR_ENV = "C:\\My Dir\\" + ENV
+sh("env: a smart-double-quoted PowerShell path with a space, denies",
+   "Get-Content " + SMART_DQ + DIR_ENV + SMART_DQ_END, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-single-quoted PowerShell path with a space, denies",
+   "Get-Content " + SMART_SQ + DIR_ENV + SMART_SQ_END, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: an ASCII double-quoted backslash path with a space, denies",
+   'Get-Content "' + DIR_ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a # inside a smart-quoted PowerShell string does not end the command, denies",
+   "Write-Host " + SMART_DQ + "a #b" + SMART_DQ_END + "; Get-Content C:\\MyDir\\" + ENV, "deny",
+   "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-double-quoted path with a sub-folder and a space, still denies",
+   "Get-Content " + SMART_DQ + "C:\\My Dir\\sub\\" + ENV + SMART_DQ_END, "deny", "env-file",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-double-quoted example file with a space, allowed",
+   "Get-Content " + SMART_DQ + "C:\\My Dir\\" + ENV + ".example" + SMART_DQ_END, "allow",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: a smart apostrophe in text does not hide a later env read, denies",
+   "Write-Host it" + SMART_SQ_END + "s; Get-Content C:\\MyDir\\" + ENV, "deny", "env-file",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: an ASCII # inside a string does not end the command, denies (the twin of the smart case)",
+   'Write-Host "a #b"; Get-Content C:\\MyDir\\' + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: Bash reads a smart pair as literal text, so the .env between them denies",
+   "cat " + SMART_DQ + "a " + ENV + " b" + SMART_DQ_END, "deny", "env-file", cwd=NOGIT)
+
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
 sh("env: a bracket existence test", "[ -f " + ENV + " ] && echo present", "allow", cwd=NOGIT)
