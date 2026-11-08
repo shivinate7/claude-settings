@@ -1,11 +1,11 @@
 {
   "title": "The report guard resolves a spawn with no model field to its role file's model, and maps a full model id to its short name",
   "why": "The report guard read a reviewer spawn with no model field as \"ran sonnet\", but ~/.claude/agents/reviewer.md sets `model: haiku` and the agent's report said claude-haiku-5-5; that wrong read gave runner 8 a wrong model for #1840's round 1 (03:09 CST, corrected 03:19 CST). It also said no reviewer ran sonnet when round 2 of lane windows-stamp-suite-hang was spawned with model sonnet and reported claude-sonnet-5-5. Sources: lanes comment-check-scans-shell (03:12 CST) and windows-stamp-suite-hang (03:18 CST); coordinator 03:18 and 03:19 CST Nov 8.",
-  "note": "Fix: when a spawn names no model, the guard reads the model from the role's agent file; it maps a full id such as claude-sonnet-5-5 to its short name before it compares. Red cases first: a reviewer spawn with no model field whose role file says haiku is read as haiku, not sonnet; a report naming claude-sonnet-5-5 counts as sonnet. Control: a spawn with model sonnet and a short-name report passes as today. Related: step report-model-from-role (#1705, reads each agent's served model) and step reviewer-model-hook-latest. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:21 CST Nov 8.",
+  "note": "Fix: when a spawn names no model, the guard reads the model from the role's agent file; it maps a full id such as claude-sonnet-5-5 to its short name before it compares. Red cases first: a reviewer spawn with no model field whose role file says haiku is read as haiku, not sonnet; a report naming claude-sonnet-5-5 counts as sonnet. Control: a spawn with model sonnet and a short-name report passes as today. Related: step report-model-from-role (#1705, reads each agent's served model) and step reviewer-model-hook-latest. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:21 CST Nov 8. Third sighting (lane child-repo-archive-scope, about 03:45 CST Nov 8): the guard called a true \"reviewer haiku\" false; round 1 was a reviewer spawn with no model field (role file haiku, report claude-haiku-5-5), round 2 named sonnet. An earlier refusal (about 03:00 CST) said \"no model named for reviewer\" while the reviewer still ran. The lane now names the model in every spawn (lane, 04:41 CST).",
   "phase": "now",
   "status": "todo",
   "order": 581,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T03:20:00-06:00"
+  "updatedAt": "2026-11-08T04:42:00-06:00"
 }
