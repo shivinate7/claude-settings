@@ -8084,6 +8084,12 @@ sh("env: PowerShell: a quoted relative backslash path with a space to .env, deni
    'Get-Content "My Dir\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 sh("env: PowerShell: a quoted relative forward-slash path with a space to .env, denies (the control)",
    'Get-Content "My Dir/' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# The unspaced siblings are the same read: a relative backslash path to a dot file in a subfolder,
+# quoted or bare. Claude could write either to read that subfolder's .env, so both deny.
+sh("env: PowerShell: a quoted relative backslash path to .env in a subfolder, denies",
+   'Get-Content "sub\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: a bare relative backslash path to .env in a subfolder, denies",
+   "Get-Content sub\\" + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
