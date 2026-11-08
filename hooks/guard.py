@@ -201,6 +201,14 @@ Other tools, in `judge` order:
                        shorthand key is not seen. A regex literal after `)`, `return` or
                        `typeof` that holds a quote can hide an `agent()` call.
                        (agent-model-cap)
+  review-rounds-in-order
+                       deny. A reviewer spawn whose brief carries `Round N of 3` with N 2 or 3, while a reviewer of
+                       an earlier round on the same pull request (each `#<n>` of the brief, a whole number) still runs
+                       in this session. A reviewer runs while its call has no result, or its background launch has no
+                       terminal task notice for its agentId; a foreground result and an error result do not run. It
+                       reads the session transcript once per round-2 or round-3 reviewer spawn, and on no other
+                       call. An unreadable transcript allows the spawn. The reason names the running round and
+                       says to wait for its notification. (review-rounds-in-order)
   brief-claim-has-probe
                        deny. An Agent or Task brief to a builder or a test-author with a sentence that says what
                        main, origin/main or today passes, allows, accepts, refuses, rejects or blocks, for an input
@@ -2882,6 +2890,97 @@ def step_up_reason(prompt: str, role, model) -> str:
     return ""
 
 
+# REVIEW ROUNDS IN ORDER (rule review-rounds-in-order, decision review-rounds-in-order). A reviewer spawn whose brief
+# carries `Round N of 3` with N 2 or 3 is refused while an earlier round's reviewer on the same pull request still runs
+# in this session. The pull request is each `#<n>` the brief names, matched as a whole number; a brief with no marker is
+# round 1. The marker is read by brief_markers, the one scanner. Cost: one read of the session transcript per round-2 or
+# round-3 reviewer spawn, and no read on any other call. An unreadable transcript, or a failed import, allows the spawn.
+# A reviewer runs while its call has no result, or while its background launch has no terminal task notice for its
+# agentId; a foreground result and an error result (a refused spawn) mean it does not run.
+ROUND_ORDER_REASON = (
+    "Rule (review rounds in order): the round %s reviewer on PR #%s still runs in this session. "
+    "Remedy: wait for its completion notification, then spawn the round %s reviewer."
+)
+_PR_NUMBER = re.compile(r"(?<![\w&#])#(\d+)(?!\d)")
+
+
+def _brief_round(prompt):
+    """The highest `Round N of 3` n of a reviewer brief, or 1 when it has no round marker."""
+    ns = [int(n) for kind, n in brief_markers(prompt) if kind.lower() == "round"]
+    return max(ns) if ns else 1
+
+
+def round_order_hit(tool: str, tool_input, payload) -> tuple:
+    """(earlier round, pull request) of a reviewer still running on a pull request that a round 2 or 3 reviewer spawn
+    names, or (0, ""). Fails open."""
+    if tool not in SPAWN_TOOLS or not isinstance(tool_input, dict) or not isinstance(payload, dict):
+        return 0, ""
+    prompt = tool_input.get("prompt")
+    if tool_input.get("subagent_type") != "reviewer" or not isinstance(prompt, str):
+        return 0, ""
+    this_round = _brief_round(prompt)
+    prs = set(_PR_NUMBER.findall(prompt))
+    transcript = payload.get("transcript_path")
+    if this_round < 2 or not prs or not isinstance(transcript, str) or not transcript:
+        return 0, ""
+    try:
+        from stall_watch import closed_by_notice  # the one reader of a completion notice
+        from shared_names import TASK_NOTIFICATION_TAG
+        tag = TASK_NOTIFICATION_TAG.strip("<>").encode()  # the bare name, so a notice in any form passes
+        calls, closed = {}, set()
+        with open(transcript, "rb") as f:
+            for line in f:
+                if tag in line:
+                    pass
+                elif b"tool_result" in line:  # a result matters only for a reviewer call already seen
+                    if not any(c.encode() in line for c in calls):
+                        continue
+                elif b'"Agent"' not in line and b'"Task"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    kind = rec.get("type")
+                    if kind == "attachment":
+                        att = rec.get("attachment")
+                        notice = att.get("prompt") if isinstance(att, dict) else None
+                        if isinstance(notice, str):
+                            closed.update(closed_by_notice(notice))
+                        continue
+                    content = rec["message"]["content"]
+                except Exception:
+                    continue
+                if isinstance(content, str):
+                    closed.update(closed_by_notice(content))
+                    continue
+                if not isinstance(content, list):
+                    continue
+                for b in content:
+                    if not isinstance(b, dict):
+                        continue
+                    if kind == "assistant" and b.get("type") == "tool_use" and b.get("name") in SPAWN_TOOLS:
+                        inp = b.get("input")
+                        if isinstance(inp, dict) and inp.get("subagent_type") == "reviewer" and isinstance(inp.get("prompt"), str) and isinstance(b.get("id"), str):
+                            calls[b["id"]] = [_brief_round(inp["prompt"]), set(_PR_NUMBER.findall(inp["prompt"])), "open", None]
+                    elif kind == "user" and b.get("type") == "tool_result" and b.get("tool_use_id") in calls:
+                        call, tur = calls[b["tool_use_id"]], rec.get("toolUseResult")
+                        if (b.get("is_error") is not True and isinstance(tur, dict) and tur.get("isAsync") is True
+                                and tur.get("status") == "async_launched" and isinstance(tur.get("agentId"), str)):
+                            call[2], call[3] = "background", tur["agentId"]
+                        else:
+                            call[2] = "done"
+                    elif kind == "user" and b.get("type") == "text" and isinstance(b.get("text"), str):
+                        closed.update(closed_by_notice(b["text"]))
+        running = [(c[0], sorted(c[1] & prs)) for c in calls.values()
+                   if c[0] < this_round and c[1] & prs
+                   and (c[2] == "open" or (c[2] == "background" and c[3] not in closed))]
+        if running:
+            earlier, shared = min(running)
+            return earlier, shared[0]
+    except Exception:
+        return 0, ""
+    return 0, ""
+
+
 # THE ROLE MODEL ROW (rule agent-role-model, decision agent-model-cap). The model per role is read at each spawn from the
 # pointer checkout's decision record, so the guard holds no copy of the table. A row names a role in its first cell and a
 # model in its second; a first cell that holds anything but role words (a qualifier such as `reviewer, rounds 2 and 3`, a
@@ -5104,6 +5203,12 @@ def judge(payload) -> None:
     step_up = step_up_hit(tool, tool_input)
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
+
+    # 9b1. Review rounds in order: a round 2 or 3 reviewer waits for an earlier round's reviewer on the same pull request.
+    earlier_round, round_pr = round_order_hit(tool, tool_input, payload)
+    if earlier_round:
+        refuse(tool, "deny", "review-rounds-in-order",
+               ROUND_ORDER_REASON % (earlier_round, round_pr, earlier_round + 1), "round %d on #%s" % (earlier_round, round_pr))
 
     # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
     # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
