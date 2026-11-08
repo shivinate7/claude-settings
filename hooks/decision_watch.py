@@ -728,15 +728,16 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
         return None, REPLY_OUTPUT_ERROR + " carried no result text"
-    return parse_verdict(text, shape)
+    return parse_verdict(text, shape, scrub)
 
 
-def parse_verdict(text, shape=VERDICT_SHAPE):
+def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
     """Return (verdict_dict, error) from the model's reply text. The one home of this parse:
-    `invoke_model` and the `--model-text` entry below both call it."""
+    `invoke_model` and the `--model-text` entry below both call it. `scrub`, when given, cleans the reply
+    text of the no-JSON error before its 120-character cut, as invoke_model does for stderr."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        return None, REPLY_RESULT_ERROR + " carried no JSON verdict"
+        return None, REPLY_RESULT_ERROR + " carried no JSON verdict: " + (scrub(text) if scrub else text)[:120]
     try:
         verdict = json.loads(match.group(0))
     except Exception:
@@ -955,6 +956,7 @@ def collect_paths(records, cwd):
                 cmd = inp.get("command") or ""
                 if not isinstance(cmd, str) or not cmd.strip():
                     continue
+                guard.POWERSHELL_CALL[0] = name == "PowerShell"
                 try:
                     matched = guard.project_config_shell_hit(cmd, cwd)
                 except Exception:
