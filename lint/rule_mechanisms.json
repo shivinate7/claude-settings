@@ -88,6 +88,12 @@
       },
       "test": "hooks/test_guard.py::ceiling: Agent with model opus and no role is denied"
     },
+    "roles-plan-gets-refuter": {
+      "mechanism": {
+        "kind": "unmechanized",
+        "reason": "No hook sees a Plan agent return without a refuter spawn after it, and none reads the refuter's brief to see that it holds only the task brief and the plan (decision plan-refuter, Known gaps). The pending plan-record check would see a plan record with no Refuter: line. The refuter's Opus spawn sits in roles-sonnet-is-the-ceiling, whose guard row covers it."
+      }
+    },
     "roles-opus-shaped-say-so": {
       "mechanism": {
         "kind": "judgment",
