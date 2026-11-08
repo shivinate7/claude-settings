@@ -13969,6 +13969,10 @@ SHELL_TEST_WRITES = (
      "cp --target-directory=$(find tests -type d) x"),
     ("cp -t with a backtick find over tests as the target directory",
      "cp -t`find tests -type d` x"),
+    # A glued target is a write too: `--target-directory=tests` and `-ttests` name the folder each copy lands in.
+    ("cp --target-directory=tests over a find of src",
+     "cp --target-directory=tests $(find src -name '*.py')"),
+    ("cp -ttests over a find of src", "cp -ttests $(find src -name '*.py')"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13998,12 +14002,16 @@ SHELL_TEST_ALLOWS = (
     # allowed (decision builders-cannot-edit-tests). A grep pattern, a -not -path value and a cp source are no root.
     ("find over src piped to xargs, sed -i", "find src|xargs sed -i s/a/b/"),
     ("for loop over src/*.py, sed -i on $f", "for f in src/*.py; do sed -i s/a/b/ $f; done"),
-    ("find over . piped to xargs, sed -i", "find .|xargs sed -i s/a/b/"),
+    # A `.` root with no test under it writes no test: the same find, in a checkout with none (FINDTESTS below holds some).
+    ("find over . piped to xargs, sed -i, in a checkout with no test", "find . | xargs sed -i s/a/b/"),
     ("grep pattern tests over src piped to xargs, sed -i", "grep -rl tests src|xargs sed -i s/a/b/"),
     ("find src with -not -path tests/*, -exec sed -i",
      "find src -not -path 'tests/*' -exec sed -i s/a/b/ {} +"),
     ("find over tests piped to xargs, grep -n", "find tests|xargs grep -n foo"),
     ("cp of a find over tests into /tmp", "cp $(find tests -name '*.py') /tmp/x/"),
+    # A glued target that is no test folder is a copy into docs/, so nothing in a test path is written.
+    ("cp --target-directory=docs over a find of src", "cp --target-directory=docs $(find src -name '*.py')"),
+    ("cp -tdocs over a find of src", "cp -tdocs $(find src -name '*.py')"),
     ("echo of a find pipe that names tests in quotes", "echo \"find tests | xargs sed -i\""),
     ("for loop over src/*.py, quoted sed -i on \"$f\" with a comment opener in quotes",
      "for f in src/*.py; do sed -i \"s/#x//\" \"$f\"; done"),
@@ -14017,6 +14025,31 @@ SHELL_TEST_ALLOWS = (
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
+# A folder root is read as the tests it holds: `find .` names `.`, and a -name value is no root, so each find
+# below reaches every test under `.`. FINDTESTS holds tests at its top and in tests/. FINDDEEP holds one only
+# two folders down, so a root read one folder deep misses it.
+FINDTESTS = os.path.join(ROOT, "findtests")
+FINDDEEP = os.path.join(ROOT, "finddeep")
+
+
+def _build_find_tests():
+    make_repo(FINDTESTS, {"src/app.py": "x\n", "docs/DEBTS.md": "x\n", "tests/test_app.py": "x\n",
+                          "test_top.py": "x\n"})
+    make_repo(FINDDEEP, {"src/app.py": "x\n", "src/pkg/deep/test_deep.py": "x\n"})
+
+
+lazy_fixture([FINDTESTS, FINDDEEP], _build_find_tests)
+FIND_ROOT_WRITES = (
+    ("find over . piped to xargs, sed -i", "find .|xargs sed -i s/a/b/"),
+    ("find . -name test_*.py, -exec sed -i", "find . -name 'test_*.py' -exec sed -i s/a/b/ {} \\;"),
+    ("find . piped to xargs, sed -i", "find . | xargs sed -i s/a/b/"),
+    ("find . -name test_*.py piped to xargs, sed -i", "find . -name 'test_*.py' | xargs sed -i s/a/b/"),
+)
+for _name, _command in FIND_ROOT_WRITES:
+    sh("builder-test: shell write, %s, in a checkout that holds tests, is refused" % _name, _command,
+       "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
+sh("builder-test: shell write, find . piped to xargs, sed -i, over a test two folders down, is refused",
+   "find . | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDDEEP))
 # The test-author writes tests, so the same shell writes stay allowed to it. A main session, and a
 # session run with --agent builder and no agent_id, is not judged.
 for _name, _command in (
