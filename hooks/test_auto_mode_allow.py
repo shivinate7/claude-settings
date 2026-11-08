@@ -24,8 +24,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
   limits the already granted act to messages that ask.
 - One "Own CI Run Cancel:" entry quotes the run cancel command and names its method. Its Covers text
-  requires a run whose head branch this session itself pushed earlier in the session, and its Never
-  covers names each run act it refuses (decision auto-mode-owner-acts).
+  requires a run whose head branch this session itself pushed earlier in the session and binds the
+  repo to shivinate7; its Never covers names each run act it refuses (decision auto-mode-owner-acts).
 - One "Own Check-in Delete:" entry names the delete tool and the create and send tools that make a
   check-in. Its Covers text requires the create_trigger call to set neither flag, and its Never covers
   names each check-in act it refuses (decision auto-mode-owner-acts).
@@ -105,10 +105,13 @@ CI_REFUSED = (("default branch", "default branch"),
               ("run_workflow", "`run_workflow`"), ("rerun_failed_jobs", "`rerun_failed_jobs`"),
               ("delete_workflow_run_logs", "`delete_workflow_run_logs`"),
               ("any other method of that tool", "any other method of that tool"),
+              ("a workflow disable", "a workflow disable"), ("a run delete", "a run delete"),
               ("repo outside shivinate7", "outside shivinate7"))
 # (name, case-insensitive pattern) for the run the Own CI Run Cancel Covers text must name.
 CI_SCOPE = (("run on a branch this session pushed earlier",
              "a run whose head branch this session itself pushed earlier in the session"),)
+# (name, case-insensitive pattern) for the repo the Own CI Run Cancel Covers text must bind.
+CI_OWNER_SCOPE = (("repo owned by shivinate7", "in a repo owned by shivinate7"),)
 OWN_CHECKIN = "Own Check-in Delete:"
 CHECKIN_DELETE = "mcp__claude-code-remote__delete_trigger"
 # (name, case-insensitive pattern) for each check-in tool the Own Check-in Delete entry must name.
@@ -414,6 +417,11 @@ class OwnCiRunCancelIsAllowed(unittest.TestCase):
     def test_covers_requires_a_run_on_a_branch_this_session_pushed(self):
         missing = unnamed_terms(entry_part(self, OWN_CI), CI_SCOPE)
         self.assertFalse(missing, "Covers text does not require a run on a branch this session pushed: %r"
+                         % missing)
+
+    def test_covers_binds_the_repo_to_shivinate7(self):
+        missing = unnamed_terms(entry_part(self, OWN_CI), CI_OWNER_SCOPE)
+        self.assertFalse(missing, "Covers text does not bind the run to a repo owned by shivinate7: %r"
                          % missing)
 
 
