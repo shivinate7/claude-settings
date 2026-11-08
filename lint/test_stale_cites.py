@@ -830,6 +830,14 @@ class UnknownTests(StaleCase):
                       "a root commit's first push (%s) did not print its unknown line\n%s" % (spec, out))
         self.assertNotIn("stale-cites: PASS", out, "a root commit's first push (%s) printed PASS\n%s" % (spec, out))
 
+    def assert_root_range_exits_two(self, rng, spec):
+        """A base past the root commit's first parent, such as its grandparent, stays unread: the range exits 2."""
+        rc, out = self.run_check(rng, spec=spec)
+        self.assertEqual(rc, 2, "a base past the root commit's first parent (%s) did not exit 2\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out,
+                         "a base past the root commit's first parent (%s) printed PASS\n%s" % (spec, out))
+        self.assertRegex(out, "(?i)unknown", out)
+
     def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
 
@@ -853,6 +861,21 @@ class UnknownTests(StaleCase):
 
     def test_a_root_commit_range_with_its_parent_spelled_zero_padded_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~01..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_two_back_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~2"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD~2..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_caret_caret_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD^^"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD^^..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_tilde_one_then_tilde_zero_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~1~0"), "scope: the root commit has no parent")
+        self.assert_root_range_exits_two(rng, "HEAD~1~0..HEAD")
 
     def test_the_first_parent_of_a_different_root_commit_exits_two_as_before(self):
         """A control: a base that is the first parent of another root commit is not the first parent of HEAD, so
