@@ -14764,7 +14764,7 @@ class BuildBatchOrderedAfter(BuildEnv):
 
 class BuildBatchLabels(BuildEnv):
     """A candidate that carries a held, parked or replaced label is left out, with that label as its reason, even with a done record for its
-    live head. A candidate with no such label joins beside it."""
+    live head. A candidate with no such label joins beside it, and so does one that carries the batch label: that label is an act, not a hold."""
 
     def label_case(self, label):
         h7, h8 = self.lane(7), self.lane(8)
@@ -14782,6 +14782,14 @@ class BuildBatchLabels(BuildEnv):
 
     def test_a_replaced_candidate_with_a_done_record_is_left_out_naming_the_label(self):
         self.label_case("replaced")
+
+    def test_a_candidate_with_the_batch_label_and_a_done_record_joins(self):
+        h7, h8 = self.lane(7), self.lane(8)
+        host = PullsHost([batch_pull(7, h7, labels=(BATCH_LABEL,)), batch_pull(8, h8)], {}, comments=self.done(7, h7) + self.done(8, h8))
+        rc, out, err = self.build(host)
+        self.assertEqual(left_of(out), [], "the batch label is read as a hold, so a PR with a done record was left out:\n" + out + err)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}", f"joins: #8 feat8 {h8[:9]}"], out + err)
+        self.assert_ran(rc, out, err, 2)
 
 
 if __name__ == "__main__":
