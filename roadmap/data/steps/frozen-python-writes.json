@@ -1,11 +1,11 @@
 {
   "title": "The guard refuses a python3 -c or heredoc script that writes to a frozen file",
   "why": "Main lets a `python3 -c` or heredoc script write to a frozen file, which the frozen-path guard refuses for a shell write (lane bg-tail-loses-verdict, 06:28 CST Nov 8).",
-  "note": "Red rows on branch frozen-python-writes (22bccac1a). Held until the env-file-shell-c lane's interpreter-code reader PR exists; then it builds on that reader (one home for interpreter code, coordinator 06:26 CST; owner items 386, 410 a and 399 a). Lane session_013NEJL3ZjZdzrS8tBezxY85. Filed 06:47 CST Nov 8.",
+  "note": "Red rows on branch frozen-python-writes (22bccac1a). Held until the env-file-shell-c lane's interpreter-code reader PR exists; then it builds on that reader (one home for interpreter code, coordinator 06:26 CST; owner items 386, 410 a and 399 a). Lane session_013NEJL3ZjZdzrS8tBezxY85. Filed 06:47 CST Nov 8. Possible false alarm for this step's reverse case (lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 08:58 CST Nov 8; reader not traced): at about 14:56Z a read-only probe, `python3 -I -c` that imports guard_frozen and passes strings naming the installed verdict wrapper to frozen_shell_hit, was refused as a frozen-path write. Triage's own heredoc that named the same path in step text was refused the same way at 09:05 CST. The guard this step builds must still pass a script that only names a frozen path (see done step frozen-path-string-note).",
   "phase": "now",
   "status": "todo",
   "order": 632,
   "owner": "triage",
   "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
-  "updatedAt": "2026-11-08T06:27:00-06:00"
+  "updatedAt": "2026-11-08T08:57:00-06:00"
 }
