@@ -4894,6 +4894,19 @@ sh("git-after-cd: a git push after a comment opener on the cd line is in the com
    "cd /tmp/w # it's; %s push" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: an echo of a cd then ; then git push, inside quotes, passes",
    'echo "cd /tmp/w; %s push"' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git branch --force is refused",
+   "cd /tmp/w; %s branch --force main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git stash list passes",
+   "cd /tmp/w; %s stash list" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git stash show passes",
+   "cd /tmp/w; %s stash show" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git clean -n, a dry run, passes",
+   "cd /tmp/w; %s clean -n" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git -C with a variable folder passes",
+   'cd /tmp/w; %s -C "$D" push' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git -C with a relative folder is refused",
+   "cd /tmp/w; %s -C rel push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
@@ -11273,8 +11286,10 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
            "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
-cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
-          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# A write after a failed cd joined by `;` is refused in any cwd repo (decision git-after-cd-joins-with-and).
+sh("conflict-markers: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
+   "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
+   cwd=CMK_CL, carries=("&&", "-C"))
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
