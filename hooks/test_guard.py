@@ -5736,6 +5736,40 @@ sh("check-tail: ci-job checks --lint |& tail -3 in the foreground, the & of |& i
 sh("check-tail: ci-job checks --lint 2>&1 |& cat in the foreground, the & of |& is a pipe, is allowed",
    "~/.claude/bin/ci-job checks --lint 2>&1 |& cat", "allow", cwd=NOGIT)
 
+# A `&` glued to the last word backgrounds the pipeline as a spaced one does: `tail -3&` is `tail -3 &`.
+# The spaced form is refused first by detached-launch, which reads only a spaced `&`, so these name
+# check-tail. They pass today, since `_ends_in_ampersand` reads only a lone `&` token. The two quoted
+# cases keep a `#` or an apostrophe inside quotes from ending the text the `&` follows.
+add("check-tail: ci-job checks piped to tail -3&, the & glued to the word, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
+add("check-tail: ci-job checks|tail&, with no space around the pipe or the &, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
+add("check-tail: a glued & after a quoted #, piped to grep, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
+add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+
+# Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
+# background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
+# `&`, a `>&` or `2>&` redirect, a `&` after a comment's `#`, and a `&` at a line's end in a multi-line quote.
+sh("check-tail: ci-job checks |& tail -3 in the foreground, the & of |& is a pipe, is allowed",
+   "ci-job checks |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks|&tail -3 in the foreground, the & of |& glued to the next word, is allowed",
+   "ci-job checks|&tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks && tail x in the foreground is allowed",
+   "ci-job checks && tail x", "allow", cwd=NOGIT)
+sh("check-tail: echo a&&b is allowed", "echo a&&b", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to grep, a & inside quotes, is allowed",
+   "ci-job checks | grep 'a&'", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 >&2 in the foreground is allowed",
+   "ci-job checks | tail -3 >&2", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks piped to tail -3 2>&1 in the foreground is allowed",
+   "ci-job checks | tail -3 2>&1", "allow", cwd=NOGIT)
+sh("check-tail: a & after a comment's # is no job, piped to tail, is allowed",
+   "ci-job checks | tail -3 # bg&", "allow", cwd=NOGIT)
+sh("check-tail: a & at a line's end inside a multi-line quote is no job, is allowed",
+   'ci-job checks | grep "first line&\nsecond line"', "allow", cwd=NOGIT)
+
 # A merge script run by its path, with no interpreter word, is the same verdict call as
 # `python merge/merge.py`, so check-tail refuses it too.
 sh("check-tail: ./merge/merge.py --lane-lint piped to tail is refused",
