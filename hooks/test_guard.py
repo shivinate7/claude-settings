@@ -3891,6 +3891,25 @@ hm_allow("a tree path through a variable that resolves to the lanes folder passe
 hm_allow("a tree path through $PWD into the lanes folder passes", HMADD + "$PWD/.claude/worktrees/hmpwd")
 hm_refuse("a tree path through $PWD that climbs out of the lanes folder is refused",
           HMADD + "$PWD/../lane-x")
+# A TREE PATH THAT A COMMAND SUBSTITUTION RESOLVES TO THE CALL'S OWN FOLDER. Run from the primary, `$(pwd)`,
+# the backtick form and `$(git rev-parse --show-toplevel)` name the folder `$PWD` names, so each passes like
+# `$PWD`. The climbing forms of each are controls and stay refused.
+hm_allow("a tree path through $(pwd) into the lanes folder passes", HMADD + "$(pwd)/.claude/worktrees/hmcwd")
+hm_allow("a tree path through backtick pwd into the lanes folder passes",
+         HMADD + "`pwd`/.claude/worktrees/hmbtick")
+hm_allow("a tree path through $(git rev-parse --show-toplevel) into the lanes folder passes",
+         HMADD + "$(" + VCS + " rev-parse --show-toplevel)/.claude/worktrees/hmtop")
+hm_refuse("a tree path through $(pwd) that climbs out of the lanes folder is refused",
+          HMADD + "$(pwd)/../lane-x")
+hm_refuse("a tree path through backtick pwd that climbs out of the lanes folder is refused",
+          HMADD + "`pwd`/../lane-x")
+hm_refuse("a tree path through $(git rev-parse --show-toplevel) that climbs out of the lanes folder is refused",
+          HMADD + "$(" + VCS + " rev-parse --show-toplevel)/../lane-x")
+# A TREE PATH THROUGH `$HOME`. The case sets HOME to a fixture folder, so the verdict never reads the home of
+# the machine that runs the suite. The guard reads HOME from its own environment (decide's `env`).
+HMFAKEHOME = os.path.join(ROOT, "hmfakehome")
+hm_allow("a tree path through $HOME/.claude/worktrees is judged as main judges it",
+         HMADD + "$HOME/.claude/worktrees/hmhome-x", env={"HOME": HMFAKEHOME})
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
