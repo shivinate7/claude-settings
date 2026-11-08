@@ -3435,7 +3435,7 @@ def uncleared_round(earlier, rec):
     """-> why, when a failed round stays failed; else None. A failed round stays failed: an earlier record's last round N is uncleared when it has a
     FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it (up to `rec`), clears it by reaching a round above N
     or by carrying a fix check PASS; at the last round (REVIEW_LAST_ROUND) only the PASS can. A fix check PASS never clears a design reviewer's FAIL
-    or PARTIAL. An uncleared round reads open, and the why names the earliest record at the highest such round. The floor comes from the bodies the
+    or PARTIAL, nor a WIDE. An uncleared round reads open, and the why names the earliest record at the highest such round. The floor comes from the bodies the
     listing already holds. Only the listing reads it: a fix check is the record that clears a failed round, so writing one never asks."""
     stuck = None  # (round, design, record): the earliest record at the highest uncleared round
     later = [*earlier, rec]
@@ -3445,9 +3445,8 @@ def uncleared_round(earlier, rec):
         if not failing and not (e["fix"] and e["fix"][3] in REVIEW_FIX_VERDICTS[1:]):
             continue
         design = REVIEW_ROLES[1] in failing  # a fix check reviews the code reviewer's finding, so its PASS never clears a design reviewer's line
-        wide = bool(e["fix"] and e["fix"][3] == "WIDE")  # a WIDE fix is a new lane, so only a fresh review clears it, never a fix check PASS
-        fresh = wide and any(not r["fix"] and not is_plain_copy(r, later[j]) for j, r in enumerate(later[k + 1:], k + 1))
-        if fresh or any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design and not wide) for r in later[k:]):
+        wide = bool(e["fix"] and e["fix"][3] == "WIDE")  # a WIDE fix is a new lane, so only a higher round clears it, never a fix check PASS
+        if any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design and not wide) for r in later[k:]):
             continue
         if stuck is None or n > stuck[0]:
             stuck = (n, design, e)
@@ -3928,7 +3927,7 @@ def main(argv, host=None, lock=None, hosts=None):
                         src = copy_source(earlier or [last])  # a plain copy carries no fix line, so the record it repeats still holds the FAIL or WIDE
                         if not problem and src["fix"] and src["fix"][3] != "PASS":
                             problem, remedy = fix_follow_problem(src, True)
-                held =next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
+                held = next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
                 if not problem and held:
                     problem = f"the review record on head {held['head'][:9]} has a Fix check {held['fix'][3]} after round {REVIEW_LAST_ROUND}, so a new fix check may not follow it"
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
