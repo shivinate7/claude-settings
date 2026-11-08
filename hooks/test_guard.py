@@ -8770,6 +8770,85 @@ def incident_write_strip_case():
 FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and builds no fixture
 
 
+# ---- env false alarms and holes, env family. Decision env-file-stays-unread.
+# An allow row names a folder called .env, or text that names one, and reads no env file. A deny row
+# reaches an env file by a form the guard misses. The walk rows need a folder that holds an env file,
+# so the three folders below are fixtures, each named so no name is a substring of another.
+ENVWALK_HELD = os.path.join(ROOT, "envwalk-held")    # an env file and an ordinary file
+ENVWALK_CLEAN = os.path.join(ROOT, "envwalk-clean")  # ordinary files and no env file
+ENVWALK_EMPTY = os.path.join(ROOT, "envwalk-empty")  # no files at all
+
+
+def build_envwalk_folders():
+    write(os.path.join(ENVWALK_HELD, ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_HELD, "README.md"), "held\n")
+    write(os.path.join(ENVWALK_CLEAN, "README.md"), "clean\n")
+    os.makedirs(ENVWALK_EMPTY, exist_ok=True)
+
+
+lazy_fixture((ENVWALK_HELD, ENVWALK_CLEAN, ENVWALK_EMPTY), build_envwalk_folders)
+
+# Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
+for _tool, _cmd in (
+    ("Bash", "source " + ENV + "/bin/activate"),
+    ("Bash", "rm -rf " + ENV + "/lib"),
+    ("PowerShell", r'gh pr comment 1 --body "the guard reads \.env names"'),
+    ("PowerShell", r'''python -c "print('see \.env')"'''),
+):
+    sh("env: false alarm, allowed: " + _cmd, _cmd, "allow", tool=_tool, cwd=NOGIT)
+
+# Refused. Each regex names an env file that the sample names do not cover, or a POSIX class that
+# Python reads as a nested set. The PowerShell tool passes the backslash of `\.env` differently from
+# Bash, which refuses the same text, so the PowerShell form is a hole of its own.
+for _cmd in (
+    r"ag --hidden -G '\.env\.prod$' K",
+    r"ag --hidden -G '\.env\.qa$' K",
+    r"ag --hidden -G '\.env\.ci$' K",
+    r"ag --hidden -G '[[:alpha:]]' K",
+):
+    sh("env: ag hidden hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+_ag_plain = r"ag --hidden -G '\.env' K"
+sh("env: ag hidden hole, PowerShell form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: ag hidden control, Bash form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
+   cwd=NOGIT)
+
+# A hidden search of a folder that holds an env file is refused. The same search of a folder with no
+# env file, or of an empty folder, is allowed.
+for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
+    sh("env: walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_HELD)
+    sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
+    sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
+
+
+def env_posix_class_stderr_case():
+    """The guard prints no FutureWarning on stderr for a `[[:alpha:]]` file regex.
+
+    Python's re reads a POSIX class as a nested set and warns at compile time. The guard catches that
+    warning, so a hook's stderr holds nothing from it. The check runs the guard in a child process,
+    because re caches a compiled pattern, and a cached pattern prints no warning again.
+    """
+    payload = {"tool_name": "Bash", "tool_input": {"command": r"ag --hidden -G '[[:alpha:]]' K"},
+               "cwd": NOGIT}
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = CFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
+                 "CLAUDE_CODE_REMOTE"):
+        env.pop(name, None)
+    run = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                         text=True, env=env, timeout=120)
+    if "Traceback" in run.stderr:   # a crash prints no FutureWarning, so it must fail here, not pass
+        return False, "the guard crashed on the POSIX class regex: %s" % run.stderr.strip()[-100:]
+    if "FutureWarning" in run.stderr:
+        return False, "the guard printed a FutureWarning on stderr: %s" % run.stderr.strip()[-100:]
+    return True, "the POSIX class regex prints no FutureWarning and no traceback"
+
+
+FIXTURELESS_CHECKS.add(env_posix_class_stderr_case)  # it runs the guard in a child and builds no fixture
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
@@ -21991,6 +22070,8 @@ LOG_CHECKS = (
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
      incident_write_strip_case),
+    ("env: a POSIX class in an ag file regex prints no FutureWarning on stderr",
+     env_posix_class_stderr_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -29101,6 +29182,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("env: a POSIX class in an ag file regex", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
