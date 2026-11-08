@@ -44,6 +44,12 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 - `git checkout -f <branch>` and `git checkout --force <branch>`. A forced switch discards local
   changes.
 - A bare `git checkout <folder>` with no `--`. Git reads it in path mode.
+- A bare `git checkout <file>` with no `--`, when the file is tracked, has an uncommitted change, and
+  no branch or other revision has its name. The guard reads git state (`lone_operand_is_dirty_file`),
+  never the spelling, so `Makefile` and `tools/runner` count as `a.json` does. A name that is both a
+  branch and a file stays a branch, as git reads it. A clean file, a branch and a hand-made worktree
+  keep their answers. Incident: 2026-11-08 03:37 CST, with coordinator rulings at 04:38 and 05:16 CST.
+  An agent-owned worktree keeps its named-file allow.
 - `--pathspec-from-file` and each unique prefix that git accepts, such as `--pathspec-from`.
 - Each `-C <dir>` in a git call. They chain as git's own chdir does. The result sets the checkout that
   the rule judges.
