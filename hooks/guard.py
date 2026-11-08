@@ -4789,8 +4789,9 @@ COORDINATOR_SCOPE_REASON = (
 # A coordinator's acts (rule coordinator-scope, waiting-page ruling 111 a): in a coordinator build
 # only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only for a type of
 # COORDINATOR_AGENT_ROLES, compared exactly. Cost: the role file is read once per call, shared with
-# coordinator_scope_hit (_cloud_coordinator), and the transcript once per call, only when the role file is missing;
-# a spawn or Workflow call reads nothing else, and a shell call adds no process (a string scan of the command).
+# coordinator_scope_hit (_cloud_coordinator), and the transcript once per call, only when the role file is missing.
+# A shell call reads the tier only when a string scan of the command finds a merge, a write word, a commit or an
+# interpreter word; it adds no process. A spawn or Workflow call reads nothing else.
 COORDINATOR_AGENT_ROLES = ("Plan", "Explore", "claude-code-guide")
 COORDINATOR_SPAWN_REASON = (
     "Rule (Roles): a coordinator briefs lanes and runs no build or review agent of its own "
@@ -5148,14 +5149,18 @@ def _own_tag_tier(transcript) -> str:
     return ""
 
 
+def _cloud_own_call(payload) -> bool:
+    """True for a cloud session's own call: CLAUDE_CODE_REMOTE true, no agent_id, no agent_type. Reads nothing."""
+    return (os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(payload, dict)
+            and not payload.get("agent_id") and not payload.get("agent_type"))
+
+
 def _cloud_coordinator(payload) -> bool:
     """True for a cloud session's own call (no agent_id, no agent_type, CLAUDE_CODE_REMOTE true) whose tier is
     `coordinator`. The role file decides when it is there. When it is missing, the tier is the session's own cs-build
     tag in its newest get_session result in the transcript. The answer is kept for one session id, config folder and
     transcript, so the two coordinator rules share one role-file read and at most one transcript read."""
-    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
-        return False
-    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
+    if not _cloud_own_call(payload):
         return False
     transcript = payload.get("transcript_path")
     key = (os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID"), str(role_path()), transcript)
@@ -5183,6 +5188,19 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
     if (tool not in SPAWN_TOOLS and tool not in COORDINATOR_MERGE_TOOLS and tool not in SHELL_TOOLS
             and not is_workflow):
         return "", ""
+    if tool in SHELL_TOOLS:   # the tier is read only once a segment names a merge
+        if not _cloud_own_call(payload):
+            return "", ""
+        for segment in split_segments(strip_heredoc_bodies(str(tool_input.get("command", "") or ""))):
+            if not segment.strip():
+                continue
+            if merge_call_of(segment) is not None:
+                if "--disable-auto" in (gh_call_of(segment) or ()):   # disarms a merge, merges nothing
+                    continue
+                return (COORDINATOR_MERGE_REASON, "gh pr merge") if _cloud_coordinator(payload) else ("", "")
+            if merge_confirm_of(segment):
+                return (COORDINATOR_MERGE_REASON, "merge --confirm") if _cloud_coordinator(payload) else ("", "")
+        return "", ""
     if not _cloud_coordinator(payload):
         return "", ""
     if tool in SPAWN_TOOLS:
@@ -5198,18 +5216,22 @@ def coordinator_act_hit(payload, tool: str, tool_input: dict):
             if "agentType" in unseen or "..." in unseen or _coordinator_type_refused(keys.get("agentType")):
                 return COORDINATOR_SPAWN_REASON, "workflow agent " + str(keys.get("agentType") or "(unread type)")[:40]
         return "", ""
-    if tool in COORDINATOR_MERGE_TOOLS:
-        return COORDINATOR_MERGE_REASON, "merge tool"
-    for segment in split_segments(strip_heredoc_bodies(str(tool_input.get("command", "") or ""))):
-        if not segment.strip():
-            continue
-        if merge_call_of(segment) is not None:
-            if "--disable-auto" in (gh_call_of(segment) or ()):   # disarms a merge, merges nothing
-                continue
-            return COORDINATOR_MERGE_REASON, "gh pr merge"
-        if merge_confirm_of(segment):
-            return COORDINATOR_MERGE_REASON, "merge --confirm"
-    return "", ""
+    return COORDINATOR_MERGE_REASON, "merge tool"
+
+
+_INTERPRETER_WORD = re.compile(r"(?<![\w-])(?:perl|dd|py|python[\d.]*)(?:\.exe)?(?![\w-])", re.I)
+
+
+def _shell_could_write(tool_input: dict, cwd: str) -> bool:
+    """True when a shell call could hold a write coordinator_scope_hit judges: an interpreter word (perl, dd,
+    python) anywhere in the text, any write word (the shell scan with a predicate that accepts every path, so it
+    reads no file), or a `git commit`. A superset of the real judges."""
+    raw = str(tool_input.get("command", "") or "")
+    stripped = strip_heredoc_bodies(raw)
+    return bool(_INTERPRETER_WORD.search(raw)
+                or _shell_write_hit(stripped, cwd, lambda word, where: True)
+                or any((call := git_call_of(segment)) is not None and call[0] == "commit"
+                       for segment in split_segments(stripped) if segment.strip()))
 
 
 def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -5221,6 +5243,9 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     the file name with it."""
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS:
         return ""
+    if tool in SHELL_TOOLS:   # the tier is read only once the command could write or commit
+        if not _cloud_own_call(payload) or not _shell_could_write(tool_input, cwd):
+            return ""
     if not _cloud_coordinator(payload):
         return ""
     session_id = session_id_of(payload)
