@@ -14,7 +14,7 @@ Every republish of a waiting page is main's `skills/waiting-page/page.html` with
 - `hooks/session_start.sh` runs `stale_pages.py --session-line <toplevel>` in a repo whose extras file names a waiting page. It prints one line naming the page as behind when the stamp differs from main's blob sha. No stamp, or an unreadable main, prints nothing.
 - Incident class: likely risk (rule `building-guard-needs-incident`). Claude is likely to republish a page from a stale saved copy in normal work, and the page's data and Status tab were lost that way before. Landed 2026-11-01.
 - Cost:
-  - `guard.py` already starts on each call of its matcher (not pinned: no test counts the starts). The matcher now also names `Artifact`, so it starts once per `Artifact` call (unmeasured). A read or a list exits before the heavy imports.
+  - `guard.py` already starts on each call of its matcher (unmeasured: no test counts the starts). The matcher now also names `Artifact`, so it starts once per `Artifact` call (unmeasured). A read or a list exits before the heavy imports.
   - Every `Artifact` call also runs the session-home record step that every guard call runs (`session_home_keep`): one path walk and one small file read, and one write only when the record is missing or changed (unmeasured).
   - Per waiting-page publish: one python import of `stale_pages`, one read-only git process (no fetch, no network), one file read, one stamp file write (unmeasured).
   - Session start: one python start and one git process, only in a repo with a waiting page (unmeasured). Any other repo pays one grep.
