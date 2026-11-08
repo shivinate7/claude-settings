@@ -22640,7 +22640,8 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd
 GCX_HOME = "gcxhome01"                 # the agent whose worktree is the recorded home
 GCX_SIB = "gcxsib02"                   # a sibling agent's worktree: another checkout of the same clone
 GCX_SESSION = "gcx-session-0001"       # a session id in the shape SESSION_ID_RE accepts
-GCX_ORIGIN = "https://github.com/example-owner/claude-settings.git"  # names the scratch clones' repo
+GCX_OTHER_SESSION = "gcx-session-0002"  # a second session, whose scratchpad holds none of the fixture
+GCX_ORIGIN = XCL_ORIGIN                # names the scratch clones' repo, the same one as the separate-clone rows
 GCX_TEMP = os.path.join(ROOT, "gcx_tmp")  # the temp folder the guard reads for these rows
 GCX_FIX = {}                           # the fixture's paths, built once by _gcx_fixture
 # Each @NAME in a command becomes the folder it names, so a command reads as the shell would type it.
@@ -22765,9 +22766,18 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a siblin
                          _gcx_row("deny", "home", "git -C @SIB commit -m x")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a linked worktree in its own scratchpad "
                          "is refused",
-                         _gcx_row("deny", "home", "git -C @SCRATCH_WT commit -m x")))
+                         _gcx_row("deny", "home", "git -C @SCRATCH_WT commit -m x", session=GCX_SESSION)))
+LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a linked worktree in another session's "
+                         "scratchpad is refused",
+                         _gcx_row("deny", "primary", "git -C @SCRATCH_WT commit -m x", agent=None,
+                                  session=GCX_OTHER_SESSION)))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a checkout with no commit yet is refused",
                          _gcx_row("deny", "home", "git -C @EMPTY commit -m x")))
+# A quote, a `#` or an apostrophe inside a string is text, and the real call beside it still counts.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit after an echo whose quoted text holds a # is refused",
+                         _gcx_row("deny", "home", 'echo "# note" && git -C @PRIMARY commit -m x')))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit whose message holds a quoted apostrophe is refused",
+                         _gcx_row("deny", "home", 'git -C @PRIMARY commit -m "pins, don\'t"')))
 # Allowed: the agent's own checkout and red-run folder, the reads, a folder no word names, a text-only
 # git -C, a scratch clone, and a -C chain whose last folder is the agent's own.
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit in its own worktree is allowed",
@@ -22788,6 +22798,13 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary check
                          _gcx_row("allow", "home", 'echo "git -C @PRIMARY commit -m x"')))
 LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary checkout, in a comment, is allowed",
                          _gcx_row("allow", "home", "# git -C @PRIMARY commit -m x\nls")))
+# A multi-line quoted string and a quoted heredoc body are text across lines, as a template literal is.
+LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary checkout, in a multi-line quoted string, "
+                         "is allowed",
+                         _gcx_row("allow", "home", 'echo "first line\ngit -C @PRIMARY commit -m x"')))
+LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary checkout, in a quoted heredoc body, is "
+                         "allowed",
+                         _gcx_row("allow", "home", "cat <<'EOF'\ngit -C @PRIMARY commit -m x\nEOF")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a scratch clone in its scratchpad is allowed",
                          _gcx_row("allow", "home", "git -C @SCRATCH_CLONE commit -m x")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add into a scratch clone in its scratchpad is allowed",
