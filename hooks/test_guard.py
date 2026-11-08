@@ -21857,10 +21857,13 @@ def _relesc_fixture():
         free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
+        # A `cd` into a folder that does not exist is not followed, so the scratch folder must exist.
+        scratch = os.path.join(ROOT, "relesc_scratch")
+        os.makedirs(scratch, exist_ok=True)
         RELESC_CACHE["folders"] = {
             "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
             "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
-            "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
+            "abs_scratch": scratch,
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
         }
         RELESC_CACHE["problems"] = problems
@@ -21919,6 +21922,9 @@ _relesc_add("worktree-home relative escape: cd .. && mkdir tmp is refused", "den
             "cd .. && mkdir tmp", "home", any_of=("worktree-home", "other-checkout"))
 _relesc_add("worktree-home relative escape: echo x > ../f from the home is refused", "deny",
             "echo x > ../f", "home", any_of=("worktree-home", "other-checkout"))
+# Deny, from the recorded home: a relative `cd` that climbs out of the home still judges the write after it.
+_relesc_add("worktree-home relative escape: cd ../.. && mkdir x from the home, a relative cd that climbs out "
+            "of the home, is refused", "deny", "cd ../.. && mkdir x", "home", rule="worktree-home")
 # No record: main's behaviour (owner ruling, page item 425 c, 2026-11-08 10:19 CST). An agent with no
 # recorded home keeps main's behaviour, so worktree-home lets its writes through, from the primary and
 # from a linked checkout. main's guard allows each row below, so each expects allow.
@@ -21954,6 +21960,31 @@ _relesc_add("worktree-home relative escape: mkdir -p in an absolute folder outsi
             "allow", "mkdir -p %(abs_scratch)s/x", "home")
 _relesc_add("worktree-home relative escape: echo x > an absolute file outside the clone is allowed",
             "allow", "echo x > %(abs_outside)s/f", "home")
+# Allow, from the recorded home. A relative write after an absolute, `~` or variable `cd` gets the verdict its
+# absolute form gets: the relative-write clause does not judge it (debt relative-write-absolute-cd). Each cd
+# row is red on head, where the guard follows the cd, except `$TMPDIR`: a variable cd leaves the folder
+# unknown, which allows, so that row is green on head. The absolute forms are green controls.
+_relesc_add("worktree-home relative escape: cd <scratch> && mkdir probe, a relative write after an absolute cd "
+            "to a folder outside the clone, is allowed", "allow", "cd %(abs_scratch)s && mkdir probe", "home")
+_relesc_add("worktree-home relative escape: cd /tmp && mkdir x, a relative write after an absolute cd, "
+            "is allowed", "allow", "cd /tmp && mkdir x", "home")
+_relesc_add("worktree-home relative escape: cd <scratch>; echo x > out.txt, a redirect after an absolute cd, "
+            "is allowed", "allow", "cd %(abs_scratch)s; echo x > out.txt", "home")
+_relesc_add("worktree-home relative escape: cd <scratch> && cp a b, a copy after an absolute cd, is allowed",
+            "allow", "cd %(abs_scratch)s && cp a b", "home")
+_relesc_add("worktree-home relative escape: cd \"$TMPDIR\" && mkdir x, a relative write after a variable cd, "
+            "is allowed", "allow", 'cd "$TMPDIR" && mkdir x', "home")
+_relesc_add("worktree-home relative escape: cd ~ && touch f, a relative write after a cd to the home folder, "
+            "is allowed", "allow", "cd ~ && touch f", "home")
+_relesc_add("worktree-home relative escape: cd /tmp && cd .. && mkdir x, a relative write after a relative cd "
+            "from an absolute folder, is allowed", "allow", "cd /tmp && cd .. && mkdir x", "home")
+# The same verdict as the absolute form. The relative-write clause judges only a relative target (its
+# CREATING_COMMAND verbs), so `mkdir -p <primary>/zz` is allowed and the cd form must be allowed too.
+_relesc_add("worktree-home relative escape: mkdir -p <primary>/zz, an absolute target the relative-write "
+            "clause does not judge, is allowed", "allow", "mkdir -p %(primary)s/zz", "home")
+_relesc_add("worktree-home relative escape: cd <primary> && mkdir zz gets the verdict of its absolute form, "
+            "which the relative-write clause does not judge, so it is allowed", "allow",
+            "cd %(primary)s && mkdir zz", "home")
 _relesc_add("worktree-home relative escape: cp t.py ../agent-" + RELESC_AGENT + "-red/, into the "
             "agent's own red-run folder, is allowed", "allow", "cp t.py ../agent-" + RELESC_AGENT + "-red/",
             "home")
