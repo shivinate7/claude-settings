@@ -41,7 +41,8 @@ designer. A text-only change gets none (decision `design-agents`).
 
 1. **Write the briefs.** Use the designer kinds above. The first line of each brief is
    `Designer kind: blind|informed|directed`. A directed brief adds its direction. The skill always names
-   the kind; a designer reads a brief with no kind as informed. The brief gives the designer its `<n>`.
+   the kind; a designer reads a brief with no kind as informed. The brief gives the designer its `<n>`,
+   and the branch it pushes to, `design/<screen>-<kind>-<n>` (`agents/designer.md`: a brief with no branch is incomplete).
    A blind designer never reads other files in the design folder, sibling designer mockups included. Point the brief at files; never paste them
    (`tokens-point-brief-at-files`). Write each brief to `<scratchpad>/design-explore/<screen>/<screen>-<kind>-<n>.md`.
    The Device section comes from `python3 ~/.claude/lint/layout.py devices <repo root>`: the repo's devices in
@@ -66,7 +67,7 @@ designer. A text-only change gets none (decision `design-agents`).
    the designer. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
-6. **Gather.** Each designer pushes only to the branch its brief names (`agents/designer.md`). The orchestrator copies every designer's pair onto the
+6. **Gather.** Each designer pushes only to the branch its brief names in step 1. The orchestrator copies every designer's pair onto the
    step's design branch, so the owner sees the whole set in one place.
 7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
    and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the
