@@ -10726,6 +10726,7 @@ AN_BUILDER = {"subagent_type": "builder", "prompt": AN_PROMPT, "model": "sonnet"
 AN_NAMED, AN_NAMED_AGENT = "overlap-a", "a553a8c1e9f0d427"  # a builder named at spawn; its id starts a553a8
 AN_REF = " [a553a8]"                                       # the ref SendMessage writes for that id
 AN_NAKED_AGENT = "a9c1e5f3d7b20468"                        # a builder spawned with no name
+AN_OLD_AGENT = "a2e7b9d4c1f08356"                          # the older of two spawns that took the name overlap-a
 AN_REV, AN_REV_AGENT = "overlap-rev", "a0d4b8e2f6c19573"   # a reviewer named at spawn, still running
 AN_UNKNOWN = "a1f0e9d8c7b6a590"                            # an agent id no spawn holds
 AN_PEER = "session_PEER01"                                 # the session a remote send_message names
@@ -10751,6 +10752,9 @@ AN_TRANSCRIPTS = {
     "coordinator": rr_session(AN_NAMED_SPAWN, AN_NAKED_SPAWN, tags=COORD_TAGS),
     "no-record": [RR_HUMAN] + AN_NAMED_SPAWN + AN_NAKED_SPAWN,   # no get_session record of the own session
     "tags-after": rr_session(AN_NAMED_SPAWN, AN_NAKED_SPAWN, AN_TAGS_AFTER),
+    # Two spawns took the name overlap-a: the older, AN_OLD_AGENT, is superseded by the newer, AN_NAMED_AGENT.
+    "superseded": rr_session(rf_launch("b1", "builder", AN_NAMED, AN_OLD_AGENT),
+                             rf_launch("b2", "builder", AN_NAMED, AN_NAMED_AGENT)),
 }
 
 
@@ -10786,7 +10790,7 @@ an_call("a bare agent id of a builder named at spawn, far up a full-size transcr
         carries=AN_CARRIES, lacks=AN_NAMED_AGENT)
 # Asked: a send to a spawn with no name, since no name can address it.
 an_call("a bare agent id of a builder with no name asks", "ask", RR_BUILTIN_SEND,
-        {"to": AN_NAKED_AGENT, "message": AN_MSG}, an_path("lane"), rule=AN_RULE)
+        {"to": AN_NAKED_AGENT, "message": AN_MSG}, an_path("lane"), rule=AN_RULE, lacks=AN_NAKED_AGENT)
 # Refused: an Agent or Task spawn from the main session with no name, or a name that is empty or only spaces.
 an_call("an Agent spawn with no name is refused", "deny", "Agent", dict(AN_BUILDER), an_path("empty"), rule=AN_RULE)
 an_call("an Agent spawn with an empty name is refused", "deny", "Agent", dict(AN_BUILDER, name=""),
@@ -10863,6 +10867,25 @@ def an_not_lane_check(tool, tool_input, transcript, env):
         if got != "allow" or reason:
             return False, "subject: want a silent allow, got %s: %s" % (got, reason[:80])
         return True, "the call is refused on a lane's own transcript and allowed silently here"
+    return check
+
+
+def an_superseded_check():
+    """A send to the older of two spawns that took one name is allowed: the newer spawn holds the name, so the older one is
+    reached by its raw agent id. The control is the newer spawn's id on the same transcript, which is refused. The control
+    comes first, so the lane's refusal is proved before the older spawn is judged."""
+    def check():
+        got, reason = decide(an_case(RR_BUILTIN_SEND, {"to": AN_NAMED_AGENT, "message": AN_MSG},
+                                     an_path("superseded"), env=ROLE_ENV))
+        if got != "deny" or AN_RULE not in reason:
+            return False, "control: a send to the newer spawn gives %s, want a deny that names %s: %s" % (
+                got, AN_RULE, reason[:80])
+        got, reason = decide(an_case(RR_BUILTIN_SEND, {"to": AN_OLD_AGENT, "message": AN_MSG},
+                                     an_path("superseded"), env=ROLE_ENV))
+        if got != "allow" or reason:
+            return False, "subject: a send to the superseded spawn gives %s, want a silent allow: %s" % (
+                got, reason[:80])
+        return True, "a send to the superseded spawn is allowed silently; the newer spawn that holds the name is refused"
     return check
 
 
@@ -14514,6 +14537,12 @@ for _why, _where, _env in AN_NOT_LANE:
         LOG_CHECKS_EXTRA.append((_label, _check))
         LOG_FAMILY[_label] = "agent-name-on-spawn"
         FIXTURELESS_CHECKS.add(_check)
+_SUPERSEDED_LABEL = ("agent-name-on-spawn: a send to a superseded spawn's agent id is allowed, and the newer spawn "
+                     "that holds the name is refused (control first)")
+_superseded = an_superseded_check()
+LOG_CHECKS_EXTRA.append((_SUPERSEDED_LABEL, _superseded))
+LOG_FAMILY[_SUPERSEDED_LABEL] = "agent-name-on-spawn"
+FIXTURELESS_CHECKS.add(_superseded)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
