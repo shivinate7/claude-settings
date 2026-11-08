@@ -105,6 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-lint-send": "a lane's hand-off to a batch runner: a send_message whose message names an open pull request with no review record at its live head is refused; a closed or merged pull request, an issue, a target that is no runner, a message with no pull request and an owner override pass; an unknown read passes with one note",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "red-run": "a git push judged on the test commits it sends: a test commit with no Red-run line, a malformed Red-run line (zero count, or no arrow and no sha), or a lane's own untrailered test commit beside main's is refused; a valid red-run or none line, a docs-only, deletion-only, merged-main, rebased-onto-main, pre-rollout or unreadable-range push passes",
@@ -1076,13 +1077,48 @@ else:
     head = state["pr"]["head"]["sha"]
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
-    if re.fullmatch(r"pulls/\d+", rel):
+    table = {int(k): v for k, v in state.get("prs", {}).items()}  # the numbered pull requests of a case that names them (make_fake_gh prs)
+    numbered_issues = set(state.get("issues", []))  # the numbers that are issues (make_fake_gh issues)
+
+    def pr_row(n):
+        p = table[n]
+        return {"number": n, "state": p["state"], "merged": p.get("merged", False), "draft": p.get("draft", False),
+                "head": {"ref": p.get("ref", "feat%d" % n), "sha": p["sha"]},
+                "base": {"ref": p.get("base", "main"), "repo": {"default_branch": "main"}},
+                "body": None, "mergeable": True, "mergeable_state": "clean", "merge_commit_sha": "e" * 40}
+
+    def table_route(rel):
+        """True when the numbered table answers the call, or exits as a 404. False leaves the call to the routes below."""
+        if rel == "issues/comments" and state.get("comments") is not None:
+            rows = [{"body": c["body"], "issue_url": "https://api.github.com/repos/o/r/issues/%d" % c["number"]} for c in state["comments"]]
+            print(listing(rows, None, fields, flags, rel=rel))
+            return True
+        found = re.fullmatch(r"(pulls|issues)/(\d+)", rel)
+        if not found:
+            return False
+        kind, n = found.group(1), int(found.group(2))
+        if n in table:
+            if kind == "pulls":
+                print(json.dumps(pr_row(n)))
+            else:
+                print(json.dumps(dict(pr_row(n), pull_request={"url": "https://api.github.com/repos/o/r/pulls/%d" % n})))
+            return True
+        if n in numbered_issues:
+            if kind == "pulls":
+                api_error(404, "Not Found")
+            print(json.dumps({"number": n, "title": "an issue", "state": "open"}))
+            return True
+        return False
+
+    if table_route(rel):
+        pass
+    elif re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
                        state=o.get("state", "open"), merged=o.get("merged", False)) for o in state["others"]]
-        rows = [dict(state["pr"], number=state["number"])] + others
+        rows = [dict(state["pr"], number=state["number"])] + others + [pr_row(n) for n in sorted(table)]
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
         print(listing(rows, None, fields, flags, rel=rel))
@@ -1120,8 +1156,13 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, prs=None, issues=(), comments=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `prs` maps a pull request number to {state, sha, base, draft, merged, ref}; each number is served by pulls/<n>,
+    issues/<n> and the open list. `issues` lists numbers that are issues: their pulls/<n> is a 404. `comments` is the
+    repo-wide list of issue comments {number, body}, served by issues/comments. None, the default, leaves that route a
+    404, as it was before these options; an empty list serves an empty comment list.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1187,6 +1228,9 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "prs": {str(k): dict(v) for k, v in (prs or {}).items()},  # number -> the pull request the numbered routes answer
+        "issues": [int(n) for n in issues],  # numbers that are issues
+        "comments": None if comments is None else [dict(c) for c in comments],  # the repo-wide issue comments
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -10638,6 +10682,163 @@ step_allow("a brief with topic colors to a target that is no lane (cs-build:tria
 # Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
 step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
            role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+
+
+# =========================================================================== 5i. lane-lint-send
+FAMILY = "lane-lint-send"
+#
+# Rule lane-lint-send. A lane hands its pull requests to a batch runner only with a passing `merge --lane-lint` on each
+# live head. A send_message to a target whose newest record carries the runner tag is judged on each #n and pull URL in
+# its message, at most five. An open pull request with no review record at its live head is refused. A closed or merged
+# pull request, an issue, a target that is no runner, a message with no pull request and an owner override all pass. A
+# read that fails, a read past its cap, an unknown repo and a sixth pull request each pass, with one guard.log line and
+# one stderr line. The first hand-off to a target with no record is refused once, with the steer; the retry passes.
+LANE_SEND_RULE = "lane-lint-send"
+LL_RUNNER = "session_LLRUNNER01"  # the batch runner a hand-off names
+LL_COORD = "session_LLCOORD01"  # the coordinator, a target that is no runner
+LL_OWNER = "5c2e7d1a-0000-4000-8000-0000000011aa"  # the session an owner override names
+LL_RUNNER_TAGS = ["cs-build:batch-runner", "cs-repo:o/r"]
+LL_CHECKOUT = os.path.join(ROOT, "ll-checkout")  # a git checkout whose origin names o/r
+LL_CAP_ENV = "LANE_LINT_SEND_SECONDS"  # the cap a pull request read is held to: a read past it is unknown
+LL_MSG = "Hand-off: PR #41 is ready for batch 3."
+# The incident hand-off: the message text of the send that named the three pull requests, unchanged.
+LL_INCIDENT = (
+    "Correction to my last line: step handoff-needs-lane-lint is not filed yet. A lane does not write roadmap steps, "
+    "so please queue it. The step: refuse a lane's hand-off message to the batch runner for a PR whose live head has no "
+    "passing `merge --lane-lint`. The incident: lane override-plain-ask handed #1463, #1513 and #1583 at 11:49 CST on "
+    "2026-11-08 before their lint, and all three failed it.")
+
+
+def ll_head(n, old=False):
+    """A 40-hex head for pull request n: its live head, or an older one when `old`."""
+    return "%040x" % ((0xb0000 if old else 0xa0000) + n)
+
+
+def ll_open(*numbers):
+    """The open pull requests `numbers`, each at its live head (make_fake_gh prs)."""
+    return {n: {"state": "open", "sha": ll_head(n)} for n in numbers}
+
+
+_LL_FORM = []
+
+
+def ll_review(n, head):
+    """The review record of pull request n at `head`, in merge.py's own form (review_body, decision pr-review-record)."""
+    if not _LL_FORM:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ll_merge_form", os.path.join(REPO, "merge", "merge.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _LL_FORM.append(module)
+    return _LL_FORM[0].review_body(n, head, "normal", "no", [(1, "reviewer", "sonnet", "PASS")], "not owed")
+
+
+def ll_records(*numbers):
+    """A review record at each pull request's live head, as the repo's issue comments list them."""
+    return [{"number": n, "body": ll_review(n, ll_head(n))} for n in numbers]
+
+
+# The transcripts: a runner whose record came from get_session, from create_session, or from a list_sessions row; a
+# runner with no repo tag; a coordinator; and a transcript that holds no record of the target at all.
+LL_LINES = {
+    "ll-runner": role_target_call("r1", LL_RUNNER_TAGS, target=LL_RUNNER),
+    "ll-runner-no-repo": role_target_call("r1", ["cs-build:batch-runner"], target=LL_RUNNER),
+    "ll-coord": role_target_call("c1", ["cs-build:coordinator", "cs-repo:o/r"], target=LL_COORD),
+    "ll-none": [role_said("ready when you are")],
+    "ll-create": [role_use("n1", CREATE_SESSION, {"tags": LL_RUNNER_TAGS, "title": "runner"}),
+                  role_result("n1", json.dumps({"id": LL_RUNNER}))],
+    "ll-list": [role_use("l1", LIST_SESSIONS), role_result("l1", role_record(LL_RUNNER_TAGS, session=LL_RUNNER))],
+}
+
+
+def write_ll_transcripts():
+    """Write each send-message transcript as JSONL, in the role fixtures' folder."""
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    for name, lines in LL_LINES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+
+lazy_fixture([role_path(name) for name in LL_LINES], write_ll_transcripts)
+
+
+def build_ll_checkout():
+    """A git checkout whose origin names github.com/o/r, so a bare #n has its repo from the cwd as well as the tag."""
+    os.makedirs(LL_CHECKOUT, exist_ok=True)
+    subprocess.run(["git", "init", "-q", LL_CHECKOUT], check=True)
+    subprocess.run(["git", "remote", "add", "origin", "https://github.com/o/r.git"], cwd=LL_CHECKOUT, check=True)
+
+
+lazy_fixture([LL_CHECKOUT], build_ll_checkout)
+
+
+def ll_gh(name, prs=None, issues=(), comments=(), **kw):
+    """The fake pull request tool of one send case, built before the case runs. -> the PATH the guard run gets."""
+    folder = os.path.join(ROOT, "ll-gh-" + name)
+    lazy_fixture([folder], lambda: make_fake_gh(folder, "main", prs=prs, issues=issues, comments=comments, **kw))
+    return fake_gh_path(folder)
+
+
+def ll_refuse(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT, carries=()):
+    """A send_message the guard refuses. The reason names its rule."""
+    add("lane-lint-send: " + name, "deny", rule=LANE_SEND_RULE, tool=SEND_MESSAGE, cwd=cwd, transcript=transcript,
+        env=ROLE_ENV, env_path=env_path, session_id=target, message=message, carries=carries)
+
+
+def ll_allow(name, transcript, message, env_path, target=LL_RUNNER, cwd=LL_CHECKOUT):
+    """A send_message the guard lets through silently."""
+    add("lane-lint-send: " + name, "allow", tool=SEND_MESSAGE, cwd=cwd, silent=True, transcript=transcript,
+        env=ROLE_ENV, env_path=env_path, session_id=target, message=message)
+
+
+# Refused: an open pull request with no review record at its live head. The reason names the pull request.
+ll_refuse("an open pull request with no review record at its live head is refused",
+          role_path("ll-runner"), LL_MSG, ll_gh("no-record", prs=ll_open(41)), carries=("41",))
+# Refused: a record on an older head does not clear the live head.
+ll_refuse("a review record on an older head does not clear the live head: refused",
+          role_path("ll-runner"), "Hand-off: PR #42 is ready for batch 3.",
+          ll_gh("older-head", prs=ll_open(42), comments=[{"number": 42, "body": ll_review(42, ll_head(42, old=True))}]),
+          carries=("42",))
+# Refused: the incident hand-off. Its three open pull requests have no record, and any one of them names the failure.
+ll_refuse("the incident hand-off (#1463, #1513 and #1583, each open with no record) is refused",
+          role_path("ll-runner"), LL_INCIDENT, ll_gh("incident", prs=ll_open(1463, 1513, 1583)),
+          carries=(("1463", "1513", "1583"),))
+# Refused: a closed pull request beside an open one with no record. The open one still refuses the whole hand-off.
+ll_refuse("a closed pull request beside an open one with no record: the open one still refuses the hand-off",
+          role_path("ll-runner"), "Hand-off: PR #40 is closed, and PR #41 is ready for batch 3.",
+          ll_gh("mixed", prs={**ll_open(41), 40: {"state": "closed", "sha": ll_head(40), "merged": True}}),
+          carries=("41",))
+# Refused, the full-size state: five pull requests are judged, and the fifth, with no record, refuses.
+ll_refuse("five pull requests named, the fifth with no record: the fifth refuses the hand-off",
+          role_path("ll-runner"), "Hand-off: PRs #51, #52, #53, #54 and #55 are ready for batch 3.",
+          ll_gh("five", prs=ll_open(51, 52, 53, 54, 55), comments=ll_records(51, 52, 53, 54)), carries=("55",))
+# Refused: the runner's record came from create_session, or from a list_sessions row, not from get_session.
+ll_refuse("a runner that create_session started is judged on its record: the hand-off is refused",
+          role_path("ll-create"), LL_MSG, ll_gh("create", prs=ll_open(41)), carries=("41",))
+ll_refuse("a runner named by a list_sessions row is judged on its record: the hand-off is refused",
+          role_path("ll-list"), LL_MSG, ll_gh("list", prs=ll_open(41)), carries=("41",))
+# Allowed: a closed or merged pull request is skipped, so a hand-off that names only it passes.
+ll_allow("a closed pull request is skipped: a hand-off that names only it passes",
+         role_path("ll-runner"), "Status: PR #40 was closed.",
+         ll_gh("closed", prs={40: {"state": "closed", "sha": ll_head(40)}}))
+ll_allow("a merged pull request is skipped: a hand-off that names only it passes",
+         role_path("ll-runner"), "Status: PR #40 was merged.",
+         ll_gh("merged", prs={40: {"state": "closed", "sha": ll_head(40), "merged": True}}))
+# Allowed: an issue number is skipped.
+ll_allow("an issue number is skipped: a hand-off that names only an issue passes",
+         role_path("ll-runner"), "Status: issue #77 is ready to file.", ll_gh("issue", issues=[77]))
+# Allowed: a review record at the live head clears the hand-off.
+ll_allow("a review record at the live head clears the hand-off",
+         role_path("ll-runner"), "Hand-off: PR #43 is ready for batch 3.", ll_gh("at-head", prs=ll_open(43), comments=ll_records(43)))
+# Allowed: a target that is no runner (the coordinator) is not judged, though the message names an unlinted pull request.
+ll_allow("a target that is no runner (the coordinator) is not judged",
+         role_path("ll-coord"), LL_MSG, ll_gh("coord", prs=ll_open(41)), target=LL_COORD)
+# Allowed: a number with no # names no pull request.
+ll_allow("item 431 with no # names no pull request, so it is not judged",
+         role_path("ll-runner"), "Next: item 431 is ready for the batch.", ll_gh("item", prs=ll_open(431)))
+# Allowed: a message with no pull request reads none.
+ll_allow("a message with no pull request is allowed",
+         role_path("ll-runner"), "Status: batch 3 is green.", ll_gh("none"))
 # Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
 # with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
 step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
@@ -14880,6 +15081,169 @@ for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: ta
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
+# The lane-lint-send log checks: the refuse-once pair, the owner override, the unknown reads and the cost pair. They sit
+# here, where LOG_CHECKS_EXTRA exists, and each carries this family.
+_LL_FAMILY_BEFORE = FAMILY
+FAMILY = "lane-lint-send"
+
+
+def ll_run(name, transcript, message, target=LL_RUNNER, cwd=LL_CHECKOUT, env_path=None, extra_env=None, session=None):
+    """One guard run on a send_message, in the config folder `name`. -> (decision, reason, guard.log rows, stderr)."""
+    folder = os.path.join(ROOT, "ll-cfg", name)
+    os.makedirs(folder, exist_ok=True)
+    body = {"tool_name": SEND_MESSAGE, "tool_input": {"session_id": target, "message": message}, "cwd": cwd,
+            "transcript_path": transcript}
+    if session:
+        body["session_id"] = session
+    env = dict(os.environ)
+    for key in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(key, None)
+    env.update(ROLE_ENV)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    if env_path:
+        env["PATH"] = env_path
+    env.update(extra_env or {})
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True, env=env,
+                         timeout=120)
+    if got.returncode != 0:
+        return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200]), [], got.stderr
+    decision, reason = read_decision(got.stdout)
+    path = os.path.join(folder, "guard.log")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return decision, reason, [line.split("\t") for line in text.splitlines() if line.strip()], got.stderr
+
+
+def ll_fake_now(name, **kw):
+    """The fake pull request tool of one check, built now. -> the PATH the guard run gets."""
+    folder = os.path.join(ROOT, "ll-gh-" + name)
+    kw.setdefault("comments", ())  # a send case reads the review records of its pull requests: none is an empty list, not a 404
+    make_fake_gh(folder, "main", **kw)
+    return fake_gh_path(folder)
+
+
+def ll_refuse_once_check():
+    """Refused once per target per session: a hand-off to a target with no record is refused with the steer, and the
+    retry in the same session, with the refused send in its transcript and still no record of the target, passes."""
+    path = ll_fake_now("once", prs=ll_open(41))
+    decision, reason, _rows, _err = ll_run("once", role_path("ll-none"), LL_MSG, env_path=path, session=LL_OWNER)
+    problems = []
+    if decision != "deny":
+        problems.append("the first hand-off to a target with no record: want deny, got %s" % decision)
+    elif not ("get_session" in reason and "alone" in reason and ("retry" in reason or "Retry" in reason)):
+        problems.append("the first refusal does not steer to get_session on the target alone, then retry: %s" % reason[:90])
+    with open(role_path("ll-none"), encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    lines += [role_use("s1", SEND_MESSAGE, {"session_id": LL_RUNNER, "message": LL_MSG}), role_result("s1", reason)]
+    retry = os.path.join(ROOT, "ll-once-retry.jsonl")
+    with open(retry, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    decision, reason, _rows, _err = ll_run("once", retry, LL_MSG, env_path=path, session=LL_OWNER)
+    if decision != "allow":
+        problems.append("the retry to the same target, with no record of it, is not allowed: got %s: %s"
+                        % (decision, reason[:90]))
+    return not problems, "; ".join(problems) or "refused once with the steer, then the retry passed"
+
+
+def ll_override_call(config, seconds):
+    """One send_message of the hand-off at OV_T0 + seconds, from the session the override names."""
+    return decide({
+        "raw": None, "tool": SEND_MESSAGE, "cwd": LL_CHECKOUT, "session": LL_OWNER,
+        "env_path": ll_fake_now("override", prs=ll_open(41)), "config": config, "agent_id": None, "agent_type": None,
+        "temp": None, "load": None, "env": dict(ROLE_ENV, LOCAL_TIME_NOW=ov_clock(seconds)),
+        "tool_input": {"session_id": LL_RUNNER, "message": LL_MSG}, "transcript": role_path("ll-runner"),
+    })
+
+
+def ll_override_check():
+    """The owner override lifts the hand-off refusal: refused before a timed override, allowed under it."""
+    config = ov_config("ll-send")
+    problem = ov_want(*ll_override_call(config, 0), "deny", LANE_SEND_RULE)
+    if problem:
+        return False, "before the override: " + problem
+    note = ov_type(config, LL_OWNER, "override 15m", 30)
+    ok, why = ov_story([("under a timed override", lambda: ll_override_call(config, 60), "allow", LANE_SEND_RULE)], note)
+    return ok, why or "refused before the override, lifted under it"
+
+
+def ll_note_check(name, env_path, transcript=None, cwd=LL_CHECKOUT, message=LL_MSG, extra_env=None):
+    """An unknown read passes the hand-off, with one guard.log line for the rule and one stderr line."""
+    def check():
+        decision, reason, rows, err = ll_run(name, transcript or role_path("ll-runner"), message, env_path=env_path,
+                                             cwd=cwd, extra_env=extra_env)
+        problems = []
+        if decision != "allow":
+            problems.append("an unknown read refused the hand-off: %s" % reason[:90])
+        noted = [row for row in rows if any(LANE_SEND_RULE in cell for cell in row)]
+        if len(noted) != 1:
+            problems.append("guard.log lines for the rule: want one, got %d" % len(noted))
+        lines = [line for line in err.splitlines() if line.strip()]
+        if len(lines) != 1:
+            problems.append("stderr lines: want one, got %d" % len(lines))
+        return not problems, "; ".join(problems) or "allowed, with one guard.log line and one stderr line"
+    return check
+
+
+def ll_reads(count):
+    """The call log of the fake pull request tool: one line per read the guard made."""
+    if not os.path.exists(count):
+        return []
+    with open(count, encoding="utf-8") as handle:
+        return [line for line in handle.read().splitlines() if line.strip()]
+
+
+def ll_cost_pin_check():
+    """A send_message to a target that is no runner makes no pull request read."""
+    count = os.path.join(ROOT, "ll-gh-cost-coord.count")
+    path = ll_gh("cost-coord", prs=ll_open(41), count_file=count)
+
+    def check():
+        if os.path.exists(count):
+            os.remove(count)
+        decision, reason, _rows, _err = ll_run("cost-coord", role_path("ll-coord"), LL_MSG, target=LL_COORD,
+                                               env_path=path)
+        problems = []
+        if decision != "allow":
+            problems.append("the hand-off to the coordinator was refused: %s" % reason[:90])
+        if ll_reads(count):
+            problems.append("the send to a non-runner made %d pull request read(s), want none" % len(ll_reads(count)))
+        return not problems, "; ".join(problems) or "no pull request read for a send to a non-runner"
+    return check
+
+
+def ll_cost_control_check():
+    """A send_message to the runner that names an open pull request makes at least one read: the counter is live."""
+    count = os.path.join(ROOT, "ll-gh-cost-runner.count")
+    path = ll_gh("cost-runner", prs=ll_open(41), count_file=count)
+
+    def check():
+        if os.path.exists(count):
+            os.remove(count)
+        ll_run("cost-runner", role_path("ll-runner"), LL_MSG, env_path=path)
+        if not ll_reads(count):
+            return False, "the send to the runner made no pull request read, want at least one"
+        return True, "the send to the runner made %d read(s)" % len(ll_reads(count))
+    return check
+
+
+LOG_CHECKS_EXTRA.append(("lane-lint-send: refused once with the steer, then the retry passes", ll_refuse_once_check))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: an owner override lifts the hand-off refusal", ll_override_check))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a read that fails passes with one guard.log line and one stderr line",
+                         ll_note_check("broken", ll_gh("broken", prs=ll_open(41), broken=True))))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a read past its cap passes with one guard.log line and one stderr line",
+                         ll_note_check("timeout", ll_gh("timeout", prs=ll_open(41), delay_s=5),
+                                       extra_env={LL_CAP_ENV: "1"})))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a sixth pull request passes with one guard.log line and one stderr line",
+                         ll_note_check("sixth", ll_gh("sixth", prs=ll_open(61, 62, 63, 64, 65, 66)),
+                                       message="Hand-off: PRs #61, #62, #63, #64, #65 and #66 are ready for batch 3.")))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: an unknown repo passes with one guard.log line and one stderr line",
+                         ll_note_check("no-repo", ll_gh("no-repo", prs=ll_open(41)),
+                                       transcript=role_path("ll-runner-no-repo"), cwd=NOGIT)))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a send to a target that is no runner makes no pull request read",
+                         ll_cost_pin_check()))
+LOG_CHECKS_EXTRA.append(("lane-lint-send: a send to the runner naming an open pull request makes a read (the counter's control)",
+                         ll_cost_control_check()))
+FAMILY = _LL_FAMILY_BEFORE
 # The red-run probe of the lint-less copy is appended here for the same reason: LOG_CHECKS_EXTRA is defined above.
 # Its family is red-run, set by hand. GUARD_FAMILY=red-run runs it.
 RR_NOLINT_LABEL = ("red-run: a hooks copy with no lint folder beside it: the push check returns no hit and raises "
