@@ -1098,41 +1098,82 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
     return False
 
 
-def _compound_delta(segment: str) -> int:
-    """How far a skipped segment moves the compound nesting: +1 for each `{` group, `if`, `for`,
-    `while` or `until` it opens at its head (past a leading `then`, `do` or `else`), -1 for a `}`,
-    `fi` or `done` that closes one. `case` is not read, so its skip ends at the next `;` (it fails
-    closed: the commands after it are judged in the stranded folder)."""
+_COMPOUND_CLOSER = {
+    # a closing word, with a `)` that ends a subshell and an attached redirect cut off: `}>/dev/null`
+    wide: re.compile(r"(?:\}|fi|done%s)\)*(?:(?:\d*|&)[<>].*)?" % ("|esac" if wide else ""))
+    for wide in (False, True)}
+_FUNCTION_NAME = re.compile(r"[^\s(){}]+\(\)(\{?)")   # `f()` and `f(){`
+
+
+def _compound_delta(segment: str, wide: bool = False) -> int:
+    """How far a segment moves the compound nesting: +1 for each `{` group, `if`, `for`, `while` or
+    `until` it opens at its head (past a leading `then`, `do`, `else` or `elif`), -1 for each `}`,
+    `fi` or `done` that closes one, so `done }` and `} }` close two and `}>/dev/null` closes one. A
+    word counts as the shell reads it: a quoted `"done"` and a word like `done_x` are no keyword.
+    `wide` also reads `case`, `select`, `esac` and a function definition's `{`: errexit needs them,
+    since a miss there turns it on wrongly. Without it `case` is not read, so a skip ends at the next
+    `;` (it fails closed: the commands after it are judged in the stranded folder)."""
     tokens = segment_tokens(segment) or []
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        raw = []
+    if len(raw) == len(tokens):
+        tokens = raw   # quotes kept, so a quoted word is no keyword; when the two readings differ, the words count as read
     delta = 0
     while tokens:
         word = tokens[0]
-        if word in ("then", "do", "else"):
+        if word in ("then", "do", "else", "elif"):
             tokens = tokens[1:]
         elif word == "{":
             delta += 1
             tokens = tokens[1:]
         elif word in ("if", "for", "while", "until"):
             return delta + 1
+        elif _COMPOUND_CLOSER[wide].fullmatch(word):
+            delta -= 1
+            tokens = tokens[1:]
+        elif wide and word in ("case", "select"):
+            return delta + 1
+        elif wide and word == "function":
+            tokens = tokens[2:]
+        elif wide and _FUNCTION_NAME.fullmatch(word):
+            delta += word.endswith("{")
+            tokens = tokens[1:]
+        elif wide and tokens[1:2] == ["()"]:
+            tokens = tokens[2:]
         else:
-            return delta - (word.rstrip(")") in ("}", "fi", "done"))
+            return delta
     return delta
 
 
-def _sets_errexit(tokens, marks) -> bool | None:
-    """True or False when the segment is a bare `set` that turns `-e` (or `-o errexit`) on or off,
-    None when it is not one. A `set` inside a `( ... )` is not read, so it fails closed."""
-    if marks or not tokens or tokens[0] != "set":
-        return None
+def _sets_errexit(tokens, sure: bool) -> bool | None:
+    """True or False when the segment holds a `set` that turns `-e` (or `-o errexit`) on or off, None
+    when it holds none. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
+    `( ... )`, since it may run: errexit is then off, which fails closed. A `set -e` counts only when
+    `sure` (the caller says the segment is sure to run) and the `set` is the segment's first word.
+    Options end at the first word that is not one: `set -- -e` sets no option, and `set -- ""` ends
+    at the empty word."""
     state = None
-    for at, token in enumerate(tokens[1:], 1):
-        flags = token[1:]
-        if token[:1] in "-+" and not token.startswith("--"):
+    for index, head in enumerate(tokens):
+        if head.lstrip("(") != "set":
+            continue
+        at = index + 1
+        while at < len(tokens):
+            token = tokens[at].rstrip(")")
+            at += 1
+            if token[:1] not in ("-", "+") or token.startswith("--"):
+                break
+            flags = token[1:]
             on = token[0] == "-"
-            if "o" in flags and tokens[at + 1:at + 2] == ["errexit"]:
-                state = on
-            elif "e" in flags:
-                state = on
+            changes = "e" in flags
+            if "o" in flags:
+                changes = changes or tokens[at:at + 1] in (["errexit"], ["errexit)"])
+                at += 1   # `-o` takes the next word as the option's name
+            if changes and not on:
+                state = False
+            elif changes and sure and index == 0:
+                state = True
     return state
 
 
@@ -1145,6 +1186,21 @@ def _opens_if_body(segments, at: int) -> bool:
 
 
 def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """`_walk_segments`, which holds the walk and what it reads. Read with `failed_cd_stays`, a crash
+    in the walk gives `stranded` with no folder, so git-after-cd refuses and the conflict-markers
+    read falls back to the command's root, and the crash is logged as a guard crash. The guard
+    otherwise fails open on a crash, which would let the write through. Without it the crash rises
+    to the caller, as before."""
+    try:
+        return _walk_segments(segments, number, shell_cwd, ends, failed_cd_stays)
+    except Exception as exc:
+        if not failed_cd_stays:
+            raise
+        record("Bash", "crash", "guard-crash", cap_safe("cd_walk " + type(exc).__name__ + ": " + str(exc), 200))
+        return CdWalk(None, True, False)
+
+
+def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """What one pass over the segments ahead of `segments[number]` says about the shell when it
     runs: a `CdWalk` of `where` (the directory the shell is in, or None when it cannot be told),
     `stranded` and `skipped`.
@@ -1171,6 +1227,7 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
     skip_depth = None   # a failed cd ended in `&&`: the group depth the skipped chain stands at
     skip_nest = 0       # the `{`, `if` and loop compounds opened inside that skipped chain and not yet closed
     errexit = False     # `set -e` ran before: a failed bare cd ends the shell
+    group_depth = 0     # the `{`, `if`, loop, `case` and function compounds the walk is inside
     skip_if = None      # a failed cd was an `if` test: the `if`s nested in the skipped `then` body
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
@@ -1188,6 +1245,15 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
             if skip_depth is not None or in_then:
                 return CdWalk(None, False, True)
             return CdWalk(where, stranded and where is not None, False)
+        tokens = segment_tokens(segment)
+        if tokens:
+            # errexit is on only for a `set -e` sure to run: not in a group, `if`, loop, function or `( )`, not after an
+            # `&&` or `||`, not piped or in the background, not in a chain a failed cd skipped. A `set +e` anywhere turns it off.
+            prev_end = ends[at - 1] if 0 < at <= len(ends) else ""
+            sure = (skip_depth is None and not in_then and not stack and not marks and not group_depth
+                    and prev_end not in ("&&", "||") and "|" not in (end, prev_end) and not segment.rstrip().endswith("&"))
+            flipped = _sets_errexit(tokens, sure)
+            errexit = errexit if flipped is None else flipped
         if in_then:
             for _ in range(marks.count(")")):
                 if stack:
@@ -1204,11 +1270,8 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
             if end not in ("&&", "|") and len(stack) <= skip_depth:
                 skip_depth = None
             continue
-        tokens = segment_tokens(segment)
-        if tokens and "|" not in (end, ends[at - 1] if 0 < at <= len(ends) else ""):
-            flipped = _sets_errexit(tokens, marks)
-            errexit = errexit if flipped is None else flipped
-        move = _segment_cd_move(tokens) if tokens else None
+        group_depth = max(0, group_depth + _compound_delta(segment, wide=True))
+        move =_segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
@@ -1236,8 +1299,9 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
                     # The shell exits on a failure: later segments follow a cd that landed. That holds for an
                     # `|| exit`, an `if ! cd` whose then body starts with `exit`, and a bare cd under `set -e`.
                     negated_if = end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
+                    # Inside a group, `if` or loop the exit may not happen: `{ cd X; push; } || true` ignores errexit.
                     bare_under_errexit = (errexit and end not in ("&&", "||", "|") and not stack and not marks
-                                          and basename(tokens[0]) in CD_WORDS)
+                                          and not group_depth and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
                         where, stranded = None, False
                     elif negated_if or bare_under_errexit:
