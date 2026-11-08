@@ -271,6 +271,26 @@ MUTATIONS = [
      '            data.update(range(step + 1, len(words)))',
      '            data.update(())', "guard",
      'heredoc-keep: retire, a gh pr create line written then run by python3 check.py brief.md, allowed'),
+    # _kept_bodies: the closure, a body that a kept body names, is no longer kept.
+    ("heredoc: drop the closure, a body a kept body names stays out of view",
+     '        more = {at for at, written in enumerate(writes) if at not in keep and written & named}',
+     '        more = set()', "guard",
+     'heredoc-keep: reader, a body in b.txt that a.sh names, then a.sh runs, denies'),
+    # _run_files: a line that runs a substitution with a runner reads the written file it names.
+    ("heredoc: a runner's substitution runs no written file, eval of a file",
+     '        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):',
+     '        if False:', "guard",
+     'heredoc-keep: reader, a body in f that python3 -c runs through a substitution, denies'),
+    # _stage_runs: a runner that reads a script on stdin runs none of the words piped into it.
+    ("heredoc: a runner reads no piped script, cat f | python3 - runs nothing",
+     '            stdin = not picked or picked[0] == "-"',
+     '            stdin = False', "guard",
+     'heredoc-keep: reader, a body in f that a cat pipes into python3, denies'),
+    # The keep set: a body written to a shell script stays in view only when a command runs it.
+    ("heredoc: a body written to a shell script is kept only when run, run.sh stays out of view",
+     'if written & ran or any(map(_SHELL_SCRIPT, written))}',
+     'if written & ran}', "guard",
+     'heredoc-keep: reader, a body in run.sh that no command in this call runs, denies'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
