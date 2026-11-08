@@ -2841,7 +2841,7 @@ def role_model_check(tool: str, tool_input):
 
 
 def review_guard_marked(brief) -> bool:
-    """True when a line of the brief starts with REVIEW_GUARD_MARKER, case-sensitive, so mid-line text does not count.
+    """True when a line of the brief starts with REVIEW_GUARD_MARKER after any leading spaces or tabs, case-sensitive, so mid-line text does not count.
     A line inside a ``` fence does not count: a quoted brief or example is not the brief's own marker.
     The marker ends at the end of the line, whitespace or a full stop: a pasted template line `yes|no`, `yesterday`
     or `yes-ish` is not a choice of yes."""
@@ -2851,8 +2851,8 @@ def review_guard_marked(brief) -> bool:
     for line in brief.split("\n"):
         if line.strip().startswith("```"):
             fenced = not fenced
-        elif not fenced and line.startswith(REVIEW_GUARD_MARKER):
-            if (line[len(REVIEW_GUARD_MARKER):] or " ")[0] in " \t\r.":
+        elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):
+            if (line.lstrip(" \t")[len(REVIEW_GUARD_MARKER):] or " ")[0] in " \t\r.":
                 return True
     return False
 
