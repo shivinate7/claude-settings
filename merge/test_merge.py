@@ -13448,9 +13448,9 @@ class ReviewedList(ReviewEnv):
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
 
-# `merge --reviewed` sends back a draft open more than 12 hours whose record is missing, stale or bad: its line is `send back: #<n> <session> (<reason>)`,
-# and it leaves the `no record:` line and its own state line. Each case reads at an injected clock (read_at), so the age is exact. A case's first
-# assertion is the old behaviour, so the old code fails it for the named cause: the constant is read only after that assertion.
+# `merge --reviewed` sends back a draft open more than 12 hours whose record is missing, stale or bad: its line is `send back: #<n> session_<id> (<reason>)`
+# (`no session` when the body names none), and it leaves the `no record:` line and its own state line. Each case reads at an injected clock (read_at),
+# so the age is exact.
 SEND_BACK_NOW = 1794153600  # 2026-11-08T16:00:00Z, the clock every send-back case reads at
 SEND_BACK_HOUR = 3600  # seconds
 LANE_ID = "01SendBackLaneQm7x"  # the id of the lane session a pull request body names as https://claude.ai/code/session_<id>
@@ -13559,6 +13559,22 @@ class ReviewedSendBack(ReviewEnv):
 
     def test_a_draft_exactly_12_hours_old_is_not_sent_back(self):
         self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 12 * SEND_BACK_HOUR)]), ["no record: #7"])
+
+    def test_a_draft_13_hours_old_with_an_open_record_keeps_its_state_line(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], [review_comment(1, 7, record_text(rounds=OPEN_ROUNDS))])
+        self.assertEqual(len(lines), 1, "\n".join(lines))
+        self.assertRegex(lines[0], rf"^#7 feat7 {REVIEW_HEAD[:9]} open: .*; CI draft, no run$")
+
+    def test_a_draft_13_hours_old_with_a_held_record_keeps_its_state_line(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS, net="negative"))])
+        self.assertEqual(len(lines), 1, "\n".join(lines))
+        self.assertRegex(lines[0], rf"^#7 feat7 {REVIEW_HEAD[:9]} held: net value is negative; CI draft, no run$")
+
+    def test_a_session_id_with_dash_and_underscore_prints_whole(self):
+        body = "Change summary.\n\nhttps://claude.ai/code/session_01Ab-Cd_Ef\n"
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR, body=body)])
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, "no record", token="session_01Ab-Cd_Ef")
 
 
 def good_record_text():
