@@ -16645,6 +16645,9 @@ mrf_case("a PR in a double-quoted span is not judged", "allow",
 mrf_case("PR #8 merged, bare, is refused and named", "deny", "PR #8 merged.", carries=("#8",))
 mrf_case("this repo's link to PR #8 merged is refused and named", "deny",
          "[PR #8](https://github.com/o/r/pull/8) merged.", carries=("#8",))
+# A hex colour after a PR word is a colour, not a PR number, so its digits are not judged.
+mrf_case("PR #7 sets the background to #0b0f14 is allowed", "allow", "PR #7 sets the background to #0b0f14.")
+mrf_case("The PR changes the border to #000000 is allowed", "allow", "The PR changes the border to #000000.")
 
 
 # =========================================================================== failing open
