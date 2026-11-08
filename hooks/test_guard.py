@@ -12189,6 +12189,20 @@ sh("frozen shell: a >&FILE inside echo's quotes is text, allows", 'echo "x >&' +
    cwd=NOGIT)
 sh("frozen shell: a -i inside perl's quoted script is text, allows",
    "perl -ne 'print \"-i\"' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# A string hides nothing after it. A comment opener, a lone quote or a line break inside quotes ends no command, so a
+# real write after the string is still refused. The spaced form is the control: its redirect is a separate word.
+sh("frozen shell: a # inside quotes, then >& onto the config settings, denies",
+   'echo "# note" >&' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: control, a # inside quotes, then a spaced >& onto the config settings, denies",
+   'echo "# note" >& ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone quote inside quotes, then >& onto the config settings, denies",
+   'echo "it\'s" >&' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a line break inside quotes, then >& onto the config settings, denies",
+   "echo \"a\nb\" >&" + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a # inside perl's script, then perl -pi on the config settings, denies",
+   "perl -pi -e 's/#.*//' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a lone quote inside perl's script, then perl -pi on the config settings, denies",
+   "perl -pi -e \"s/'//g\" " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
