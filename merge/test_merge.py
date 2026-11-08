@@ -153,6 +153,10 @@ class FakeHost:
     def required_names(self):
         return ["checks"]
 
+    def review_comments(self, since):
+        """The review record bodies of each pull request, as Host.review_comments gives them. Empty: a case with records builds its own host."""
+        return {}
+
     def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
         if self.batch_error:
@@ -13103,8 +13107,8 @@ class ReviewedList(ReviewEnv):
                          comments=[review_comment(1, 7, a, created="2026-10-02T00:00:00Z"), review_comment(2, 8, b, created="2026-10-03T00:00:00Z"),
                                    review_comment(3, 7, c, created="2026-10-04T00:00:00Z")])
         self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"),
-                         {7: [("2026-10-02T00:00:00Z", a), ("2026-10-04T00:00:00Z", c)], 8: [("2026-10-03T00:00:00Z", b)]},
-                         "review_comments gives (created_at, body) pairs per pull request, oldest first")
+                         {7: [("2026-10-02T00:00:00Z", 1, a), ("2026-10-04T00:00:00Z", 3, c)], 8: [("2026-10-03T00:00:00Z", 2, b)]},
+                         "review_comments gives (created_at, comment_id, body) triples per pull request, oldest first")
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")

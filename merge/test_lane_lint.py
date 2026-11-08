@@ -501,15 +501,28 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("no record", line, out)
         self.assertIn("live head", line, out)
 
-    def test_a_newest_record_at_an_older_head_fails_the_review_record_step_and_names_the_live_head(self):
+    def test_a_newest_record_at_an_older_head_passes_with_a_note_naming_the_live_head(self):
+        # a stale record is a note, not a FAIL: the lint passes, and the note names the live head by its first 9 characters
         head = self.head("feat")
         self.pr_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD))])
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_lane("--lane-lint", "7")
-        self.assertNotEqual(rc, 0, out)
-        line = self.review_record_line(out)
-        self.assertIn("live head", line, out)
-        self.assertIn(head[:9], line, out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertFalse([line for line in out.splitlines() if "Review record" in line and "FAIL" in line], out)
+        notes = [line for line in out.splitlines() if "live head" in line]
+        self.assertTrue(notes, "the lane lint prints no note naming the live head:\n" + out)
+        self.assertIn(head[:9], notes[0], out)
+
+    def test_a_pr_with_no_record_passes_with_a_note_naming_no_record(self):
+        # control: a PR with no record is a note, not a FAIL, so the lint passes
+        self.pr_host([])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertFalse([line for line in out.splitlines() if "Review record" in line and "FAIL" in line], out)
+        self.assertTrue([line for line in out.splitlines() if "no record" in line], "the lane lint prints no note naming no record:\n" + out)
 
     def test_a_good_record_at_the_live_head_passes_the_review_record_step(self):
         # control: the newest record parses and names the live head, so the step does not fail
