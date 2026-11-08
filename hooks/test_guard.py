@@ -5670,6 +5670,21 @@ sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tai
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
+# `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
+# reads only an interpreter's operand, so these uv spellings must still be refused.
+sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with x merge/merge.py --review-record piped to head is refused",
+   "uv run --with x merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: pythonw and the -X value flag are read as interpreter spellings already. Dropping pythonw from
+# SCRIPT_INTERPRETER, or -X from INTERPRETER_VALUE_FLAGS, turns the matching row red.
+sh("check-tail: pythonw runs the merge script piped to tail in the foreground is refused",
+   "pythonw merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -X dev runs the merge script piped to tail in the foreground is refused",
+   "python3 -X dev merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: a uv run of another script that names --lane-lint is not the merge script, so it is allowed.
+sh("check-tail: uv run of another script naming --lane-lint piped to tail is allowed",
+   "uv run lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
 
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
