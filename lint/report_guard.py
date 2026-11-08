@@ -2090,7 +2090,7 @@ def cannot_problem(records, text, refused=()):
     no_try, no_check = [], []
     for sentence, act, _, past, prior, following in claims:
         backed = _backed(tries, act, sentence)
-        if past and not backed and act in recovered:  # the try failed once and a later call of it worked
+        if past and not tries.get(act) and act in recovered:  # every failed try of the act was later cancelled
             continue
         if not backed and not _cited(sentence, refused, act):
             if sentence not in no_try:
