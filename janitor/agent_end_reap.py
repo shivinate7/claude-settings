@@ -37,7 +37,7 @@ untracked file), no process inside, no live lock, HEAD on a remote-tracking ref.
 prove keeps. One lock and its processes are the exception (coordinator picks of 2026-11-07 14:43 and
 15:05 CST): a tree locked by this session's host is unlocked and removed only when the agent is
 proven finished (`agent_finished`: its own SubagentStop row is in the payload log and newer than its
-subagent transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30
+agent transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30
 minutes or more) and the tree is clean and pushed. A process inside keeps the tree unless
 `sweep.host_child_stops` proves each one the agent's own: it holds the agent marker, the exec-time
 `CLAUDE_AGENT_ID` equal to the 17-hex id in the tree's basename (`sweep.agent_mark`), or it holds none
@@ -500,7 +500,7 @@ def _row_time(stamp):
 
 def agent_finished(payload, path: str, stopped) -> bool:
     """True when the agent that owns the tree at PATH is proven finished, by all of: STOPPED (from
-    `stopped_agents`) holds a SubagentStop row of its own that is not older than its subagent
+    `stopped_agents`) holds a SubagentStop row of its own that is not older than its agent
     transcript (an older row is from before the agent was resumed); the payload's `background_tasks`
     is a list of dicts and none lists this agent (`id` is the agent id) as running; `transcript_path`
     names a `.jsonl`; and `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been

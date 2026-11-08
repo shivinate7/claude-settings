@@ -90,7 +90,7 @@ Cost, at a later agent end, per finished tree with a process inside: one environ
 
 The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock ticks since boot, field 22 of `/proc/<N>/stat` (measured: host 159, start 181). On Linux the host proof matches S against that field: a match is the live host, a mismatch or a dead pid is a stale lock. A platform that cannot read it (macOS, Windows, where the unit is unmeasured) leaves the host unproven: the lock stays and the tree is kept. The lock is re-read and lifted just before the removal; a failed re-read or unlock keeps the tree. An unlocked tree keeps the rule above.
 
-Home: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`decide_worktree`, `finished_host_lock`, `host_child_stops`, `agent_mark`).
+Code: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`decide_worktree` and its parameter `finished_host_lock`, `decide_agent_end_worktree`, `host_child_stops`, `agent_mark`).
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
 

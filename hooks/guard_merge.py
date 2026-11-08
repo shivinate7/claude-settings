@@ -1040,7 +1040,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
     slugs, repos = [x for x in slugs if x], [x for x in repos if x]
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
-    try:  # cost: one paginated gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
+    try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")

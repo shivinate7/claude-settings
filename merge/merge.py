@@ -41,7 +41,7 @@
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403 (route graphql-gh-api-cloud).
-`gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
+A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond `api -X GET -f` is needed.
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
@@ -168,6 +168,7 @@ RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
+PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
 RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
@@ -212,6 +213,10 @@ def split_headers(out):
         return {}, out
     pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
     return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+def has_next_link(link):
+    """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
+    return any(re.search(r'\brel="?(?:[^";,]*\s)?next\b', entry) for entry in re.findall(r"<[^<>]*>([^<]*)", link or ""))
 
 def _seconds(value):
     """A header value as whole seconds, or None when it is not a number."""
@@ -726,11 +731,17 @@ class Host:
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
-        of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
+        raw = []
+
+        def call():
+            c, out = sh(["gh", *args], cwd=cwd)
+            raw[:] = [out]
+            return c, out
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-        return c, out
+        return c, raw[0] if "-i" in args else out
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
@@ -758,14 +769,29 @@ class Host:
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
-        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests."""
-        c, out = self.api(rel, "--paginate", "--slurp", fields={**(fields or {}), "per_page": 100})
-        try:
-            if c:
-                raise ValueError(out)
-            return [x for page in json.loads(out) for x in (page[key] if key else page)]
-        except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"reading {rel} from GitHub failed: {e}")
+        Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
+        so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
+        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
+        items = []
+        for n in range(1, PAGE_CEILING + 1):
+            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
+            headers, out = split_headers(out)
+            try:
+                if c:
+                    raise ValueError(out)
+                page = json.loads(out)
+                page = page[key] if key else page
+                if not isinstance(page, list):
+                    raise TypeError(f"expected a list, got {type(page).__name__}")
+            except (ValueError, KeyError, TypeError) as e:
+                why = f" on page {n}: {e}"
+                break
+            items += page
+            if not has_next_link(headers.get("link")):
+                return items
+        else:
+            why = f": more than {PAGE_CEILING} pages of 100"
+        raise Stop(f"reading {rel} from GitHub failed{why}")
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
