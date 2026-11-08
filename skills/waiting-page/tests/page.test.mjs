@@ -2814,6 +2814,71 @@ test("an answer the viewer has not seen stays open, with the New answer mark", a
   await shownBox(page, "New answer");
 });
 
+// ---------------------------------------------------------------- folded answered row: the date line and its press
+// Contract: docs/design/ask-folded-date-notes.md, sections 0 and 1; the mockup is docs/design/ask-folded-date.html.
+// The cases read geometry, not markup. The date line is .fwhen in the row button. Its press is the row's side button (Dismiss
+// or Restore), or Show answer (.fgo) on a row with a waiting reply, which has no side press.
+const FOLD_ROWS = {
+  dismiss: { label: "with Dismiss", press: "Dismiss", ask: { id: "ask-fold-dis", text: "The rail chips feel small on my phone. I miss them with my thumb.", owner: "triage", at: "2026-10-29T08:00:00Z", answered: "2026-10-30T10:00:00Z", reply: "It is on the Status tab." } },
+  restore: { label: "with Restore", press: "Restore", ask: { id: "ask-fold-res", text: "Is the archive push for lane hooks-batch done?", owner: "triage", at: "2026-10-29T08:00:00Z", answered: "2026-10-30T10:00:00Z", reply: "It is done.", dismissed: "2026-10-31T00:00:00Z" } },
+  wait: { label: "with a waiting reply, Show answer", press: "Show answer", ask: { id: "ask-fold-wai", text: "Can the Status tab show the batch runner's queue?", owner: "triage", at: "2026-10-29T08:00:00Z", answered: "2026-10-30T10:00:00Z", reply: "Yes, next week." }, reply: { id: "ask-fold-wai-r", text: "Which repo should it show first?", at: "2026-10-31T08:00:00Z", re: "ask-fold-wai" } },
+};
+// Opens the page with the one folded row of the kind, seen on an earlier visit so the answer folds at load. A restore row is
+// opened from the dismissed list, as the owner opens it. Null when there is no browser, so the case returns without a verdict.
+async function foldedRowPage(t, kind, width) {
+  const { ask, reply } = FOLD_ROWS[kind];
+  const asks = { [ask.id]: ask, ...(reply ? { [reply.id]: reply } : {}) };
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" }, viewport: { width, height: 800 } }); if (!page) return null;
+  if (kind === "restore") { await mustHave(page, "#askDismissed", "Show dismissed asks control"); await page.click("#askDismissed"); }
+  await mustHave(page, `#row-${ask.id}`, `the folded row for ${kind}`);
+  return page;
+}
+const FOLD_DATE = "Answered Oct 30, 05:00 CDT";
+// The date line's words and text runs, its box, the press beside the row (or Show answer), and the row's height. The runs are read per text
+// node, so a wrapped line counts once per line; lines counts the distinct tops of those runs.
+const foldedDate = (page, id) => page.evaluate((id) => {
+  const li = document.getElementById("row-" + id), row = li.querySelector(".frow"), when = row.querySelector(".fwhen");
+  const press = li.querySelector(":scope > button.btn") || row.querySelector(".fgo");
+  const runs = [], walk = document.createTreeWalker(when, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const r = document.createRange(); r.selectNodeContents(n); runs.push(...r.getClientRects()); }
+  const p = press.getBoundingClientRect(), b = when.getBoundingClientRect();
+  return { dateText: when.innerText.replace(/\s+/g, " ").trim(), lines: new Set(runs.map((r) => Math.round(r.top))).size,
+    textRight: runs.length ? Math.max(...runs.map((r) => r.right)) : Infinity, boxRight: b.right, pressLeft: p.left,
+    pressName: (press.querySelector("span") || press).textContent.trim(), pressShown: press.checkVisibility() && p.width > 8, rowH: row.getBoundingClientRect().height };
+}, id);
+// The scope the geometry is read in: the press is the one the kind names and is shown, and the date line reads its words. Each fails by name.
+function foldedScope(g, kind, width) {
+  assert.equal(g.pressName, FOLD_ROWS[kind].press, `the press beside the row is "${g.pressName}", not "${FOLD_ROWS[kind].press}", at ${width} wide`);
+  assert.ok(g.pressShown, `the press "${g.pressName}" is not shown at ${width} wide`);
+  assert.equal(g.dateText, FOLD_DATE, `the date line reads "${g.dateText}", not "${FOLD_DATE}", at ${width} wide`);
+}
+// At 360 and 390 wide, light theme: two claims per row kind, one test each, so each failure names one cause. The waiting-reply row at 390
+// is green on the old page (its date ends 11 px before Show answer): it guards the fix from moving the date under the press there.
+for (const width of [360, 390]) for (const kind of Object.keys(FOLD_ROWS)) {
+  test(`folded answered row ${FOLD_ROWS[kind].label}: its date line stays in its box, at ${width} wide`, async (t) => {
+    const page = await foldedRowPage(t, kind, width); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, width);
+    assert.ok(g.textRight <= g.boxRight + 1, `the date line runs ${Math.round(g.textRight - g.boxRight)} px past its box, at ${width} wide`);
+  });
+  test(`folded answered row ${FOLD_ROWS[kind].label}: its date line ends before the press, at ${width} wide`, async (t) => {
+    const page = await foldedRowPage(t, kind, width); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, width);
+    assert.ok(g.textRight <= g.pressLeft, `the date line ends at ${Math.round(g.textRight)} px, under the press "${g.pressName}" at ${Math.round(g.pressLeft)} px, at ${width} wide`);
+  });
+}
+// Controls at 1440 and 820 wide, green on the old page: the row is as it is there, one line of date and the one-line row height.
+for (const width of [1440, 820]) for (const kind of Object.keys(FOLD_ROWS)) {
+  test(`folded answered row ${FOLD_ROWS[kind].label}: at ${width} wide its date line is one line, and the row keeps its one-line height`, async (t) => {
+    const page = await foldedRowPage(t, kind, width); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, width);
+    assert.equal(g.lines, 1, `the date line wraps to ${g.lines} lines at ${width} wide`);
+    assert.equal(g.rowH, 48, `the row is ${g.rowH} px tall at ${width} wide, not the one-line 48 px`);
+  });
+}
+
 test("a waiting ask says who has not read it, or who read it and is working on it", async (t) => {
   const asks = {
     "ask-w01": { id: "ask-w01", text: "Nobody has read this yet", at: "2026-10-31T08:00:00Z" },
