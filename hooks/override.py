@@ -130,6 +130,8 @@ EXCLUSION_STEM = re.compile(r"(?:skip(?:s|ped|ping)?|omit(?:s|ted|ting)?|ignor(?
 # A model or stay word in a clause of its own that names the other roles ("sonnet for the rest", "others stay")
 # governs those roles, not the ones the ask sends to Opus.
 MODEL_WORDS = {"sonnet", "haiku"}
+# Words that point back to roles named earlier ("keep their model"), so a keep clause that holds one names roles.
+BACK_REFERENCES = {"they", "them", "their", "theirs", "those", "these"}
 REST_WORDS = {"rest", "others", "other", "everyone", "everybody", "everything", "else"}
 CLAUSE_MARK = re.compile(r"[,;:.!?\u2014]")
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
@@ -296,6 +298,15 @@ def _ask_scope(text):
         return words[to].lower() == "but" and not any(
             opus_role(w) in ASK_ROLES for w, c in zip(words[to + 1:], clause[to + 1:]) if c == clause[to])
 
+    def _keep_manner(to, at):
+        # A keep word in a clause of its own that names no role, model or word pointing back to roles ("keep it
+        # short", "keep the cost low", "keep going") says how to work, not which roles stay off Opus. "builders
+        # and reviewers keep their model" keeps it in the roles' clause, and "keep their model" points back.
+        if words[to].lower() not in KEEP_WORDS or clause[to] == clause[at]:
+            return False
+        same = [w.lower() for w, c in zip(words, clause) if c == clause[to]]
+        return not any(opus_role(w) or w in MODEL_WORDS or w in BACK_REFERENCES for w in same)
+
     def _opus_after_roles(at):
         # `opus` within STAY_SPAN words after the plain list of role words that holds words[at].
         end = at + 1
@@ -312,7 +323,7 @@ def _ask_scope(text):
         span = range(first, min(len(words), at + 1 + NEGATION_SPAN))
         for to in span:
             lower = words[to].lower()
-            if to == at or _governs_rest(to, at) or _manner(to):
+            if to == at or _governs_rest(to, at) or _manner(to) or _keep_manner(to, at):
                 continue
             if lower in NEGATIONS or EXCLUSION_STEM.fullmatch(lower):
                 return None
