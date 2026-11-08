@@ -8,8 +8,8 @@ flags or as a JSON payload on stdin and prints one line: `allow`, or `<decision>
     python3 hooks/probe.py --tool Bash --command-file <path> [--cwd <dir>]
     python3 hooks/probe.py < payload.json     # {"tool_name", "tool_input", "cwd"}
 
-Run `hooks/probe.py` in a claude-settings worktree to judge that branch's guard. Run
-`~/.claude/hooks/probe.py` elsewhere to judge the installed guard.
+Run `hooks/probe.py` in a claude-settings worktree to judge that branch's guard. Once the probe is
+installed, run `~/.claude/hooks/probe.py` in any other repo to judge the installed guard.
 
 The verdict is for a call with no session id and no agent id. The probe drops agent_id, agent_type and
 session_id from a stdin payload, and writes one stderr note that names each field it drops. So
@@ -29,9 +29,14 @@ With `--command` or `--command-file`, the tool must be one of the guard's shell 
 
 The guard runs as a subprocess, with the payload on its stdin. CLAUDE_CONFIG_DIR is a fresh temp
 dir, so guard.log and the other config writes land there. The probe deletes that dir before it
-exits. The probed command is text for the guard to judge, and it never runs. The probe writes
-only its temp dir. One exception: during a merge in progress, the guard's merge-tree check
-writes git objects. Bad input exits 2 or 1, with a message on stderr and no verdict.
+exits. The temp dir moves the guard's config reads too. So frozen-path, override state and the
+guard's other config reads are not judged as live. When the call's folder is inside the real
+config dir, the probe writes one stderr line that starts `probe: note:` and says so.
+
+The probed command is text for the guard to judge, and it never runs. The probe writes its config
+files only to its temp dir. The guard's own `git status` may refresh .git/index. During a merge
+in progress, the guard's merge-tree check writes git objects. Bad input exits 2 or 1, with a
+message on stderr and no verdict.
 
 If the guard refuses the probe call itself, the guard's deny line is the verdict. Report it, and
 do not encode the command another way. A harness refusal ("too complex", worktree isolation) is
@@ -60,16 +65,40 @@ class BadInput(Exception):
     pass
 
 
-def shell_tools():
-    """The guard's SHELL_TOOLS, read from guard_core.py beside this file. None when that file is absent,
-    as in a copy of the probe beside a stub guard; a real guard cannot run without guard_core.py."""
-    if not os.path.exists(os.path.join(HERE, "guard_core.py")):
+def hooks_module(name):
+    """The hooks module `name`, imported from beside this file. None when that file is absent, as in a
+    copy of the probe beside a stub guard; a real guard cannot run without its modules."""
+    if not os.path.exists(os.path.join(HERE, name + ".py")):
         return None
     sys.dont_write_bytecode = True  # the import must not write __pycache__ beside hooks/
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
-    import guard_core
-    return guard_core.SHELL_TOOLS
+    return __import__(name)
+
+
+def shell_tools():
+    """The guard's SHELL_TOOLS, read from guard_core.py beside this file, or None without it."""
+    guard_core = hooks_module("guard_core")
+    return None if guard_core is None else guard_core.SHELL_TOOLS
+
+
+def config_overlap_note(folder):
+    """A `probe: note:` line when `folder` lies inside the real config dir, else None. The guard reads
+    its config from the probe's temp dir, so its config reads for such a folder are not live."""
+    shared_names = hooks_module("shared_names")
+    if shared_names is None:
+        return None
+    real_config = os.path.realpath(shared_names.config_dir())
+    real_folder = os.path.realpath(folder)
+    try:
+        inside = os.path.commonpath([real_config, real_folder]) == real_config
+    except ValueError:  # different drives on Windows
+        inside = False
+    if not inside:
+        return None
+    return ("probe: note: the folder %s is inside the real config dir %s; frozen-path and override state "
+            "are not judged for this folder, since the guard reads its config from the probe's temp dir"
+            % (folder, real_config))
 
 
 def read_payload(args):
@@ -146,6 +175,16 @@ def remove_dir(path):
 
 
 def probe(payload):
+    cwd = payload.get("cwd")
+    if isinstance(cwd, str) and cwd:
+        # The guard reads cwd as given, so a relative path would name a folder under the guard's own cwd.
+        cwd = os.path.abspath(cwd)
+        payload = dict(payload, cwd=cwd)
+    # With no cwd, the guard judges the folder it runs in, which is this process's own.
+    note = config_overlap_note(cwd if isinstance(cwd, str) and cwd else os.getcwd())
+    if note is not None:
+        print(note, file=sys.stderr)
+    run_cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
     config_dir = tempfile.mkdtemp(prefix="probe-guard-")
     try:
         env = dict(os.environ)
@@ -155,12 +194,6 @@ def probe(payload):
         # and override.py reads CLAUDE_CODE_REMOTE_SESSION_ID for the Opus spawn step. Drop both.
         for name in SESSION_ENV:
             env.pop(name, None)
-        cwd = payload.get("cwd")
-        if isinstance(cwd, str) and cwd:
-            # The guard reads cwd as given, so a relative path would name a folder under the guard's own cwd.
-            cwd = os.path.abspath(cwd)
-            payload = dict(payload, cwd=cwd)
-        run_cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
         try:
             result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
                                     text=True, encoding="utf-8", env=env, cwd=run_cwd,
