@@ -376,7 +376,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 self.assertEqual(rc, 1, out)
 
     def test_a_step_less_unknown_such_as_a_failed_shallow_fetch_is_still_lifted_by_lint_unknown_ok(self):
-        self.use_ci_job([("raw", "unknown         git fetch --unshallow failed: fatal: no remote")], 2)
+        self.use_ci_job([("raw", "unknown         the clone is shallow and git fetch --unshallow failed: fatal: no remote")], 2)
         rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
         self.assertIn("--lint-unknown-ok, reason:", out, "a step-less unknown is no longer lifted, as on main")
         self.assertEqual(rc, 0, out)
