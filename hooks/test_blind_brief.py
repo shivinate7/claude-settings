@@ -293,6 +293,14 @@ class BriefFaults(unittest.TestCase):
                 found = codes(self.m.brief_faults(brief(job=JOB + "\n" + line)))
                 self.assertIn("token-font", found, msg="a no-break space before a font name must be refused")
 
+    def test_font_name_after_a_no_break_space_then_a_line_break_is_refused(self):
+        # A no-break space before a line break is still space, so a font name on the next line still names a font.
+        # The plain-space break is the control: the guard refuses it today and must keep refusing it.
+        for line in ("font\xa0\nLora for the body.", "typeface\xa0\nLora for the body.", "font \nLora for the body."):
+            with self.subTest(line=line):
+                found = codes(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn("token-font", found, msg="a no-break space before a line break must not hide a font name")
+
     def test_no_break_space_before_a_lower_case_word_after_font_still_passes(self):
         # The same separator before a lower-case word names no font, so these neighbours stay green.
         for line in ("The font\xa0on the envelope is hard to read.", "Font\xa0size is set by the grid."):
