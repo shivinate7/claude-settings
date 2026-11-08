@@ -1810,24 +1810,29 @@ def O2_open_call_under_cap_is_not_listed():
 
 @case
 def O3_open_background_call_is_quiet_not_stuck():
-    """O3. an open call whose input has run_in_background true, 1000 s old, in a quiet agent: listed as quiet,
-    with the row an agent with no open call has, and not as stuck. Control: a quiet agent with no open call,
-    in the same transcript, is listed"""
+    """O3. an open call whose input has run_in_background true is not busy, at any age. Two agents with quiet
+    transcripts: one whose call is 1000 s old (over the cap), one whose call is 600 s old (under it). Both are
+    listed as quiet, with the row an agent with no open call has, and not as stuck. Control: a quiet agent with
+    no open call, in the same transcript, is listed"""
     folder = new_dir()
-    age = OPEN_CAP + 100
-    lb, bg = background_agent(folder, agent_id(220), [open_tool_call("toolu_o6", age, background=True)], age)
+    old, young = OPEN_CAP + 100, OPEN_CAP - 300
+    lb, bg = background_agent(folder, agent_id(220), [open_tool_call("toolu_o6", old, background=True)], old)
+    ly, yg = background_agent(folder, agent_id(222), [open_tool_call("toolu_o11", young, background=True)], young)
     lc, ctl = background_agent(folder, agent_id(221), agent_step("c1"), 600)
-    path = transcript(stamped(lb + lc, age + 100), agents=[bg, ctl], folder=folder)
+    path = transcript(stamped(lb + ly + lc, old + 100), agents=[bg, yg, ctl], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
     problems += listed_once(msg, agent_id(221), by_line=True)  # scope: the control shows the quiet row
     if problems:
         return problems
-    problems += listed_once(msg, agent_id(220), by_line=True)
-    line = line_of(msg, agent_id(220))
-    problems += expect("no activity for" in line, f"agent {agent_id(220)} row is not the quiet row: {line!r}")
-    problems += expect("stuck" not in line, f"agent {agent_id(220)} with a background call is named stuck: {line!r}")
+    for aid, age in ((agent_id(220), old), (agent_id(222), young)):
+        problems += listed_once(msg, aid, by_line=True)
+        line = line_of(msg, aid)
+        problems += expect("no activity for" in line,
+                           f"agent {aid} with a background call {age} s old: row is not the quiet row: {line!r}")
+        problems += expect("stuck" not in line,
+                           f"agent {aid} with a background call {age} s old is named stuck: {line!r}")
     return problems
 
 
@@ -1864,16 +1869,19 @@ def O4_open_call_without_a_readable_time_is_not_listed():
 
 @case
 def O5_open_call_age_is_the_newest_open_calls_age():
-    """O5. two open calls in one agent, the newer (800 s) written first: the age is the newest one's, by its
-    timestamp, so the agent is not listed. File order does not give the newest. Control: a second agent whose
-    open calls are 1000 s and 950 s old, in that order, is listed, its newest call past the cap"""
+    """O5. two open calls in one agent: the age is the newest one's, by its timestamp, so the agent is not listed
+    while its newest call is under the cap. Agent 240 writes the newer call (800 s) first; agent 242 writes the
+    older call (1000 s) first, so file order gives the oldest for it. Control: agent 241, whose open calls are
+    1000 s and 950 s old, is listed, its newest call past the cap"""
     folder = new_dir()
     young, old, mid = OPEN_CAP - 100, OPEN_CAP + 100, OPEN_CAP + 50
     la, two = background_agent(folder, agent_id(240),
                                [open_tool_call("toolu_p1", young), open_tool_call("toolu_p2", old)], young)
     lb, ctl = background_agent(folder, agent_id(241),
                                [open_tool_call("toolu_p3", old), open_tool_call("toolu_p4", mid)], mid)
-    path = transcript(stamped(la + lb, old + 100), agents=[two, ctl], folder=folder)
+    lc, late = background_agent(folder, agent_id(242),
+                                [open_tool_call("toolu_p5", old), open_tool_call("toolu_p6", young)], young)
+    path = transcript(stamped(la + lb + lc, old + 100), agents=[two, ctl, late], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
@@ -1881,7 +1889,11 @@ def O5_open_call_age_is_the_newest_open_calls_age():
     if problems:
         return problems
     problems += expect(agent_id(240) not in msg,
-                       f"agent {agent_id(240)} is listed on its older open call; its newest is {young} s old: {msg!r}")
+                       f"agent {agent_id(240)} is listed though its newest open call is {young} s old "
+                       f"(newer call written first): {msg!r}")
+    problems += expect(agent_id(242) not in msg,
+                       f"agent {agent_id(242)} is listed though its newest open call is {young} s old "
+                       f"(older call written first): {msg!r}")
     return problems
 
 
