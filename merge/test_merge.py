@@ -14195,6 +14195,19 @@ class ReviewStampSince(unittest.TestCase):
             else:
                 self.fail("review_stamp_since read a linked worktree of a shallow clone as full history and returned %r instead of stopping" % (got,))
 
+    def test_an_unreadable_shallow_file_stops_naming_the_file_and_does_not_read_as_full_history(self):
+        # Only a missing shallow file means full history. This one exists and cannot be read, so the read stops and names it. Root ignores
+        # chmod 000, so the file is a directory named `shallow`: it exists, and reading it fails the same way.
+        root = self.repo(salt_at=2, branch="fixture")
+        os.mkdir(os.path.join(root, ".git", "shallow"))
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(os.path.join(".git", "shallow"), str(stop), "the Stop does not name the unreadable shallow file:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since read an unreadable shallow file as full history and returned %r instead of stopping" % (got,))
+
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
         env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
