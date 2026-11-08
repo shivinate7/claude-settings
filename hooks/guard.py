@@ -251,6 +251,11 @@ Other tools, in `judge` order:
                        message edits a path. No transcript, no spawn record, `main`, an unreadable file and any
                        other role pass. An override lifts it. `mcp__claude-code-remote__send_message` is not
                        judged. (message-role-scope)
+  brief-role-scope     ask. An Agent or Task spawn whose `subagent_type` is a builder or a test-author and whose
+                       brief asks it to leave that role: a builder to change a test, a test-author to change product
+                       code or a Markdown file. The brief is read with the message-role-scope clause reader. The
+                       ask names the role to send the work to (a test-author, a builder or a record-writer), never
+                       the path. No transcript is read. An override lifts it. (message-role-scope)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -2311,6 +2316,14 @@ def _message_spawn_role(transcript: str, agent: str) -> str:
     return role
 
 
+def _role_rel(path: str, role: str):
+    """The repo-relative form of a path a message or brief names, or None when it is outside the repo (a builder's
+    outside path still resolves, so a test path under another root is judged)."""
+    slashed = norm(path)
+    rooted = slashed.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", slashed))
+    return repo_rel(path, "", outside=role == BUILDER_ROLE) if rooted else slashed.removeprefix("./")
+
+
 def message_role_hit(tool: str, tool_input, transcript):
     """(matched, reason) when this SendMessage asks a builder to change a test, or a test-author to change product code,
     else None. The receiver's role is its spawn's. A message that edits no path reads no transcript. An unknown role
@@ -2329,9 +2342,7 @@ def message_role_hit(tool: str, tool_input, transcript):
     except Exception:
         return None
     for path, test_object in paths:
-        slashed = norm(path)
-        rooted = slashed.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", slashed))
-        rel = repo_rel(path, "", outside=role == BUILDER_ROLE) if rooted else slashed.removeprefix("./")
+        rel = _role_rel(path, role)
         if rel is None:
             continue
         if role == BUILDER_ROLE and is_test_rel(rel):
@@ -2340,6 +2351,49 @@ def message_role_hit(tool: str, tool_input, transcript):
         if (role == AUTHOR_ROLE and ext and ext != ".md" and not test_object and not norm(rel).startswith("../")
                 and not author_path_ok(rel) and not is_workflow_rel(rel)):
             return path, MESSAGE_ROLE_AUTHOR_REASON
+    return None
+
+
+# ---- brief-role-scope: an Agent or Task spawn is judged by its own `subagent_type`, with the same clause reader as a
+# message (decision message-role-scope). The brief is the first message the new agent reads, so a builder is not briefed
+# to change a test and a test-author is not briefed to change product code or a Markdown file. Unlike a message, a
+# Markdown path counts for a test-author: a record-writer owns it. The verdict is an ask, and the remedy names the role.
+BRIEF_ROLE_BUILDER_REASON = (
+    "This brief asks a builder to change a test. Send that work to a test-author. "
+    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+)
+BRIEF_ROLE_AUTHOR_REASON = (
+    "This brief asks a test-author to change product code. Send that work to a builder. "
+    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+)
+BRIEF_ROLE_WRITER_REASON = (
+    "This brief asks a test-author to change a Markdown file. Send that work to a record-writer. "
+    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+)
+
+
+def brief_role_hit(tool: str, tool_input):
+    """(matched, reason) when this Agent or Task spawn briefs a builder to change a test, or a test-author to change
+    product code or a Markdown file, else None. The role is the call's `subagent_type`, so no transcript is read. Any
+    other role, and a brief that edits no path, pass."""
+    if tool not in SPAWN_TOOLS or not isinstance(tool_input, dict):
+        return None
+    prompt = tool_input.get("prompt")
+    role = role_key(str(tool_input.get("subagent_type") or "").rsplit(":", 1)[-1])
+    if role not in (BUILDER_ROLE, AUTHOR_ROLE) or not isinstance(prompt, str):
+        return None
+    for path, test_object in message_edit_paths(prompt):
+        rel = _role_rel(path, role)
+        if rel is None:
+            continue
+        if role == BUILDER_ROLE:
+            if is_test_rel(rel):
+                return path, BRIEF_ROLE_BUILDER_REASON
+            continue
+        ext = os.path.splitext(norm(rel).rstrip("/"))[1].lower()
+        if (ext and not norm(rel).startswith("../") and not test_object
+                and not author_path_ok(rel) and not is_workflow_rel(rel)):
+            return path, BRIEF_ROLE_WRITER_REASON if ext == ".md" else BRIEF_ROLE_AUTHOR_REASON
     return None
 
 
@@ -5234,6 +5288,11 @@ def judge(payload) -> None:
     sent = message_role_hit(tool, tool_input, trust_transcript)
     if sent:
         refuse(tool, "deny", "message-role-scope", sent[1], sent[0])
+
+    # A spawn whose brief asks the new agent to leave its role (rule brief-role-scope). An override lifts it.
+    briefed_role = brief_role_hit(tool, tool_input)
+    if briefed_role:
+        refuse(tool, "ask", "brief-role-scope", briefed_role[1], briefed_role[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

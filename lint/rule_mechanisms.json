@@ -72,7 +72,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "message-role-scope",
-        "reason": "The guard (message-role-scope, hooks/guard.py message_role_hit) refuses one slice: a SendMessage that asks a builder to change a test or a test-author to change product code. It reads the receiver's spawn role from the transcript and a path only when an edit verb governs it. It does not see a plain message with no path, a role mixed in the spawn brief, or any other act of an agent."
+        "reason": "The guard (message-role-scope, hooks/guard.py message_role_hit) refuses one slice: a SendMessage that asks a builder to change a test or a test-author to change product code. It reads the receiver's spawn role from the transcript and a path only when an edit verb governs it. A second guard code (brief-role-scope, hooks/guard.py brief_role_hit) asks about an Agent or Task spawn whose brief sends a builder a test edit, or a test-author a product or Markdown edit, read from the call's own subagent_type. It does not see a plain message with no path, a brief that names no path, or any other act of an agent."
       },
       "test": "hooks/test_guard.py::message-role: a test edit to a builder is refused, and the refusal names test-author"
     },
