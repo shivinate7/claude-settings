@@ -2458,7 +2458,7 @@ def lint_run(root, head, base, make_tree):
     finally:
         drop_worktree(root, tmp, wt)
 
-REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge --review-record` again. " + REVIEW_CITE
+REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge <pr> --review-record` again, as a background command (the lint can pass 600 s). " + REVIEW_CITE
 
 def lane_lint(root, target, host, base="", unknown_ok="", info=None, review_record=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -3250,7 +3250,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --review-record <pr>` (with its --head, --kind and --guard) as a background command: it lints the reviewed head and prints the review record, and the lane posts that review record on the pull request, where the batch runner finds it. `merge --lane-lint <pr>` is the optional early check. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -3372,7 +3372,7 @@ def main(argv, host=None, lock=None):
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+            raise Stop("this session may not merge. Run `merge --review-record <pr>` (with its --head, --kind and --guard) as a background command: it lints the reviewed head and prints the review record, and the lane posts that review record on the pull request, where the batch runner finds it. `merge --lane-lint <pr>` is the optional early check. " + ROLE_CITE)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
