@@ -74,6 +74,15 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The notification-markup check (rule `no-self-written-notification`): on every Stop, landed or not, with or without a human
+record, it refuses each line of the last reply that holds notification markup as an opening tag (NOTIFICATION_TAGS:
+`<task-notification`, `<cross-session-message`, `<webhook-payload`, `<system-reminder`, `<local-command-caveat`,
+`<child-session-event`, `<wake` with `reason=`, `<event` with `source=`; any case, mid-line or in a blockquote), outside
+fences and inline code spans. An unclosed fence runs to the end of the reply. One refusal per turn lists the lines and
+joins any other reason. A rewrite after a missing-report refusal is checked too; a rewrite after this check's own refusal
+stays quiet. Risk kind and incident: decision no-self-written-notification. Cost: one regex read of the last reply at Stop;
+no file, no process, no log.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -590,6 +599,50 @@ def answered_problem(text):
             continue
         bad.append(body)
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
+
+
+# no-self-written-notification: a reply that holds notification markup as an opening tag reads, to the session and
+# its reader, as an agent, a result or an owner event that never happened. One constant names the tags: the value
+# is the attribute the same tag must carry (None: the tag name alone is enough), so a plain `<wake up>` or `<event>`
+# is no markup. Fences, quotes and code spans are read as in answered_problem; an unclosed fence runs to the end.
+NOTIFICATION_TAGS = {
+    "task-notification": None,
+    "cross-session-message": None,
+    "webhook-payload": None,
+    "system-reminder": None,
+    "local-command-caveat": None,
+    "child-session-event": None,
+    "wake": "reason",
+    "event": "source",
+}
+NOTIFICATION_RE = re.compile(
+    "|".join(
+        r"<%s(?=[\s>/])" % re.escape(name) if attr is None
+        else r"<%s\s[^<>]*?\b%s\s*=" % (re.escape(name), re.escape(attr))
+        for name, attr in NOTIFICATION_TAGS.items()),
+    re.I)
+NOTIFICATION_REASON = owner_line(
+    "Notification-markup guard (rule no-self-written-notification)",
+    "each line below holds notification markup as an opening tag, which reads as an agent, result or owner event "
+    "that never happened; a mention of the tag in an inline code span or a fence is no markup") + " Lines: "
+
+
+def notification_markup_problem(text):
+    """The refusal for reply lines that hold notification markup as an opening tag, else ''."""
+    if "<" not in text:
+        return ""
+    bad, fence = [], ""
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence:
+            continue
+        if NOTIFICATION_RE.search(CODE_SPAN.sub(" ", body)):
+            bad.append(body)
+    return NOTIFICATION_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
@@ -1733,6 +1786,9 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
+        notification = notification_markup_problem(text)
+        if notification:
+            reasons.append(notification)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
@@ -2157,6 +2213,10 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
+    try:
+        relay.append(notification_markup_problem(text))  # every Stop, with or without a human record
+    except Exception:
+        pass
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.

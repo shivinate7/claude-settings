@@ -62,6 +62,14 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 - A mention of the word, not a claim, can go in an inline code span.
 - Lines inside a code fence, and lines that end in a question mark, are not checked.
 
+### Notification-markup guard (any reply)
+
+Text: `NOTIFICATION_REASON`, rule `no-self-written-notification` (a reply holds no notification markup as an opening tag).
+
+- On each listed line, say the event in plain words instead of writing the tag. A tag you wrote in your own reply is not an agent, a result or an owner event.
+- Or put a mention of the tag in an inline code span or a code fence, which are not checked.
+- A closing tag alone is not markup.
+
 ### Recovered guard (any reply whose report shape holds)
 
 Text: two inline facts in `recovered_problem`. The two line forms below live here only.
