@@ -245,14 +245,16 @@ def _sends_nothing(specs, where: str, sha: str) -> bool:
     return True
 
 
-def reviewed_head_push_hit(args, where: str, overrides=None) -> bool:
+def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> bool:
     """True when this push writes the head branch of an open pull request whose newest review record is done
     and already holds its fix check (rule reviewed-head-push). Fails open, the opposite of merge_check: a tool that
     cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
     The record is read and judged by the merge tool's own `review_comments`, `parse_review` and `review_state`, so no
-    parse or state rule is copied here. Only the current branch's destinations are read: a push of `--all`, `--mirror`,
-    a tag alone, a deletion, a glob refspec, or a push whose remote (named, or implied by `push_remote`) is not origin is never
-    judged. A push whose sources all equal a pull request's live head sha sends nothing, and that pull request is not judged.
+    parse or state rule is copied here. Every destination the push names is read, globs and unresolved names skipped: a push
+    of `--all`, `--mirror`, a tag alone, a deletion, or a push whose remote (named, or implied by `push_remote`) is not origin
+    is never judged. When the push is the first command (`first`), a push whose sources all equal a pull request's live head
+    sha sends nothing, and that pull request is not judged. A later push is judged as sending something: local HEAD is read
+    before the commands ahead of it run, so a chained commit would still read as the live head.
     Reads: none from gh when the push is out of that scope; else one open pull request list, and, when a pull request
     has the destination as its head, one paged repo-wide issue comment read."""
     scope = push_refspecs(args)
@@ -270,7 +272,8 @@ def reviewed_head_push_hit(args, where: str, overrides=None) -> bool:
         host = module.Host(repo=None, cwd=where or None)
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             rows = [d for d in host.pages("pulls", fields={"state": "open"})
-                    if d["head"]["ref"] in branches and not _sends_nothing(scope[1], where, d["head"]["sha"])]
+                    if d["head"]["ref"] in branches
+                    and not (first and _sends_nothing(scope[1], where, d["head"]["sha"]))]
             if not rows:
                 return False
             since = min(str(d.get("created_at") or "1970-01-01T00:00:00Z") for d in rows)
