@@ -13274,6 +13274,26 @@ class UnreviewedGuardAllowed(UnreviewedGuardEnv):
                                   review_comment(3, 7, record_text(head=h2, rounds=REVIEW_PASS_TWICE)))
         self.assert_done(line, h2, "a new Round line breaks the carried run at the second record, so the guard commit before it is not owed, and the line should read done")
 
+    def test_a_merge_of_main_with_a_docs_conflict_resolved_by_hand_stays_done(self):
+        # main and the lane both add docs/lane.md, so the merge conflicts. The conflict lies on no guard path, so the hand resolution owes no reviewer.
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        self.main_commit("docs/lane.md", "main's text\n")
+        h2 = self.merge_main(resolve=("docs/lane.md", "resolved by hand\n"))
+        first, second = review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2))
+        merge_tree_exits = []
+
+        def spy(args, run_real):
+            if args[:1] != ("merge-tree",):
+                return None
+            rc, out = run_real()
+            merge_tree_exits.append(rc)
+            return rc, out
+
+        with self.git_stubbed(spy):
+            line = self.reviewed_line(h2, first, second)
+        self.assertEqual(merge_tree_exits, [1], "the carried check did not meet one merge-tree conflict, so this case does not reach the hand-resolved conflict:\n" + line)
+        self.assert_done(line, h2, "the carried rounds read open, though the conflict of main was resolved by hand in docs/lane.md, a path no guard covers")
+
 class UnreviewedGuardWriter(UnreviewedGuardEnv):
     """`--review-record` with Guard or check yes writes no record for a head that carries the rounds of an earlier record across a guard path
     the earlier record never read. The refusal names the first head and the path."""
