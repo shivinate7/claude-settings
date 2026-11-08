@@ -57,8 +57,9 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             states what code does or does not do: a code subject (a noun such as tool, ledger, script, hook, guard,
             check, or one source file) and a behaviour verb (reads, writes, prints, calls, refuses, counts, runs,
             checks; also after never, only, or does not). It passes when it cites `file.py` `name`, (file.py name) or
-            a test node id, as STALE002 reads them, or a .mjs, .js, .cjs, .ts or .sh file (the unknown form of
-            STALE002). A dead cite is no missing cite: STALE010 judges it, and STALE009 reports only a code claim
+            a test node id, as STALE002 reads them. A cite of a .mjs, .cjs, .js, .ts or .sh file is no finding: it gives
+            one unknown line, and in a claim sentence that line prints even for a file the range did not touch. A dead
+            cite is no missing cite: STALE010 judges it, and STALE009 reports only a code claim
             with no cite. Paragraphs, sentences and the mark come from STALE005. It prints as
             `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
             source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
@@ -68,8 +69,10 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
             leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
-            STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .js, .cjs, .ts or .sh file keeps
-            the unknown line. A cited .py that does not parse at head is one unknown line, no finding.
+            STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .cjs, .js, .ts or .sh file gives
+            one unknown line and no finding. In a decision claim sentence the line prints even for a file the range did
+            not touch. On another added line it follows the existing unknown rule: it prints only for a file the range
+            touched, and only when Markdown is read. A cited .py that does not parse at head is one unknown line, no finding.
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
 no path cite for STALE010, and one unknown line for a STALE005 backing or a STALE008 value cite.
@@ -109,16 +112,19 @@ Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 belo
 a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
-for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
+for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file), and a Markdown range with no such line starts 3
+(CostTests pins both). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
 at head through the one `cat-file` the run opens, once per range. That `cat-file` is one start, and it opens only when an
-added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a .py name cite and
+added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
-(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it.
+(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
+by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
