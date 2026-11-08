@@ -6192,7 +6192,7 @@ test("a doing step that is not stalled or paused reads In progress in all three 
 // a3 paused, a5 stalled, a4 and d6 in progress. Each bar must show two active cells, and the where-you-are bar already does.
 async function actCells(page, scope) {
   assert.equal(await page.locator(`${scope} .segbar`).count(), 1, `${scope} has no phase bar (.segbar)`);
-  return page.locator(`${scope} .segbar i.act`).count();
+  return page.locator(`${scope} .segbar > i.act`).count();
 }
 async function stalledPaused(page) {
   assert.equal(await doingNowRow(page, "c1").locator('[role="img"][aria-label="Stalled"]').count(), 1, "step c1 is not in Doing now, marked Stalled");
@@ -8370,4 +8370,28 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read
     const ratio = await page.evaluate(`(() => {${CONTRAST} return R(${JSON.stringify(hexOf(c))}, ${JSON.stringify(surface)}); })()`);
     assert.ok(ratio >= 3, `${token} is ${ratio.toFixed(2)}:1 against --surface in ${scheme}, under 3:1`);
   }
+});
+// ---------------------------------------------------------------- the narrow rule (lane nfp-narrow-paused-cell)
+// A bar draws one cell per step while it is at least steps x 5px - 2px wide. Under that, it draws one run per kind, in the order done,
+// in progress, stalled, paused, blocked, to do, with no empty run and no cell. Each drawn part is at least 3px. The cells stay in the DOM at 0 width.
+const RULE_PX = 30 * 5 - 2;
+// The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
+const barLayers = (loc) => loc.evaluate((bar) => {
+  const parts = (els) => els.map((e) => ({ cls: e.className, w: e.getBoundingClientRect().width }));
+  const runs = bar.querySelector(":scope > .runs");
+  return { barW: bar.getBoundingClientRect().width, cells: parts([...bar.querySelectorAll(":scope > i")]), runs: runs ? parts([...runs.querySelectorAll(":scope > i")]) : [] };
+});
+for (const width of [390, 1280]) for (const [name, scope] of BARS_W) test(`${name} at ${width} wide draws one layer, cells or runs by the narrow rule, and each drawn part is at least 3px`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator(scope).count(), 1, `${name} at ${width} wide is missing (${scope})`);
+  const L = await barLayers(page.locator(scope));
+  const cellsDrawn = L.cells.filter((p) => p.w > 0), runsDrawn = L.runs.filter((p) => p.w > 0);
+  assert.ok(!(cellsDrawn.length && runsDrawn.length), `${name} at ${width} wide draws cells and runs both`);
+  assert.ok(cellsDrawn.length + runsDrawn.length > 0, `${name} at ${width} wide draws no cell and no run`);
+  const narrow = L.barW < RULE_PX;
+  assert.equal(runsDrawn.length > 0, narrow, `${name} at ${width} wide is ${L.barW.toFixed(1)}px, ${narrow ? "under" : "at least"} ${RULE_PX}px, so it should draw ${narrow ? "runs" : "cells"}, not ${narrow ? "cells" : "runs"}`);
+  for (const p of [...cellsDrawn, ...runsDrawn]) assert.ok(p.w >= 3, `${name} at ${width} wide draws a ${p.w.toFixed(1)}px part (${p.cls || "to do"}), under 3px`);
+  if (narrow) assert.deepEqual(L.runs.map((r) => r.cls), ["done", "act", "stl", "pzd", "blk", ""], `${name} at ${width} wide: its runs are not one each of done, in progress, stalled, paused, blocked, to do, in that order`);
+  else assert.equal(cellsDrawn.length, 30, `${name} at ${width} wide draws ${cellsDrawn.length} cells, not one per step (30)`);
 });
