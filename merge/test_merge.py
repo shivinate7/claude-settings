@@ -8267,7 +8267,9 @@ class SilentWait(Env):
             while not os.path.exists(marker) and time.time() < stop:
                 time.sleep(0.05)
             self.assertTrue(os.path.exists(marker), "the held call never started")
-            time.sleep(4)  # a human watching the terminal gets this long before anything is said
+            stop = time.time() + 4  # a human watching the terminal gets this long before anything is said
+            while time.time() < stop and not self.names_step(out.getvalue()):
+                time.sleep(0.05)
             seen = out.getvalue()
             t.join(seconds + 60)
             self.assertFalse(t.is_alive(), "the merge did not end")
@@ -8275,11 +8277,17 @@ class SilentWait(Env):
             os.chdir(cwd)
         return seen, result.get("rc", result.get("error")), out.getvalue() + err.getvalue()
 
+    @staticmethod
+    def names_step(seen):
+        """True when the last line printed says merge is waiting or doing a step."""
+        last = seen.splitlines()[-1] if seen.strip() else ""
+        return re.search(r"(?i)waiting|checking|merging", last) is not None
+
     def assert_names_the_held_step(self, seen, step):
         """The last line printed while the call was held must say merge is waiting or doing that step. A claim's
         `pushed` line is not that: it says what happened, not what merge is blocked on."""
         last = seen.splitlines()[-1] if seen.strip() else ""
-        self.assertRegex(last, r"(?i)waiting|checking|merging", f"while `{step}` was held the last line was {last!r}; printed so far: {seen!r}")
+        self.assertTrue(self.names_step(seen), f"while `{step}` was held the last line was {last!r}; printed so far: {seen!r}")
 
     def test_a_held_check_read_names_its_step_before_it_blocks(self):
         seen, _, _ = self.hold_run("check-runs", 12, self.gh_host())
