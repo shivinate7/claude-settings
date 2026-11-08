@@ -2869,8 +2869,8 @@ def brief_claim_hit(tool: str, tool_input) -> list:
 # `*`, `_` and a leading bullet are stripped, and holds a negator with a run verb within 2 words after it ("Never run:",
 # "Do not run any of these:"). Its cover holds across blank lines, over a fence opened under it, and over bullets nested
 # under it; it ends at the next prose line that is no bullet, or at a bullet no deeper than a bullet heading. A Workflow
-# script is read through `spawn_inputs`, as the role and Opus checks read it. Cost: pure text work inside the one guard
-# call. No process, no file.
+# script is read through `_brief_spawns`, which counts each agent() call whatever its model. Cost: pure text work inside
+# the one guard call. No process, no file.
 try:
     from agent_brief import READ_ONLY  # noqa: E402  the one home of the read-only roles, shared with the SubagentStart hook
 except Exception:  # fail closed (decision guard-hooks-fail-closed): with no read-only list, every role is judged
@@ -2882,7 +2882,7 @@ BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mu
 BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word directly before the part
 BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
-BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"X\s*,\s*(?:(?:and|or|nor)\s+)*(?=X(?!\w)|$)", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -2944,7 +2944,10 @@ def _brief_prohibits(before: str) -> bool:
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
     # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
     # from the negator's window; a comma before plain words ends the clause
-    listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))
+    # a span becomes a NUL, which no prose word holds, so "fix, `git reset`" is no list; a NUL already in the brief
+    # reads as a space first, so it cannot pose as a span
+    spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
+    listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
         or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
