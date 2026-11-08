@@ -13,8 +13,10 @@ records that run as a trailer on the commit that adds the test:
                                                     sha has the same shape as the failed form's
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
-A line whose keyword reads `mutant` (any case, a space allowed before the colon: `Mutant:`, `mutant :`, `MUTANT:`)
-is judged by the mutant form alone, never by the command form. The check reads the sha's shape only, as it does for the
+A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
+pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
+any whitespace before the colon, the colon, then a literal space. The failed and none forms need a literal space after
+`Red-run:`. The check reads the sha's shape only, as it does for the
 failed form, and never that the sha exists or that the mutation was made: those parts are claimed. A rebase or a
 cherry-pick rewrites the commit a sha names, so a reach check raised false alarms.
 
@@ -59,22 +61,20 @@ def git(root, *args):
     return r.stdout
 
 
-def trailer_verdict(message):
-    """"absent" (no Red-run line), "valid" (a line with 1 or more failures, or none with a reason) or "malformed"
-    (Red-run lines, none valid). Pure: it reads no repo."""
-    seen, valid = False, False
+def has_valid_trailer(message):
+    """True when a Red-run line has 1 or more failures, or is none with a reason. Pure: it reads no repo."""
     for line in message.splitlines():
         if not line.startswith("Red-run:"):
             continue
-        seen = True
         if MUTANT_KEY.match(line):
             mutant = MUTANT.match(line)
-            valid = valid or bool(mutant and int(mutant.group(1)) >= 1)
+            if mutant and int(mutant.group(1)) >= 1:
+                return True
             continue
         red = RED.match(line)
         if (red and int(red.group(1)) >= 1) or NONE.match(line.rstrip()):
-            valid = True
-    return "valid" if valid else "malformed" if seen else "absent"
+            return True
+    return False
 
 
 def commits(root, base):
@@ -117,7 +117,7 @@ def gaps(root, base):
         paths = added_test_paths(root, parent, sha)
         if not paths:
             continue
-        if trailer_verdict(message) != "valid":
+        if not has_valid_trailer(message):
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
             lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown))
     return lines
