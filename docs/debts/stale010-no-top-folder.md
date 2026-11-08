@@ -7,3 +7,5 @@
 **Decision.** record-cites-live-code (claims about code cite live code names).
 
 **Retire.** STALE010 skips a cite whose first folder is no top folder of the tracked tree. It reuses the test STALE003 uses (the `tops` set in lint/stale_cites.py `scan_tree`). A case in `lint/test_stale_cites.py` shows a cite into an untracked top folder gives no STALE010.
+
+**Fix.** step `stale010-top-folder` (a follow-up PR with `Merge after: #1893`).
