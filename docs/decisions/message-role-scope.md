@@ -24,7 +24,7 @@ The verdict is per clause. A refusal needs an edit verb: edit, change, fix, upda
 - A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an object (`Fix X is not your job`).
 - The object is the first path after the verb in its clause, and a path joined to it by `and`, `or` or a comma. A later path is a spec or a target: `Make guard.py handle the case in tests/x.py` and `Fix guard.py for/as/to satisfy ... tests/x.py` edit guard.py only.
 - With no path right after the verb (a determiner or `file` may sit between), a noun phrase then `in`, `at`, `of`, `to` or `into` and the path governs that path (`Fix the failing case in X`, `Make the fix in X`, `Add a case to X`). After another preposition (`for`, `as`, `with`) the path is a spec.
-- A participle right before `at` or `in` makes the path a locator, not an object (`Fix the failure reported at X:120`). The participles are the set `MESSAGE_LOCATOR_PARTICIPLES` in hooks/guard.py. Ruling: lane, 2026-11-08 11:30 CST, process-only.
+- A participle right before `at` makes the path a locator, not an object (`Fix the failure reported at X:120`). The participles are reported, raised, shown, logged and seen (`MESSAGE_LOCATOR_PARTICIPLES` in hooks/guard.py). Before `in`, the path stays the object (`Fix the bug raised in X`). Ruling: lane, 2026-11-08 11:30 CST, process-only.
 - A gerund after `by` governs its own direct path (`Make it pass by fixing X`, `Fix the bug by updating X`).
 - A noun phrase whose head is note, report or summary governs nothing (`Make a note of the failures in X`).
 - A test noun as the head (case, cases, test, assert) makes the path a spec when a test-author is sent it (`Add red cases for the empty brief in hooks/guard.py`). A builder is still judged on that path.
@@ -66,7 +66,7 @@ One more guard process start per SendMessage, as the matcher in `settings.json` 
 
 ## Measure
 
-`MUTATE_ONLY=message-role: hooks/test_guard.py`: the `message-role` cases, 37 refusals, 57 passes and 1 crash check (`quotespan0`). `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
+`MUTATE_ONLY=message-role: hooks/test_guard.py`: the 113 `message-role` cases, with 1 crash check (`quotespan0`). `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
 
 ## Spawn briefs
 
@@ -90,7 +90,7 @@ Which paths count:
 
 - A builder: a test path only (`is_test_rel`). The exclusions below do not apply to a builder.
 - A test-author: an edit of a path with a file extension that `author_path_ok` rejects. A Markdown path counts. Unlike a message, the ask says "to a record-writer".
-- Shared with the message rule, these pass for a test-author: a test-noun spec (`Add red cases for ... in hooks/guard.py`), a workflow file, a `../` path, and an extensionless path such as `Makefile`.
+- Shared with the message rule, these pass for a test-author: a test-noun spec (`Add red cases for ... in hooks/guard.py`), a workflow file, a `../` path, and an extensionless path such as `ci/build/Makefile`. A bare `Makefile` or a two-part path such as `tools/Makefile` is not read as a path at all.
 - `only` and `just` keep the object direct: `Edit only X`, `Edit just X` and `Change only X` name X.
 - A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an edit object, so it does not count.
 
@@ -101,8 +101,8 @@ Known gap:
 
 Check:
 
-- `MUTATE_ONLY=brief-role python3 hooks/test_guard.py` runs the 23 `brief-role` cases: 10 asks and 13 passes. The filter is a substring match on case names.
-- `hooks/mutate_guard.py` has no mutant for this rule.
+- `MUTATE_ONLY=brief-role python3 hooks/test_guard.py` runs the 44 `brief-role` cases. The filter is a substring match on case names.
+- `hooks/mutate_guard.py` carries a mutant that turns the role gate in `brief_role_hit` off. The shared reader's mutants are labelled `message-role:`.
 
 Cost: no transcript is read. The guard already judges `Agent` and `Task` calls (`settings.json`), so this adds no hook.
 
