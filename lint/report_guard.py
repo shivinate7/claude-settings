@@ -1634,8 +1634,9 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
 # A failing word followed by to and a verb of _clause.OUTAGE_VERBS (start, connect, respond, authenticate, clone ...) names an
-# outage ("failing to start"), not a red check ("failing to go green"). A checks noun after a noun of _clause.OUTAGE_NOUNS
-# (connection, network, auth, proxy, health ...) is an outage too.
+# outage ("failing to start"), not a red check ("because CI is failing to go green" skips). A comma join needs the state
+# right before the comma, so "CI is failing to go green, so I cannot merge" blocks with no try: a true block. A checks noun
+# after a noun of _clause.OUTAGE_NOUNS (connection, network, auth, proxy, health ...) is an outage too.
 _FAIL_END = r"(?!\s+to\s+(?:%s)\b)" % "|".join(_clause.OUTAGE_VERBS)  # the verbs have one home, lint/_clause.py
 _CI_CHECKS = "".join("(?<!%s )" % noun for noun in _clause.OUTAGE_NOUNS) + "checks?"
 _BLOCKER_TAIL = (
@@ -1756,7 +1757,7 @@ CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|ed
 # Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
 # while "the push failed, so I could not push" does.
 CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _clause.ADVERB_PATTERN, re.I)  # any -ly adverb too
-_CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
+_CHECK_WORD = "(?:%s)" % "|".join(_clause.CHECK_WORDS)  # the words have one home, lint/_clause.py
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
 _BACK = _clause.BACK_PATTERN  # "sent back 403": a status the call answered with; the words have one home, lint/_clause.py
 _STATUS = _clause.STATUS_PATTERN  # an HTTP status that no hyphen joins and no size unit follows
@@ -1772,11 +1773,13 @@ CANNOT_CHECK_RE = re.compile(
 # ("Sorry, I could not push."). A clause that a conjunction opens ("..., but I can open a PR") is another clause, not a reason.
 
 
-def _gives_reason(tail, following):
+def _gives_reason(head, tail, following):
     """True when `tail`, the sentence after the phrase, carries a reason that no conjunction opens, or the sentence that
-    `following` names is one."""
+    `following` names is one, or a clause of `head`, the sentence up to the end of the phrase, says why before it
+    (_clause.reasons_before)."""
+    tail, head, following = (_strip_emphasis(t)[0] for t in (tail, head, following))
     return any(_clause.is_reason(g) and not _clause.opens_with_joiner(g) for g in _clause.reasons(tail)) \
-        or _clause.is_reason(following)
+        or _clause.is_reason(following) or bool(_clause.reasons_before(head))
 
 
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
@@ -1855,7 +1858,8 @@ def _claim(body, mask, hit, floor, scan):
     if _clause.conditional(shown) or _clause.negated_near(shown):
         return None
     words = after.split()
-    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(
+            _clause.veil(after, mask[hit.end():end])):  # "until" in a code span waits on nothing
         return None
     if not _clause.own_subject(before) and not (
             after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
@@ -1863,7 +1867,7 @@ def _claim(body, mask, hit, floor, scan):
     left = mask.rfind(";", 0, hit.start()) + 1  # the sentence part between the semicolons around the phrase
     right = mask.find(";", hit.end())
     right = len(mask) if right < 0 else right
-    if CANNOT_RULE_RE.search(body[left:right]):
+    if CANNOT_RULE_RE.search(_clause.veil(body[left:right], mask[left:right])):  # `rules.md` names no rule
         return None
     window = _clause.first_words(after)
     act = _window_act(window, before + " " + after)
@@ -2241,14 +2245,24 @@ def _backed(tries, act, sentence):
     return False
 
 
+def _head(sentence, tail):
+    """`sentence` up to the end of the phrase: what is left once `tail`, the text after the phrase, is cut off."""
+    return sentence[:len(sentence) - len(tail.rstrip())]
+
+
+def _names_a_call(text):
+    """True when `text` holds a check (CANNOT_CHECK_RE) that names a call. A bare check word (CANNOT_CHECK_WORD_RE) counts
+    only when the writer is not its subject (CANNOT_WRITER_RE): "I tried" names no call. The one home of that test."""
+    return any(not (CANNOT_CHECK_WORD_RE.fullmatch(m.group()) and CANNOT_WRITER_RE.search(text[:m.start()]))
+               for m in CANNOT_CHECK_RE.finditer(text))
+
+
 def _names_check(sentence, tail):
-    """True when `sentence` names its check (CANNOT_CHECK_RE). In `tail`, the text after the phrase, any form counts.
-    Before the phrase, a bare check word (CANNOT_CHECK_WORD_RE) counts only when the writer is not its subject
-    (CANNOT_WRITER_RE): "I tried" names no call."""
-    head = sentence[:len(sentence) - len(tail.rstrip())]
-    return bool(CANNOT_CHECK_RE.search(tail)) or any(
-        not (CANNOT_CHECK_WORD_RE.fullmatch(m.group()) and CANNOT_WRITER_RE.search(head[:m.start()]))
-        for m in CANNOT_CHECK_RE.finditer(head))
+    """True when `sentence` names its check (CANNOT_CHECK_RE), read with its emphasis marks removed (_strip_emphasis). In
+    `tail`, the text after the phrase, any form counts. Before the phrase, a bare check word counts only when the writer is
+    not its subject (_names_a_call)."""
+    head = _strip_emphasis(_head(sentence, tail))[0]
+    return bool(CANNOT_CHECK_RE.search(_strip_emphasis(tail)[0])) or _names_a_call(head)
 
 
 # The act a sentence's own words are about: the verb of a table act, a PR act's verb only beside the PR word. github-reach
@@ -2263,6 +2277,7 @@ CANNOT_PROSE_ACTS = (
 
 def _prose_acts(prose):
     """The table acts the words of `prose` (a sentence without its code spans) are about; a PR act needs the PR word."""
+    prose = _clause.unopen(prose)  # "PR 12 is open" is a state, so it opens no PR
     return {act for act, rx in CANNOT_PROSE_ACTS
             if rx.search(prose) and (act in ("push", "pr-merge") or CANNOT_PR_RE.search(prose))}
 
@@ -2272,12 +2287,13 @@ def _prior_names_check(prior, act):
     code spans, in a sentence that is not about another act alone ("The push failed." checks no merge), or a code span that
     names a route of `act`, in a sentence that names no route of another act. A route of another act ("`gh pr create`
     returned 403") is the check of that act, and a span of another command ("`ls` printed a list") names no check."""
+    prior = _strip_emphasis(prior)[0]
     acts = _text_acts(prior)
     if acts and act not in acts:
         return False
     prose = CODE_SPAN.sub(" ", prior)
     about = _prose_acts(prose)
-    return bool(CANNOT_CHECK_RE.search(prose)) and (not about or act in about or act == GITHUB_REACH) or any(
+    return _names_a_call(prose) and (not about or act in about or act == GITHUB_REACH) or any(
         act in _text_acts(span.group(2)) for span in CODE_SPAN.finditer(prior))
 
 
@@ -2308,7 +2324,7 @@ def cannot_problem(records, text, refused=()):
             if sentence not in no_try:
                 no_try.append(sentence)
         elif not (_names_check(sentence, tail) or backed and (_prior_names_check(prior, act)
-                                                                  or _gives_reason(tail, following))) \
+                                                                  or _gives_reason(_head(sentence, tail), tail, following))) \
                 and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)

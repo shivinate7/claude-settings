@@ -1,7 +1,8 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN). The module reads text and
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
 
@@ -12,8 +13,8 @@ opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term`
 `lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
-veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, is_reason, form_pattern) read the grammar of the cannot-claim
-check from the same lexicons.
+veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, reasons_before, is_reason,
+form_pattern, unopen) read the grammar of the cannot-claim check from the same lexicons.
 """
 import bisect
 import re
@@ -62,6 +63,11 @@ SIZE_UNITS = ("lines?", "files?", "words?", "chars?", "commits?", "bytes?", "[km
 STATUS_PATTERN = r"[45]\d\d\b(?![-\w])(?!\s+(?:%s)\b)" % "|".join(SIZE_UNITS)
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
+NEGATOR_GAP_SKIP = ("am",)  # words the gap does not count: "did not say I am not authorized" reaches the first not
+# The words that name a call's outcome: a try, or what the call returned. A sentence that holds one names its check, unless
+# the writer is its subject ("I tried" names no call).
+CHECK_WORDS = ("tried", "ran", "returned", "refused", "denied", "failed", "errored", "rejected", "blocked", "said",
+               "returns", "refuses", "denies", "rejects", "blocks", "says", "fails", "errors")
 
 _STOPS = PREPOSITIONS + ("without", "into", "onto", "over", "under", "through", "via", "than", "as", "like")
 _PRONOUNS = ("i", "we", "you", "he", "she", "it", "they", "there", "here")
@@ -71,6 +77,7 @@ _CONTRACTED = {"i'm": ("i", "am"), "we're": ("we", "are"), "you're": ("you", "ar
                "i'd": ("i", "would"), "we'd": ("we", "would")}
 _MODALS = ("can", "could", "would", "will", "shall", "should", "may", "might", "must")
 _BE = ("is", "are", "was", "were", "be", "been", "being", "am")
+STATE_VERBS = _BE + ("remain", "remains", "remained", "stay", "stays", "stayed", "still")  # "is open" is a state, not an act
 _HAVE = ("has", "have", "had")
 _DO = ("do", "does", "did")
 _PAST_AUX = ("could", "did", "was", "were", "had")
@@ -106,6 +113,9 @@ def _lemma(word):
 _WORD = re.compile(r"\w+(?:['’]\w+)*(?:-\w+)*")
 _BOUND = re.compile(r"(\s-{1,2}\s)|([;:!?—–]|\.(?!\w))|(,)|\b(but|because)\b", re.I)
 _STOP_ANY = re.compile(r"[.;:!?]")
+_REASON_STOP = re.compile(r"[;:!?]|\.(?!\w)")  # a dot inside a token (package.json) ends no reason
+_OPEN_ADJ = re.compile(r"\b((?:%s)\s+(?:\w+ly\s+)*)open\b" % "|".join(STATE_VERBS + DETERMINERS), re.I)
+_WRITER_START = re.compile(r"^\W*(?:(?:%s)\b\W*)?(?:I|we)\b" % "|".join(JOINERS + REASON_LINKS), re.I)
 _SENTENCE_GAP = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -153,8 +163,9 @@ _COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
 _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
 _LEAD_RE = re.compile(r"^\W*(?:(?:and|but|so|then)\b\W*)?", re.I)
 _OWN_RE = re.compile(
-    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re|\bthe\s+cloud(?:\s+session)?"
-    r"|\bthis\s+session|\bhere|\bthere(?:\s+(?:is|was)|['’]s))(?:\s+" + _ADV + r")*\s*$", re.I)
+    r"(?:^|\b(?:I|we)(?:\s+(?:am|are|was|were|have|has|had))?|\bI['’]m|\bwe['’]re"
+    r"|\b(?:the\s+cloud(?:\s+session)?|this\s+session)(?:\s+(?:is|was))?|\bhere|\bthere(?:\s+(?:is|was)|['’]s))"
+    r"(?:\s+" + _ADV + r")*\s*$", re.I)
 _PAST_RE = re.compile(r"^(?:could|(?:was|were)n['’]t)", re.I)
 _WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
 _ADV_LEAD_RE = re.compile(r"^(?:%s\s+)+" % _ADV, re.I)
@@ -176,8 +187,9 @@ def veil(text, shadow):
 
 
 def negated_near(text, gap=NEGATOR_GAP):
-    """True when a negator (NEGATORS) sits in the last `gap` words of `text`."""
-    return bool(_NEGATOR_RE.search(" ".join(text.split()[-gap:])))
+    """True when a negator (NEGATORS) sits in the last `gap` words of `text`. A word of NEGATOR_GAP_SKIP (am) takes no slot."""
+    counted = [w for w in text.split() if w.lower() not in NEGATOR_GAP_SKIP]
+    return bool(_NEGATOR_RE.search(" ".join(counted[-gap:])))
 
 
 def first_words(text, count=WINDOW):
@@ -226,7 +238,7 @@ def is_reason(text):
 
 def reasons(text):
     """The clauses of `text` that a reason link opens, in order: the text after a : ; , or dash that whitespace follows,
-    the text after because, and the words in parentheses. Each runs to the next . ; : ! ? and a link inside one is part of
+    the text after because, and the words in parentheses. Each runs to the next . ; : ! ? (a dot inside a token, as in package.json, ends none) and a link inside one is part of
     it."""
     events = []
     for c in clauses(text, [False] * len(text)):
@@ -243,12 +255,27 @@ def reasons(text):
         if at < done:
             continue
         if stop is None:
-            hit = _STOP_ANY.search(text, begin)
+            hit = _REASON_STOP.search(text, begin)
             stop = hit.start() if hit else len(text)
         if stop > begin:
             found.append(text[begin:stop])
             done = stop
     return found
+
+
+def reasons_before(head):
+    """The clauses of `head`, the text of a sentence up to the end of a phrase, that say why before the phrase: each clause
+    ahead of the phrase's own that is_reason accepts. A clause with the writer as its subject (I, we: "I tried it"), one that
+    conditions, and a lead-in with no verb ("Sorry") say nothing."""
+    parts = clauses(head, [False] * len(head))
+    return [head[c.start:c.end] for c in parts[:-1]
+            if not c.conditional and not _WRITER_START.match(head[c.start:c.end]) and is_reason(head[c.start:c.end])]
+
+
+def unopen(text):
+    """`text` with each `open` that a state verb or a determiner just before it makes an adjective ("PR 12 is open", "the
+    open PR") read as underscores of the same length, so no act reads it."""
+    return _OPEN_ADJ.sub(lambda m: m.group(1) + "_" * 4, text)
 
 
 def form_pattern(form):
