@@ -12521,6 +12521,107 @@ sh("frozen form gap: python -c that runs ls on a frozen hooks folder through a s
    "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
    "subprocess.run(\"ls \" + h + \"/.claude/hooks\", shell=True)'", "allow", cwd=NOGIT, env=TILDE_ENV)
 
+# --------------------------------------------------------------------------- frozen-scan-crash: a crash in the scan
+#
+# The frozen reader of a python script may raise. Four claims: a crash that loses the whole script denies a
+# frozen write in it; a crash on one string literal leaves the other writes of the script judged; a crash on a
+# script that writes nothing frozen allows, because a crash loses only the expression it hit (decision
+# frozen-path-resolves-shell-vars); and the armed driver with no trigger still denies a frozen write. The seam
+# is a driver file that patches guard_core in the guard's own process, then runs this repository's guard. It
+# patches the frozen reading only (`frozen=True`), so the env rule's reader is untouched. Each name carries
+# frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs this block alone.
+
+SCAN_SEAM_DIR = os.path.join(ROOT, "scan-seam")
+_SCAN_SEAM = """import ast, importlib.util, inspect, sys
+sys.path.insert(0, %(hooks)r)
+import guard_core
+%(patch)s
+spec = importlib.util.spec_from_file_location("guard_under_test", %(guard)r)
+g = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(g)
+g.main()
+"""
+SCAN_PATCH_WHOLE_SCAN = """_real = guard_core._python_paths
+def _boom(code, frozen=False):
+    if frozen:
+        raise RuntimeError("scan seam: the frozen reader crashed on the whole script")
+    return _real(code, frozen)
+guard_core._python_paths = _boom
+"""
+_SCAN_PATCH_ONE_LITERAL = """_real = guard_core._python_mode
+_bind = inspect.signature(_real).bind
+def _boom(*args, **kwargs):
+    node = args[0]
+    if _bind(*args, **kwargs).arguments.get("frozen") and isinstance(node, ast.Constant) and node.value == %r:
+        raise RuntimeError("scan seam: the frozen reader crashed on one literal")
+    return _real(*args, **kwargs)
+guard_core._python_mode = _boom
+"""
+
+
+def scan_seam(name, patch):
+    """The path of a driver file that runs this repository's guard with `patch` applied to guard_core."""
+    os.makedirs(SCAN_SEAM_DIR, exist_ok=True)
+    path = os.path.join(SCAN_SEAM_DIR, name + ".py")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(_SCAN_SEAM % {"hooks": os.path.dirname(os.path.abspath(GUARD)),
+                                   "guard": os.path.abspath(GUARD), "patch": patch})
+    return path
+
+
+SCAN_WHOLE = scan_seam("whole-scan", SCAN_PATCH_WHOLE_SCAN)
+SCAN_ONE_LITERAL = scan_seam("one-literal", _SCAN_PATCH_ONE_LITERAL % "/tmp/a.txt")
+SCAN_ARMED = scan_seam("armed-no-trigger", _SCAN_PATCH_ONE_LITERAL % "/no/such/literal")
+
+add("frozen-scan-crash: python -c that opens a frozen hook when the reader raises on the whole script is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "open(os.path.expanduser(\"~/.claude/hooks/x.py\"), \"w\")'")
+add("frozen-scan-crash: python -c that writes a frozen hook after a crash on one other literal is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ONE_LITERAL,
+    command="python3 -c 'import os\n"
+            "open(\"/tmp/a.txt\", \"w\").write(\"x\")\n"
+            "open(os.path.expanduser(\"~/.claude/hooks/x.py\"), \"w\")'")
+add("frozen-scan-crash: python -c that writes only /tmp, with the reader crashing on its literal, is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ONE_LITERAL,
+    command="python3 -c 'import os\n"
+            "open(\"/tmp/a.txt\", \"w\").write(\"x\")'")
+add("frozen-scan-crash: control, python -c that writes a frozen hook with the reader armed and no trigger is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ARMED,
+    command="python3 -c 'import os\n"
+            "open(os.path.expanduser(\"~/.claude/hooks/x.py\"), \"w\")'")
+
+# GAPS. Each script writes a frozen hook in a spelling the reader must follow. Each is denied.
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook joined by os.sep.join is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "open(os.sep.join([h, \".claude\", \"hooks\", \"x.py\"]), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook joined from a list appended to after its literal is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "parts = [h]\n"
+   "parts.append(\".claude/hooks/x.py\")\n"
+   "open(\"/\".join(parts), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook formatted with ** from a dict is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "d = {\"h\": h}\n"
+   "open(\"{h}/.claude/hooks/x.py\".format(**d), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook through a format string held in a name is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "t = \"{}/.claude/hooks/x.py\"\n"
+   "open(t.format(h), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that runs less -o on a frozen hook built by % formatting through subprocess is denied",
+   "python3 -c 'import os, subprocess\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "subprocess.run([\"less\", \"-o%s\" % (h + \"/.claude/hooks/x\"), \"src\"])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
