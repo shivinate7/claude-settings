@@ -8549,12 +8549,15 @@ async function countLinesW(page, sel) {
     return lines.map((l) => l.words);
   }, sel);
 }
-for (const width of [390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+// A phone width wraps the line, so the break assert below keeps the group check from passing on a line that never wraps. 360 is where
+// the nowrap rule decides: without it "1" ends one line and "paused" starts the next. 1280 does not wrap, so it has no break assert.
+for (const width of [360, 390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
   const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
   await openStatus(page);
   const lines = await countLinesW(page, "#svNow > div:first-child > .lead");
   assert.ok(lines && lines.length, "the Now card has no count line (#svNow > div:first-child > .lead)");
   const text = lines.map((l) => l.join(" ")).join(" | ");
+  if (width < 1280) assert.ok(lines.length >= 2, `at ${width} wide the count line does not wrap, so the group check proves nothing: ${text}`);
   const starts = lines.find((l) => bareOf(l[0]) === "" || GROUP_WORDS_W.has(bareOf(l[0])));
   assert.equal(starts, undefined, `at ${width} wide a line of the count line starts inside a group: ${text}`);
   const ends = lines.find((l) => /^\d+$/.test(bareOf(l[l.length - 1])));
