@@ -46,17 +46,16 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
-# --step and --lint run in the claude-settings commit the job pins, as CI does: the one 40-hex sha of its
-# `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins), checked out as a
-# detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names;
-# the sha is fetched from that clone's origin when it lacks it. Each step it runs (a named step, or a --lint lint or
-# install step) gets CLAUDE_SETTINGS_DIR set to that tree (the step's own env: wins), and a remote ste-lint, code-check
-# or zizmor action runs from it only (ste-lint as its bin/ste-changed). With no pin, a step
-# runs as before. Two pinned refs, a ref that is no sha, a sha that cannot be fetched or a failed `npm ci` makes each
-# named step (under --lint, each lint step that is not skipped) one `unknown` line naming the reason, exit 2, and none
-# runs. The worktree is removed on every exit. Under --lint --plan a sha the clone lacks is no problem: the pin is read,
-# nothing is fetched and no worktree is made, so the `would run` lines stay (merge/merge.py lint_steps parses them);
-# two refs or a ref that is no sha is still unknown, exit 2.
+# --step and --lint run claude-settings at the commits the job pins, as CI does (under --lint, each lint step that is not
+# skipped; --lint --plan reads the pins and needs no clone, so a sha the clone lacks is no problem there): the 40-hex shas of its
+# `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins). Each pinned sha is a
+# detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names,
+# fetched from that clone's origin when it lacks the sha. A remote ste-lint, code-check or zizmor step runs from the
+# worktree of its own pin only (ste-lint as its bin/ste-changed), as CI downloads each pinned sha separately.
+# CLAUDE_SETTINGS_DIR is set to the tree only when the job has exactly one distinct pin (the step's own env: wins).
+# With two or more pins, a plain run step is one `unknown` line naming the shas (merge/merge.py lint_steps parses the `would run` lines). A ref that is no sha, a sha that cannot
+# be fetched or a failed `npm ci` makes each step that needs that tree one `unknown` line; the other steps run. With no
+# pin, a step runs as before. Each worktree is removed on every exit.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -66,11 +65,12 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --step or --lint with a pin: one worktree (a temp folder named by this run's pid, removed after, on a SIGTERM too), a git fetch
-# only when the sha is absent, an `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json, and one
-# `git worktree list` of the clone to remove the trees of dead runs (a SIGKILL leaves one; only a tree whose pid is not
-# alive goes). --plan with a pin makes no fetch and no worktree (under --step it reads the clone for the sha; under
-# --lint it reads no clone). A --lint run pays this once, only when a lint step is not skipped. Under
+# --step or --lint with pins: one worktree per distinct pinned sha a step that runs needs (a temp folder named by this run's pid,
+# removed after, on a SIGTERM too), a git fetch only when the sha is absent, an `npm ci --ignore-scripts` only when the
+# pinned tree has a package-lock.json, and one `git worktree list` of the clone per worktree made, to remove the trees
+# of dead runs (a SIGKILL leaves one; only a tree whose pid is not alive goes).
+# --plan with a pin makes no fetch and no worktree (under --step it reads the clone for the sha; under --lint it reads no
+# clone). A --lint run pays this only when a lint step is not skipped. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
@@ -80,7 +80,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import COMMIT_SHA, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import COMMIT_SHA, SETTINGS_ACTION, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -396,6 +396,20 @@ def pin_of(text):
     return (refs[0] if refs else None), None
 
 
+def own_pin(step):
+    """(sha, why) of the commit a remote claude-settings action step (code-check, zizmor, ste-lint) pins itself, as CI downloads
+    each pinned sha separately; (None, None) when the step is no such action, so it takes the job's pin. A ref that is no
+    commit sha gives (None, why): that step is unknown."""
+    if LOCAL_ACTION.fullmatch(uses(step)) or not known_action(step):
+        return None, None
+    m = SETTINGS_ACTION.search(uses(step))
+    if not m:
+        return None, None
+    if not COMMIT_SHA.fullmatch(m.group(2)):
+        return None, "the step pins claude-settings at %s, which is no 40-hex commit sha" % m.group(2)
+    return m.group(2), None
+
+
 STALE_TREE = re.compile(r"[/\\]ci-job-pin-(\d+)-[^/\\]+[/\\]tree$")  # a pinned tree's path: its temp folder names the pid that owns it
 LIVE = []  # the bin/verdict process of the step now running: a SIGTERM ends it, not the step it started
 
@@ -553,40 +567,54 @@ def run(argv, stack):
         for w in absent:
             print("%-15s --step %s: no step of job %r has this name" % ("unknown", w, job))
         return 2
-    base, no_base, probe = opts["--base"], False, False
+    base, no_base = opts["--base"], False
     if lint and not base:
         # A no-base lint run once read as a pass while CI's pull-request steps failed: default to CI's base.
         if git("rev-parse", "--verify", "-q", "origin/main^{commit}", cwd=top):
             base = "origin/main"
             print("base: origin/main (default; pass --base to change)")
         else:
-            probe = True  # the pull-request steps to name are read once the pinned tree is known
+            idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
+            unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(step_blocks(block), 1)
+                      if is_lint(st) and plan(st, False, idle, top)[0] == "skipped"]
+            if unread:
+                print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
+                      "steps are skipped: %s" % ", ".join(unread))
+                no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
-    # --step and --lint run in the claude-settings commit the job pins, as CI does; None runs as before. A --lint run needs
-    # it only when a lint step will not be skipped, and --lint --plan reads the pin but needs no clone (no fetch, no tree).
-    pinned = None
-    idle = {"base": "", "github.base_ref": "", "github.event.pull_request.head.sha": ""}
-    asked = wanted or [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(steps, 1)
-                       if lint and is_lint(st) and plan(st, bool(base), values, top)[0] != "skipped"]
+    # Each step that runs gets the claude-settings tree it pins, as CI does: a named step (--step), or under --lint each lint
+    # step that is not skipped. --lint --plan reads the pins but needs no clone (no fetch, no tree).
+    trees, need, blocked = {}, {}, {}  # sha -> its tree; step index -> (sha, why); step index -> why it is unknown
+    plain_sha = None  # the one sha the job pins, when it pins exactly one: a plain run step takes it
+    asked = [n for n, st in enumerate(steps) if (names[n] in wanted if wanted else
+                                                  lint and is_lint(st) and plan(st, bool(base), values, top)[0] != "skipped")]
     if asked:
-        sha, why = pin_of(block)  # the pins of this job's steps only
-        if sha and dry:
-            why = clone_problem(sha, settings_clone(), False) if wanted else None  # --plan makes no fetch and no worktree
-        elif sha:
-            end_on_sigterm(stack)  # before the tree exists, so a signal while it is made still removes it
-            pinned, why = stack.enter_context(pinned_tree(sha, settings_clone()))
-        if why:  # no tree to run in: a step run against other code would be a guess
-            for w in dict.fromkeys(asked):
-                print("%-15s %s: %s" % ("unknown", w, why))
+        plain_sha, plain_why = pin_of(block)  # the pins of this job's steps only
+        for n in asked:
+            sha, why = own_pin(steps[n])
+            need[n] = (sha, why) if sha or why else (plain_sha, plain_why)
+        clone = settings_clone() if wanted or not dry else None
+        for sha in dict.fromkeys(sha for sha, _ in need.values() if sha):  # one tree per distinct sha a step needs
+            if dry:
+                tree, why = None, clone_problem(sha, clone, False) if wanted else None  # --plan makes no fetch and no worktree
+            else:
+                if not trees:
+                    end_on_sigterm(stack)  # before the first tree exists, so a signal while it is made still removes it
+                tree, why = stack.enter_context(pinned_tree(sha, clone))
+            if tree:
+                trees[sha] = tree
+            for n, (own, _) in need.items():
+                if own == sha and why:  # no tree to run in: a step run against other code would be a guess
+                    blocked[n] = why
+        for n, (_, why) in need.items():
+            if why:
+                blocked[n] = why
+        if all(n in blocked for n in need):
+            for n in need:
+                print("%-15s %s: %s" % ("unknown", names[n], blocked[n]))
             return 2
-    if probe:
-        unread = [step_key(st, "name") or ("step %d" % n) for n, st in enumerate(steps, 1)
-                  if is_lint(st) and plan(st, False, idle, top, pinned)[0] == "skipped"]
-        if unread:
-            print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
-                  "steps are skipped: %s" % ", ".join(unread))
-            no_base = True
+    own_tree = {n: trees.get(sha) for n, (sha, _) in need.items()}  # this step's own tree: its own sha, else the job's one
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
@@ -594,13 +622,18 @@ def run(argv, stack):
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
-    planned = [plan(st, bool(base), values, top, pinned) if k else None for st, k in zip(steps, kind)]
-    runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
+    planned = [plan(st, bool(base), values, top, own_tree.get(i)) if k else None for i, (st, k) in enumerate(zip(steps, kind))]
+    runs = [k == "lint" and p[0] == "run" and i not in blocked for i, (k, p) in enumerate(zip(kind, planned))]  # an install runs only if a lint step after it does
     ran, blocker = 0, None  # blocker: the install step that did not finish
     for n, step in enumerate(steps, 1):
         name = names[n - 1]
         if wanted and name not in wanted:
             continue
+        if n - 1 in blocked:
+            tally["unknown"] += 1
+            print("%-15s %s: %s" % ("unknown", name, blocked[n - 1]))
+            continue
+        pinned = own_tree.get(n - 1)
         if lint and not kind[n - 1]:
             if LOCAL_ACTION.fullmatch(uses(step)):
                 tally["unknown"] += 1
@@ -646,7 +679,7 @@ def run(argv, stack):
                                  stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                      **({"CLAUDE_SETTINGS_DIR": pinned} if pinned else {}),
+                                      **({"CLAUDE_SETTINGS_DIR": trees[plain_sha]} if plain_sha in trees else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 LIVE[:] = [proc]
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output

@@ -146,10 +146,38 @@ def step_with(step):
     return step_map(step, "with")
 
 
+def line_without_comment(line):
+    """A workflow line without its comment. A comment is a `#` at the start or after a space or tab, outside quotes. A quote
+    opens only at the start of a token (the line start, or after a space, `{`, `[`, `,`, `:` or `-`) and only when its closer
+    is on the line, so a `#` inside '...' or "..." is text, and a lone `'` in `don't` or `it's` opens nothing."""
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c in "'\"" and (i == 0 or line[i - 1] in " \t{[,:-"):
+            j = i + 1
+            while j < len(line):
+                if c == '"' and line[j] == "\\":
+                    j += 2
+                    continue
+                if line[j] == c:
+                    if c == "'" and line[j + 1:j + 2] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            if j < len(line):
+                i = j + 1
+                continue
+        elif c == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+        i += 1
+    return line
+
+
 def settings_pins(text):
     """[(action, ref, line)] for each `<owner>/claude-settings/actions/<name>@<ref>` in a workflow, in file order, `line` being
     its 1-based line. It reads every line, so a pin in a flow-style step (`- {uses: ...}`) or a steps list at another indent is
-    found; a line loses its comment (a `#` at the start or after a space, so `# v1` and `# - uses:` are no pin) and a step's
+    found; a line loses its comment (a `#` at the start or after a space, outside quotes, so `# v1` and `# - uses:` are no pin) and a step's
     `run:` text is skipped, since it is a script and not a `uses:`. A pin-like token the parser cannot place as a step key is
     still reported, never dropped. The ref is the characters after `@` up to a space, quote, comma or brace: a caller that
     needs a commit checks it against COMMIT_SHA."""
@@ -168,6 +196,6 @@ def settings_pins(text):
     found = []
     for n, ln in enumerate(lines):
         if n not in skip:
-            for m in SETTINGS_ACTION.finditer(re.sub(r"(^|\s)#.*", "", ln)):
+            for m in SETTINGS_ACTION.finditer(line_without_comment(ln)):
                 found.append((m.group(1), m.group(2), n + 1))
     return found
