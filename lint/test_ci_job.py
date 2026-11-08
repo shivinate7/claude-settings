@@ -1423,9 +1423,9 @@ CODE_CHECK_A = "import pathlib\npathlib.Path('code-check-A.txt').write_text('A\\
 CODE_CHECK_B = "import pathlib\npathlib.Path('code-check-B.txt').write_text('B\\n')\n"  # pin B's code_check.py
 CODE_CHECK_FAIL_A = "import pathlib, sys\npathlib.Path('code-check-A.txt').write_text('A\\n')\nsys.exit(1)\n"  # pin A's, failing
 RUN_SH_SEEN_B = '#!/bin/sh\necho B > zizmor-B.txt\nprintf "%s" "$CLAUDE_SETTINGS_DIR" > seen-B.txt\n'  # pin B's run.sh: reports its settings dir
-LOCAL_CODE_CHECK = ("import pathlib, sys\n"
-                    "pathlib.Path('local-code-check.txt').write_text('local\\n')\n"
-                    "sys.exit(%d)\n")  # the repo under test's own code_check.py: its side file shows the run, its exit sets the verdict
+LOCAL_CODE_CHECK = ("import os, pathlib, sys\n"
+                    "pathlib.Path('local-code-check.txt').write_text(os.environ.get('CLAUDE_SETTINGS_DIR', '(unset)') + '\\n')\n"
+                    "sys.exit(%d)\n")  # the repo under test's own code_check.py: its side file records the settings dir it got
 READ_PINNED = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = pinned'
 READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
@@ -1494,7 +1494,8 @@ class PinnedSettings(Job):
     (marker `pinned`), and the clone's HEAD is commit B (marker `local`). CLAUDE_SETTINGS_DIR is set by each run to a decoy
     that holds `local`, so a step that is not given the pinned tree reads what main reads. `--lint` takes the same pin for
     its lint steps; its plan reads no pin, so it lists the steps and fetches nothing. A local uses: step (`$/actions/...`,
-    `./actions/...`) takes no pin: it runs the repo under test's own file, so two pins do not make it unknown."""
+    `./actions/...`) takes no pin: its code check and zizmor run the repo under test's own file, and its ste lint runs
+    ci-job's own bin/ste-changed, so two pins do not make it unknown."""
 
     def setUp(self):
         super().setUp()
@@ -2243,6 +2244,61 @@ class PinnedSettings(Job):
         self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
                         "precondition: pin A's code check did not run:\n" + out)
         self.assert_local_code_check_passes(lines, rc, out)
+
+    def test_lint_a_local_code_check_still_runs_and_prints_when_its_only_remote_pin_is_blocked(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        local = self.local_code_check("$/actions/code-check", 0)
+        missing = os.path.join(self.fixture, "no-such-clone")  # the one pin cannot be made, so its step is blocked
+        rc, lines, out = self.run_pinned(step("code check", uses=PIN_USES % self.sha_a), local,
+                                         args=("--lint", "--base", "origin/main"), clone=missing)
+        self.assertEqual(by_step(lines).get("code check"), "unknown", "precondition: the missing clone must block the pin:\n" + out)
+        self.assertEqual(by_step(lines).get("local code check"), "PASS",
+                         "the local code check printed no verdict, so it never ran beside a blocked remote step:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "local-code-check.txt")),
+                        "the repo's own code_check.py did not run:\n" + out)
+        self.assert_names_own_code_check(line_of(lines, "local code check") or "")
+        self.assertEqual(rc, 2, "one step is unknown and none failed, so --lint must exit 2:\n" + out)
+
+    def test_lint_a_local_code_check_never_gets_a_pinned_settings_dir_beside_a_pinned_remote_step(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        local = self.local_code_check("$/actions/code-check", 0)
+        rc, lines, out = self.run_pinned(step("code check", uses=PIN_USES % self.sha_a), local,
+                                         args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the pinned remote step did not run, so no pinned tree existed:\n" + out)
+        self.assertEqual(by_step(lines).get("local code check"), "PASS", "the local code check did not PASS:\n" + out)
+        self.assertEqual(self.root_file("local-code-check.txt"), self.decoy,
+                         "the local code check got CLAUDE_SETTINGS_DIR set to a pinned tree, not the caller's value:\n" + out)
+
+    def test_step_a_local_code_check_alone_keeps_the_callers_settings_dir_beside_one_pin(self):  # control: no tree under --step
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        local = self.local_code_check("./actions/code-check", 0)
+        rc, lines, out = self.run_pinned(step("code check", uses=PIN_USES % self.sha_a), local,
+                                         args=("--base", "origin/main", "--step", "local code check"))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "code-check-A.txt")),
+                         "precondition: the unnamed pinned step ran:\n" + out)
+        self.assertEqual(by_step(lines).get("local code check"), "PASS", "the local code check did not PASS:\n" + out)
+        self.assertEqual(self.root_file("local-code-check.txt"), self.decoy,
+                         "--step on the local step alone changed CLAUDE_SETTINGS_DIR from the caller's value:\n" + out)
+
+    def quoted_local_code_check_is_the_local_action(self, uses):
+        """A step whose `uses:` is quoted is the repo's own code_check.py: it runs there, and its failure is a FAIL."""
+        self.settings()
+        local = self.local_code_check(uses, 1)
+        rc, lines, out = self.run_pinned(local, args=("--lint", "--base", "origin/main"))
+        line = line_of(lines, "local code check") or ""
+        self.assertEqual(by_step(lines).get("local code check"), "FAIL",
+                         "a quoted local uses: is not read as the local action, so its code check did not run:\n" + line + "\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "local-code-check.txt")),
+                        "the repo's own code_check.py did not run:\n" + out)
+        self.assert_names_own_code_check(line)
+        self.assertEqual(rc, 1, "a FAIL must exit 1:\n" + out)
+
+    def test_lint_a_single_quoted_local_uses_runs_the_repos_own_code_check_py(self):
+        self.quoted_local_code_check_is_the_local_action("'./actions/code-check'")
+
+    def test_lint_a_double_quoted_local_uses_runs_the_repos_own_code_check_py(self):
+        self.quoted_local_code_check_is_the_local_action('"$/actions/code-check"')
 
 
 if __name__ == "__main__":
