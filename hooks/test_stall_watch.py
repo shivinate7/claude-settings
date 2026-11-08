@@ -1128,16 +1128,39 @@ def unknown_cd_leaves_the_log_unresolved():
         "{ cd /x; make; } > log",
         "true || cd /x; make > log",
         "if true; then cd /x; fi; make > log",
+        "cd /x; cd -; make > log",
+        "popd; make > log",
     )])
 
 
 @case
 def sure_cd_resolves_the_log():
-    """27b. a cd that surely runs in the main shell (cd or pushd, joined by &&) joins the log to its target"""
+    """27b. a cd that surely runs in the main shell (cd or pushd, joined by &&) joins the log to its target, a relative target included"""
     return read_rows_problems([
         ("cd /x && make > log", ["/x/log"], []),
         ("pushd /x && make > log", ["/x/log"], []),
+        ("cd a && cd b && make > log", ["a/b/log"], []),
+        ("cd .. && make > log", ["../log"], []),
+        ("cd sub && make > log", ["sub/log"], []),
     ])
+
+
+@case
+def subshell_and_background_list_leave_the_main_shell_alone():
+    """27f. a cd in ( ) or in a list that ends in & does not move the main shell, so a log after it is read where the shell stands"""
+    problems = read_rows_problems([
+        ("( cd /x ); make > log", ["log"], []),
+        ("cd /x && make & make2 > log2", ["log2"], []),
+    ])
+    # The list before the & runs in a background subshell, so its s.log is /x/s.log (or unresolved, never bare);
+    # the main shell after the & never left the start directory, so r.txt is bare.
+    sw = load_module()
+    paths, unresolved = read_with(sw, "cd /x && ./srv > s.log 2>&1 & sleep 2; curl u > r.txt")
+    if "/x/r.txt" in paths or "r.txt" not in paths:
+        problems.append(f"the log after the & is not bare: paths {paths}, want r.txt")
+    if "s.log" in paths or not ("/x/s.log" in paths or "s.log" in unresolved):
+        problems.append(f"the log of the backgrounded list is neither /x/s.log nor unresolved: paths {paths}, unresolved {unresolved}")
+    return problems
 
 
 @case
