@@ -853,7 +853,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
         return ""
     if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:
         return target
-    status, home, _ = agent_worktree_home(payload, cwd)
+    status, home, _ = agent_worktree_home(payload, drive_form_cwd(cwd))
     if status in ("none", "unknown") or _own_red_run(payload, primary, tree):
         return ""
     own = path_is_inside(tree, home) is True and path_is_inside(home, tree) is True
