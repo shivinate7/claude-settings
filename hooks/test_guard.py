@@ -28361,6 +28361,64 @@ LOG_FAMILY[RBB_OVERRIDE_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((RBB_OVERRIDE_LABEL, reviewer_brief_override_check),)
 
 
+# --------------------------------------------------------------------------- the refusal names the line it refused
+#
+# Debt note verdict-format-run-on (docs/debts/notes.md): a refused reviewer brief names no line, so its author guesses
+# which line to reword. The refusal names the refused line by its number in the brief, never by its text: brief lines
+# carry `haiku`, `guard.py` and paths, which the reason-hygiene check forbids in a reason. Each line below is quoted from
+# its source, and sits at a line number other than 1, so the number is read, not assumed.
+
+
+def rbb_line_refuse(name, prompt, number, extra=()):
+    """A reviewer brief the guard refuses. Its refusal names the refused line by `number`, and each fragment in `extra`."""
+    add(name, "deny", RBB, tool="Agent", prompt=prompt, subagent_type="reviewer", model="haiku",
+        carries=("line %d" % number,) + tuple(extra))
+
+
+# Source: the incident behind decision reviewer-brief-blind, a prior verdict pasted into a reviewer's brief.
+rbb_line_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict: FAIL line at line 3, the refusal names line 3",
+                "Check the floor fix.\nRead the diff first.\nPrior verdict: FAIL\nFiles: hooks/guard.py.", 3)
+# Source: debt note verdict-format-run-on (docs/debts/notes.md). A false alarm the guard still refuses, so the refusal
+# names its line. When that note is fixed, re-point this case to another false-alarm line the guard refuses today.
+rbb_line_refuse("reviewer-brief-blind: refused: a bold format line, End your report with a verdict, at line 2, the refusal names line 2",
+                "Check the floor fix.\n**End your report with a verdict: PASS, FAIL or PARTIAL.**\nFiles: hooks/guard.py.", 2)
+# The report shape has no verdict line. Its refusal names the line of the first label line, `Done: the floor fix is in.`,
+# a builder's report pasted into the brief, as the decision names it.
+rbb_line_refuse("reviewer-brief-blind: refused: a report with Done and Deviations lines, the refusal names the first label line at line 3",
+                "Check the floor fix.\nNo edits.\nDone: the floor fix is in.\nDeviations: none.\nFiles: hooks/guard.py.", 3)
+
+
+# A refused line over 200 characters is named by its number, and its text is not echoed, so a 5 KB line cannot make the
+# refusal long. The checker judges decide()'s reason, as the cases above do.
+RBB_CAP_LINE = "Prior verdict: FAIL " + "x " * 2500
+RBB_CAP_LABEL = ("reviewer-brief-blind: a refused 5 KB line is named by its number at line 2, its text is not echoed, "
+                 "and the refusal stays under 600 characters")
+
+
+def rbb_line_cap_check():
+    """The refusal of a 5 KB verdict line at line 2 names line 2, prints none of the line's text, and is under 600
+    characters. A refusal that echoes the line fails the text and the length. A refusal that names no line fails the
+    number."""
+    got, reason = decide({
+        "raw": None, "tool": "Agent", "cwd": None, "session": None, "env_path": None,
+        "tool_input": {"prompt": "Check the floor fix.\n" + RBB_CAP_LINE + "\nFiles: hooks/guard.py.",
+                       "subagent_type": "reviewer", "model": "haiku"}})
+    if got != "deny":
+        return False, "expected deny, got %s: %s" % (got, reason[:90])
+    if "line 2" not in reason:
+        return False, "the refusal does not name line 2, the refused line: %s" % reason[:90]
+    if "Prior verdict: FAIL" in reason or "x x x" in reason:
+        return False, "the refusal prints text from the refused line, which it must not: %s" % reason[:90]
+    if len(reason) >= 600:
+        return False, "the refusal is %d characters, 600 or more" % len(reason)
+    return True, "names line 2, prints none of the 5 KB line, and the refusal is %d characters" % len(reason)
+
+
+FIXTURELESS_CHECKS.add(rbb_line_cap_check)  # it builds no fixture: decide reads only its own payload
+LOG_FAMILY[RBB_CAP_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((RBB_CAP_LABEL, rbb_line_cap_check),)
+
+
 # --------------------------------------------------------------------------- the simulator boot rules
 FAMILY = "simulator"
 #
