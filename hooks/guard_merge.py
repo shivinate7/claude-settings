@@ -119,7 +119,7 @@ def pr_call_of(segment: str, verb: str, value_flags):
     selector, repo = "", ""
     args = rest[2:]
     if "-h" in args or "--help" in args:
-        return None
+        return None   # help merges nothing
     index = 0
     while index < len(args):
         arg = args[index]
