@@ -101,7 +101,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
   and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
 - `answers`: `ArtifactData list answers` of the repo's waiting page, every page. Copy each `answers/<id>` row with
   only `n`, `choice` and `at`. Skip `answers/park.<id>` rows. The owner-pick claims row compares each step's
-  "the owner picked a" or "item N a" claim (markup or punctuation around the letter allowed; an `item` claim ends at the end of the text or before `. , ; ) ] ? * ``) with these rows and with each item's `lastAnswer`. A live file with no
+  "the owner picked a", "the owner picked a on item N" or "item N a" claim with these rows and with each item's
+  `lastAnswer`. Markup or punctuation around the letter is allowed. An `item` claim with the letter a or i must end at
+  the end of the text, at a line break, or before a backtick or one of these marks: . , ; ) ] ? * ( : A live file with no
   `answers` list, or no `items` list, reads that row unknown and still renders Live work. Cost: the row reads only
   the live file the build already takes; 0 process starts, 0 files written, no timer or watcher. The publisher adds
   one `answers` list read to its publish.

@@ -79,17 +79,19 @@ when the live file is missing or unreadable, its readAt is bad (the stale-step r
 items list, or it holds an item row of the wrong shape. A skipped session row does not blank this row.
 
 The upkeep list also names each open step whose note, why or ask holds an owner-pick claim that the page's recorded
-answers do not match (step pick-claims-match-page). A claim is `[the] owner picked [option] <letter>` or
-`item <n> <letter>` (`item #<n>` too), any case, the letter one whole word, with markup or punctuation allowed around it
-(`**b**`, `(b)`, `: b`, backticks). An `item` claim ends at the end of the text or before `. , ; ) ] ? * ``, after
-optional whitespace, so "item 9 a decision" is not one; "Owner picked none of these" and "items 9 and 10 a" are not
-claims either. A
-claim naming item n matches the live file's "answers" row {"n", "choice"?, "at"?} with that n, or that item's
-`lastAnswer` {"choice"?, "note"?, "at"?} on its "items" row, when its choice (a letter, or a list of letters) holds the
-letter. A claim with no item number matches nothing. An answers row with no integer n (answers/park.<id>) is skipped.
-Each entry reads `<step id> (claim "<claim>")`, its whitespace collapsed to one space. The row reads one unknown entry, never an empty list, when
-the live file is missing or unreadable, its readAt is bad, it has no answers list or no items list, or an answers row
-or a lastAnswer has the wrong shape. A skipped session row does not blank it. Cost: it reads only the live file the
+answers do not match (step pick-claims-match-page). A claim is `[the] owner picked [option] [<n>] <letter> [on [page]
+item <n>]` or `item <n> [option] <letter>` (`item #<n>` too), any case, the letter one whole word, with markup or
+punctuation allowed around it (`**b**`, `(b)`, `: b`, `_a_`, backticks, quotes). An `item` claim whose letter is `a` or
+`i` ends at the end of the text, a line break, or before a backtick or one of the marks . , ; ) ] ? * ( : after whitespace,
+so "item 9 a decision" is not one; another letter needs only a non-letter after it. "Owner picked none of these" and
+"items 9 and 10 a" are not claims either. A claim names item n by `item <n>`, by a number before the letter, or by
+`on [page] item <n>` after it; it matches the live file's "answers" row {"n", "choice"?, "at"?} with that n, or that
+item's `lastAnswer` {"choice"?, "note"?, "at"?} on its "items" row, when its choice (a letter, or a list of letters)
+holds the letter. A claim naming no item matches nothing. An answers row that is not an object, or whose n is not an
+integer (answers/park.<id>), is skipped. Each entry reads `<step id> (claim "<claim>")`, quoting the whole claim with
+its whitespace collapsed to one space. The row reads one unknown entry, never an empty list, when the live file is
+missing or unreadable, its readAt is bad, it has no answers list or no items list, or an answers row with an integer
+n, or a lastAnswer, has the wrong shape. A skipped session row does not blank it. Cost: it reads only the live file the
 build already takes; 0 process starts, 0 files written, no timer or watcher.
 
 The upkeep list also names each doing or active step whose note holds a stale dated claim, so triage asks
@@ -613,7 +615,8 @@ def live_work(path, steps, slug=None):
     answers/park.<id>, is skipped) and an item row's optional `lastAnswer` `{"choice"?, "note"?, "at"?}` feed the
     owner-pick claims row (pick_claims). A `choice` is a letter or a list of letters. `answerPicks` holds {n: sorted
     lowercase letters} from both, or None with `answersWhy` saying why they read unknown: the readAt reasons, no answers
-    list, no items list, or an answers row or lastAnswer of the wrong shape. Cost: it reads only the file already
+    list, no items list, or an answers row with an integer n, or a lastAnswer, of the wrong shape (an answers row that is
+    not an object, or whose n is not an integer, is skipped, never unknown). Cost: it reads only the file already
     parsed; 0 process starts, 0 files written, no timer or watcher.
     `laneTags` holds the cs-topic: and cs-build: tags of the live sessions, for lane_live.
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
@@ -1449,21 +1452,28 @@ def unfiled(steps, work):
     return out
 
 
-# An owner-pick claim: `[the] owner picked [option] <letter>` or `item [#]<n> <letter>`, any case. The letter may sit behind
-# markup or punctuation (`**b**`, `(b)`, `: b`, backticks). No word character may touch either end, so "homeowner picked a",
-# "subitem 9 a", "items 9 a" and "item 9 ab" are not claims. An item claim must also end at the end of the text, or before
-# `. , ; ) ] ? * ` ` (after optional whitespace), so the article in "item 9 a decision" is no pick.
-_SEP = r"[\s:*`(\[]+"
-_CLOSE = r"[*`)\]]*"
+# An owner-pick claim: `[the] owner picked [option] [<n>] <letter> [on [page] item <n>]` or `item [#]<n> [option] <letter>`,
+# any case. The letter may sit behind markup or punctuation (`**b**`, `(b)`, `: b`, `_a_`, backticks, quotes). No letter or
+# digit may touch either end, so "homeowner picked a", "subitem 9 a", "items 9 a" and "item 9 ab" are not claims. An item
+# claim whose letter is `a` or `i` must also end (ITEM_END): at the end of the text, a line break, or before
+# a backtick or one of `. , ; ) ] ? * ( :` after optional whitespace, so the article in "item 9 a decision" and the word in "item 9 I
+# decide" are no pick. Any other letter needs only a non-letter after it.
+_SEP = r"[\s:*_`\"(\[]+"
+_CLOSE = r"[*_`\")\]]*"
+_OPTION = r"(?:(?i:option)" + _SEP + r")?"
 PICK_CLAIM = re.compile(
-    r"(?<![\w-])(?:(?i:(?:the\s+)?owner\s+picked)" + _SEP + r"(?:(?i:option)" + _SEP + r")?(?P<pick>[A-Za-z])" + _CLOSE +
-    r"(?!\w)|(?i:item)\s+#?(?P<n>\d+)" + _SEP + r"(?P<letter>[A-Za-z])" + _CLOSE + r"(?=\s*(?:\Z|[.,;)\]?*`])))")
+    r"(?<![^\W_]|-)(?:(?i:(?:the\s+)?owner\s+picked)" + _SEP + _OPTION + r"(?:#?(?P<on>\d+)" + _SEP + r")?(?P<pick>[A-Za-z])" +
+    _CLOSE + r"(?:\s+(?i:on)\s+(?:(?i:page)\s+)?(?i:item)\s+#?(?P<on2>\d+))?(?![^\W_])"
+    r"|(?i:item)\s+#?(?P<n>\d+)" + _SEP + _OPTION + r"(?P<letter>[A-Za-z])" + _CLOSE + r"(?![^\W_]))")
+ITEM_END = re.compile(r"\s*(?:\Z|[.,;)\]?*`(:]|[\r\n])")
 
 
 def pick_claims(open_, work):
-    """Entries `<step> (claim "<text>")` (whitespace collapsed to one space) for each owner-pick claim in an open step's note, why or ask that the
-    page's recorded answers do not match, or one unknown entry. A claim naming item n matches when the answers row with n,
-    or that item's lastAnswer, holds its letter. A claim with no item number matches nothing. Reads the live file only."""
+    """Entries `<step> (claim "<text>")` (whitespace collapsed to one space) for each owner-pick claim in an open step's
+    note, why or ask that the page's recorded answers do not match, or one unknown entry. A claim names item n by its
+    `item <n>`, or by a number before the letter or an `on [page] item <n>` after it in the owner form; it matches when the
+    answers row with n, or that item's lastAnswer, holds its letter. A claim naming no item matches nothing. Reads the
+    live file only."""
     work = work or {"read": "unknown (no --live file)"}
     if "answersWhy" not in work:
         return [work["read"]]
@@ -1474,8 +1484,13 @@ def pick_claims(open_, work):
         seen = set()
         for key in ("note", "why", "ask"):
             text = d.get(key)
-            for m in PICK_CLAIM.finditer(text if isinstance(text, str) else ""):
-                if m.group("n") is not None and m.group("letter").lower() in work["answerPicks"].get(int(m.group("n")), ()):
+            text = text if isinstance(text, str) else ""
+            for m in PICK_CLAIM.finditer(text):
+                if m.group("letter") is not None and m.group("letter") in "aAiI" and not ITEM_END.match(text, m.end()):
+                    continue
+                n = m.group("n") or m.group("on") or m.group("on2")
+                letter = m.group("letter") or m.group("pick")
+                if n is not None and letter.lower() in work["answerPicks"].get(int(n), ()):
                     continue
                 claim = " ".join(m.group(0).split())  # an entry is one line
                 if claim not in seen:
