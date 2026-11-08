@@ -413,7 +413,7 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_zone.py", text,
                        listed=["t_utc = datetime.now(timezone.utc)", "t_tz = datetime.now(tz)"])
 
-    def test_utcnow_is_listed_beside_a_fixed_epoch(self):
+    def test_utcnow_and_a_local_read_of_an_epoch_are_listed(self):
         text = src(
             "import datetime",
             "import time",
@@ -427,10 +427,10 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_utc.py", text)
         calendar_judge(self, "tests/test_utc.py", text,
-                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()"],
-                       clean=["t_fixed = time.localtime(EPOCH)"])
+                       listed=["t_utc = datetime.utcnow()", "t_utc_dt = datetime.datetime.utcnow()",
+                               "t_fixed = time.localtime(EPOCH)"])
 
-    def test_epoch_and_given_time_forms_are_not_listed(self):
+    def test_local_read_of_an_epoch_is_listed_and_strftime_with_a_time_is_not(self):
         text = src(
             "import time",
             "EPOCH = 0",
@@ -442,8 +442,8 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_fixed.py", text)
         calendar_judge(self, "tests/test_fixed.py", text,
-                       listed=["t_now = time.localtime()"],
-                       clean=["t_fixed = time.localtime(EPOCH)", "t_given = time.strftime('%Y', stamp)"])
+                       listed=["t_fixed = time.localtime(EPOCH)", "t_now = time.localtime()"],
+                       clean=["t_given = time.strftime('%Y', stamp)"])
 
     def test_summary_and_counts_include_calendar(self):
         text = src(
@@ -469,11 +469,11 @@ class PythonCalendarTest(FinderCase):
             "EPOCH = 0",
             "",
             "def test_none(stamp):",
-            "    t_fixed = time.localtime(EPOCH)",
+            "    t_fixed = time.gmtime(EPOCH)",
             "    time.sleep(1)",
         )
         self.put("tests/test_none.py", text)
-        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.localtime(EPOCH)"])
+        calendar_judge(self, "tests/test_none.py", text, clean=["t_fixed = time.gmtime(EPOCH)"])
         self.assertIn("calendar 0", self.last_line(), "calendar not listed in the summary")
 
     def test_hash_opener_in_a_string_does_not_hide_a_form(self):
@@ -522,7 +522,7 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_block.py", text,
                        listed=["t_after = datetime.now()"], clean=["t_block = time.localtime()"])
 
-    def test_no_argument_time_readers_are_listed_and_given_time_is_not(self):
+    def test_ctime_and_no_argument_readers_are_listed_and_gmtime_asctime_are_not(self):
         text = src(
             "import time",
             "EPOCH = 0",
@@ -537,9 +537,9 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_readers.py", text)
         calendar_judge(self, "tests/test_readers.py", text,
-                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()"],
-                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_ct_fixed = time.ctime(EPOCH)",
-                              "t_as_fixed = time.asctime(stamp)"])
+                       listed=["t_gm_now = time.gmtime()", "t_ct_now = time.ctime()", "t_as_now = time.asctime()",
+                               "t_ct_fixed = time.ctime(EPOCH)"],
+                       clean=["t_gm_fixed = time.gmtime(EPOCH)", "t_as_fixed = time.asctime(stamp)"])
 
     def test_zone_attributes_are_listed(self):
         text = src(
@@ -891,6 +891,45 @@ class PythonCalendarTest(FinderCase):
         )
         self.put("tests/test_bare_zone.py", text)
         calendar_judge(self, "tests/test_bare_zone.py", text, listed=["assert timezone == 0"])
+
+    def test_fromtimestamp_without_a_zone_is_listed_and_a_zone_argument_is_not(self):
+        text = src(
+            "import time",
+            "from datetime import datetime, timezone",
+            "",
+            "EPOCH = 0",
+            "",
+            "def test_fromtimestamp(stamp):",
+            "    t_ft_fixed = datetime.fromtimestamp(EPOCH)",
+            "    t_ft_stamp = datetime.fromtimestamp(stamp)",
+            "    t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
+            "    t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
+            "    t_ft_utc = datetime.utcfromtimestamp(stamp)",
+            "    t_gm = time.gmtime(EPOCH)",
+            "    # t_comment = datetime.fromtimestamp(EPOCH)",
+            "    NOTE = 't_note = datetime.fromtimestamp(EPOCH)'",
+        )
+        self.put("tests/test_fromtimestamp.py", text)
+        calendar_judge(self, "tests/test_fromtimestamp.py", text,
+                       listed=["t_ft_fixed = datetime.fromtimestamp(EPOCH)",
+                               "t_ft_stamp = datetime.fromtimestamp(stamp)"],
+                       clean=["t_ft_utc_kw = datetime.fromtimestamp(stamp, tz=timezone.utc)",
+                              "t_ft_utc_pos = datetime.fromtimestamp(stamp, timezone.utc)",
+                              "t_ft_utc = datetime.utcfromtimestamp(stamp)", "t_gm = time.gmtime(EPOCH)",
+                              "# t_comment = datetime.fromtimestamp(EPOCH)", "NOTE = 't_note = datetime"])
+
+    def test_astimezone_without_a_zone_is_listed_and_a_zone_argument_is_not(self):
+        text = src(
+            "from datetime import timezone",
+            "",
+            "def test_astimezone(fixed_dt):",
+            "    t_as_local = fixed_dt.astimezone()",
+            "    t_as_utc = fixed_dt.astimezone(timezone.utc)",
+        )
+        self.put("tests/test_astimezone.py", text)
+        calendar_judge(self, "tests/test_astimezone.py", text,
+                       listed=["t_as_local = fixed_dt.astimezone()"],
+                       clean=["t_as_utc = fixed_dt.astimezone(timezone.utc)"])
 
 
 # ---- JS/TS: masker then patterns ----------------------------------------------------------------
@@ -1490,7 +1529,9 @@ class SwiftCategoriesTest(FinderCase):
         text = src(*lines)
         self.put("Tests/TimingTests.swift", text)
         code, out = self.report()
-        self.assertEqual(self.rows(out), pinned(
+        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+        # Only the elapsed-assert rows. Calendar rows are SwiftCalendarTest's claim.
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TimingTests.swift", text,
             *[(f"XCTAssertLessThan(t{i}, 9)", "elapsed-assert") for i in range(len(SWIFT_CLOCKS))],
             ("XCTAssertLessThan(elapsed, 1.0)", "elapsed-assert"),
@@ -1548,7 +1589,7 @@ class SwiftCategoriesTest(FinderCase):
 
 
 class SwiftCleanTest(FinderCase):
-    def test_patterns_in_comments_and_strings_are_clean(self):
+    def test_patterns_in_comments_and_strings_are_clean_and_a_code_date_is_listed(self):
         text = src(
             "// Thread.sleep(forTimeInterval: 1) and XCTAssertLessThan(Date(), 1)",
             'let s = "measure { executionTimeAllowance = 5 }"',
@@ -1559,7 +1600,83 @@ class SwiftCleanTest(FinderCase):
         )
         self.put("Tests/CleanTests.swift", text)
         code, out = self.report()
-        self.assertEqual((code, self.rows(out)), (0, set()))
+        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+        self.assertEqual(self.rows(out), pinned(
+            "Tests/CleanTests.swift", text, ("print(Date())", "calendar")),
+            "a comment or a string line is listed, or the code-level Date() is not")
+        self.assertEqual(code, 1, "the listed code-level Date() does not set exit 1")
+
+
+class SwiftCalendarTest(FinderCase):
+    def test_calendar_and_zone_reads_are_listed(self):
+        text = src(
+            "import XCTest",
+            "final class CalendarTests: XCTestCase {",
+            "    func testReads() {",
+            "        let c_cal = Calendar.current",
+            "        let c_zone = TimeZone.current",
+            "        let c_now = Date()",
+            "        XCTAssertEqual(Date(), stamp)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/CalendarTests.swift", text)
+        calendar_judge(self, "Tests/CalendarTests.swift", text, listed=[
+            "let c_cal = Calendar.current", "let c_zone = TimeZone.current", "let c_now = Date()",
+            "XCTAssertEqual(Date(), stamp)",
+        ])
+
+    def test_fixed_calendar_and_zone_forms_are_clean(self):
+        text = src(
+            "import XCTest",
+            "final class FixedTests: XCTestCase {",
+            "    func testFixed() {",
+            "        let f_date = Date(timeIntervalSince1970: 0)",
+            "        let f_cal = Calendar(identifier: .gregorian)",
+            '        let f_zone = TimeZone(identifier: "UTC")',
+            "        // let note = Calendar.current",
+            '        let s_text = "let s = TimeZone.current"',
+            "    }",
+            "}",
+        )
+        self.put("Tests/FixedTests.swift", text)
+        calendar_judge(self, "Tests/FixedTests.swift", text, clean=[
+            "let f_date = Date(timeIntervalSince1970: 0)", "let f_cal = Calendar(identifier: .gregorian)",
+            'let f_zone = TimeZone(identifier: "UTC")', "// let note = Calendar.current", "let s_text =",
+        ])
+
+    def test_elapsed_subtraction_in_an_assert_is_elapsed_only(self):
+        text = src(
+            "import XCTest",
+            "final class SpanTests: XCTestCase {",
+            "    func testSpan() {",
+            "        let begin = Date(timeIntervalSince1970: 0)",
+            "        XCTAssertLessThan(Date().timeIntervalSince(begin), 1)",
+            "    }",
+            "}",
+        )
+        self.put("Tests/SpanTests.swift", text)
+        out = calendar_judge(self, "Tests/SpanTests.swift", text,
+                             clean=["XCTAssertLessThan(Date().timeIntervalSince(begin), 1)"])
+        self.assertIn(("Tests/SpanTests.swift", lineno(text, "XCTAssertLessThan(Date()"), "elapsed-assert"),
+                      self.rows(out), "the elapsed subtraction in the assert is no longer elapsed-assert")
+
+    def test_calendar_forms_after_comment_openers_quotes_and_multi_line_strings(self):
+        text = src(
+            'let u = "http://a.test/"; let z_zone = TimeZone.current',
+            'let s = "/* not a comment"',
+            "let c_after = Calendar.current",
+            "// Don't use Calendar.current here",
+            "let c_last = Calendar.current",
+            'let block = """',
+            "let t_block = Calendar.current",
+            '"""',
+        )
+        self.put("Tests/CalendarTrapTests.swift", text)
+        calendar_judge(self, "Tests/CalendarTrapTests.swift", text,
+                       listed=["let z_zone = TimeZone.current", "let c_after = Calendar.current",
+                               "let c_last = Calendar.current"],
+                       clean=["// Don't use Calendar.current here", "let t_block = Calendar.current"])
 
 
 class SwiftTrapsTest(FinderCase):
@@ -2048,7 +2165,9 @@ class DurationThroughCallTest(FinderCase):
         )
         self.put("Tests/TraceTests.swift", text)
         code, out = self.report()
-        self.assertEqual(self.rows(out), pinned(
+        self.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+        # Only the elapsed-assert rows. Calendar rows are SwiftCalendarTest's claim.
+        self.assertEqual({row for row in self.rows(out) if row[2] == "elapsed-assert"}, pinned(
             "Tests/TraceTests.swift", text,
             ('XCTAssertGreaterThanOrEqual(LaunchTrace.ms(end - start)', "elapsed-assert")))
 
