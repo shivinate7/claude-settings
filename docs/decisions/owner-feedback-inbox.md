@@ -72,9 +72,10 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   standing -> handoff; page -> page:<n>; repo -> repo:<owner>/<name>`, with the closed-note and grant homes in the note's text). Items added in any later turn count, so the session needs no new heading. A home outside
   its kind's paths is reported as not a tracked home of that kind, with the homes listed. It blocks
   nothing on `stop_hook_active`, so it cannot loop, but it still counts that turn's messages and
-  judges repeats (the Repeats bullet). When the session's
-  folder is in no git repo, or the layout cannot be read, it checks no ruling or task home and says so
-  in one line.
+  judges repeats (the Repeats bullet). A relative home is judged in the repo the inbox sidecar binds
+  and in the Stop's cwd repo, and passes if either holds it. A repo whose git or layout cannot be read
+  is skipped, and the block reason names it. Homes pass unchecked, with a systemMessage line, only when
+  no repo reads: neither folder is in a git repo, or every repo is unreadable.
 - **Pages.** `page` (the owner's ruling answers waiting-page item n): the home is `page:<n>`. The guard
   checks each open one, in every block that holds one, burst or not. A `[closed]` one is never checked.
   It blocks until the transcript shows a send after the owner's message. The send is a send_message or
@@ -130,7 +131,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   work, so the owner's words meet the code's names ("carousel" for code that says "wheel") with no
   glossary to keep up. It runs in the Stop guard, on every Stop including `stop_hook_active`. New
   items are well-formed, open items whose ids the turn state's `judged` list lacks; a state file
-  from before the key counts the items already there as judged. One call per Stop covers all of
+  from before the key counts the items already there as judged. A `[repo]` item is skipped
+  (hooks/feedback_guard.py `new_items`): it is feedback for another repo, so it is never compared with
+  this repo's roadmap and backlog. One call per Stop covers all of
   them, through `decision_watch.invoke_model` (`claude-haiku-5-5`, 45 s, no effort; the Stop hook's
   timeout is 60 s). Candidates are cut to 300 characters each, at most 400, roadmap first. Each
   source has its own share, so one cannot crowd out the rest: 200 roadmap steps, 100 backlog lines,
