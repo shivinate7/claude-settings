@@ -13589,6 +13589,22 @@ sendto_refuse("a test path updated after Don't forget is refused to a builder, n
 sendto_refuse("a read of a test line, then Replace that assert, is refused to a builder, naming test-author",
               SENDTO_BUILDER, "Read tests/x.py:40. Replace that assert.", T_SENDTO_BUILDER, "test-author",
               lacks=("tests/x.py",))
+# Edge cases the reader rests on. A leading `To pass X,` clause is a goal, so its path is no edit. `for` names a spec,
+# not an object. An adverb between a negation and its edit verb keeps the negation. `file` is filler between an edit
+# verb and its path. A path joined to another by `and` is governed. `the case` after an edit verb points back to a
+# test path that a read verb named.
+sendto_allow("a leading To pass clause names a test path as the goal, then a product fix, is allowed to a builder",
+             SENDTO_BUILDER, "To pass tests/x.py, fix the code.", T_SENDTO_BUILDER)
+sendto_allow("a path after for, named as the spec of a fix, is allowed to a builder",
+             SENDTO_BUILDER, "Fix the bug for tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit with an adverb between is no edit, for a builder",
+             SENDTO_BUILDER, "Don't just edit tests/x.py.", T_SENDTO_BUILDER)
+sendto_refuse("an edit of the file tests/x.py, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Edit the file tests/x.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a test path joined to a product path by and, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Edit hooks/a.py and tests/b.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/b.py",))
+sendto_refuse("a read of a test path, then Fix the case, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the case.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
