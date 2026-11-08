@@ -7,3 +7,5 @@
 **Decision.** `pre-existing-needs-main-run`, a pre-existing claim names a run on main (the Known limit).
 
 **Retire.** Read a failure said to predate this change, in other words, as the claim and ask for the run on the base branch's tip. Closed when a red case in `lint/test_report_guard.py` refuses each form above with no run named, and the green cases still pass.
+
+Fix: step:clause-parser-claims

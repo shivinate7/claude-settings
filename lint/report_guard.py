@@ -536,8 +536,7 @@ def answered_problem(text):
 #   comes is/was/it. "A pre-existing test" or "the pre-existing guard" modifies another noun and is no claim.
 #   A failure noun that heads a longer noun ("failure mode") is no claim; a verb after it ("failure breaks CI") is.
 #   "Red", "failing", "broken" or "flaky" right after it is always the claim ("pre-existing red tests").
-#   A cause noun (issue, bug) claims as the cause of an earlier failure ("red because of a pre-existing bug"), or
-#   as the subject of a failure verb ("a pre-existing issue in the parser breaks CI").
+#   A cause noun (issue, problem, bug) makes no claim (debt pe-cause-noun-reading-dropped).
 # - "already red" (fails, broken, there, present), in a sentence that names a base ("against main", "main
 #   already") or "before this change".
 #   "Already red on the old code" names neither.
@@ -556,17 +555,6 @@ PRE_ONE_WORD = r"(?:(?![\w-]*[^s\W]s\b)[\w-]+\s+)?"
 PRE_DESCRIBES_AFTER_RE = re.compile(
     r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also|red|failing|broken|flaky)\b|" + PRE_ONE_WORD
     + r"(?:failures?|errors?|regressions?|breakage|flakes?|flakiness)\b" + PRE_HEAD_NOUN + ")", re.I)
-# A cause noun (issue, problem, bug, defect) is a claim only as a failure's cause or as a failure verb's subject.
-# "Filed the pre-existing issue as a debt", "a regression test for a pre-existing bug" and "a pre-existing bug
-# in the guard that breaks on empty input" are neither.
-PRE_CAUSE_AFTER_RE = re.compile(
-    r"\s*" + PRE_ONE_WORD + r"(?:issues?|problems?|bugs?|defects?)\b" + PRE_HEAD_NOUN
-    + r"(?P<verb>(?:\s+(?!(?:that|which|who)\b)[\w-]+){0,4}?\s+(?:fail(?:s|ed)?|breaks|broke|blocks|blocked"
-    r"|(?:is|are|was|were|keeps?)\s+(?:failing|breaking|blocking))\b)?", re.I)
-# The text before the cause noun ends in a causal link: "fails due to a", "red, because of the".
-PRE_CAUSE_LINK_RE = re.compile(
-    r"\b(?:due\s+to|owing\s+to|caused\s+by|because(?:\s+of)?|from|since|as)\s+[,\s]*"
-    r"(?:(?:an?|the|this|that|some)\s+)?$", re.I)
 # "a line that calls a failure pre-existing" describes a rule. An indefinite object marks a mention, not a claim.
 PRE_MENTION_BEFORE_RE = re.compile(
     r"\b(?:that|when|if|whenever)\s+(?:\w+\s+){0,3}?(?:calls?|says?|labels?|names?|marks?|claims?|treats?)"
@@ -618,27 +606,6 @@ def _unnegated(clause, pos):
     return not ANSWERED_NEGATOR_RE.search(clause[:pos])
 
 
-def _failure_before(clause, end):
-    fail = FAILURE_RE.search(clause[:end])
-    return bool(fail and _unnegated(clause, fail.start()))
-
-
-def _cause_noun_claims(parts, i, m, earlier_fail):
-    """True when the word at `m` in clause i names a cause noun (issue, bug) as a failure's cause or a failure
-    verb's subject. `earlier_fail` says a clause before clause i holds an unnegated failure word."""
-    clause = parts[i]
-    after = PRE_CAUSE_AFTER_RE.match(clause, m.end())
-    if not after:
-        return False
-    verb = after.group("verb")
-    if verb and not ANSWERED_NEGATOR_RE.search(verb):
-        return True
-    # The link may start in an earlier break ("red, because of a"), so it is read across the clauses before.
-    head = "".join(parts[:i])
-    link = PRE_CAUSE_LINK_RE.search(head + clause[:m.start()])
-    return bool(link and (earlier_fail or _failure_before(clause, max(0, link.start() - len(head)))))
-
-
 def _claims_pre_existing(sentence):
     """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
@@ -657,7 +624,7 @@ def _claims_pre_existing(sentence):
             return True
         ref_pending = False
         for m in PRE_EXISTING_RE.finditer(clause):
-            if ((_pre_existing_describes_failure(clause, m) or _cause_noun_claims(parts, i, m, earlier_fail))
+            if (_pre_existing_describes_failure(clause, m)
                     and _unnegated(clause, m.start())
                     and not (negated_after and not PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
                     and not PRE_MENTION_BEFORE_RE.search(clause[:m.start()])):
