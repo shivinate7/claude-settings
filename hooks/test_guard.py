@@ -13385,6 +13385,11 @@ for _command, _want in (
         ('bash -e -c -- "pytest tests/"', ("tests/",)),
         ('sh -c -- "pytest tests/"', ("tests/",)),
         ('sh -c -- "python tests/x.py"', ("tests/x.py",)),
+        # Negative rows, each reads no test. A `--` before a `-c` ends the options, so the `-c` after it is a file name.
+        # A `--` with no word after it is no script. The text an echo prints is data, never a command.
+        ('bash -- -c "pytest tests/"', ()),
+        ('bash -c --', ()),
+        ('bash -c -- "echo tests"', ()),
         # Controls, green on the head: a plain shell -c, and a shell that runs a script file rather than a -c.
         ('bash -c "pytest tests/"', ("tests/",)),
         ('bash -e tests/x.py', ("tests/x.py",)),
