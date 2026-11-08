@@ -672,6 +672,52 @@ class Hook(unittest.TestCase):
         self.assertEqual(count_lines(prompt), ["- Blind designers: <n>"], "scope: the control brief holds only the marked line")
         self.assertRefused(self.spawn(prompt))
 
+    def test_plain_count_with_extra_spaces_passes(self):
+        # Green control. The plain count line is exact about its marks, not its spacing: spaces either side still count.
+        prompt = "Designer kind: informed\nBlind designers:   2   \n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["Blind designers:   2   "], "scope: the control brief holds only the plain line")
+        self.assertEqual(self.spawn(prompt), "", "a plain count line with spaces either side must count as its number")
+
+    def assertCountRefused(self, prompt, lines, case):
+        """Scope first: the brief holds exactly `lines` as its count lines and reads as informed. Then the spawn is
+        refused on the count, the one cause `case` names."""
+        self.assertEqual(count_lines(prompt), lines, "scope: " + case + ", the probe brief must hold exactly these count lines")
+        self.assertEqual(load().kind_of(prompt), "informed", "scope: " + case + ", the probe brief must read as informed")
+        out = self.spawn(prompt)
+        self.assertTrue(out, case + " must be refused, but the spawn passed")
+        self.assertRefused(out)
+        self.assertIn("Blind designers", reason_of(out), case + " must be refused on the count, not on another fault")
+
+    def test_two_marked_count_lines_with_no_plain_one_are_refused(self):
+        # A marked line counts only when it is the only count line. Two marked lines and no plain one: neither counts.
+        self.assertCountRefused("Designer kind: informed\n- Blind designers: 2\n- Blind designers: 0\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2", "- Blind designers: 0"],
+                                "two bulleted count lines with no plain one")
+
+    def test_bold_and_bulleted_count_lines_with_no_plain_one_are_refused(self):
+        # The same rule for a bold marked line: the first marked line must not decide the count.
+        self.assertCountRefused("Designer kind: informed\n**Blind designers:** 2\n- Blind designers: 0\n\n" + DUO_BRIEF,
+                                ["**Blind designers:** 2", "- Blind designers: 0"],
+                                "a bold and a bulleted count line with no plain one")
+
+    def test_plain_count_with_trailing_bold_marks_is_refused(self):
+        # The plain count line is exact: stray `**` after the number makes it no plain count. It is no marked line either.
+        self.assertCountRefused("Designer kind: informed\nBlind designers: 2**\n\n" + DUO_BRIEF,
+                                ["Blind designers: 2**"],
+                                "a plain count line with trailing bold marks")
+
+    def test_plain_count_with_bold_after_the_colon_is_refused(self):
+        # The plain count line is exact: a `**` after the colon makes it no plain count, and no leading mark makes it no marked line.
+        self.assertCountRefused("Designer kind: informed\nBlind designers:** 2\n\n" + DUO_BRIEF,
+                                ["Blind designers:** 2"],
+                                "a plain count line with bold after the colon")
+
+    def test_plain_owner_none_with_trailing_bold_marks_is_refused(self):
+        # The same owner form as the owner control, with a stray `**` after the quote. Only the marks differ.
+        self.assertCountRefused('Designer kind: informed\nBlind designers: none, owner: "informed only"**\n\n' + DUO_BRIEF,
+                                ['Blind designers: none, owner: "informed only"**'],
+                                "the owner form with trailing bold marks")
+
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
