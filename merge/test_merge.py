@@ -12831,6 +12831,7 @@ class ReviewFixBase(ReviewEnv):
                 self.assert_refused(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
+        # the review cap rule (roles-review-cap-three) lets a small fix to a round's finding take a fix check after a PASS one, so this pin covers a FAIL head
         # the head's fix check FAILed, so a second fix check from it is a fix after a failed fix, and every base is refused. A PASS fix check is
         # ReviewFixPassChain's case
         fixed = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(verdict="FAIL", head=self.EARLIER_HEAD),))
@@ -12995,8 +12996,8 @@ class ReviewFixPassChain(ReviewEnv):
     live head: one compare of BASE and the live head, ahead with no behind. A FAIL or WIDE fix check on the newest record refuses every base. So
     does a base the live head has diverged from or is behind, and a base that fails the base rule. A refusal exits 2 and prints no record. Its
     stderr names the cause the case asserts: the verdict word FAIL or WIDE, the compare status diverged or behind, or the base rule's "are not all
-    record or notes files" or "have diverged". The cases that pass on the old code are the controls and the pins of today's refusals; the rest
-    are red there."""
+    record or notes files" or "have diverged", or, after round 3, the "keeps it" refusal that names the newest record's Net value. The cases
+    that pass on the old code are the controls and the pins of today's refusals; the rest are red there."""
 
     LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
     NEWEST = REVIEW_OLD_HEAD  # the Head of the newest earlier record
@@ -13006,19 +13007,20 @@ class ReviewFixPassChain(ReviewEnv):
     CODE = file_entry("merge/merge.py")  # a code file: a fix diff that holds one is not a record-only step
     NOTES_FILE = file_entry("docs/debts/notes.md")
 
-    def pair(self, verdict):
+    def pair(self, verdict, rounds=REVIEW_PASS, net="not owed"):
         """Pull request 7's comments in the shape of PR 1679 (a second small fix after a passed fix check): an older record at EARLIER, then the
-        newest record at NEWEST, whose fix check of `verdict` reviewed EARLIER. A `verdict` of None leaves the newest record with no fix check line."""
+        newest record at NEWEST, whose fix check of `verdict` reviewed EARLIER. A `verdict` of None leaves the newest record with no fix check line.
+        `rounds` and `net` set the newest record's rounds and Net value."""
         fix = (fix_check_line(verdict=verdict, head=self.EARLIER),) if verdict else ()
         return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS)),
-                review_comment(2, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS, fix=fix)))
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds, fix=fix, net=net)))
 
-    def run_chain(self, base, comments=(), diffs=None, verdict="PASS"):
+    def run_chain(self, base, comments=(), diffs=None, verdict="PASS", net="not owed"):
         """The record for the live head, with one round, and --fix-check `base` at `verdict`, on the repo's `comments` and the compares `diffs`.
-        -> (rc, out, err, host)."""
+        `net` is the --net-value. -> (rc, out, err, host)."""
         host = self.record_host(*comments, diffs=diffs or {})
         argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.LIVE, "--round", "1:reviewer:sonnet:PASS",
-                "--fix-check", f"{base}:reviewer:haiku:{verdict}"]
+                "--fix-check", f"{base}:reviewer:haiku:{verdict}", "--net-value", net]
         rc, out, err = self.run_args(*argv, host=host)
         return rc, out, err, host
 
@@ -13078,6 +13080,35 @@ class ReviewFixPassChain(ReviewEnv):
         self.assertTrue(self.compared(host, self.NEWEST, self.NOTES), "the base rule did not compare the step with the newest record's Head")
         self.assertIn((self.NOTES, self.LIVE), host.compare_reads, "the ancestor read compare(base, live) was not made")
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NOTES, "reviewer", "haiku", "PASS"))
+
+    def test_a_chain_after_a_round_3_record_may_not_change_its_net_value(self):
+        # the round-3 hold (decision hold-unsafe-after-round-3): a passing fix keeps the net value round 3 gave. A chained fix check with another
+        # net value would turn a held negative into done, so each other value is refused, and the refusal names both values
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        comments = self.pair("PASS", rounds=REVIEW_FAILED_THREE, net="negative")
+        held = record_text(head=self.NEWEST, rounds=REVIEW_FAILED_THREE, net="negative", fix=(fix_check_line(head=self.EARLIER),))
+        self.assertEqual(record_state(self, held, self.NEWEST), "held", "control: a round-3 FAIL record with Net value negative does not read held")
+        for net in ("zero", "positive", "not owed"):
+            with self.subTest(net=net):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, net=net)
+                self.assert_refused(rc, out, err)
+                self.assertIn("Net value negative", err, "the refusal does not name the newest record's net value:\n" + err)
+                self.assertIn(f"may not be {net}", err, "the refusal does not name the new record's net value:\n" + err)
+
+    def test_a_chain_after_a_round_3_record_that_keeps_its_net_value_is_accepted(self):
+        # a chain that keeps the round-3 net value is allowed: negative reads held, zero reads done
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        for net, state in (("negative", "held"), ("zero", "done")):
+            with self.subTest(net=net):
+                rc, out, err, _ = self.run_chain(self.NEWEST, self.pair("PASS", rounds=REVIEW_FAILED_THREE, net=net), diffs=diffs, net=net)
+                self.assertEqual(rc, 0, f"a chained fix check keeping the round-3 net value {net} was refused:\n" + out + err)
+                self.assertEqual(record_state(self, posted_body(self, out), self.LIVE), state)
+
+    def test_a_chain_before_round_3_may_set_the_net_value(self):
+        # the net value check reads only a newest record that reached round 3, so a round-1 record may chain with any net value
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.pair("PASS", net="negative"), diffs=diffs, net="zero")
+        self.assertEqual(rc, 0, "a chain after a round-1 record was refused over its net value:\n" + out + err)
 
     def test_a_newest_record_with_no_fix_check_line_keeps_its_head_as_the_base_with_no_compare(self):
         # control, green on the old code: a single record with no fix check line is accepted at its own Head, and no compare is read
