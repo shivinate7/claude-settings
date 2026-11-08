@@ -5,7 +5,8 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
   session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
-  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt
+  reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
+  A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
@@ -316,8 +317,12 @@ def grant_override(raw, at):
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
     that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
     prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
-    role named means every role (decision owner-override). Those calls are why the
-    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
+    role named means every role (decision owner-override). A prompt neither grants goes last to
+    override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
+    prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
+    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most one
+    judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any failure is one stderr
+    line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
@@ -326,6 +331,10 @@ def grant_override(raw, at):
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),
                                              source=hook.get("source"))
+        if result is None:
+            result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                                 transcript=hook.get("transcript_path"),
+                                                 source=hook.get("source"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):
