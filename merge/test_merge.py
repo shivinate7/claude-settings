@@ -10966,6 +10966,46 @@ class CapUnknownDeadline(Env):
         self.assertNotIn("that job's", notice, "with several unknown jobs the notice must not say that job's cap\n" + out)
 
 
+class CapNoConfig(Env):
+    """No .github/stamp.json on the base: load_config still reads the job caps. The floor raises the 45-minute default to
+    min(largest cap + 5, 360), and an unknown cap prints the line that names the job and merge.deadlineMinutes. The defaults
+    line still prints. host_default_branch is patched: the defaults ask gh for the default branch, and no case here reads it."""
+    def setUp(self):
+        super().setUp()
+        patch = unittest.mock.patch.object(merge, "host_default_branch", lambda root: "main")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def no_config_waits(self, workflow):
+        """The base with no stamp.json and `workflow` as its one workflow file. -> (the waits, the output)."""
+        drop_config(self)
+        push_base(self, {".github/workflows/checks.yml": workflow})
+        rc, out, waits = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        return waits, out
+
+    def test_a_literal_cap_of_60_with_no_config_waits_65_and_the_defaults_line_still_prints(self):
+        waits, out = self.no_config_waits(cap_workflow("60"))
+        self.assertIn("not found on origin/main. Using the defaults", out, "the defaults line must still print\n" + out)
+        self.assertEqual(set(waits), {65}, "a literal cap of 60 must set the floor at 65, not the default 45\n" + out)
+
+    def test_a_matrix_cap_of_30_and_42_with_no_config_waits_47(self):
+        waits, out = self.no_config_waits(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]"))
+        self.assertEqual(set(waits), {47}, "the matrix's largest value, 42, must set the floor at 47, not the default 45\n" + out)
+
+    def test_an_unknown_cap_with_no_config_waits_45_and_prints_a_line_naming_the_job_and_the_key(self):
+        waits, out = self.no_config_waits(EXPR_ONLY_WORKFLOW)
+        self.assertEqual(set(waits), {45}, "an unknown cap sets no floor, so the default 45 stays\n" + out)
+        hits = [line for line in out.splitlines() if "slow-probe" in line and "merge.deadlineMinutes" in line]
+        self.assertTrue(hits, "no printed line names job slow-probe and merge.deadlineMinutes\n" + out)
+
+    def test_a_cap_of_10_with_no_config_waits_45_and_prints_no_floor_line(self):
+        waits, out = self.no_config_waits(cap_workflow("10"))
+        self.assertEqual(set(waits), {45}, "a cap of 10 is under the default 45, so the wait stays 45\n" + out)
+        self.assertNotIn("largest job timeout-minutes", out, "no floor line may print under the default\n" + out)
+        self.assertNotIn("merge.deadlineMinutes", out, "no unknown cap, so no line may name merge.deadlineMinutes\n" + out)
+
+
 class CapMatrixValues(unittest.TestCase):
     """job_caps reads a `${{ matrix.<key> }}` cap from the job's own strategy.matrix: the largest literal value counts, in a flow list,
     a block list or an include entry. A quoted number counts. Exclude entries count for nothing. Each case also reads the literal job `checks`."""
