@@ -2932,7 +2932,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             def prove(stop):
                 """Read the branch against the base tip fetched now. -> the records proof, or None off the default base.
                 stop(why) refuses. It waits on no check, so WAITS stays the bound."""
-                c, out, _ = retry_net(lambda: fetch_branch(root, base),getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
+                c, out, _ = retry_net(lambda: fetch_branch(root, base), getattr(host, "pause", time.sleep), what=f"the fetch of {base}")
                 if is_net(c, out):  # a network error is not a refusal: the claim stays
                     raise NetStop(f"network error on the fetch of origin {base}, still failing after {NET_RETRIES} retries. The claim stays on {branch}. Run again to resume.\n{out}")
                 if c:  # never check against a stale base tip
