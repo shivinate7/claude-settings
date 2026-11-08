@@ -14044,12 +14044,18 @@ FIND_ROOT_WRITES = (
     ("find . -name test_*.py, -exec sed -i", "find . -name 'test_*.py' -exec sed -i s/a/b/ {} \\;"),
     ("find . piped to xargs, sed -i", "find . | xargs sed -i s/a/b/"),
     ("find . -name test_*.py piped to xargs, sed -i", "find . -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("find . -name test_*.py piped to while read, sed -i on \"$f\"",
+     "find . -name 'test_*.py' | while read f; do sed -i s/a/b/ \"$f\"; done"),
 )
 for _name, _command in FIND_ROOT_WRITES:
     sh("builder-test: shell write, %s, in a checkout that holds tests, is refused" % _name, _command,
        "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDTESTS))
 sh("builder-test: shell write, find . piped to xargs, sed -i, over a test two folders down, is refused",
    "find . | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDDEEP))
+# The same while-read loop over docs/ writes no test, in the same checkout: the twin of the deny above.
+sh("builder-test: shell write, find docs piped to while read, sed -i on \"$f\", is allowed",
+   "find docs -name 'DEBTS.md' | while read f; do sed -i s/a/b/ \"$f\"; done", "allow",
+   **dict(BR, cwd=FINDTESTS))
 # The test-author writes tests, so the same shell writes stay allowed to it. A main session, and a
 # session run with --agent builder and no agent_id, is not judged.
 for _name, _command in (
