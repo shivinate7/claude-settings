@@ -789,9 +789,62 @@ def turn_commands(transcript_path):
             if use.get("name") == "Bash"]
 
 
+# The programs that execute a file given as an argument. A read (cat, grep, sed, git show, python3 -c) is not one: it
+# names the file and runs nothing, so it backs no forecast about the file.
+RUN_COMMANDS = frozenset({"python3", "python", "node", "bash", "sh", "pytest"})
+COMMAND_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+
+def runs_file(command, name):
+    """True when a Bash `command` runs the file `name`: a runner from RUN_COMMANDS (or `python3 -m pytest`) with the file
+    as an argument, a `verdict` wrapper around one, or the file path as the command. Each `&&`, `||`, `;` or `|` part is
+    read alone, and a line shlex cannot parse is no run."""
+    import shlex
+
+    def is_file(word):
+        word = word.split("::")[0]
+        return word == name or word.endswith("/" + name)
+
+    for line in command.splitlines():
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            words = list(lexer)
+        except ValueError:
+            continue
+        parts, part = [], []
+        for word in words:
+            if word in COMMAND_SEPARATORS:
+                parts.append(part)
+                part = []
+            else:
+                part.append(word)
+        parts.append(part)
+        for part in parts:
+            while part and (re.match(r"\w+=", part[0]) or os.path.basename(part[0]) == "verdict"):
+                part = part[1:]
+            if not part:
+                continue
+            if is_file(part[0]):
+                return True
+            args = part[1:]
+            if os.path.basename(part[0]) not in RUN_COMMANDS:
+                continue
+            if args[:1] == ["-m"]:
+                if args[1:2] != ["pytest"]:
+                    continue
+                args = args[2:]
+            for word in args:
+                if word in ("-c", "-e"):
+                    break
+                if is_file(word):
+                    return True
+    return False
+
+
 def verdict_claim_problem(payload, message):
     """The refusal text for an unbacked verdict forecast in `message`, or None. A claim is backed by a cite, or by a
-    Bash call in this turn that names a file the claim names."""
+    Bash call in this turn that runs a file the claim names (`runs_file`). A read of the file backs nothing."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
@@ -811,7 +864,7 @@ def verdict_claim_problem(payload, message):
                 print("verdict claim check unknown: transcript unreadable (%s)" % exc.__class__.__name__,
                       file=sys.stderr)
                 return None
-        if not any(name in command for name in files for command in commands or ()):
+        if not any(runs_file(command, name) for name in files for command in commands or ()):
             return VERDICT_CLAIM_REMEDY
     return None
 
