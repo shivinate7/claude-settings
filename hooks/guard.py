@@ -133,6 +133,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  stale-index          deny. A `git commit` whose tree is an old one while HEAD moved on: the old head C (read
+                       from this worktree's HEAD log and the shared branch log) is a strict ancestor of HEAD,
+                       and a path the commit carries (the index; the working tree with `-a`, a pathspec or an
+                       earlier add) has its entry at C, absent included, while HEAD's differs. Names those
+                       paths only. It judges a commit only when each earlier segment is a git add, a git read,
+                       `true`, `false` or `cd`. A HEAD log that cannot be read, and a path edited to match
+                       neither C nor HEAD, give no hit. (commit-refuses-stale-index)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -395,7 +402,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, STALE_INDEX_REASON, stale_index_hit,
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
@@ -3862,6 +3869,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
+
+    # 6c3. A commit whose tree is an old one while HEAD moved on (rule stale-index). Cost: one `git rev-parse`
+    # and two small file reads per commit segment; a few more reads only when HEAD's logs show a move.
+    stale = stale_index_hit(stripped, cwd)
+    if stale:
+        refuse(tool, "deny", "stale-index", STALE_INDEX_REASON.format(old=stale[0][:12], files=", ".join(stale[1])),
+               stale[1][0])
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)

@@ -36,7 +36,7 @@ Why: a test-author worktree, resumed for a fix round, held staged copies of four
 
 Each agent runs `git diff --cached --stat` before each commit. The list names only the files that the agent changed this round. Any other file means the branch moved under the worktree. The agent commits nothing and reports it.
 
-`COMMON`, the standing-rules list in `hooks/agent_brief.py` (the SubagentStart hook), carries the staged-diff step (`git diff --cached --stat`) to each agent type that commits, meaning each type not in `READ_ONLY`. A test in `hooks/test_agent_brief.py` checks that each committing agent in `agents/` gets it. Still, no hook or check stops a commit that skips the step.
+`COMMON`, the standing-rules list in `hooks/agent_brief.py` (the SubagentStart hook), carries the staged-diff step (`git diff --cached --stat`) to each agent type that commits, meaning each type not in `READ_ONLY`. A test in `hooks/test_agent_brief.py` checks that each committing agent in `agents/` gets it. The step is also backed by a guard: rule `stale-index` refuses a commit whose index is an old tree while HEAD moved on (decision `commit-refuses-stale-index`).
 
 - The orchestrator never `cd`s into an agent's worktree. It reads that tree with `git -C <path>`.
 - The cloud platform's Stop hook (`~/.claude/stop-hook-git-check.sh`) is written by the platform, not this repo. It checks git in the shell's current folder. A `cd` by the main session persists.
