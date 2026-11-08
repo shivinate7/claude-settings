@@ -1,11 +1,11 @@
 {
   "title": "The idle-lane archive can judge a lane whose step is not on the record branch",
   "why": "54 idle lanes read \"unknown\" because their steps are not on the record branch, so the idle-lane archive cannot judge them. Runner 8, 02:00 CST Nov 8, via coordinator 01:58 CST.",
-  "note": "Fix: first list the 54 lanes and why each has no step (another repo's lane, an old c-number, a lane started with no step); then give each a step or a rule that judges it another way, such as its PR state. Related: step live-file-archive-fields (ready) and done step one-lane-one-step. Queue fix (owner 13:20 CST Nov 7). Slug and title by triage. Filed 02:22 CST Nov 8.",
+  "note": "Fix: first list the 54 lanes and why each has no step (another repo's lane, an old c-number, a lane started with no step); then give each a step or a rule that judges it another way, such as its PR state. Related: step live-file-archive-fields (ready) and done step one-lane-one-step. Queue fix (owner 13:20 CST Nov 7). Slug and title by triage. Filed 02:22 CST Nov 8. Lane session_013NEJL1VtpMs3Aw5JLtyvVD started it (coordinator, 01:59 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 571,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T01:59:00-06:00"
+  "lane": "session_013NEJL1VtpMs3Aw5JLtyvVD",
+  "updatedAt": "2026-11-08T02:00:00-06:00"
 }

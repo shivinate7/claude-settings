@@ -1,11 +1,11 @@
 {
   "title": "The ready checks guard can read q_max PRs",
   "why": "A guard refused runner 8 because it cannot read q_max PRs. Runner 8, 02:00 CST Nov 8, via coordinator 01:58 CST.",
-  "note": "Fix: first get the exact refusal text and the act it refused from runner 8; then let the guard read a PR in the repo the act names, or refuse with a remedy that names the missing access. Related: done step merge-runs-repo-checks and step ready-checks-use-pinned-tools. Queue fix (owner 13:20 CST Nov 7). Slug from runner 8. Filed 02:22 CST Nov 8.",
+  "note": "Fix: first get the exact refusal text and the act it refused from runner 8; then let the guard read a PR in the repo the act names, or refuse with a remedy that names the missing access. Related: done step merge-runs-repo-checks and step ready-checks-use-pinned-tools. Queue fix (owner 13:20 CST Nov 7). Slug from runner 8. Filed 02:22 CST Nov 8. Waits for runner 8's refusal text; the coordinator asked for it (01:59 CST Nov 8).",
   "phase": "now",
   "status": "todo",
   "order": 570,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T01:59:00-06:00"
+  "updatedAt": "2026-11-08T02:00:00-06:00"
 }
