@@ -14,11 +14,13 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          A head that carries a `Batch: red <head> <job>` comment for itself, or holds a lane head that does, is refused in the preview
-                          and in a ready PR's --confirm, before any claim or push, and no flag lifts it; an unreadable lane list, open-pull list or comment
-                          list refuses too. A draft's --confirm is the records step: it does not run this check and pushes the records page, so only the
-                          draft's preview shows the refusal. Cost: one read of the repo's issue comments, since the oldest open PR (the ledger's window)
-                          when the head holds a lane, which adds one open-pull list read, else since the PR opened.
+                          A head that carries a `Batch: red <head> <job>` comment for itself, or merges a lane tip that does, or holds a batch head (a commit
+                          that holds lane merges since the base) that does, is refused in the preview and in a ready PR's --confirm, before any claim or push,
+                          and no flag lifts it. A line on a lane head binds that exact head: a fix pushed on top of it is a new head and merges. An unreadable
+                          lane list, open-pull list or comment list refuses too. A draft's --confirm is the records step: it does not run this check and pushes
+                          the records page, so only the draft's preview shows the refusal. Cost: one read of the repo's issue comments, since the older of the
+                          oldest open PR (the ledger's window) and the oldest commit checked, and one open-pull list read; one log over base..head and
+                          one read_lanes (a log and a merge-base per lane) for the head and for each chain commit that carries a line.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -1612,7 +1614,7 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
-SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
+SUITE_LINE = re.compile(r"(python3?|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
 def needles(path):
     """The names a suite that reads `path` would hold: the path, its file name, its stem (4 or more characters), and each
@@ -1799,9 +1801,11 @@ def lint_steps(root, base_ref, env=None):
     return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
 
 def checks_steps(root, jobs=None):
-    """-> the step blocks of the CHECKS_SUITE_JOBS jobs (`checks` and its split half) in root's workflow, in order: the one walk of the workflow
-    that hit_suites and step_names share. `jobs` (a collection of job names) keeps only those jobs; a name outside CHECKS_SUITE_JOBS has no suite
-    read here and adds no step, and None keeps them all. Stop when the workflow or a job kept cannot be read. Cost: one file read."""
+    """-> the step blocks of the jobs in root's workflow, in order: the one walk of the workflow that hit_suites and step_names share, and the one
+    read of a job's own steps (job_block, step_blocks). None reads the CHECKS_SUITE_JOBS jobs (`checks` and its split half). `jobs` (a collection of
+    job names) reads those jobs instead: the CHECKS_SUITE_JOBS among them first, then the others by name, so a failing Windows shard reads its own
+    steps. A job of CHECKS_SUITE_JOBS that the workflow lacks is a Stop; any other name the workflow lacks (a display name that is no job id) adds
+    no step, so no lane is read as hit by it. Stop when the workflow cannot be read. Cost: one file read."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     from workflow_steps import CHECKS_SUITE_JOBS, job_block, step_blocks  # the one home of the step parser
     try:
@@ -1809,11 +1813,12 @@ def checks_steps(root, jobs=None):
             text = f.read()
     except (OSError, UnicodeError) as e:
         raise Stop(f"the workflow cannot be read ({type(e).__name__}) {BASE_CITE}")
-    blocks = [(name, job_block(text, name)) for name in CHECKS_SUITE_JOBS if jobs is None or name in jobs]
+    names = CHECKS_SUITE_JOBS if jobs is None else (*(j for j in CHECKS_SUITE_JOBS if j in jobs), *sorted(set(jobs) - set(CHECKS_SUITE_JOBS)))
+    blocks = [(name, job_block(text, name)) for name in names]
     for name, block in blocks:
-        if block is None:
+        if block is None and name in CHECKS_SUITE_JOBS:
             raise Stop(f"the workflow has no `{name}` job " + BASE_CITE)
-    return [st for _, block in blocks for st in step_blocks(block)]
+    return [st for _, block in blocks if block is not None for st in step_blocks(block)]
 
 def step_names(root):
     """-> the names of the steps checks_steps reads. Empty when the workflow cannot be read: a caller that subtracts the lint steps then skips none,
@@ -1826,10 +1831,10 @@ def step_names(root):
     return {step_key(st, "name") for st in steps}
 
 def hit_suites(root, paths, skip, jobs=None):
-    """-> [(file, line)]: each suite line of the jobs in CHECKS_SUITE_JOBS (`checks` and its split half) in root's workflow whose
-    source names one of `paths` (needles), except a mutation script and the steps named in `skip`. `jobs` narrows the read to those job
-    names (checks_steps), so a hit is one of that job's own suites; None reads every job in CHECKS_SUITE_JOBS. The workflow is the one
-    home of which suites run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop
+    """-> [(file, line)]: each suite line (`python3`, `python`, `node` or `bash` run of a script) of the jobs in root's workflow whose
+    source names one of `paths` (needles), except a mutation script and the steps named in `skip`. `jobs` reads those job names (checks_steps),
+    so a hit is one of that job's own suites, a Windows shard's `python` lines among them; None reads every job in CHECKS_SUITE_JOBS
+    (`checks` and its split half). The workflow is the one home of which suites run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop
     when the workflow, one of the jobs read or a suite source cannot be read, or a hit line is not a plain suite line."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     from workflow_steps import run_body, step_key  # the one home of the step parser
@@ -1848,7 +1853,7 @@ def hit_suites(root, paths, skip, jobs=None):
             continue
         for line in (run_body(step) or "").splitlines():
             line = line.strip()
-            m = re.match(r"(?:python3|node|bash) +(\S+\.(?:py|mjs|sh))\b", line)
+            m = re.match(r"(?:python3?|node|bash) +(\S+\.(?:py|mjs|sh))\b", line)
             if not m:  # a line of no suite form is never read, so one that names main's paths or their folders refuses
                 if line and any(w.search(line) for w in names):
                     raise Stop(f"the checks line `{line}` names main's paths and is no suite this tool can read {BASE_CITE}")
@@ -3480,36 +3485,50 @@ def range_commits(wt, base_ref, head):
     return times, chain
 
 def refuse_batch_red(host, wt, base_ref, info):
-    """A `Batch: red <head> <job>` comment says the batch at <head> ran red and its lane was dropped. A head that carries such a line for itself, or
-    holds a commit that does, is the red batch: refuse it before anything is claimed. No reason flag lifts it, because only a rebuild without the
-    lane clears the red. The commits checked are the head, every commit on its first-parent chain since the base (a batch built on a split batch holds
-    that batch's own head there, and a stacked pull request holds its base's head) and each lane tip (read_lanes, the second parents of the merges).
-    A head that holds lanes reads the comments since the older of two times: the oldest open pull request (open_pr_window, the ledger's
-    window) and the oldest commit time among those commits, so the line of a lane whose pull request has closed is in it. A lane's line can be
-    older than this pull request. Every failed read refuses with a plain Stop (unknown is red), an OSError and a timeout of git among them: the
-    lane list, the open-pull list and the comments, so no reason flag lifts an unreadable lane list.
-    Cost: one comment list read per preview or confirm, and one `git log` over base..head, one more `git log` and a merge-base per lane (read_lanes). A
-    head that holds lanes adds one open-pull list read. No file, timer or log."""
+    """A `Batch: red <head> <job>` comment says the batch at <head> ran red and its lane was dropped. Two kinds of line, told apart by what the
+    named head is: a line on a lane head (a head that holds no lane merge since the base) binds that exact head, because a new head makes the line
+    stale, so a fix pushed on top of a dropped lane head is not refused. A line on a batch head (a head that holds lane merges since the base, as
+    the integration pull request's head does) binds every head whose first-parent chain holds that commit: a batch built on a split batch holds
+    that batch's own head there, and a stacked pull request holds its base's head. So the merged head is refused when it, or a lane tip it merges
+    (read_lanes, the second parents of the merges), carries a line, or when a commit on its first-parent chain since the base is a batch head that
+    carries one. No reason flag lifts it, because only a rebuild without the lane clears the red.
+    The comments are read since the older of two times, for every head: the oldest open pull request (open_pr_window, the ledger's window) and
+    the oldest commit time among the commits checked, so the line of a lane whose pull request has closed or reopened is in it. A lane's line can
+    be older than this pull request. A pull request with no known open time reads from the epoch. Every failed read refuses with a plain Stop (unknown is red), an OSError and a timeout of git among them:
+    the lane list, the open-pull list, the comments and the lane read of a chain commit, so no reason flag lifts an unreadable one.
+    Cost: one comment list read and one open-pull list read per preview or confirm, one `git log` over base..head, one more `git log` and a
+    merge-base per lane (read_lanes) of the head, and the same read_lanes cost for each chain commit that carries a line. No file, timer or log."""
+    def unknown(what):
+        return Stop(f"{what}, so whether this tree holds a commit with a `{BATCH_RED_WORD}` line is unknown. Nothing was claimed or pushed. {READ_CITE}")
     try:
         times, chain = range_commits(wt, base_ref, info["head"])
         lanes = read_lanes(wt, base_ref, info["head"])[0]
-        heads = {info["head"], *chain, *lanes}
     except (ValueError, OSError, subprocess.TimeoutExpired) as e:
-        raise Stop(f"the commits of {info['head'][:9]} cannot be read ({type(e).__name__}: {e}), so whether this tree holds a commit with a `{BATCH_RED_WORD}` line is unknown. "
-                   f"Nothing was claimed or pushed. {READ_CITE}")
+        raise unknown(f"the commits of {info['head'][:9]} cannot be read ({type(e).__name__}: {e})")
+    exact = {info["head"], *lanes}
+    heads = exact | set(chain)
     try:
-        # a line on the head's own pull request cannot predate it, so only a head that holds lanes needs the wider window
-        if lanes:
-            oldest = min((times[x] for x in heads if x in times), default=None)
-            since = open_pr_window(host.pages("pulls", fields={"state": "open"}),
-                                   info.get("created"), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest)) if oldest is not None else None)
-        else:
-            since = open_pr_window([], info.get("created"))
+        oldest = min((times[x] for x in heads if x in times), default=None)
+        since = open_pr_window(host.pages("pulls", fields={"state": "open"}),
+                               info.get("created") or "1970-01-01T00:00:00Z", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest)) if oldest is not None else None)
     except Stop as e:
         raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the open pull requests. {READ_CITE}")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise unknown(f"the open pull requests cannot be read ({type(e).__name__}: {e})")
     except (KeyError, TypeError, ValueError, AttributeError) as e:
         raise Stop(f"an open pull request read from GitHub is malformed ({type(e).__name__}: {e}), so the check for a `{BATCH_RED_WORD}` line is unknown. {READ_CITE}")
-    red = {sha: job for sha, job in batch_red_lines(comments_since(host, since)).items() if sha in heads}
+    try:
+        lines = batch_red_lines(comments_since(host, since))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise unknown(f"the comments cannot be read ({type(e).__name__}: {e})")
+    red = {sha: job for sha, job in lines.items() if sha in exact}
+    for sha, job in lines.items():
+        if sha in chain and sha not in exact:  # a lane head on the chain is not bound by its line: only a batch head is
+            try:
+                if read_lanes(wt, base_ref, sha)[0]:
+                    red[sha] = job
+            except (ValueError, OSError, subprocess.TimeoutExpired) as e:
+                raise unknown(f"the lanes of {sha[:9]} cannot be read ({type(e).__name__}: {e})")
     if red:
         raise Dropped("the batch ran red: " + "; ".join(f"{sha[:9]} ({job})" for sha, job in sorted(red.items())) + " carries a `" + BATCH_RED_WORD
                       + " <head> <job>` line, and this tree still holds that commit.\n"
