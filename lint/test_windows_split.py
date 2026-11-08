@@ -34,7 +34,7 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -1666,7 +1666,7 @@ def collected_files(root):
 class CiCoverage(unittest.TestCase):
     def test_every_test_file_runs_in_a_ci_step(self):
         with open(CHECKS, encoding="utf-8") as handle:
-            commands = run_commands(handle.read())
+            commands = run_commands(gating_text(handle.read()))
         collected = set(collected_files(REPO)) if runs_collector(commands) else set()
         missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
         # No rename remedy: a `_test_` name is outside the scope, so a rename would hide a real test from this check.
