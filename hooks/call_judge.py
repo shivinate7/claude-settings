@@ -374,7 +374,7 @@ def main():
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
             import question_form
-            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
+            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "", payload.get("session_id") or None)
             judged = [] if hit[0] else question_form.judged_item_writes(writes)
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0

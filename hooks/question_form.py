@@ -967,13 +967,16 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd=""):
-    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
+def item_hit(op, entry, cwd="", session_id=None):
+    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
+    writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
     if op == "str_replace":
+        if entry.get("field") in CROSS_REPO_FIELDS:
+            return CROSS_REPO_RULE, CROSS_REPO_EDIT_REASON
         hit = task_str_replace_hit(entry)
         if hit[0]:
             return hit
@@ -998,7 +1001,8 @@ def item_hit(op, entry, cwd=""):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
-    hit = cross_repo_hit(op, data, _page_repo(cwd))
+    page_repo = _page_repo(cwd)
+    hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
     if hit:
         return CROSS_REPO_RULE, hit
     hit = widens_pick_hit(data)
@@ -1086,7 +1090,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
     return waiting_page_root(tool_input, cwd) is not None
 
 
-def page_item_hit(tool_input, cwd=""):
+def page_item_hit(tool_input, cwd="", session_id=None):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
@@ -1104,7 +1108,7 @@ def page_item_hit(tool_input, cwd=""):
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd)
+        hit = item_hit(op, entry, cwd, session_id)
         if hit[0]:
             return hit, writes
     return PASS, writes
@@ -1235,10 +1239,11 @@ def key_named_hit(texts) -> str:
 NONE_KEY_HIT = "option keyed none"
 
 
-def _open_decision(data) -> bool:
-    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
-    of option_letter_hit and keyed_options_hit."""
-    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+def _open_decision(data, kinds=("decision",)) -> bool:
+    """True for the data of an open item of one of `kinds` (a decision by default). A missing kind is a decision.
+    Any status but closed is open. A task, a note and a closed item are not judged by default. The one filter
+    of option_letter_hit, keyed_options_hit and cross_repo_hit (kinds decision and task)."""
+    return isinstance(data, dict) and data.get("kind", "decision") in kinds and data.get("status") != "closed"
 
 
 def _keyed_none(option) -> bool:
@@ -1434,32 +1439,40 @@ def _page_repo(cwd):
     return _layout().repo_name(root) if root else None
 
 
-def cross_repo_hit(op, data, page_repo):
-    """The reason when this write of an open decision or task names no repo, a repo off the page's own without a
-    session-shaped `checked_with`, or a `checked_with` that is the session in its `owner`; else None. An update is
-    judged only when it carries `repo`; a str_replace, a closed item and a page with no repo pass."""
-    if not page_repo or op not in ("set", "update") or not isinstance(data, dict):
+CROSS_REPO_FIELDS = ("repo", "checked_with")
+CROSS_REPO_EDIT_REASON = ("A str_replace on `repo` or `checked_with` changes the cross-repo check, which a "
+                          "str_replace cannot show. Send an update that carries both `repo` and `checked_with`.")
+
+
+def cross_repo_hit(op, data, page_repo, session_id=None):
+    """The reason when this write of an open decision or task names no repo, a repo that is not owner/name, a repo
+    off the page's own without a session-shaped `checked_with`, or a `checked_with` that is the session in its
+    `owner` or the writer's own `session_id`; else None. `repo` is required whether or not the page's repo is
+    known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`; a
+    str_replace (item_hit judges its field) and a closed item pass."""
+    if op not in ("set", "update") or not _open_decision(data, ("decision", "task")):
         return None
-    if data.get("kind", "decision" if op == "update" else None) not in ("decision", "task"):
-        return None
-    if data.get("status", "open") != "open" or (op == "update" and "repo" not in data):
+    if op == "update" and "repo" not in data:
         return None
     if _WAITING_PAGE_DIR not in sys.path:
         sys.path.append(_WAITING_PAGE_DIR)
     from stale_pages import REPO_NAME
     repo = data.get("repo")
-    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo)):
-        return ("`repo` is missing or not owner/name. Add `repo`: \"%s\" for a question on this page's own repo, or "
-                "the repo the question is about." % page_repo)
-    if repo.lower() == page_repo.lower():
+    own = "Add `repo`: \"%s\" for a question on this page's own repo, or the repo the question is about." % page_repo \
+        if page_repo else "Add `repo` (owner/name): the repo the question is about."
+    if not repo:
+        return "`repo` is missing. " + own
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and not repo.lower().endswith(".git")):
+        return "`repo` is not owner/name. " + own
+    if not page_repo or repo.lower() == page_repo.lower():
         return None
     checked = data.get("checked_with")
     if not (isinstance(checked, str) and SESSION_ID.fullmatch(checked)):
         return ("`repo` %s is not this page's repo, and `checked_with` is missing or not a session id. Ask that "
                 "repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
                 "session id in `checked_with`." % repo)
-    if checked in str(data.get("owner") or ""):
-        return ("`checked_with` is the session in this item's `owner`. Write the session id of the %s session that "
+    if checked in str(data.get("owner") or "") or (session_id and checked == session_id):
+        return ("`checked_with` is the session that files this item. Write the session id of the %s session that "
                 "checked, not the one that files the item." % repo)
     return None
 
