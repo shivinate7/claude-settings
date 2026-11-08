@@ -56,9 +56,10 @@
 # A step's stdout is its one verdict line. verdict's "still running" heartbeat (every $VERDICT_HEARTBEAT s) goes to
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
-# The ste-lint action step runs bin/ste-changed with STE_CHANGED_PIN_NOTE=1: a stale pin of this repo's ste-lint or zizmor
-# action never fails a passing lint, and its PASS line ends `; ste-changed: pin note: <the whole drift line>` (hooks/pin_note.py).
-# No other step gets the variable, even when the caller exports it. A failing lint is FAIL.
+# Under --lint, the ste-lint action step runs bin/ste-changed with STE_CHANGED_PIN_NOTE=1: a stale pin of this repo's ste-lint or
+# zizmor action never fails a passing lint, and its PASS line ends `; <the whole drift line>`, which starts with the marker
+# `ste-changed: pin note: ` (hooks/pin_note.py). A --step run (merge's ready checks) never gets the variable: a drifted pin
+# exits 3 and the step reads FAIL. No other step gets it either, even when the caller exports it. A failing lint is FAIL.
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
@@ -289,8 +290,8 @@ def could_not_start(log, start):
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
-def plan(step, pr, values, top):
-    """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
+def plan(step, pr, values, top, lint=False):
+    """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown. lint: the run is --lint."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
     action = known_action(step)
@@ -322,8 +323,8 @@ def plan(step, pr, values, top):
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
-        # A lane's lint step passes with a stale pin and says so (decision action-pins-follow-sessions); a direct run still exits 3.
-        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"}, None
+        # A --lint run passes with a stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
+        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)
@@ -426,7 +427,7 @@ def main(argv):
     tally = {"FAIL": 0, "unknown": int(no_base)}
     unshallow(block, top, dry, tally)
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
-    planned = [plan(st, bool(base), values, top) if k else None for st, k in zip(steps, kind)]
+    planned = [plan(st, bool(base), values, top, lint) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     for n, step in enumerate(steps, 1):
@@ -449,7 +450,7 @@ def main(argv):
             tally["unknown"] += 1
             print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
             continue
-        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
+        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top, lint)
         if lint and kind[n - 1] == "lint" and state == "skipped" and condition(step_key(step, "if"), True) is not False \
                 and not base:  # a required CI step (its if: reads true on a pull-request run) that did not run proved nothing
             state, detail = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
