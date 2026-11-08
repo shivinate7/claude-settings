@@ -862,7 +862,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 @media (max-width: 520px) {
   .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
   .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .frow .fwhen { grid-column: 2; grid-row: 2; }
+  .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
+  .frow .fdate { display: inline-block; }
   .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
 }
 .older { justify-self: start; width: auto; }
@@ -2848,7 +2849,7 @@ function askItem(t, dl) {
         h("span", { class: "fhead" }, h("span", { class: "ftext" }, t.text), latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null, homeTag(t.home)),
         h("span", { class: "freply" }, shortReply(answered)), h("span", { class: "fgo" }, "Show answer"))
       : h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": k, onclick: press },
-        glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered" + (when ? " " + when : "")), h("span", { class: "fgo" }, "Show answer"));
+        glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered", ...(when ? [" ", h("span", { class: "fdate" }, when)] : [])), h("span", { class: "fgo" }, "Show answer"));
     return h("li", { class: "askc folded" + (side ? " withd" : "") + (routed ? " rline" : ""), id: "row-" + k }, row, side, ...t.reps.map(askFoldedMine), askRowLine(t));
   }
   const head = h("div", { class: "ahead" }, glyph(askWaitsIn(t) ? "wait" : "done"), h("span", { class: "aby" }, "You asked" + (fmt(t.at) ? ", " + fmt(t.at) : "")),
