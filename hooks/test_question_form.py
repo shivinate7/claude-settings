@@ -1622,6 +1622,29 @@ def case_step_foreach_cmdlet_is_a_shell_line():
          entry_of(task_item(["Check the output of `JavaScript-heavy`"])), None)
 
 
+def case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line():
+    # `time` is a command wrapper (guard_core's COMMAND_WRAPPERS), so the token reader takes the cmdlet path after it as
+    # the command, as it does after `sudo`. The prefix reader for a backslash path (CMDLET_PREFIX) lists `&`, `sudo` and
+    # `env` but not `time`, so `time C:\tools\Get-Thing` passes. The forward-slash form is the control: it is refused
+    # already, since the token reader reads it.
+    refused = ("command-in-item", "shell line")
+    page("a step holding `time C:/tools/Get-Thing` is refused as a shell line, a control", "set",
+         entry_of(task_item(["Check the output of `time C:/tools/Get-Thing`"])), refused)
+    page(r"a step holding `time C:\tools\Get-Thing` is refused as a shell line", "set",
+         entry_of(task_item([r"Check the output of `time C:\tools\Get-Thing`"])), refused)
+
+
+def case_step_prefixed_folder_path_is_text():
+    # A folder path after `&` or after other text names a folder, not a cmdlet. `Read-Me` is a PowerShell verb (Read),
+    # so only the path shape keeps `Tom & C:\Docs\Read-Me` and `& docs\Read-Me` text: a prefix reader that takes any
+    # text before the path (CMDLET_PREFIX as `[^\\/]*`) refuses both as a Verb-Noun at a path. The last folder,
+    # `& ~\Documents\Claude-Settings`, has a verb (`Claude`) that is no PowerShell verb, so it passes under any prefix
+    # reader. It pins that the verb list still applies after `&`.
+    for span in (r"Tom & C:\Docs\Read-Me", r"& docs\Read-Me", r"& ~\Documents\Claude-Settings"):
+        page("a step holding `%s` is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2345,6 +2368,7 @@ def main():
                  case_step_backslash_cmdlet_path_after_a_prefix_is_a_shell_line,
                  case_step_span_flag_after_a_prose_determiner_is_text, case_step_camel_verb_cmdlet_is_a_shell_line,
                  case_step_bare_cmdlet_outside_the_verb_list_is_a_shell_line, case_step_foreach_cmdlet_is_a_shell_line,
+                 case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line, case_step_prefixed_folder_path_is_text,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
