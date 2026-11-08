@@ -22520,17 +22520,18 @@ _relesc_add("other-checkout: heredoc replay fed script: x.bash run by name with 
 # A kept body whose run names a path the guard cannot resolve (a quoted `$` word, a bare variable, a glob, or a
 # variable inside a quoted path) keeps every body, as main does. No plain word of the kept body is `helper.sh`, so
 # nothing names the helper and its body is dropped unless the guard keeps it for the unresolved run.
-def _kept_unresolved_run(run_line):
-    """A heredoc helper.sh that echoes to ../other/f, then a heredoc run.sh whose body is RUN_LINE, then bash run.sh."""
-    return "\n".join([
-        "cat > helper.sh <<'EOF'",
-        "echo hi > ../other/f",
-        "EOF",
-        "cat > run.sh <<'EOF'",
-        run_line,
-        "EOF",
-        "bash run.sh",
-    ])
+def _kept_heredocs(files, run):
+    """Each (name, body) of FILES as a heredoc, in order, then the line RUN. The one builder of the kept-body rows."""
+    lines = []
+    for name, body in files:
+        lines += ["cat > %s <<'EOF'" % name, body, "EOF"]
+    return "\n".join(lines + [run])
+
+
+def _kept_unresolved_run(run_line, helper="helper.sh"):
+    """A heredoc HELPER (helper.sh by default) that echoes to ../other/f, then a heredoc run.sh whose body is
+    RUN_LINE, then bash run.sh."""
+    return _kept_heredocs([(helper, "echo hi > ../other/f"), ("run.sh", run_line)], "bash run.sh")
 
 
 for _run in ('bash "$PWD/helper.sh"', "bash $f", "bash h*.sh", 'sh ./"$name"', 'source "$dir/helper.sh"'):
@@ -22541,6 +22542,46 @@ for _run in ('bash "$PWD/helper.sh"', "bash $f", "bash h*.sh", 'sh ./"$name"', '
 _relesc_add("other-checkout: heredoc replay kept body control: a heredoc run.sh that runs no script and only writes "
             "out.txt, then bash run.sh, is allowed",
             "allow", "\n".join(["cat > run.sh <<'EOF'", "echo done > out.txt", "EOF", "bash run.sh"]), "home")
+
+# A kept body that runs a helper in a form the unresolved check does not read keeps every body, as main does. Each
+# helper here writes out of the tree, so a dropped body would let it run. Each run is one the guard cannot resolve: a
+# pipe into a shell, a glob, or a quoted or bare variable as the runner or the script. The last two are companions:
+# a `#` inside a string opens no comment, and a lone quote in a comment ends no line, so `bash $f` after them runs.
+_KEPT_UNRESOLVED_RUNS = (
+    (r"printf 'h.sh\n' | xargs bash", "h.sh"),
+    ("ls *.sh | xargs bash", "helper.sh"),
+    ('"$SHELL" "$f"', "helper.sh"),
+    ('"$SHELL" $f', "helper.sh"),
+    ("$f", "helper.sh"),
+    ("python3 $f", "helper.sh"),
+    ("cat $f | bash", "helper.sh"),
+    ('python3 "$f" --x', "helper.sh"),
+    ('echo "#"; bash $f', "helper.sh"),
+    ("# it's\nbash $f", "helper.sh"),
+)
+for _run, _helper in _KEPT_UNRESOLVED_RUNS:
+    _relesc_add("other-checkout: heredoc replay kept body unresolved: a heredoc %s that echoes to ../other/f, then a "
+                "heredoc run.sh whose body is %s, then bash run.sh, is refused" % (_helper, _run.replace("\n", " then ")),
+                "deny", _kept_unresolved_run(_run, _helper), "home", rule="other-checkout")
+_relesc_add("other-checkout: heredoc replay kept body unresolved chain: a heredoc helper.sh that echoes to ../other/f, "
+            "a heredoc b.sh that runs bash \"$PWD/helper.sh\", a heredoc a.sh that runs bash b.sh, then bash a.sh, is refused",
+            "deny", _kept_heredocs([("helper.sh", "echo hi > ../other/f"), ("b.sh", 'bash "$PWD/helper.sh"'),
+                                    ("a.sh", "bash b.sh")], "bash a.sh"), "home", rule="other-checkout")
+
+# A kept body that only reads or prints, or that names bash $f only in a comment or in a string, runs no file. The
+# helper beside it runs by nothing, so its body is data and is dropped.
+_KEPT_READ_ONLY_BODIES = (
+    ("echo $f", "echo $f"),
+    ("cat $f", "cat $f"),
+    ('grep -n x "$f"', 'grep -n x "$f"'),
+    ("a # comment that holds bash $f", "# bash $f\necho ok"),
+    ('echo "bash $f"', 'echo "bash $f"'),
+    ("a quoted string over two lines that holds bash $f", 'echo "one\nbash $f"'),
+)
+for _shown, _body in _KEPT_READ_ONLY_BODIES:
+    _relesc_add("other-checkout: heredoc replay kept body read only: a heredoc helper.sh that echoes to ../other/f, "
+                "then a heredoc run.sh whose body is %s, then bash run.sh, is allowed" % _shown,
+                "allow", _kept_unresolved_run(_body), "home")
 
 
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
