@@ -9449,6 +9449,48 @@ sh("env: heredoc-refuse: a hash in quotes before a bash heredoc with an env read
 sh("env: heredoc-allow: a multi-line backtick span crossing a header line in a cat write body, is allowed",
    "cat > /tmp/b.md <<'EOF'\nconst s = `one\nbash <<EOF cat " + ENV + "\n`;\nEOF", "allow", cwd=NOGIT)
 
+# A prose line that names an env file, held in a comment or a string of a body an interpreter runs, is
+# data: the interpreter reads no prose. Each allow below is refused as env-file on main, so each is red there.
+# The deny cases after them keep a real env read in view, beside or after prose, so a fix cannot widen past them.
+sh("env: heredoc-prose-allow: a python body with a triple-quoted prose line holding an env name and an odd apostrophe, is allowed",
+   "python3 - <<'EOF'\np='hooks/guard_env.py'\ns=open(p).read()\ns=s.replace('A','''# don't read " + ENV + ".py; it's text''')\nopen(p,'w').write(s)\nEOF",
+   "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a // prose line holding an env name and an odd apostrophe, is allowed",
+   "node - <<'EOF'\n// don't match " + ENV + ".sample\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a /* */ prose line holding an env name and an odd apostrophe, is allowed",
+   "node - <<'EOF'\n/* don't read " + ENV + ".local */\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a python body with a triple-quoted prose line naming an env file, is allowed",
+   "python3 - <<'EOF'\n'''don't read " + ENV + ".local'''\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a // prose line naming an env file, with no apostrophe, is allowed",
+   "node - <<'EOF'\n// read " + ENV + ".local\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a multi-line template literal holding a // prose line, is allowed",
+   "node - <<'EOF'\nconst s = `one\n// don't read " + ENV + ".local\n`;\nconsole.log(s)\nEOF", "allow", cwd=NOGIT)
+
+# The body is judged on what it runs. These stay denied, so no prose allow above widens into a pass for a read.
+# The bash and subprocess cases repeat existing heredoc-refuse cases, so the prose class's edge sits in one block.
+sh("env: heredoc-prose-refuse: a bash heredoc with a quoted delimiter and an env read in the body, denies",
+   "bash <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python body that runs cat of an env file through subprocess, denies",
+   "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a clean python heredoc, then a cat of an env file on the next line, denies",
+   "python3 - <<'EOF'\nprint(1)\nEOF\ncat " + ENV, "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a cat of an env file in a substitution of an unquoted cat heredoc, denies",
+   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node runner given an env file with inline code, denies",
+   "node --env-file=" + ENV + " - <<'EOF'\nconsole.log(1)\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python comment before a real subprocess cat of an env file, denies",
+   "python3 - <<'EOF'\n# don't read\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node runner given an env file, with a // comment before its inline code, denies",
+   "node --env-file=" + ENV + " - <<'EOF'\n// note\nconsole.log(1)\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python string holding a # then a real subprocess cat of an env file, denies",
+   "python3 - <<'EOF'\nu = \"http://x#y\"; import subprocess; subprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an unquoted node body with a // comment and a cat substitution, denies",
+   "node - <<EOF\n// don't $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an unquoted node body with a // inside a string and a cat substitution, denies",
+   'node - <<EOF\nconst u = "http://x"; const s = "$(cat ' + ENV + ')";\nEOF', "deny", "env-file", cwd=NOGIT)
+
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
 sh("env: heredoc-r2: a data body with bash <<EOF and an env read, then sh of that file, denies",
