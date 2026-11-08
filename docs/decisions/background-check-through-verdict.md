@@ -1,4 +1,4 @@
-# A check runs through verdict, never into tail or head
+# A check runs through verdict, never into a filter
 
 ## The ruling
 

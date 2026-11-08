@@ -84,6 +84,9 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+# The lone file-writer stage the check rule lets through: each writes the output to a file the agent reads
+# back, so no filter cuts it. Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
+FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
 SCRIPT_INTERPRETERS = ("python", "python3", "py")
 
 
@@ -133,8 +136,7 @@ NARRATED_TAIL_REASON = (
 
 
 # A CHECK piped into any filter but a lone `tee` (decision background-check-through-verdict). A filter
-# after the run holds every byte until the command exits, then prints what it keeps, so the one useful
-# line, the verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the
+# after the run can cut or hide the verdict line, the one useful line, so it can be lost or never read. `verdict <cmd>` keeps the whole log and prints the
 # verdict itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
 # (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
@@ -165,7 +167,7 @@ def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
     what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
     narrated rule and the check rule. `any_filter` (the check rule, coordinator ruling 2026-11-08
-    07:16 CST) widens the reach to every later stage but `tee`, since `sed -n`, `grep -m1` and `awk`
+    07:16 CST) widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk`
     cut what the agent reads as `tail` does."""
     for first, segment in enumerate(stages):
         stage = find_stage(segment)
@@ -177,7 +179,7 @@ def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
             if at is None:
                 continue
             word = basename(tokens[at])
-            if (word != "tee") if any_filter else (word in TRUNCATING_FILTERS):
+            if (word.removesuffix(".exe") not in FILE_WRITER_STAGES) if any_filter else (word in TRUNCATING_FILTERS):
                 return stage + " | " + word
     return ""
 
@@ -205,8 +207,8 @@ def check_tail_hit(stripped: str, background: bool) -> str:
 
 
 CHECK_TAIL_REASON = (
-    "this check's output goes into a filter after the run, so the filter holds everything "
-    "until the check exits and the verdict can be lost "
+    "this check's output goes into a filter after the run, and the filter can cut or hide the "
+    "verdict line "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
     "full log and prints the verdict itself."
