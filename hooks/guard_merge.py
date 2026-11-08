@@ -380,12 +380,18 @@ REVIEW_OLD_UNREAD_REASON = (
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
 REVIEW_LITERAL_ID_REMEDY = "write the literal comment id and repo in the route, not a shell expansion such as $ID, then run the edit again."
 REVIEW_LITERAL_PR_REMEDY = "write the PR number literally, not a shell expansion such as $PR, then run the edit again."
+REVIEW_LITERAL_REPO_REMEDY = "write the repo, OWNER/NAME, literally, not a shell expansion such as $REPO, then run the edit again."
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
     "Remedy: name a body file that exists and can be read, or post the text with `--body`. "
     "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
+
+
+def shell_expanded(text) -> bool:
+    """True when `text` holds a shell expansion (`$X`, `${X}`, `$(..)`, `$((..))`, a backtick) the guard sees before the shell fills it."""
+    return "$" in str(text) or "`" in str(text)
 
 
 class _LiteralIdNeeded(RuntimeError):
@@ -485,7 +491,7 @@ def _old_body(host, edit):
         if code:
             raise RuntimeError("reading the comment failed")
         return str(json.loads(out).get("body") or "")
-    if "$" in str(ref) or "`" in str(ref):
+    if shell_expanded(ref):
         raise _LiteralIdNeeded("the pull request number is a shell expansion the guard cannot read", REVIEW_LITERAL_PR_REMEDY)
     rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
     return str(rows[-1].get("body") or "") if rows else ""
@@ -497,6 +503,8 @@ def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
     prints the not-checked note; a refused edit prints none."""
     module = merge_module()
     try:
+        if edit[0] == "last" and shell_expanded(repo):   # a comment-id edit with a variable repo already carries no id
+            raise _LiteralIdNeeded("the repo is a shell expansion the guard cannot read", REVIEW_LITERAL_REPO_REMEDY)
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
         with module.shared_deadline(MERGE_READ_TIMEOUT):
@@ -513,8 +521,8 @@ def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
 
 
 VARIABLE_REMEDIES = {
-    "number": "write the PR number literally in the route (`issues/12/comments`)",
-    "repo": "write the repo, OWNER/NAME, in the route instead of a shell expansion (`repos/OWNER/NAME/issues/12/comments`)",
+    "number": "write the PR number literally (`issues/12/comments`, `gh pr comment 12`)",
+    "repo": "write the repo, OWNER/NAME, instead of a shell expansion (`repos/OWNER/NAME/issues/12/comments`, `-R OWNER/NAME`)",
     "endpoint": "write the route out in the call (`repos/OWNER/NAME/issues/12/comments`) instead of a substitution",
 }
 

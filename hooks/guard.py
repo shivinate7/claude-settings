@@ -390,6 +390,7 @@ while True:
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target, ansi_c_decoded,
+            shell_expanded,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL,
         )
         _loading = "guard_frozen"
@@ -1462,10 +1463,10 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 # ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 # The one home of the comment routes. The guard sees the word before the shell fills it, so a repo, an issue number or a comment id
-# may be a variable (`$N`, `${N}`, `${N:-12}`), an arithmetic (`$((N+1))`) or a command substitution (`$(...)`). Group 1 is the
-# repo, group 2 the number. `_joined_substitutions` first joins a substitution the tokenizer split at its spaces into one word.
-_ROUTE_REPO = r"([^/\s]+/[^/\s]+|\$\w+|\$\{[^}\s]*\}|\$\(.*\))"
-_ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*)"
+# may be a variable (`$N`, `${N}`, `${N:-12}`), an arithmetic (`$((N+1))`) or a command substitution (`$(...)`, `` `...` ``).
+# Group 1 is the repo, group 2 the number. `_joined_substitutions` first joins a substitution the tokenizer split at its spaces into one word.
+_ROUTE_REPO = r"([^/\s]+/[^/\s]+|\$\w+|\$\{[^}\s]*\}|\$\(.*\)|`[^`]*`)"
+_ROUTE_NUMBER = r"(\d+|\$\w+|\$\{[^}\s]*\}|\$\(.*|`[^`]*`)"
 
 
 def _issue_route(middle: str, after: str):
@@ -1475,24 +1476,58 @@ def _issue_route(middle: str, after: str):
 
 _COMMENTS_ROUTE = _issue_route("", "/comments/?")
 _COMMENT_EDIT_ROUTE = _issue_route("comments/", "/?")   # a comment edited in place, by comment id
-ENDPOINT_NUMBER = "<endpoint>"   # the number of a route whose whole endpoint is a substitution
+ENDPOINT_NUMBER = "<endpoint>"   # the number of a route whose whole endpoint is a shell expansion (`$URL`, `$(...)`)
 _API_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-q", "--jq", "-t", "--template", "--input", "--hostname", "--cache",
                     "-p", "--preview"} | set(GH_API_FIELD_FLAGS)
 
 
+def _open_substitutions(text: str, quotes: bool = True) -> int:
+    """Return how many `$(..)` and backtick substitutions `text` leaves open at its end, the one count both joins below read. With
+    `quotes`, a parenthesis or backtick inside quotes is text (`$(echo '(' 12)` closes); without, `text` is a word the tokenizer
+    already unquoted."""
+    depth, ticks = 0, 0
+    steps = walk_quotes(text) if quotes else ((index, char, "") for index, char in enumerate(text))
+    for index, char, quote in steps:
+        if quote:
+            continue
+        if char == "(" and (depth or text[index - 1:index] == "$"):
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        elif char == "`":
+            ticks ^= 1
+    return depth + ticks
+
+
+def review_segments(segments, ends, offsets):
+    """Yield (segment, before, piped) for the review-record loop. The splitter cuts at an unquoted `|`, `;`, `&&` or newline even
+    inside a `$(..)`, so a gh call whose substitution it cut is joined with the segments up to the close, each cut put back as it
+    was: the call is judged whole, and its inner call never stands alone. Only a gh call joins, so a stray `$(` in other text
+    hides no later call. `before` is the first segment's heredoc offset (`offsets`), and `piped` the group before, when it ends in `|`."""
+    index, previous, previous_end = 0, "", ""
+    while index < len(segments):
+        text, before, last = segments[index], offsets[index], index
+        if ("$(" in text or "`" in text) and _open_substitutions(text) and gh_call_of(text) is not None:
+            while last < len(segments) - 1 and ends[last] and _open_substitutions(text):
+                text += ends[last] + segments[last + 1]
+                last += 1
+        yield text, before, (previous if previous_end == "|" else "")
+        previous, previous_end, index = text, ends[last], last + 1
+
+
 def _joined_substitutions(args):
-    """Return `args` with each route-shaped word that opens a `$(` the tokenizer split at a space joined with the words up to its
-    close, so the inner call of a substitution is no word of its own. Only a word that starts a route or an endpoint (`repos/`,
-    `/repos/`, `$(`) is joined: a body field that holds `$(` as text is left alone."""
+    """Return `args` with each route-shaped word that opens a `$(` or a backtick the tokenizer split at a space joined with the words
+    up to its close, so the inner call of a substitution is no word of its own. Only a word that starts a route or an endpoint
+    (`repos/`, `/repos/`, `$(`, a backtick) is joined: a body field that holds `$(` as text is left alone."""
     out, depth = [], 0
     for arg in args:
         if depth > 0:
             out[-1] += " " + arg
         else:
             out.append(arg)
-            if "$(" not in arg or not re.match(r"(/?repos/|\$\()", arg):
+            if not re.search(r"\$\(|`", arg) or not re.match(r"(/?repos/|\$\(|`)", arg):
                 continue
-        depth = max(0, out[-1].count("(") - out[-1].count(")"))
+        depth = _open_substitutions(out[-1], quotes=False)
     return out
 
 
@@ -1507,18 +1542,29 @@ def _api_endpoint(args):
     return ""
 
 
+def _api_method(args) -> str:
+    """Return the method a `gh api` call names, upper case (`-X PATCH`, `-XPATCH`, `--method PATCH`, `--method=PATCH`), else ''."""
+    for index, arg in enumerate(args):
+        if arg in ("-X", "--method"):
+            return args[index + 1].upper() if index + 1 < len(args) else ""
+        if arg.startswith("--method="):
+            return arg[len("--method="):].upper()
+        if arg.startswith("-X") and not arg.startswith("--"):
+            return arg[2:].upper()
+    return ""
+
+
 def _comment_route(args):
     """Return (routes, repo, number) for the comment route of a `gh api` call, else None. `routes` is the post or the edit
-    pattern. A first route-shaped word wins, and an endpoint that is itself a substitution is a variable target
-    (ENDPOINT_NUMBER, repo ''), an edit when the call names the method PATCH or PUT, else a post."""
+    pattern. A first route-shaped word wins, and an endpoint that starts with a shell expansion (`$URL`, `${URL}`, `$(...)`, a
+    backtick) is a variable target (ENDPOINT_NUMBER, repo ''), an edit when the call names the method PATCH or PUT, else a post."""
     for arg in args[1:]:
         for routes in (_COMMENTS_ROUTE, _COMMENT_EDIT_ROUTE):
             found = routes.fullmatch(arg)
             if found:
                 return routes, found.group(1), found.group(2)
-    if _api_endpoint(args).startswith("$("):
-        method = next((args[i + 1].upper() for i, a in enumerate(args[:-1]) if a in ("-X", "--method")), "")
-        return (_COMMENT_EDIT_ROUTE if method in ("PATCH", "PUT") else _COMMENTS_ROUTE), "", ENDPOINT_NUMBER
+    if re.match(r"[$`]", _api_endpoint(args)):
+        return (_COMMENT_EDIT_ROUTE if _api_method(args) in ("PATCH", "PUT") else _COMMENTS_ROUTE), "", ENDPOINT_NUMBER
     return None
 
 
@@ -1526,7 +1572,7 @@ def _variable_parts(repo: str, number) -> tuple:
     """Return which parts of a route are shell expansions the guard cannot read: "endpoint", else "number" and "repo" as they apply."""
     if number == ENDPOINT_NUMBER:
         return ("endpoint",)
-    return tuple(name for name, bad in (("number", not str(number).isdigit()), ("repo", "$" in repo)) if bad)
+    return tuple(name for name, bad in (("number", not str(number).isdigit()), ("repo", shell_expanded(repo))) if bad)
 
 
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
@@ -1612,6 +1658,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         selector, repo = _comment_target(args)
         if any(a in ("--edit-last", "--edit-last=true") for a in args):   # -e is --editor, a post
             edit = ("last", selector)
+        variable = tuple(name for name, part in (("number", selector), ("repo", repo)) if shell_expanded(part))
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
         rest = _joined_substitutions(rest)
@@ -3775,8 +3822,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 6b2. A review record posted as a comment with a hand-typed head or number (rule pr-review-record).
     # Cost: one pull request read per post that holds the record marker, none for any other command.
-    for index, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
-        piped = segments[index - 1] if index and ends[index - 1] == "|" else ""
+    for segment, before, piped in review_segments(segments, ends, heredoc_offsets(segments, ends, stripped == raw)):
         hit = review_post_hit(segment, raw, cite_where, before, piped) if segment.strip() else None
         if hit:
             refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
