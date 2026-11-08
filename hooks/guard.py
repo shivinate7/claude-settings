@@ -1111,8 +1111,8 @@ def _settings_place(path: str, cwd: str) -> bool:
             if parent == folder_up:
                 break
             folder_up = parent
-    # On Windows `here` holds the drive spelling of each folder, so the folder is read the same way: a
-    # Git-Bash `/c/` folder becomes `C:`. Elsewhere `/c/` is a plain folder and the spelling stays raw.
+    # `here` reads the cwd through `_expanded` on every OS. `where` is read that way on Windows only, so a
+    # Git-Bash `/c/` folder becomes `C:`. Elsewhere `where` stays raw, as `/c/` is a plain folder.
     where = _expanded(folder, "") if os.name == "nt" else folder
     return os.path.normcase(os.path.realpath(where)) in here
 
