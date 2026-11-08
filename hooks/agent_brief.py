@@ -18,6 +18,7 @@ COMMON = [
     (False, "- Push only with: git push origin HEAD:<branch>."),
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
+    (True, "- A refusal from the harness or a guard is final. Report it, and never send the same command again in another form (escaped quotes, base64, hex escapes, a glob)."),
     (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),

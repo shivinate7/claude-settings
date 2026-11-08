@@ -71,6 +71,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
+  encoded-retry-after-refusal
+                       deny. A call that decodes text and runs it (a decode piped into a shell, or eval or
+                       source of a decode), or whose command word is an ANSI-C `$'...'` escape word, when
+                       its session had a refusal in the last ten minutes: a row in its refusal state file
+                       (an agent's row counts for that agent only) or a guard.log deny row. The refusal
+                       state is read only when the call has the shape. A PowerShell call is not judged.
+                       An override lifts it. (encoded-retry-after-refusal)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   verdict-pipe         deny. A `verdict` stage piped into another command: the exit is the last
                        stage's, and a filter can cut verdict's FAIL line.
@@ -323,7 +330,8 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl",
+                   "guard_encoded")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
@@ -436,6 +444,8 @@ while True:
         )
         _loading = "guard_wsl"
         from guard_wsl import WSL_REASON, wsl_hit
+        _loading = "guard_encoded"
+        from guard_encoded import ENCODED_RETRY_REASON, encoded_retry_hit
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -3591,7 +3601,7 @@ def settle_ask(tool: str, raw: str) -> None:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "") -> None:
+                background: bool = False, description: str = "", agent_id: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -3784,6 +3794,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = wsl_hit(stripped)
     if matched:
         refuse(tool, "deny", "wsl-allow-list", WSL_REASON, matched)
+
+    # 2d. A decode-and-run call, or an ANSI-C escape command word, in the ten minutes after a refusal in this
+    # session (decision encoded-retry-after-refusal). The refusal state is read only when the shape matches.
+    matched = "" if POWERSHELL_CALL[0] else encoded_retry_hit(raw, stripped, session_id, agent_id)
+    if matched:
+        refuse(tool, "deny", "encoded-retry-after-refusal", ENCODED_RETRY_REASON, matched)
 
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's
@@ -5308,7 +5324,8 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "")
+                        tool_input.get("description") or "",
+                        str(payload.get("agent_id") or "") if isinstance(payload, dict) else "")
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:
