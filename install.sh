@@ -901,8 +901,8 @@ land_skills_dir() {
   [ -n "$LANDED" ] && log "skills in $DEST_DIR:$LANDED"
 }
 # The set of directories landed above comes from landed-dirs.txt at the repo root, the single
-# source install.ps1 reads too (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a
-# deliberately separate literal; see the comment beside it in hooks/guard.py for why.
+# source install.ps1 reads too (see the comment there). hooks/guard_frozen.py's CONFIG_FROZEN_DIRS is a
+# deliberately separate literal; see the comment beside it in hooks/guard_frozen.py for why.
 # lint/check_landed_dirs.py checks the two stay in agreement.
 while IFS= read -r sub || [ -n "$sub" ]; do
   sub=$(printf '%s' "$sub" | tr -d '\r' | sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//')
@@ -1038,9 +1038,18 @@ fi
 # A cloud session reads no rc file, so ~/.claude/bin reaches its shells only through CLAUDE_ENV_FILE, the file a
 # SessionStart hook writes to persist environment variables for the shell commands Claude runs later. The marker
 # keeps a second install from appending a second line. A failed write never fails the install.
+# The line names the bin the install landed at. The default config dir keeps the $HOME/.claude form, so the line
+# follows a moved home. A CLAUDE_CONFIG_DIR gets its absolute path, single-quoted so a space in it stays one word,
+# with each single quote in it escaped; a fixed $HOME/.claude would miss bin there.
 if [ "$CLOUD" = 1 ] && [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$CLAUDE_ENV_FILE"; then
-  if printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' 2>/dev/null >> "$CLAUDE_ENV_FILE"; then
-    log "added ~/.claude/bin to PATH in $CLAUDE_ENV_FILE"
+  if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then
+    env_path_line='export PATH="$HOME/.claude/bin:$PATH"'
+  else
+    env_bin=$(printf '%s' "$CLAUDE_DIR/bin" | sed "s/'/'\\\\''/g")
+    env_path_line="export PATH='$env_bin':\"\$PATH\""
+  fi
+  if printf '\n# claude-settings: ~/.claude/bin on PATH\n%s\n' "$env_path_line" 2>/dev/null >> "$CLAUDE_ENV_FILE"; then
+    log "added $CLAUDE_DIR/bin to PATH in $CLAUDE_ENV_FILE"
   else
     log "could not write the PATH line to $CLAUDE_ENV_FILE; skipped"
   fi

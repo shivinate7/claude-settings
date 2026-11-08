@@ -5,8 +5,8 @@
 # reads it twice: once for its own foreach, once inside the embedded post-merge hook it writes,
 # so a `git pull` on a symlink-less machine lands the same set.
 #
-# hooks/guard.py keeps CONFIG_FROZEN_DIRS as its own literal on purpose. See the comment beside
-# it in hooks/guard.py for why a frozen-path list must never be read from a file at runtime.
+# hooks/guard_frozen.py keeps CONFIG_FROZEN_DIRS as its own literal on purpose. See the comment beside
+# it in hooks/guard_frozen.py for why a frozen-path list must never be read from a file at runtime.
 # lint/check_landed_dirs.py checks that the two stay in agreement, `state` excepted: it is a
 # guard-only extra, never landed by either installer.
 agents

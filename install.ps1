@@ -394,8 +394,8 @@ Write-Pointer -RepoDir $RepoDir -ClaudeDir $ClaudeDir
 # link is never touched. A link is no longer pruned because it dangles.
 # The set of directories landed here comes from landed-dirs.txt at the repo root, the single
 # source the embedded post-merge hook above reads too, and that install.sh reads on
-# Linux/macOS (see the comment there). hooks/guard.py's CONFIG_FROZEN_DIRS is a deliberately
-# separate literal; see the comment beside it in hooks/guard.py for why. lint/check_landed_dirs.py
+# Linux/macOS (see the comment there). hooks/guard_frozen.py's CONFIG_FROZEN_DIRS is a deliberately
+# separate literal; see the comment beside it in hooks/guard_frozen.py for why. lint/check_landed_dirs.py
 # checks the two stay in agreement.
 function Get-LandedDirs([string]$FromRepoDir) {
     Get-Content (Join-Path $FromRepoDir 'landed-dirs.txt') |
