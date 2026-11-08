@@ -19750,6 +19750,41 @@ add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to 
 add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
     subagent_type="builder", model="sonnet")
+# Brief-scan cases for these causes: a heading negator read across the whole heading, a negator that is not the word
+# before its span ("without", "avoid"), emphasis marks inside a negator, a bold heading, a blank line before the list, a
+# fence or a nested bullet under a negating heading, an inline triple-backtick span with text after it, and a read-only
+# role with a plugin prefix. Each deny is red on a brief that the scan lets through; each allow is red on a refusal the
+# scan makes, and its reason names this rule.
+add("brief-destructive-git: heading Do not skip any step: does not cover a numbered list that orders a reset is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="Do not skip any step:\n1. `git fetch`\n2. `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: heading Without losing the log, run: does not cover a bullet that orders a discard is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Without losing the log, run:\n- `git checkout -- .`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: without that is not the word before the span does not cancel a reset is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Reset without asking: `git reset --hard origin/main`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: avoid that is not the word before the span does not cancel a clean is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="To avoid conflicts run `git clean -fd`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: an inline triple-backtick span with text after it opens no fence, so the reset after it "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Agent",
+    prompt="```git status``` first\nThen:\n```\ngit reset --hard origin/main\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: emphasis marks inside the negator, Do **not** run, are allowed", "allow",
+    tool="Agent", prompt="Do **not** run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a bold Never run: heading over discard bullets is allowed", "allow",
+    tool="Agent", prompt="**Never run:**\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a blank line between Never run: and its discard bullets is allowed", "allow",
+    tool="Agent", prompt="Never run:\n\n- `git reset --hard`\n- `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a fenced discard under a Never run: heading is allowed", "allow",
+    tool="Agent", prompt="Never run:\n```\ngit reset --hard\n```", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a nested discard bullet under a - Never run: bullet heading is allowed", "allow",
+    tool="Agent", prompt="- Never run:\n  - `git stash`", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a plugin-prefixed reviewer role my-plugin:reviewer that says a reset is refused is allowed",
+    "allow", tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
+    subagent_type="my-plugin:reviewer", model="sonnet")
 # Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
 # builder's refusal text still orders a reset.
 add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
