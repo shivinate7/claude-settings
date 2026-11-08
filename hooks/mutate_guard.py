@@ -2441,6 +2441,16 @@ MUTATIONS = [
      '    return version.group(2) is not None and int(version.group(2)) != own[2]',
      '    return False',
      "guard", "commit trailer: a Claude Haiku 5.4 trailer from a Haiku 5.5 agent is refused"),
+    ("commit-trailer-model: a hyphen before the minor goes unread after the family word",
+     'VERSION_AFTER = re.compile(r"[\\s_-]*(\\d+)(?:[.-](\\d{1,2}))?',
+     'VERSION_AFTER = re.compile(r"[\\s_-]*(\\d+)(?:[.](\\d{1,2}))?',
+     "guard", "commit trailer: a claude-haiku-5-4 trailer from a Haiku 5.5 agent is refused"),
+    # The lookbehind change keeps the minor from being read as a major of its own: with `[.]` alone, `5-4` falls back to
+    # major 4, which a Haiku 5.5 agent is refused for too.
+    ("commit-trailer-model: a hyphen before the minor goes unread before the family word",
+     'VERSION_BEFORE = re.compile(r"(?<!\\d)(\\d+)(?:[.-](\\d{1,2}))?',
+     'VERSION_BEFORE = re.compile(r"(?<![\\d-])(\\d+)(?:[.](\\d{1,2}))?',
+     "guard", "commit trailer: a Claude 5-4 Haiku trailer from a Haiku 5.5 agent is refused"),
     ("commit-trailer-model: a push inside bash -c or sh -lc goes unread",
      '    inner = inner_commands(tokens) if tokens else []\n    if inner:\n        inner_cwd',
      '    inner = []\n    if inner:\n        inner_cwd',
