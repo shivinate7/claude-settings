@@ -2856,20 +2856,32 @@ class LostSentence(unittest.TestCase):
     KEY_OLD = "- key-claim-note: The finder reads each calendar column for key Q4 once."
     KEY_NEW = "- key-claim-note: The finder reads each calendar column for key Q5 once."
     ID_UNRELATED = "- id-unrelated-note: The finder prints its rows in file order."
+    # A label word such as `Decision:` is not a clause word, so a changed label alone keeps the clause. An id's words are.
+    LABEL_OLD = "- label-note: The finder lists each calendar read in the sweep. Decision: test-strategy-reset."
+    LABEL_NARROW = "- label-note: The finder lists each calendar read in the sweep. Decision: test-practices."
+    LABEL_RULING = "- label-note: The finder lists each calendar read in the sweep. Ruling: test-strategy-reset."
+    # A clause that only words most notes carry hold is not kept. Below GENERIC_MIN notes no word is generic.
+    GEN_SRC = "- gen-src: The finder lists each calendar read in the sweep. The branch never checks the finding twice."
+    GEN_DST = "- gen-dst: The finder lists each calendar read in the sweep."
+    GEN_UNRELATED = "- gen-unrelated: The branch never checks each run."
+    GEN_PAIR_SRC = "- gen-pair-src: The branch never checks the finding twice. The finder lists each calendar read once."
+    GEN_LOOKALIKE = "- gen-lookalike: The branch never checks the lint finding."
 
-    def start(self, lines):
+    def start(self, lines, filler=None):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
-        the branch's rewrite is read against its own parent. -> nothing; the branch is checked out."""
+        the branch's rewrite is read against its own parent. `filler` is how many filler notes it holds (all of them by default).
+        -> nothing; the branch is checked out."""
         r = self.r = Repo()
+        self.base = self.FILLER if filler is None else self.FILLER[:filler]
         r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
-        r.commit("notes", docs__debts__notes_md=self.text(*(self.FILLER + lines)))
+        r.commit("notes", docs__debts__notes_md=self.text(*(self.base + lines)))
         r.commit("unrelated main commit", other_txt="other v1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
 
     def rewrite(self, msg, lines):
         """The branch's one commit: its notes file is the filler and `lines`. -> the sha."""
-        return self.commit_notes(msg, self.FILLER + lines)
+        return self.commit_notes(msg, self.base + lines)
 
     def premises(self, head, old, slug, gone):
         """The scope, read before the verdict (P7): the commit is no merge, main holds the old line, the head holds one line for
@@ -3247,6 +3259,57 @@ class LostSentence(unittest.TestCase):
                          "premise: the head does not hold the unrelated note once")
         got = self.r.verdict()
         self.assertEqual(got, [], "a note kept with its key label was refused: %r" % got)
+
+    def test_a_decision_id_with_one_of_three_words_kept_is_refused_and_names_the_claim(self):
+        self.start([self.LABEL_OLD])
+        head = self.rewrite("Narrow the decision id to test-practices", [self.LABEL_NARROW])
+        self.premises(head, self.LABEL_OLD, "label-note", "test-strategy-reset.")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "label-note", "test-strategy-reset"),
+                        "a decision id that kept one of its three words was not refused by a problem that names the note and the id: %r"
+                        % got)
+
+    def test_a_decision_label_renamed_to_ruling_with_the_id_kept_passes(self):  # control: the label is not a clause word
+        self.start([self.LABEL_OLD])
+        head = self.rewrite("Rename the decision label to ruling", [self.LABEL_RULING])
+        self.premises(head, self.LABEL_OLD, "label-note", "Decision: test-strategy-reset.")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a label renamed with its id kept was refused: %r" % got)
+
+    def test_a_clause_kept_only_by_generic_words_of_an_unrelated_note_is_refused_at_twenty_notes(self):
+        self.start([self.GEN_SRC])
+        head = self.rewrite("Rename gen-src to gen-dst and drop its second clause", [self.GEN_DST, self.GEN_UNRELATED])
+        self.assertIn(self.GEN_SRC, self.notes_at("main"), "premise: main does not hold gen-src")
+        self.assertEqual(sum(line.startswith("- gen-src:") for line in self.body(head)), 0, "premise: the head holds gen-src")
+        self.assertEqual(sum(line.startswith("- gen-dst:") for line in self.body(head)), 1, "premise: the head does not hold gen-dst once")
+        self.assertEqual(sum(line.startswith("- gen-unrelated:") for line in self.body(head)), 1,
+                         "premise: the head does not hold gen-unrelated once")
+        self.assertNotIn("branch never checks the finding twice", "\n".join(self.body(head)), "premise: the head holds the dropped clause")
+        self.assertGreaterEqual(sum(line.startswith("- ") for line in self.body(head)), 20, "premise: the head has fewer than 20 notes")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "gen-src", "branch never checks the finding twice"),
+                        "a clause that only generic words of an unrelated added note hold was not refused by a problem that names the "
+                        "note and the clause: %r" % got)
+
+    def test_the_same_clause_at_under_twenty_notes_is_kept_by_the_shared_words_and_passes(self):  # control: the cut is off here
+        self.start([self.GEN_SRC], filler=10)
+        head = self.rewrite("Rename gen-src to gen-dst and drop its second clause", [self.GEN_DST, self.GEN_UNRELATED])
+        self.assertIn(self.GEN_SRC, self.notes_at("main"), "premise: main does not hold gen-src")
+        self.assertEqual(sum(line.startswith("- gen-dst:") for line in self.body(head)), 1, "premise: the head does not hold gen-dst once")
+        self.assertLess(sum(line.startswith("- ") for line in self.body(head)), 20, "premise: the head has 20 or more notes")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a clause kept by shared words at fewer than twenty notes was refused: %r" % got)
+
+    def test_a_plain_retire_beside_a_note_that_shares_only_generic_words_passes(self):
+        self.start([self.GEN_PAIR_SRC])
+        head = self.rewrite("Retire gen-pair-src beside an unrelated note", [self.GEN_LOOKALIKE])
+        self.assertIn(self.GEN_PAIR_SRC, self.notes_at("main"), "premise: main does not hold gen-pair-src")
+        self.assertEqual(sum(line.startswith("- gen-pair-src:") for line in self.body(head)), 0, "premise: the head holds gen-pair-src")
+        self.assertEqual(sum(line.startswith("- gen-lookalike:") for line in self.body(head)), 1,
+                         "premise: the head does not hold gen-lookalike once")
+        self.assertGreaterEqual(sum(line.startswith("- ") for line in self.body(head)), 20, "premise: the head has fewer than 20 notes")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a plain retire was refused because an unrelated note shares only generic words with a clause: %r" % got)
 
 
 if __name__ == "__main__":
