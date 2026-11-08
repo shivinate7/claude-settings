@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -62,6 +63,7 @@ def setUpModule():
     os.environ.update(CJ_LOADED_DIR=stub, CJ_RECORD=os.path.join(stub, "calls.jsonl"),
                       CJ_ANSWER=tcj.ALLOW)
     os.environ.pop("CJ_MODEL_FAIL", None)
+    os.environ.pop("CJ_MODEL_TIMEOUT", None)
     # The route-rows seam points at a missing file, so no old case reads a real rows file.
     _ISOLATION["rows"] = os.environ.get(hook_base.ROUTE_ROWS_ENV)
     os.environ[hook_base.ROUTE_ROWS_ENV] = os.path.join(_ISOLATION["dir"], "no-route-rows.json")
@@ -4055,7 +4057,7 @@ class GuardLogAppendRaceTests(unittest.TestCase):
 # call (spec past-rulings, relayed questions). The model is the stub in hooks/test_call_judge.py, set up in setUpModule:
 # CJ_ANSWER is its answer, CJ_MODEL_FAIL makes it fail, and every call is recorded. A model error refuses once with the
 # Unvetted: remedy; an absent source allows with the stderr notice; question-keys refuses two questions on one key.
-MODEL_ENV = ("PYTHONPATH", "CJ_LOADED_DIR", "CJ_RECORD", "CJ_ANSWER", "CJ_MODEL_FAIL")
+MODEL_ENV = ("PYTHONPATH", "CJ_LOADED_DIR", "CJ_RECORD", "CJ_ANSWER", "CJ_MODEL_FAIL", "CJ_MODEL_TIMEOUT")
 RELAY = "> **Input Needed** Should the GitHub apps keep their access to claude-settings?"
 PROSE_Q = "Should the GitHub apps keep their access to claude-settings?"
 DONE_ONLY = "> **Done** OTHER read the audit\n> **Next** wait"
@@ -4067,6 +4069,12 @@ KEYS_DISTINCT = ("> **Input Needed** Two questions.\n> 1a) keep the apps\n> 1b) 
                  "> 2a) about 2x\n> 2b) under 80%")
 KEYS_NOW = "> **Input Needed** Keep the caps?\n> a) about 2x\n> b) under 80%"
 KEYS_EARLIER = "> **Input Needed** Keep the apps?\n> a) keep\n> b) remove"
+# The run-line cases: an accented question (chars counts characters, not bytes), and the measured full size.
+RELAY_ACCENTED = ("> **Input Needed** Should the GitHub apps keep their access to claude-settings? "
+                  "Caf" + chr(0xE9) + ": the owner's call " + chr(0x2014) + " one word.")
+FULL_COUNT = 320  # the measured cloud run: about 320 records, and a prompt near 235 KB
+FULL_RULING = ("Owner, 2026-10-28, marker full-%03d: "
+               + "keep the rule as written and revisit it only if it bloats. " * 12)
 
 
 C153_MARK = "c153-5e7a"
@@ -4106,7 +4114,8 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         with open(self.record, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False):
+    def stop(self, repo, reply=None, answer=None, model_fail=False, records=None, to_writer=False,
+             model_timeout=False, config=None):
         if records is None:
             # A question reaches the page writer in its own turn, so `to_writer` adds that send before the reply.
             sent = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)] if to_writer else []
@@ -4116,6 +4125,10 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         overrides = {"CJ_ANSWER": answer or tcj.ALLOW}
         if model_fail:
             overrides["CJ_MODEL_FAIL"] = "1"
+        if model_timeout:
+            overrides["CJ_MODEL_TIMEOUT"] = "1"  # the stub's model run times out at once
+        if config is not None:
+            overrides["CLAUDE_CONFIG_DIR"] = config  # one case's own guard.log, under the run folder
         with mock.patch.dict(os.environ, overrides):
             run = run_guard(REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -4275,6 +4288,113 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         out, _ = self.stop(self.decided, records=records)
         self.assertNotIn("question-keys", self.reason(out), out)
 
+    # ---- the past-ruling-run line (spec past-rulings, guard.log). Each model run of past_ruling_problem writes one
+    # line, rule past-ruling-run, whose matched text reads ms, chars, cands and result. ms is a measured time, so no
+    # case asserts its value, only that it is a whole number. chars is the length of the prompt the model got.
+    RUN_RULE = "past-ruling-run"
+    RUN_TEXT = re.compile(r"ms=(\d+) chars=(\d+) cands=(\d+) result=(ok|refuse|timeout|error)")
+
+    def fresh_config(self):
+        """An empty config dir for one case, under the run folder, so its guard.log holds only that case's lines."""
+        return tempfile.mkdtemp(dir=RUN_FOLDER)
+
+    def run_lines(self, cfg):
+        """The past-ruling-run lines of the guard.log in cfg, each split into its tab fields."""
+        rows = [row.split("\t") for row in (gl_lines(cfg) or [])]
+        return [fields for fields in rows if fields[3:4] == [self.RUN_RULE]]
+
+    def assert_one_run_line(self, cfg, result):
+        """One model run wrote one run line, which names the outcome `result`. Returns the match of the line's text."""
+        rows = self.run_lines(cfg)
+        self.assertEqual(len(rows), 1, "expected one past-ruling-run line for one model run, found %d" % len(rows))
+        self.assertNotIn(rows[0][2], ("deny", "ask"),
+                         "a past-ruling run is no refusal and no prompt, but its line reads decision %r" % rows[0][2])
+        match = self.RUN_TEXT.search(rows[0][4])
+        self.assertIsNotNone(match, "the run line carries no ms, chars, cands and result: %r" % rows[0][4])
+        self.assertEqual(match.group(4), result,
+                         "the run line reads result=%s, expected result=%s" % (match.group(4), result))
+        return match
+
+    def test_ok_run_writes_one_line_with_result_ok(self):
+        cfg = self.fresh_config()
+        self.stop(self.decided, RELAY, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        self.assert_one_run_line(cfg, "ok")
+
+    def test_refused_run_writes_one_line_with_result_refuse(self):
+        cfg = self.fresh_config()
+        out, _ = self.stop(self.decided, RELAY, answer=REFUSE_APPS, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        self.assertIn("past-ruling", self.reason(out), out)
+        self.assert_one_run_line(cfg, "refuse")
+
+    def test_timed_out_run_still_refuses_unvetted_and_writes_result_timeout(self):
+        # A timeout fails to the owner: the question is refused as Unvetted, and the run line says it timed out.
+        cfg = self.fresh_config()
+        out, _ = self.stop(self.decided, RELAY, model_timeout=True, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        self.assertIn("Unvetted guard", self.reason(out), "a timed-out run did not refuse as Unvetted: %r" % out)
+        self.assertIn("timed out", self.reason(out), "the Unvetted refusal does not name the timeout: %r" % out)
+        self.assert_one_run_line(cfg, "timeout")
+
+    def test_error_run_still_refuses_unvetted_and_writes_result_error(self):
+        cfg = self.fresh_config()
+        out, _ = self.stop(self.decided, RELAY, model_fail=True, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        self.assertIn("Unvetted guard", self.reason(out), "a failed run did not refuse as Unvetted: %r" % out)
+        self.assert_one_run_line(cfg, "error")
+
+    def test_run_line_chars_is_the_prompt_length_in_characters(self):
+        cfg = self.fresh_config()
+        self.stop(self.decided, RELAY_ACCENTED, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the past-ruling model run did not happen")
+        match = self.assert_one_run_line(cfg, "ok")
+        self.assertEqual(int(match.group(2)), len(calls[0]["prompt"]),
+                         "chars is %s, but the prompt the model got has %d characters"
+                         % (match.group(2), len(calls[0]["prompt"])))
+        self.assertEqual(int(match.group(3)), 1,
+                         "cands is %s, but the decided repo holds one decision record" % match.group(3))
+
+    def test_repo_with_no_records_writes_zero_candidates(self):
+        cfg = self.fresh_config()
+        self.stop(self.bare, RELAY, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        match = self.assert_one_run_line(cfg, "ok")
+        self.assertEqual(int(match.group(3)), 0, "cands is %s, but the bare repo holds no record" % match.group(3))
+
+    def test_full_size_repo_writes_every_candidate_and_the_whole_prompt(self):
+        # The measured cloud run: about 320 records and a prompt near 235 KB. The fixture reaches that size first.
+        repo = tcj.make_repo("run-line-full", decisions={"full-%03d" % i: FULL_RULING % i for i in range(FULL_COUNT)})
+        cfg = self.fresh_config()
+        self.stop(repo, RELAY, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the past-ruling model run did not happen")
+        self.assertGreater(len(calls[0]["prompt"]), 200000,
+                           "the fixture prompt has %d characters, short of full size" % len(calls[0]["prompt"]))
+        match = self.assert_one_run_line(cfg, "ok")
+        self.assertEqual(int(match.group(3)), FULL_COUNT,
+                         "cands is %s, but the repo holds %d records" % (match.group(3), FULL_COUNT))
+        self.assertEqual(int(match.group(2)), len(calls[0]["prompt"]),
+                         "chars is %s, but the prompt has %d characters" % (match.group(2), len(calls[0]["prompt"])))
+
+    def test_a_run_adds_one_guard_log_line_and_no_other_file(self):
+        cfg = self.fresh_config()
+        self.stop(self.decided, RELAY, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        self.assertEqual(len(self.model_calls()), 1, "the past-ruling model run did not happen")
+        lines = gl_lines(cfg) or []
+        self.assertEqual(len(lines), 1, "one model run wrote %d guard.log lines, not one" % len(lines))
+        files = sorted(os.path.relpath(os.path.join(root, name), cfg)
+                       for root, _, names in os.walk(cfg) for name in names)
+        self.assertEqual(files, ["guard.log"], "one model run left files other than guard.log: %r" % files)
+
+    def test_model_run_is_given_the_thirty_second_budget(self):
+        cfg = self.fresh_config()
+        self.stop(self.decided, RELAY, answer=tcj.ALLOW, config=cfg, to_writer=True)
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the past-ruling model run did not happen")
+        self.assertGreaterEqual(calls[0].get("timeout") or 0, 30,
+                                "the past-ruling model run was given %r s, under 30 s" % calls[0].get("timeout"))
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
