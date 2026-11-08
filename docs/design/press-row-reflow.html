@@ -993,7 +993,9 @@ html:is(.opt-start, .opt-full) .askform { container: askf / inline-size; }
 
 /* 2a. A folded answered row, too narrow for its text beside the press: the press drops under the text. */
 @container askl (width < 19.5em) {
-  html:is(.opt-start, .opt-full) .frow { grid-template-columns: auto minmax(0, 1fr); padding-block: 8px; }
+  /* The glyph sits on the title's first line, not on the middle of a three-line block. */
+  html:is(.opt-start, .opt-full) .frow { grid-template-columns: auto minmax(0, 1fr); padding-block: 8px; align-items: start; }
+  html:is(.opt-start, .opt-full) .frow > .g { margin-block-start: calc((1.55em - 12px) / 2); }
   html:is(.opt-start, .opt-full) .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
   html:is(.opt-start, .opt-full) .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
   html:is(.opt-start, .opt-full) .frow .fdate { display: inline-block; }
