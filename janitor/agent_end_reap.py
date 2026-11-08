@@ -34,8 +34,8 @@ the hook KEEPS the ending agent's own worktree, with the row reason OWN_TREE_REA
 removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent-*`
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
-prove keeps. One lock and its processes are the exception (coordinator picks of 2026-11-07 14:43 and
-15:05 CST): a tree locked by this session's host is unlocked and removed only when the agent is
+prove keeps. One lock and its processes are the exception (decision
+`when-a-worktree-may-be-removed`): a tree locked by this session's host is unlocked and removed only when the agent is
 proven finished (`agent_finished`: its own SubagentStop row is in the payload log and newer than its
 agent transcript, it is not listed as running in `background_tasks`, and the transcript is idle 30
 minutes or more) and the tree is clean and pushed. A process inside keeps the tree unless
