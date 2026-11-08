@@ -1595,8 +1595,8 @@ BUILDER_TEST_REASON = (
 # The builder's refusal when a fed folder is past the walk cap (`_TOO_LARGE_NOTE` on the hit): no test was found,
 # so the reason says the folder is too large to check, not that the command writes a test.
 BUILDER_TOO_LARGE_REASON = (
-    "A builder's write through a folder this large cannot be checked for a test. Name a narrower path, or a find "
-    "-name filter. If the write does change a test, report it: the orchestrator assigns it to a test-author."
+    "The folder this builder's write goes through is too large to check for a test. Name a narrower path, or a "
+    "find -name filter. If the write does change a test, report it: the orchestrator assigns it to a test-author."
     " (decision builders-cannot-edit-tests, a builder never changes a test or test config)"
 )
 AUTHOR_SCOPE_REASON = (
