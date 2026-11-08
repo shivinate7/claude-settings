@@ -30,7 +30,9 @@ import sys
 import tokenize
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
 
 class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
@@ -74,9 +76,17 @@ class ReviewRound:
                     self.top = git("rev-parse", "--show-toplevel").strip()
                 except Unread:
                     self.top = ""
-            self.known[ident] = bool(self.top) and os.path.isfile(
-                os.path.join(self.top, "docs", "decisions", ident + ".md"))
+            self.known[ident] = bool(self.top) and self.has_decision(ident)
         return self.known[ident]
+
+    def has_decision(self, ident):
+        """True when the first decisions folder the layout allows for the repo at self.top holds ident.md. A layout
+        that does not read says nothing is real, so the round stays flagged."""
+        try:
+            return any(os.path.isfile(os.path.join(self.top, *folder.split("/"), ident + ".md"))
+                       for folder in layout.candidates(self.top, "decisions"))
+        except (layout.LayoutError, KeyError, OSError):
+            return False
 
     @staticmethod
     def paren_spans(text):
