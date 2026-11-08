@@ -54,6 +54,7 @@
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
 - env-deno-run-stdin: `deno run --env-file=ENV -` reads a stdin script but allows, since `run` reads as the script word (hooks/guard_env.py _runner_inline_code). Fix: none — Claude rarely feeds a stdin script to deno run -. Until: 2026-11-21
+- env-guard-interpreter-api-reads: the env guard allows an env file read through an interpreter API, bare with no comment: python `os.system('cat .env')`, node `require('fs').readFileSync('.env')`, node `require('child_process').execSync('cat .env')` (hooks/guard_env.py). Decision: env-file-stays-unread. Fix: none — no incident. Until: 2026-11-22.
 - env-value-flag-list-closed: a node value flag outside ENV_RUNNER_VALUE_FLAGS, such as `--title x -e y`, reads its value as the script and allows (hooks/guard_env.py). Fix: none — the value-flag list is closed by design, and an unlisted value flag before -e is rare. Until: 2026-11-21
 - env-split-string-wsl-only: only the WSL rule reads the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
