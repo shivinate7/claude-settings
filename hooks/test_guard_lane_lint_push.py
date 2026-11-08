@@ -441,7 +441,7 @@ class LaneLintCase(unittest.TestCase):
             self.assertEqual(len(unknown_stderr_lines(out)), 1, "stderr lines that say unknown, want exactly one")
 
 
-class DenyCases(LaneLintCase):
+class RefuseCases(LaneLintCase):
     def test_1a_merge_that_drops_a_main_line_is_refused_before_it_leaves(self):
         case = self.case()
         clone = drop_repo(case)
