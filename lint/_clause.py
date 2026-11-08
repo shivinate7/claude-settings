@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS, OUTAGE_NOUNS, OUTAGE_VERBS). The module reads text and
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
 in step with the text.
 
@@ -44,6 +44,12 @@ CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn'
 OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
 OUTAGE_VERBS = ("start", "connect", "run", "load", "reach", "respond", "authenticate", "fetch", "launch", "initialize",
                 "initialise", "clone")
+# "sent back 403": the verb phrases that say a call answered with a status, and the HTTP status (a 4xx or 5xx that no hyphen
+# joins and no unit follows: "450 files" and "a 450-line diff" are sizes). A clause that holds one is a reason.
+BACK_FORMS = ("sent", "came", "gave", "given", "comes", "sends", "gives", "come")
+BACK_PATTERN = r"(?:%s)\s+back" % "|".join(BACK_FORMS)
+SIZE_UNITS = ("lines?", "files?", "words?", "chars?", "commits?", "bytes?", "[km]b", "ms")
+STATUS_PATTERN = r"[45]\d\d\b(?![-\w])(?!\s+(?:%s)\b)" % "|".join(SIZE_UNITS)
 WINDOW = 6  # words after a phrase, in its clause, that may name the act
 NEGATOR_GAP = 3  # words before a phrase that a negator may sit in and still negate it
 
@@ -143,6 +149,7 @@ _PAST_RE = re.compile(r"^(?:could|wasn['’]t)", re.I)
 _WAS_RE = re.compile(r"\b(?:was|were)(?:\s+%s)*\s*$" % _ADV, re.I)
 _ADV_LEAD_RE = re.compile(r"^(?:%s\s+)+" % _ADV, re.I)
 _FIRST_WORD = re.compile(r"\s*(\w+)")
+_BACK_STATUS_RE = re.compile(r"\b(?:%s)\s+(?:a\s+)?%s" % (BACK_PATTERN, STATUS_PATTERN), re.I)
 _PAREN_RE = re.compile(r"\(([^()]+)\)")
 _REASON_LEADS = (":", ";", ",", "—", "–", "-", "--")
 
@@ -193,11 +200,12 @@ def strip_adverbs(text):
 
 def is_reason(text):
     """True when `text` is a clause of three words or more with a verb (VERBS, or a word in -ed) that no determiner
-    just before it makes an adjective: "a protected branch" holds no verb."""
+    just before it makes an adjective: "a protected branch" holds no verb. "sent back 403" (BACK_PATTERN, then a status)
+    is a verb of its own."""
     tokens = [w.strip(".,;:()\"'").lower().replace("’", "'") for w in text.split()]
-    return len(tokens) >= 3 and any(
+    return len(tokens) >= 3 and bool(_BACK_STATUS_RE.search(text) or any(
         (w in VERBS or re.fullmatch(r"\w+ed", w)) and not (k and tokens[k - 1] in DETERMINERS)
-        for k, w in enumerate(tokens))
+        for k, w in enumerate(tokens)))
 
 
 def reasons(text):

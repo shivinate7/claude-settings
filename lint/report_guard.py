@@ -1669,9 +1669,8 @@ CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|ed
 CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _ADVERB, re.I)
 _CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
-_BACK = r"(?:sent|came|gave|given|comes|sends|gives|come)\s+back"  # "sent back 403": a status the call answered with
-# An HTTP status: a 4xx or 5xx that no hyphen joins and no unit follows ("450 files" and "a 450-line diff" are sizes).
-_STATUS = r"[45]\d\d\b(?![-\w])(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)"
+_BACK = _clause.BACK_PATTERN  # "sent back 403": a status the call answered with; the words have one home, lint/_clause.py
+_STATUS = _clause.STATUS_PATTERN  # an HTTP status that no hyphen joins and no size unit follows
 CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b" + _CHECK_WORD + r"\b|\bexit(?: code)? [1-9]"
     r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a|" + _BACK + r")\s+(?:a\s+)?"
