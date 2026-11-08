@@ -66,8 +66,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       merge/merge.py) on="$on $M $W $X code guard " ;;
       lint/layout.json|lint/layout.py) on="$on $M $R $Z $W $X code guard " ;;
       lint/check_silent_undo.py) on="$on $M code " ;;
-      # _test_event_body.py: merge/test_lane_lint.py (checks-merge-install) and lint/test_ci_job.py (checks) run on `code`; merge/test_merge.py
-      # runs in checks-merge-install (`code`) and checks-windows-merge ($M).
+      # _test_event_body.py: merge/test_lane_lint.py (checks-merge-install) runs on `code`; lint/test_ci_job.py runs in checks, ungated;
+      # merge/test_merge.py runs in checks-merge-install (`code`), checks-windows-merge ($M), and checks-windows-merge-2 to -5
+      # (`code`, off pull_request only).
       lint/_test_event_body.py) on="$on $M code " ;;
       # _test_temp.py: the run-folder home. Suites in every job import it (hooks, skills, merge, actions, githooks, and the .sh and .mjs suites through python3).
       lint/_test_temp.py) on="$on $ALL " ;;
