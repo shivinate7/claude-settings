@@ -12125,6 +12125,70 @@ sh("frozen shell: curl --output writes the config settings, denies",
    "curl --output " + CFG_SETTINGS + " https://example.com", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: wget -O writes the config settings, denies",
    "wget -O " + CFG_SETTINGS + " https://example.com", "deny", "frozen-path", cwd=NOGIT)
+# An output flag that names a file writes it, whatever the command. Each form below writes the config settings, so
+# each is refused.
+for _n, _c in (
+    ("wget -o", "wget -o " + CFG_SETTINGS + " https://example.com"),
+    ("wget -a", "wget -a " + CFG_SETTINGS + " https://example.com"),
+    ("wget -o glued", "wget -o" + CFG_SETTINGS + " https://example.com"),
+    ("wget --output-file=", "wget --output-file=" + CFG_SETTINGS + " https://example.com"),
+    ("wget --output-file", "wget --output-file " + CFG_SETTINGS + " https://example.com"),
+    ("wget --append-output=", "wget --append-output=" + CFG_SETTINGS + " https://example.com"),
+    ("wget --append-output", "wget --append-output " + CFG_SETTINGS + " https://example.com"),
+    ("curl -D", "curl -D " + CFG_SETTINGS + " https://example.com"),
+    ("curl -D glued", "curl -D" + CFG_SETTINGS + " https://example.com"),
+    ("curl --dump-header", "curl --dump-header " + CFG_SETTINGS + " https://example.com"),
+    ("curl --dump-header=", "curl --dump-header=" + CFG_SETTINGS + " https://example.com"),
+    ("curl -c", "curl -c " + CFG_SETTINGS + " https://example.com"),
+    ("curl -c glued", "curl -c" + CFG_SETTINGS + " https://example.com"),
+    ("curl -sc in a cluster", "curl -sc " + CFG_SETTINGS + " https://example.com"),
+    ("curl --cookie-jar", "curl --cookie-jar " + CFG_SETTINGS + " https://example.com"),
+    ("curl --cookie-jar=", "curl --cookie-jar=" + CFG_SETTINGS + " https://example.com"),
+    ("git log --output=", VCS + " log --output=" + CFG_SETTINGS),
+    ("git log --output", VCS + " log --output " + CFG_SETTINGS),
+    ("git show --output=", VCS + " show --output=" + CFG_SETTINGS),
+    ("git show --output", VCS + " show --output " + CFG_SETTINGS),
+    ("perl -pi -e", "perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -i.bak -pe", "perl -i.bak -pe 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi.bak -e", "perl -pi.bak -e 's/a/b/' " + CFG_SETTINGS),
+    (">& glued onto a file", "echo x >&" + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " writes the config settings, denies", _c, "deny", "frozen-path", cwd=NOGIT)
+# The allow twin of each form: the same flag with a target that is not frozen writes nothing frozen, so it allows.
+for _n, _c in (
+    ("wget -o", "wget -o /tmp/wget.log https://example.com"),
+    ("wget -a", "wget -a /tmp/wget.log https://example.com"),
+    ("wget --output-file=", "wget --output-file=/tmp/wget.log https://example.com"),
+    ("wget --append-output=", "wget --append-output=/tmp/wget.log https://example.com"),
+    ("curl -D", "curl -D /tmp/curl.h https://example.com"),
+    ("curl -c", "curl -c /tmp/curl.jar https://example.com"),
+    ("curl --cookie-jar=", "curl --cookie-jar=/tmp/curl.jar https://example.com"),
+    ("git log --output=", VCS + " log --output=/tmp/log.txt"),
+    ("git show --output", VCS + " show --output /tmp/show.txt"),
+    ("perl -pi -e", "perl -pi -e 's/a/b/' src/x.txt"),
+    ("perl -i.bak -pe", "perl -i.bak -pe 's/a/b/' src/x.txt"),
+    (">& glued onto a file", "echo x >&/tmp/x"),
+):
+    sh("frozen shell: " + _n + " to a non-frozen target allows", _c, "allow", cwd=NOGIT)
+# The no-file twin of each form: a flag of the same command that reads the frozen path, or takes it as a value
+# that is no file, writes nothing, so each allows. curl -C takes an offset, not a file, so it is not curl -c.
+for _n, _c in (
+    ("curl -b reads a cookie file", "curl -b " + CFG_SETTINGS + " https://example.com"),
+    ("curl -T uploads a file", "curl -T " + CFG_SETTINGS + " https://example.com"),
+    ("curl -d @ reads a data file", "curl -d @" + CFG_SETTINGS + " https://example.com"),
+    ("curl -C takes an offset", "curl -C " + CFG_SETTINGS + " https://example.com"),
+    ("wget -i reads a URL list", "wget -i " + CFG_SETTINGS),
+    ("wget -A takes an accept list", "wget -A " + CFG_SETTINGS + " https://example.com"),
+    ("perl -ne reads without -i", "perl -ne 'print 1' " + CFG_SETTINGS),
+    ("git log -- takes a pathspec", VCS + " log --oneline -- " + CFG_SETTINGS),
+    ("git log --output-indicator-new= is no --output", VCS + " log --output-indicator-new=x -- " + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " on the config settings, allows", _c, "allow", cwd=NOGIT)
+# Quoted text is data for the shell: a redirect or a -i inside quotes names no file the command writes.
+sh("frozen shell: a >&FILE inside echo's quotes is text, allows", 'echo "x >&' + CFG_SETTINGS + '"', "allow",
+   cwd=NOGIT)
+sh("frozen shell: a -i inside perl's quoted script is text, allows",
+   "perl -ne 'print \"-i\"' " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
