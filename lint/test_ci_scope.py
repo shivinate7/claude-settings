@@ -13,6 +13,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import itertools
 import os
 import posixpath
 import shutil
@@ -95,9 +96,10 @@ def repo_files(*dirs):
     return out
 
 
-def repo_py_files():
-    """-> the repo-relative paths of every .py file under LOAD_ROOTS."""
-    return {p for p in repo_files(*LOAD_ROOTS) if p.endswith(".py")}
+def repo_load_files():
+    """-> the repo-relative paths a load can name: every .py file under LOAD_ROOTS, and every file under bin/, where a by-path
+    load names a script with no .py name (bin/sim-lease)."""
+    return {p for p in repo_files(*LOAD_ROOTS) if p.endswith(".py") or p.startswith("bin/")}
 
 
 def read_repo(rel):
@@ -110,16 +112,114 @@ def consts(node):
     return [n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
 
 
+SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)
+
+
+def scopes_of(tree):
+    """-> (parents, values): each node's parent, and {scope: {name: [value]}} for every `name = value` in the file, keyed by the
+    function or module the assignment sits in. Module-level and function-level names are both read here."""
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    values = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            scope = node
+            while not isinstance(scope, SCOPES):
+                scope = parents[scope]
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    values.setdefault(scope, {}).setdefault(t.id, []).append(node.value)
+    return parents, values
+
+
+def dotted(node):
+    """-> the dotted name of a Name or an Attribute chain (`os.path`), or '' for anything else."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = dotted(node.value)
+        return base + "." + node.attr if base else ""
+    return ""
+
+
+def path_fn(func):
+    """-> f when a call's `func` is os.path.f, posixpath.f or a bare f, else ''."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute) and dotted(func.value) in ("os.path", "posixpath"):
+        return func.attr
+    return ""
+
+
+def read_values(node, rel, scopes, depth=0):
+    """-> the path strings `node` can be, read from this file alone: a string literal; `__file__`, the file's own path `rel`; a
+    name the file assigns, in the nearest function or module that holds it; os.path.join, dirname, realpath and abspath; Path(x)
+    with .resolve(), .absolute(), .parent or .parents[N]; and `/`. [] when a part cannot be read: such a load is not guessed."""
+    parents, values = scopes
+    if depth > 8:
+        return []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return [rel]
+        cur = parents.get(node)
+        while cur is not None:
+            if isinstance(cur, SCOPES):
+                if node.id in values.get(cur, {}):
+                    return [s for v in values[cur][node.id] for s in read_values(v, rel, scopes, depth + 1)]
+                if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                        isinstance(a, ast.arg) and a.arg == node.id for a in ast.walk(cur.args)):
+                    return []  # a parameter: its value is the caller's, not this file's
+            cur = parents.get(cur)
+        return []
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return join_all([node.left, node.right], rel, scopes, depth)
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        return [posixpath.dirname(s) for s in read_values(node.value, rel, scopes, depth + 1)]
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents" \
+            and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
+        out = read_values(node.value.value, rel, scopes, depth + 1)
+        for _ in range(node.slice.value + 1):  # parents[0] is the folder of the path, parents[1] its parent
+            out = [posixpath.dirname(s) for s in out]
+        return out
+    if isinstance(node, ast.Call):
+        if node.args:
+            fn = path_fn(node.func)
+            if fn == "join":
+                return join_all(node.args, rel, scopes, depth)
+            if fn == "dirname" and len(node.args) == 1:
+                return [posixpath.dirname(s) for s in read_values(node.args[0], rel, scopes, depth + 1)]
+            if fn in ("realpath", "abspath") and len(node.args) == 1:
+                return read_values(node.args[0], rel, scopes, depth + 1)
+            if dotted(node.func) in ("Path", "pathlib.Path") and len(node.args) == 1:
+                return read_values(node.args[0], rel, scopes, depth + 1)
+        elif isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute"):
+            return read_values(node.func.value, rel, scopes, depth + 1)
+    return []
+
+
+def join_all(parts, rel, scopes, depth):
+    """-> posixpath.join over every combination of the paths each part can be; [] when any part cannot be read."""
+    options = [read_values(p, rel, scopes, depth + 1) for p in parts]
+    if not all(options):
+        return []
+    return [posixpath.join(*combo) for combo in itertools.product(*options)]
+
+
+# A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (ruling 2026-11-07 22:12 CST).
 def file_loads(rel, source, files):
     """-> the files in `files` that the file `rel`, with this `source`, loads when it runs. A load is: an import at any depth
     (`import x`, `import x.y`, `from x import y`, `from . import y`) that names a file x.py in `files`; LOADER("<name>") as
-    hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and `spec_from_file_location`
-    whose path names a file in `files` by a string constant in the call, or in a module-level name the call uses.
-    A name in a comment or a string is no load."""
+    hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and a by-path load,
+    `spec_from_file_location(name, path)` or `SourceFileLoader(name, path)`, whose path names a file in `files`, by a string
+    constant in the call, or by a path read from this file (read_values). module_from_spec takes no path: its load is read where
+    its spec or loader is made. A name in a comment or a string is no load, and a path that cannot be read is no load."""
     tree = ast.parse(source)
     by_name = {}
     for p in files:
-        by_name.setdefault(posixpath.basename(p)[:-3], set()).add(p)
+        if p.endswith(".py"):
+            by_name.setdefault(posixpath.basename(p)[:-3], set()).add(p)
+    scopes = scopes_of(tree)
     module_strings = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -147,7 +247,7 @@ def file_loads(rel, source, files):
                 out.add(f"hooks/{literal}.py")
             elif fn in ("__import__", "import_module") and literal:
                 out |= by_name.get(literal.split(".")[0], set())
-            elif fn == "spec_from_file_location":
+            elif fn in ("spec_from_file_location", "SourceFileLoader"):
                 strings = []
                 for arg in [*node.args, *(k.value for k in node.keywords)]:
                     strings += consts(arg)
@@ -156,6 +256,11 @@ def file_loads(rel, source, files):
                     if s.endswith(".py"):
                         out.add(posixpath.normpath(s))
                         out.add(posixpath.normpath(posixpath.join(here, s)))
+                # The path is the second argument (location, or path as a keyword), read as repo-relative: __file__ is rel.
+                path_arg = node.args[1] if len(node.args) > 1 else next(
+                    (k.value for k in node.keywords if k.arg in ("location", "path")), None)
+                if path_arg is not None:
+                    out |= {posixpath.normpath(s) for s in read_values(path_arg, rel, scopes)}
     return out & files
 
 
@@ -180,7 +285,7 @@ class FileLoads(unittest.TestCase):
     the reader in this file, not product code, so they are controls, not product claims."""
 
     FILES = {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py",
-             "lint/check_silent_undo.py", "hooks/in_class.py", "hooks/deep.py", "janitor/sweep.py"}
+             "lint/check_silent_undo.py", "hooks/in_class.py", "hooks/deep.py", "janitor/sweep.py", "bin/sim-lease"}
 
     def loads(self, source, rel="merge/merge.py"):
         return file_loads(rel, source, self.FILES)
@@ -220,6 +325,48 @@ class FileLoads(unittest.TestCase):
                "    return importlib.import_module(\"deep\")\n")
         self.assertEqual(self.loads(src), {"janitor/sweep.py", "hooks/deep.py"})
 
+    def test_a_source_file_loader_reads_a_script_named_through_file(self):
+        # hooks/guard.py loads bin/sim-lease this way: a local name joined from __file__'s folder and two literals.
+        src = ("import importlib.machinery, os\n"
+               "def sim_lease():\n"
+               "    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), \"..\", \"bin\", \"sim-lease\")\n"
+               "    return importlib.machinery.SourceFileLoader(\"sim_lease\", path)\n")
+        self.assertEqual(self.loads(src, rel="hooks/guard.py"), {"bin/sim-lease"},
+                         "file_loads misses a SourceFileLoader load of a script named through __file__'s folder")
+
+    def test_a_by_path_load_reads_a_module_constant(self):
+        src = ("import importlib.util, os\n"
+               "HOOKS = os.path.join(\"hooks\", \"..\")\n"
+               "def load():\n"
+               "    return importlib.util.spec_from_file_location(\"sweep\", os.path.join(HOOKS, \"janitor\", \"sweep.py\"))\n")
+        self.assertEqual(self.loads(src), {"janitor/sweep.py"},
+                         "file_loads misses a by-path load whose path joins a module constant")
+
+    def test_a_by_path_load_reads_a_local_name_in_its_own_function(self):
+        src = ("import importlib.util, os\n"
+               "def other():\n    path = \"janitor/sweep.py\"\n    return path\n"
+               "def load():\n"
+               "    path = os.path.join(\"hooks\", \"deep.py\")\n"
+               "    return importlib.util.spec_from_file_location(\"deep\", path)\n")
+        self.assertEqual(self.loads(src), {"hooks/deep.py"},
+                         "file_loads does not resolve a by-path load through a local name in its own function")
+
+    def test_a_by_path_load_reads_a_parent_folder_of_this_file(self):
+        # merge.py loads skills/roadmap/build.py as pathlib's parents[1] of __file__, joined with a split literal.
+        src = ("import importlib.util, pathlib\n"
+               "IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / \"janitor\" / \"sweep.py\"\n"
+               "def load():\n"
+               "    return importlib.util.spec_from_file_location(\"roadmap_build\", IDLE_BUILD)\n")
+        self.assertEqual(self.loads(src, rel="merge/merge.py"), {"janitor/sweep.py"},
+                         "file_loads does not read a by-path load's path through parents[N] of __file__")
+
+    def test_a_path_built_from_a_parameter_is_no_load(self):
+        # Control: the caller passes root, which this file cannot read. A reader that guessed would add janitor/sweep.py.
+        src = ("import importlib.util, os\n"
+               "def load(root):\n"
+               "    return importlib.util.spec_from_file_location(\"sweep\", os.path.join(root, \"janitor\", \"sweep.py\"))\n")
+        self.assertEqual(self.loads(src), set(), "file_loads guesses a by-path load from a path part it cannot read")
+
     def test_the_closure_follows_loads_to_the_end_and_stops_at_its_start(self):
         files = {"merge/merge.py", "hooks/mid.py", "hooks/leaf.py", "hooks/unused.py"}
         source = {"merge/merge.py": "def f():\n    import mid\n", "hooks/mid.py": "import leaf\n",
@@ -228,11 +375,12 @@ class FileLoads(unittest.TestCase):
 
 
 # The files the closure must reach, one per kind of load the reader sorts: a module-level import, a by-path load, a load through a
-# module-level path, a function-level import, a transitive load, and guard.py. A reader that stops short fails the scope check first.
+# module-level path, a function-level import, a transitive load, guard.py, and bin/sim-lease, a script with no .py name that
+# guard.py loads by a path built from __file__'s folder. A reader that stops short fails the scope check first.
 REACHED = ["hooks/_nowindow.py", "hooks/git_reads.py", "skills/roadmap/build.py", "janitor/sweep.py", "hooks/shared_names.py",
            "hooks/guard.py", "hooks/guard_core.py", "hooks/git_bash.py", "hooks/decision_watch.py", "lint/hook_catalog.py",
            "lint/workflow_steps.py", "lint/stale_cites.py", "lint/check_debt_retire.py", "lint/check_skill_model_rows.py",
-           "actions/ci-alarm/clear_rule.py"]
+           "actions/ci-alarm/clear_rule.py", "bin/sim-lease"]
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -244,7 +392,7 @@ class MergeFlagFiles(unittest.TestCase):
         with open(MERGE_PY, encoding="utf-8") as f:
             src = f.read()
         self.assertTrue(defines_function(src, LOADER), f"merge.py no longer defines {LOADER}, so its by-path loads are not read")
-        loads = closure("merge/merge.py", repo_py_files(), read_repo)
+        loads = closure("merge/merge.py", repo_load_files(), read_repo)
         # Scope before subject: the reader reached each named file, so the case below tests the whole closure.
         missing = [p for p in REACHED if p not in loads]
         self.assertFalse(missing, f"the closure from merge.py misses {missing}: the reader does not follow those loads")
