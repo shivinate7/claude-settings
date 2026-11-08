@@ -1236,10 +1236,50 @@ def _posts_record(use, marker) -> bool:
     return name == "Bash" and isinstance(command, str) and _bash_posts_record(command, marker)
 
 
+_ASYNC_LAUNCH = "Async agent launched successfully"
+_LAUNCH_AGENT = re.compile(r"agentId:\s*(\S+)")
+_NOTICE_TASK = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>")
+_NOTICE_COMPLETED = re.compile(r"<status>\s*completed\s*</status>")
+
+
+def _spawn_events(reader, records):
+    """(events, launched, done) from the main-session records, in order. `events` holds ("use", tool_use) and
+    ("done", agent_id) entries, one per call and one per completion notice. `launched` maps a spawn's tool_use id to
+    the agentId its launch result names, for a background spawn only. `done` maps an agentId to the position of
+    its last completion notice in `events`. A notice is a task-notification block in a queued_command attachment
+    (whatever the record's type) or a user line (`owner_text`); it is keyed on its task-id, never its tool-use-id, which changes on resume."""
+    events, launched, done = [], {}, {}
+    for rec in records:
+        for use in reader.tool_uses(rec):
+            events.append(("use", use))
+        for res in reader.tool_results(rec):
+            text = reader.result_text(res)
+            found = _LAUNCH_AGENT.search(text)
+            if _ASYNC_LAUNCH in text and found and isinstance(res.get("tool_use_id"), str):
+                launched[res["tool_use_id"]] = found.group(1)
+        att = rec.get("attachment")
+        text = att.get("prompt") if isinstance(att, dict) and att.get("type") == "queued_command" else reader.owner_text(rec)
+        for part in (text or "").split("<task-notification>")[1:]:
+            task = _NOTICE_TASK.search(part)
+            if task and _NOTICE_COMPLETED.search(part):
+                events.append(("done", task.group(1)))
+                done[task.group(1)] = len(events) - 1
+    return events, launched, done
+
+
+def _anchor_at(index, use, launched, done):
+    """The position in the events after which a record must be posted for the reviewer spawn at `index`. A
+    foreground spawn counts at its own position. A background spawn counts at its agent's completion notice, and
+    anchors nothing while the notice is missing."""
+    agent = launched.get(use.get("id"))
+    return index if agent is None else done.get(agent)
+
+
 def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = False):
     """(reason, matched, unknown): the refusal when this builder or test-author spawn, or this send_message (the
-    remote tool or the built-in SendMessage), comes after the session's last reviewer spawn and no later call posted
-    a review record, else ("", "", unknown). A reviewer spawn whose result is an error never ran and gates nothing.
+    remote tool or the built-in SendMessage), comes after the session's last completed reviewer spawn and no later call posted
+    a review record, else ("", "", unknown). A reviewer spawn whose result is an error never ran and anchors nothing.
+    A background spawn counts when its completion notice arrives, a foreground spawn at once.
     `unknown` is true when the merge tool (the home of the record marker) could not be loaded: the call is
     allowed and the caller notes it. A call with an agent_id is an agent's and is not judged. A missing or
     unreadable transcript allows. Cost: one transcript read per judged call, no subprocess, no network; the merge
@@ -1252,24 +1292,26 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
         if not judged:
             return "", "", False
         records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
-        failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
-        uses = [use for rec in records for use in reader.tool_uses(rec)]
+        failed = reader.failed_tool_use_ids(records)
+        events, launched, done = _spawn_events(reader, records)
     except Exception:
         return "", "", False
-    last = max((i for i, use in enumerate(uses) if _is_spawn_of(use, RECORD_REVIEWER_ROLES) and use.get("id") not in failed),
-               default=None)
-    if last is None:
+    anchors = [(_anchor_at(i, ev[1], launched, done), ev[1]) for i, ev in enumerate(events)
+               if ev[0] == "use" and _is_spawn_of(ev[1], RECORD_REVIEWER_ROLES) and ev[1].get("id") not in failed]
+    anchors = [g for g in anchors if g[0] is not None]
+    if not anchors:
         return "", "", False
+    anchor, last = max(anchors, key=lambda g: g[0])
     try:
         marker = merge_module().REVIEW_MARKER
     except Exception:
         marker = None
     if not isinstance(marker, str) or not marker:
         return "", "", True
-    if any(_posts_record(use, marker) for use in uses[last + 1:]):
+    if any(_posts_record(ev[1], marker) for ev in events[anchor + 1:] if ev[0] == "use"):
         return "", "", False
     matched = "%s after a reviewer spawn with no review record" % tool
-    if role_key(uses[last]["input"].get("subagent_type")) == "design-reviewer":
+    if role_key(last["input"].get("subagent_type")) == "design-reviewer":
         return REVIEW_RECORD_DESIGN_REASON, matched, False
     return REVIEW_RECORD_REASON, matched, False
 

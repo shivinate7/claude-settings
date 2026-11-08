@@ -38,7 +38,7 @@ CI: read live by merge --reviewed
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
-- A lane posts the body with the GitHub MCP comment tool after each round. Rule `review-record-after-round` refuses the next builder or test-author spawn, or the send_message handoff, until the record for the last reviewer spawn is posted. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
+- A lane posts the body with the GitHub MCP comment tool after each round. Rule `review-record-after-round` refuses the next builder or test-author spawn, or the send_message handoff, until the record for the last completed reviewer spawn is posted. The rule counts a reviewer at its completion, not at its launch. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
 - The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
 ## The done rules
