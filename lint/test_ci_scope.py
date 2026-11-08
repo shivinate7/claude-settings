@@ -852,7 +852,7 @@ class Scope(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class GuardWindowsSplit(unittest.TestCase):
     """The Windows guard suite on a pull_request. guard_windows_full turns on the full shards (checks-windows-guard's shard 1
-    and checks-windows-guard-2). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
+    and each checks-windows-guard-<i>). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
     together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
 
     def test_a_guard_family_pr_turns_the_full_windows_guard_on(self):
