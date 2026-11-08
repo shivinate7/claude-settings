@@ -3,12 +3,12 @@
 
 Run: python3 merge/test_idle_lanes.py
 
-WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per lane that can never be
-judged, then one summary line that counts both. A hold line is a lane with no cs-step tag, or an absent step with no Step
-trailer on main; it is never archived. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and
-exits 1. It takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other
-flag, and no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never
-reads as an empty one.
+WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per lane not to archive now,
+then one summary line that counts both. A hold line is never archived. Its reasons: no cs-step tag; a step off the
+record branch with no Step trailer on main; or a step still doing under the lane. A waiting lane prints no line. A
+whole-read failure prints one `unknown (` line and exits 1. It takes its steps, marks and repo name from the checkout,
+as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud session. A missing --live file
+exits 1 and prints no summary, so an unread list never reads as an empty one.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
