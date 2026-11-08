@@ -12,8 +12,8 @@ protection. GitHub's branch protection setting is the owner's to change.
 - `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
   when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
   job is missing from its `needs`.
-- `all-jobs-passed` runs only on a pull request. Its `needs` holds `checks-windows-guard-2` and the Windows
-  merge shard jobs `checks-windows-merge-2` to `-5`, so those start on every ready pull request. Each one's
+- `all-jobs-passed` runs only on a pull request. Its `needs` holds `checks-windows-guard-2` and `-3` and the
+  Windows merge shard jobs `checks-windows-merge-2` to `-5`, so those start on every ready pull request. Each one's
   steps run there only when its full flag is on (`guard_windows_full`, `merge_windows_full`). On main their
   own job results are the verdict.
 - A job that a scope flag turns off skips its steps, not the job, so it ends green, not skipped. Cost: a
