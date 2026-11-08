@@ -80,6 +80,14 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_agent_send_message(self):
+        # Rule message-role-scope refuses an Agent SendMessage that sends a builder a test edit, so a guard matcher
+        # must see the SendMessage tool itself. That is not the send_message MCP tool named above.
+        matchers = guard_matchers()
+        tool = "SendMessage"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
