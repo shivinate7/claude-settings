@@ -1,0 +1,11 @@
+{
+  "title": "A fix check after a main merge judges the guard question on main...head plus conflict edits",
+  "phase": "now",
+  "status": "doing",
+  "order": 103.61,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzEteiJ3oyJR8P7PPn",
+  "why": "Coordinator reading, process-only, 23:15 CST Nov 7: a fix check after a main merge judges the \"Guard or check\" question on main...head plus the conflict edits, not old..new (agents/reviewer.md line 73). The old reading held #1419 and hits every guard-no PR in lint sets b to d.",
+  "note": "Lane batch63-lint-a writes it into agents/reviewer.md as its own PR. A queue fix under the item 384 hold. Related: step merge-guard-flag-from-paths. Slug from the coordinator; title by triage.",
+  "updatedAt": "2026-11-07T23:17:00-06:00"
+}
