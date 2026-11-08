@@ -1209,12 +1209,14 @@ class RuleQuotes(Case):
 
 
 class SelfCheck(unittest.TestCase):
-    def test_check_file_has_no_hit_on_itself_at_the_round_two_base(self):
-        r = subprocess.run([sys.executable, MODULE, "--base", "a8959bc6a"], cwd=os.path.join(HERE, ".."),
-                           capture_output=True, text=True, encoding="utf-8", errors="replace")
-        self.assertIn(r.returncode, (0, 1), r.stderr)
-        hits = [row for row in r.stdout.splitlines() if row.startswith("lint/check_comment_narration.py:")]
-        self.assertEqual(hits, [], r.stdout)
+    def test_check_file_comments_and_docstrings_hit_no_pattern(self):
+        import check_comment_narration as checker
+        hits = []
+        for line, text in checker.narrated_lines(MODULE):
+            for name, pat in checker.PATTERNS.items():
+                for m in pat.finditer(text):
+                    hits.append("%d: %s: %s" % (line, name, m.group(0)))
+        self.assertEqual(hits, [], "\n".join(hits))
 
 
 class Degraded(Case):
