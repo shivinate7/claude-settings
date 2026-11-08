@@ -462,7 +462,7 @@ def hook():
                 "stall-watch: the command names the relative log %s after a `cd` whose target the hook "
                 "cannot read (it uses $, `cd -` or a glob), so it cannot tell which file the job writes. "
                 "Remedy: write each log as an absolute path, such as /full/path/to/%s, and run the "
-                "command again." % (", ".join(unresolved), os.path.basename(unresolved[0])))}}))
+                "command again. (decision stall-watch)" % (", ".join(unresolved), os.path.basename(unresolved[0])))}}))
         return 0
     base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
     log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
