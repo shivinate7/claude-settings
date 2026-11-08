@@ -152,6 +152,8 @@ Other tools, in `judge` order:
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
                        red-run folder passes. A relative shell write that lands outside the
                        agent's own checkout is refused, with `mkdir` and `touch` counted as writes.
+                       So is a `git restore` or `git checkout [<rev>] --` with a relative path in the
+                       own checkout, when another segment of the command names its red-run folder.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -4199,6 +4201,18 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
 
 
+def _padded_shell_command(tool: str, tool_input: dict) -> str:
+    """The shell command of a call as worktree-home reads it: heredoc bodies dropped, and each unquoted
+    `(` and `)` (not `$(`, `<(`, `>(`) spaced on both sides. A parenthesis glued to a word hides the verb
+    from the command read: `(mkdir x)` names `(mkdir`. The count and place of parentheses is unchanged,
+    so the subshell scope of a `cd` still ends at its `)`."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
+    command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+    pads = {index for index, char, quote in walk_quotes(command)
+            if char in "()" and not quote and not (char == "(" and index and command[index - 1] in "$<>")}
+    return "".join(" " + char + " " if index in pads else char for index, char in enumerate(command))
+
+
 def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
     """The relative target a shell write names that lands outside OWN, the agent's own checkout, else ''.
     A target resolves against the folder its segment runs in (`follow_cd`). An absolute, `~` or variable
@@ -4224,18 +4238,93 @@ def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: s
             return False
         return path_is_inside(target, own) is False and not _own_red_run(payload, primary, target)
 
-    POWERSHELL_CALL[0] = tool == "PowerShell"
-    command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
-    # A parenthesis glued to a word hides the verb from the command read: `(mkdir x)` names `(mkdir`. Each
-    # unquoted `(` and `)` (not `$(`, `<(`, `>(`) gets a space on both sides. The count and place of
-    # parentheses is unchanged, so the subshell scope of a `cd` still ends at its `)`.
-    pads = {index for index, char, quote in walk_quotes(command)
-            if char in "()" and not quote and not (char == "(" and index and command[index - 1] in "$<>")}
-    command = "".join(" " + char + " " if index in pads else char for index, char in enumerate(command))
+    command = _padded_shell_command(tool, tool_input)
     return _shell_write_hit(command, cwd, escapes, follow_cd=True, command_position=True,
                             extra_verbs=CREATING_COMMAND, skip_after_cd=lambda anchor, at: (
                                 path_is_inside(anchor, own) is False
                                 and path_is_inside(at, own) is False))
+
+
+# `git restore` options that take the next word as their value; its paths follow them.
+RESTORE_VALUE_FLAGS = ("-s", "--source", "--pathspec-from-file")
+RED_RESTORE_DETAIL = "relative restore meant for the red-run folder: "
+
+
+def _restore_paths(verb: str, args: list) -> list:
+    """The path words of one `git restore` or `git checkout [<rev>] -- <paths>` call. A `checkout` with no
+    `--` names no path here: it may name a branch."""
+    if verb == "checkout":
+        return args[args.index("--") + 1:] if "--" in args else []
+    paths, skip, dashed = [], False, False
+    for arg in args:
+        if dashed:
+            paths.append(arg)
+        elif skip:
+            skip = False
+        elif arg == "--":
+            dashed = True
+        elif arg in RESTORE_VALUE_FLAGS:
+            skip = True
+        elif not arg.startswith("-"):
+            paths.append(arg)
+    return paths
+
+
+def relative_restore_for_red(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
+    """The detail when a `git restore <paths>` or `git checkout [<rev>] -- <paths>` has a relative path that
+    resolves inside OWN, the agent's own checkout, and another segment of the same command names the agent's
+    own red-run folder, else ''. The agent meant the restore for its red-run folder, typed the path
+    relative, and overwrote its own edit. A segment that names the red-run folder itself (`git -C <red>
+    restore f`, `--work-tree=<red>`) or runs in it after a `cd` resolves there, and passes, as does an
+    absolute, `~` or variable path, a command that names no red-run folder, and another agent's. A word
+    names the folder when it, or the value after its `=`, resolves inside it (`_own_red_run`) from the
+    folder its segment runs in (`dir_before_segment`). Read with the walk of `relative_write_escape`:
+    heredoc bodies, comments and quoted text name nothing. No git is spawned and nothing is written."""
+    if not own or not primary:
+        return ""
+    command = _padded_shell_command(tool, tool_input)
+    if "git" not in command or "restore" not in command and "checkout" not in command:
+        return ""
+    ends = []
+    segments = split_segments(command, ends)
+    # A segment the tokenizer cannot read, the open-quote reading of `echo don't; ...`, is dropped before the
+    # folders are walked: it would leave every later segment's folder unknown. `ends` stays in step.
+    readable = [number for number, segment in enumerate(segments) if segment_tokens(segment) is not None]
+    ends = [ends[number] if number < len(ends) else "" for number in readable]
+    segments = [segments[number] for number in readable]
+    tokens = [segment_tokens(segment) for segment in segments]
+    places = [dir_before_segment(segments, number, cwd, ends) if words else None
+              for number, words in enumerate(tokens)]
+
+    def names_red(number):
+        for word in tokens[number] or ():
+            for part in (word, word.partition("=")[2]) if word.startswith("--") else (word,):
+                if (part and not part.startswith("-") and "$" not in part and "`" not in part
+                        and places[number] and _own_red_run(payload, primary, _resolved(part, places[number]))):
+                    return True
+        return False
+
+    red = [names_red(number) for number in range(len(segments))]
+    for number, segment in enumerate(segments):
+        words, at = tokens[number], places[number]
+        if not words or not at or red[number] or not any(red[:number] + red[number + 1:]):
+            continue
+        if any(word.startswith(("--work-tree", "--git-dir")) for word in words):
+            continue   # the tree it runs in is another folder, not read here
+        named = _segment_git_c_target(words)
+        if named is not None:
+            at = None if _unexpanded(named) else shell_abs(named, at)
+        for verb, args in git_calls(segment):
+            for word in _restore_paths(verb, args) if verb in ("restore", "checkout") and at else ():
+                if "$" in word or "`" in word or shell_abs(word, None) is not None:
+                    continue
+                try:
+                    target = _resolved(word, at)
+                except Exception:
+                    continue
+                if path_is_inside(target, own) is True and not _own_red_run(payload, primary, target):
+                    return RED_RESTORE_DETAIL + word
+    return ""
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -4261,6 +4350,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         escape = relative_write_escape(payload, tool, tool_input, home_cwd, home, home_primary)
         if escape:
             return "relative shell write outside recorded agent home: " + escape
+        restore = relative_restore_for_red(payload, tool, tool_input, home_cwd, home, home_primary)
+        if restore:
+            return restore
     elif tool in WRITE_TOOLS:
         for write_target in (write_targets(tool_input) if home_primary else ()):
             # A relative `file_path` resolves against the CALLER's cwd, the payload's own

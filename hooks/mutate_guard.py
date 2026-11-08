@@ -1371,6 +1371,10 @@ MUTATIONS = [
      '            if char in "()" and not quote and not (char == "(" and index',
      '            if char in "" and not quote and not (char == "(" and index',
      "guard", "worktree-home relative escape: (mkdir ../tmp) from the home is refused"),
+    ("worktree-home: a relative restore is judged with no red-run folder named in the command",
+     "        if not words or not at or red[number] or not any(red[:number] + red[number + 1:]):",
+     "        if not words or not at or red[number]:",
+     "guard", "worktree-home red restore"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
