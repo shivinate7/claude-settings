@@ -5049,6 +5049,16 @@ sh("kill: a pkill inside a loop's do-block, MEASURED wrongly allowed",
 sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
    "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
 
+# A separator inside a `$( )` cuts the span's inner call, so the pkill after it is judged. Each of these runs one.
+sh("kill: a pkill after ; inside a dollar paren denies",
+   "echo $(cd d; pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after && inside a dollar paren denies",
+   "echo $(cd d && pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after || inside a dollar paren denies",
+   "echo $(cd d || pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after | inside a dollar paren denies",
+   "echo $(cd d | pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+
 
 # =========================================================================== 2b. detached launches
 #
@@ -5460,6 +5470,9 @@ sh("waiter: one short sleep ahead of a poll is allowed", "sleep 5 && gh pr list"
 sh("waiter: a short sleep ahead of a later call is allowed", "cd a && sleep 15; gh run list",
    "allow", cwd=NOGIT)
 sh("waiter: a 30 s sleep ahead of a later call is refused", "cd a && sleep 30; gh run list",
+   "deny", "waiter", cwd=NOGIT)
+# A `&&` inside a `$( )` does not hide the 30 s sleep it runs.
+sh("waiter: a 30 s sleep after a && inside a dollar paren is refused", "echo $(cd d && sleep 30)",
    "deny", "waiter", cwd=NOGIT)
 sh("waiter: an until-loop waiting on a file is refused", "until [ -s f ]; do sleep 2; done",
    "deny", "waiter", cwd=NOGIT)
@@ -6095,6 +6108,8 @@ for _name, _command in (
     ("a leading bang", "! wsl --shutdown"),
     ("a dollar paren", "$(wsl --shutdown)"),
     ("a dollar paren inside echo", "echo $(wsl --shutdown)"),
+    ("a && before the call in a dollar paren", "echo $(cd d && wsl --shutdown)"),
+    ("a && before the call in a backtick", "echo `cd d && wsl --shutdown`"),
     ("a glued subshell", "(wsl --shutdown)"),
     ("cmd /c", "cmd /c wsl --shutdown"),
     ("bash -c with the call in quotes", 'bash -c "wsl --shutdown"'),
@@ -9830,6 +9845,9 @@ roots_allow("merge --reviewed --root o/alpha=$( pwd ) --root o/bravo=/w/b with t
 # A `&&` inside a `$( )` in a --root value is part of that argument, so both --root flags are read and the call allows.
 roots_allow("merge --reviewed --root o/alpha=$(cd d && pwd) --root o/bravo=/w/b with two tagged repos allows",
             "merge --reviewed --root o/alpha=$(cd d && pwd) --root o/bravo=/w/b", role_path("roots-runner"))
+# The same `&&` inside `$( )`, with o/bravo missing: the call is refused, and the reason names o/bravo.
+roots_refuse("merge --reviewed --root o/alpha=$(cd d && pwd) for two tagged repos is refused, and the reason names o/bravo",
+             "merge --reviewed --root o/alpha=$(cd d && pwd)", role_path("roots-runner"), carries=("o/bravo",))
 # A real `&&` still splits: the merge after `cd /w &&` is read, and o/bravo has no --root, so the call is refused.
 roots_refuse("cd /w && merge --reviewed --root o/alpha=/w/a is refused for two tagged repos, and the reason names o/bravo",
              "cd /w && merge --reviewed --root o/alpha=/w/a", role_path("roots-runner"), carries=("o/bravo",))
@@ -19978,22 +19996,20 @@ def split_segments_comment_case():
 
 
 def split_segments_substitution_case():
-    """A `&&` inside a `$( )` or backtick span is text of the word that holds it, so the span stays
-    one segment. The `&&` after the span still splits. A single-quoted span is text already.
-
-    The roots runner's `--root o/alpha=$(cd d && pwd)` split at the inner `&&`, so its second --root
-    fell into a segment of its own and the runner was refused for a missing repo.
+    """A `&&` inside a `$( )` or backtick span splits here, as on main, so each guard that reads a
+    segment sees the inner call. The `&&` after the span splits too. A single-quoted span is text, so
+    it stays one segment.
     """
     guard = _load_guard_module()
     problems = []
 
     got = guard.split_segments("a $(b && c) && d")
-    want = ["a $(b && c) ", " d"]
+    want = ["a $(b ", " c) ", " d"]
     if got != want:
         problems.append("$( ) span: got %r want %r" % (got, want))
 
     got = guard.split_segments("a `b && c` && d")
-    want = ["a `b && c` ", " d"]
+    want = ["a `b ", " c` ", " d"]
     if got != want:
         problems.append("backtick span: got %r want %r" % (got, want))
 
@@ -20002,7 +20018,7 @@ def split_segments_substitution_case():
     if got != want:
         problems.append("single-quoted $( ) span: got %r want %r" % (got, want))
 
-    return (not problems), "; ".join(problems) if problems else "a && in a $( ) or backtick span stays in its segment"
+    return (not problems), "; ".join(problems) if problems else "a && in a $( ) or backtick span splits as on main, and a single-quoted span stays whole"
 
 
 def process_start_ms_case():
@@ -22038,7 +22054,7 @@ LOG_CHECKS = (
      pointer_remedy_names_enter_worktree_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
-    ("split_segments: a && inside a $( ) or backtick span stays in its segment, and a real && still splits",
+    ("split_segments: a && inside a $( ) or backtick span splits as on main, and a single-quoted span stays whole",
      split_segments_substitution_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
      incident_write_strip_case),
