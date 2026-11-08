@@ -2065,7 +2065,9 @@ MESSAGE_CODE_EXT = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "yml",
 # A command word starts a command that runs to the clause end: a path in it is run, not edited.
 MESSAGE_COMMANDS = {"python", "python3", "node", "bash", "sh", "pwsh", "verdict", "pytest", "npm", "npx", "git"}
 MESSAGE_FENCE = re.compile(r"```.*?```", re.S)
+# A backtick or double-quoted span of several words is a command or a quoted example: data, not an order.
 MESSAGE_SPAN = re.compile(r"`([^`\n]*)`")
+MESSAGE_QUOTE = re.compile(r'"([^"\n]*)"')
 MESSAGE_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 MESSAGE_CLAUSE = re.compile(r"\s*;\s*|\s*,\s*then\b\s*|\s+then\b\s*|\s*,\s*so\b\s*|\s+so\b\s*|\s+and\s+(?=\S)", re.I)
 MESSAGE_NAME = re.compile(r"^[\w@+-][\w@+.-]*\.([A-Za-z][A-Za-z0-9]{0,5})$")
@@ -2140,8 +2142,9 @@ def _message_edits(words):
             if act == "edit":
                 edit_seen = True
                 ahead = [w for w, _ in words[at + 1:at + 3]]
-                anaphor = anaphor or (bool(ahead) and ahead[0] in MESSAGE_ANAPHORS) or (
-                    len(ahead) == 2 and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)
+                anaphor = anaphor or ((bool(ahead) and ahead[0] in MESSAGE_ANAPHORS) or (
+                    len(ahead) == 2 and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)) and not (
+                    _message_goal(words, at + 1))
             continue
         if word in MESSAGE_READ_VERBS:
             kind, verb, slot = "read", word, False
@@ -2173,11 +2176,13 @@ def _message_edits(words):
 def message_edit_paths(message: str):
     """(path, test_object) per path a message asks its receiver to edit. A path counts when an edit verb governs it
     (_message_edits), or the verb's clause names no path at all and an earlier clause of the sentence (`Look at X, then
-    fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named
-    carries only when the verb is followed by an anaphor. `test_object` marks a path a test noun object makes a spec
+    fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named,
+    or one that led its clause, carries only when the verb is followed by an anaphor that does not go green
+    (`Make them green`). `test_object` marks a path a test noun object makes a spec
     for a test-author (`Add red cases for ... in X`)."""
-    text = MESSAGE_SPAN.sub(lambda m: m.group(1) if len(m.group(1).split()) == 1 else MESSAGE_SPAN_MASK,
-                            MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message))
+    def mask(found):
+        return found.group(1) if len(found.group(1).split()) == 1 else MESSAGE_SPAN_MASK
+    text = MESSAGE_QUOTE.sub(mask, MESSAGE_SPAN.sub(mask, MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message)))
     hits, before = [], []
     for sentence in (s for s in MESSAGE_SENTENCE.split(text) if s.strip()):
         pieces, joins = MESSAGE_CLAUSE.split(sentence), MESSAGE_CLAUSE.findall(sentence)
@@ -2196,7 +2201,7 @@ def message_edit_paths(message: str):
             if governed:
                 hits += governed
             elif governed is not None and not any(path for _, path in words):
-                hits += [(path, test) for path, kind, test in earlier or before if kind != "read" or anaphor]
+                hits += [(path, test) for path, kind, test in earlier or before if kind == "edit" or anaphor]
             earlier = seen or earlier
         before = named
     return hits
