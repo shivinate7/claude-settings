@@ -457,10 +457,12 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
     `refs/remotes/<remote>/*` only, never the network: the ref files with no spawn (`for-each-ref` only for a
     layout the file read does not know), plus one `rev-parse` only for a judged refspec whose destination is
     a new branch name (a tag, `main`, `master`, a branch the remote holds and `archive/*` exit first), plus
-    the default-branch read only when a judged sha sits at a remote tip. A push that names no remote first
-    reads the current branch and its remote (`symbolic-ref -q HEAD`, `config --get branch.<cur>.remote`). A colon-less push stays allowed (plain-push-asks). So
-    do `--force` and a lease, a mirror, `--all`, `--delete`, tags, a glob, a remote named by URL and any
-    read that fails: this judges only what it can read.
+    the default-branch read only when a judged sha sits at a remote tip. `_push_parse` takes the first plain
+    word as the remote, so a push with a refspec has a remote. The current-branch reads (`symbolic-ref -q
+    HEAD`, `config --get branch.<cur>.remote`) run only when the remote comes back empty, which no ordinary
+    push reaches. A colon-less push stays allowed (plain-push-asks). So do `--force` and a lease, a mirror,
+    `--all`, `--delete`, tags, a glob, a remote named by URL and any read that fails: this judges only what
+    it can read.
     """
     force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or every or delete or not plain:
