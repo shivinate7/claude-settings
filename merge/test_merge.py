@@ -12123,11 +12123,18 @@ class ReviewStampForm(unittest.TestCase):
                          "the Stamp line is not review_stamp of the lines above it:\n" + text)
 
     def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
-        # the MCP tool may add spaces at a line's end. The marker line stays exact: it is what makes a body a record at all.
+        # the MCP tool may add spaces at a line's end. This case spaces the body lines; the marker line has its own case below.
         text = record_text(rounds=REVIEW_PASS)
         lines = text.splitlines()
         spaced = "\n".join([lines[0]] + [line + "  " for line in lines[1:]]) + "\n"
         self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces changed what the record parses to")
+
+    def test_trailing_spaces_on_the_marker_line_still_make_a_record(self):
+        # the marker line is what makes a body a record, and the MCP tool may add spaces to it as to any other line
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0] + "  "] + lines[1:]) + "\n"
+        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces on the marker line changed what the record parses to")
 
     def test_crlf_line_ends_still_parse_to_the_same_fields(self):
         text = record_text(rounds=REVIEW_PASS)
@@ -12737,25 +12744,103 @@ class ReviewLaneLint(ReviewEnv):
         with unittest.mock.patch.object(merge, "lane_lint", stub):
             yield calls
 
-    def assert_unknown_held(self, error):
-        """An unknown lint refuses the record and names the lint step. It offers no override, because the review record path has none."""
+    def assert_unknown_held(self, error, liftable):
+        """An unknown lint refuses the record and names merge --lane-lint. A liftable unknown names --lint-unknown-ok "REASON" as the way
+        through, and no line says no override lifts it. A plain unknown has no flag that lifts it, so its refusal keeps the generic line."""
         with self.lint_raising(error) as calls:
             rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertNotEqual(rc, 0, "an unknown lint printed a PASS record:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a held PASS record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
-        self.assertNotIn("--lint-unknown-ok", out + err, "the refusal tells the caller to pass --lint-unknown-ok:\n" + out + err)
-        self.assertNotIn("No override lifts this refusal", out + err, "the refusal says no override lifts it:\n" + out + err)
+        if liftable:
+            self.assertIn('--lint-unknown-ok "REASON"', out + err, "the refusal does not name --lint-unknown-ok \"REASON\" as the way through:\n" + out + err)
+            self.assertNotIn("No override lifts this refusal", out + err, "the refusal says no override lifts a lint that the flag lifts:\n" + out + err)
+        else:
+            self.assertNotIn("--lint-unknown-ok", out + err, "the refusal names a flag that does not lift this unknown:\n" + out + err)
+            self.assertIn("No override lifts this refusal", out + err, "the refusal dropped the generic no-override line:\n" + out + err)
         self.assertTrue(calls, "the record did not ask lane_lint about its head")
 
-    def test_an_unknown_lint_that_lifts_is_refused_without_an_override_offer(self):
-        # lane_lint raises a Liftable for an unknown step: its own text names --lint-unknown-ok, and the record path must not pass that on
+    def test_an_unknown_lint_that_lifts_names_the_unknown_ok_flag_as_the_way_through(self):
+        # lane_lint raises a Liftable for an unknown step, and --lint-unknown-ok REASON lifts it: the refusal names that way through
         self.assert_unknown_held(merge.Liftable("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:\n"
-                                                'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>".'))
+                                                'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>".'), True)
 
-    def test_an_unknown_lint_that_does_not_lift_is_refused_without_an_override_offer(self):
-        # a plain Stop for an unknown step is the one that gets the generic "No override lifts this refusal" line
-        self.assert_unknown_held(merge.Stop("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:"))
+    def test_an_unknown_lint_that_does_not_lift_keeps_the_no_override_line(self):
+        # a plain Stop for an unknown step has no flag that lifts it, so its refusal keeps the generic line
+        self.assert_unknown_held(merge.Stop("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:"), False)
+
+    @contextlib.contextmanager
+    def lint_lifted_by_reason(self):
+        """lane_lint passes when it is given a non-blank unknown reason, and raises a Liftable for an unknown step when it is not. The calls are logged."""
+        calls = []
+
+        def stub(*args, **kwargs):
+            calls.append((args, kwargs))
+            unknown_ok = args[4] if len(args) > 4 else kwargs.get("unknown_ok", "")
+            if unknown_ok.strip():
+                return 0
+            raise merge.Liftable("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:\n"
+                                 'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>".')
+
+        with unittest.mock.patch.object(merge, "lane_lint", stub):
+            yield calls
+
+    def test_a_done_record_whose_unknown_lint_has_a_reason_passes_the_reason_and_prints_its_body(self):
+        with self.lint_lifted_by_reason() as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--lint-unknown-ok", "the lint tool is missing here")
+        self.assertEqual(rc, 0, "--lint-unknown-ok with a reason did not print the done record:\n" + out + err)
+        self.assertTrue(calls, "the record did not ask lane_lint about its head")
+        self.assertEqual(calls[0][0][4], "the lint tool is missing here", "lane_lint was not given the reason")
+        self.assertEqual(parse_text(self, posted_body(self, out))["rounds"], [(1, "reviewer", "sonnet", "PASS")])
+
+    def test_the_unknown_ok_flag_is_a_usage_error_outside_the_lint_modes(self):
+        # the flag goes with --lane-lint and --review-record only; the other modes still refuse it as a usage error
+        self.assert_usage_error("7", "--lint-unknown-ok", "the lint tool is missing here")
+        self.assert_usage_error("--reviewed", "--lint-unknown-ok", "the lint tool is missing here")
+
+    def test_a_failed_lint_on_a_done_record_is_a_plain_refusal_that_keeps_the_no_override_line(self):
+        # a FAIL is not unknown: no flag lifts it, and the refusal says so
+        with self.lint("FAIL") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertNotEqual(rc, 0, "a failed lint printed a done record:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
+        self.assertIn("No override lifts this refusal", out + err, "the refusal dropped the generic no-override line:\n" + out + err)
+        self.assertTrue(calls, "the done record did not ask lane_lint about its head")
+
+    def test_a_lint_line_that_lane_lint_prints_stays_out_of_the_record(self):
+        # the record's stdout is the record alone: a PASS line from the lint goes to stderr
+        def stub(*args, **kwargs):
+            print("PASS: lint of " + REVIEW_HEAD[:9] + " against main passes.")
+            return 0
+
+        with unittest.mock.patch.object(merge, "lane_lint", stub):
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(out.startswith(REVIEW_MARKER + "\n"), "the printed record does not start with the marker:\n" + out)
+        self.assertNotIn("lint of", out, "a lint line reached the record's stdout:\n" + out)
+
+    def test_the_lane_lint_call_runs_inside_release_on_signals(self):
+        # a signal during the lint must remove lane_lint's worktree, so the call sits inside the signal guard
+        state, seen = {"on": False}, []
+
+        @contextlib.contextmanager
+        def guard():
+            state["on"] = True
+            try:
+                yield
+            finally:
+                state["on"] = False
+
+        def stub(*args, **kwargs):
+            seen.append(state["on"])
+            return 0
+
+        with unittest.mock.patch.object(merge, "release_on_signals", guard), unittest.mock.patch.object(merge, "lane_lint", stub):
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(seen, "the record did not ask lane_lint about its head")
+        self.assertTrue(all(seen), "lane_lint ran outside release_on_signals")
 
     def test_a_done_record_on_a_failed_round_is_refused_when_lint_fails(self):
         # a delete-only change with guard no is done after round one whatever its verdict, and a done record is the handoff, so lint must pass
