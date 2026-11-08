@@ -9084,6 +9084,11 @@ PS_RUN_CASES = (
      + PS_PR_LINE + "\n'@"),
     ("single-quoted, piped to pwsh -Command -", "@'\n" + PS_PR_LINE + "\n'@ | pwsh -Command -"),
     ("double-quoted, inside a scriptblock Create call", '& ([scriptblock]::Create(@"\n' + PS_PR_LINE + '\n"@))'),
+    # A switch that takes a value (-ExecutionPolicy Bypass) does not end the pwsh arguments: the lone `-` after
+    # the switches still reads the body from stdin.
+    ("piped to pwsh with -ExecutionPolicy Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -NoProfile -ExecutionPolicy Bypass -'),
+    ("piped to powershell.exe with -ExecutionPolicy Bypass before -Command -", '@"\n' + PS_PR_LINE + '\n"@ | powershell.exe -ExecutionPolicy Bypass -Command -'),
+    ("piped to pwsh -NonInteractive -Command -", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -NonInteractive -Command -'),
 )
 for _name, _command in PS_RUN_CASES:
     sh("draft-pr: a PowerShell here-string body run " + _name + " holds gh pr create, is refused",
@@ -9098,6 +9103,9 @@ sh("draft-pr: a PowerShell single-quoted here-string held in a variable, with $(
    "$body = @'\n$(" + PS_PR_LINE + ")\n'@", "allow", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell Set-Content of a single-quoted here-string, with an apostrophe line and a bare gh pr create line, is allowed",
    "Set-Content f.md -Value @'\n# note: don't open it yet\n" + PS_PR_LINE + "\n'@", "allow", tool="PowerShell", cwd=NOGIT)
+# pwsh -File runs the named script, so its stdin is no script: the here-string piped to it is data and allowed.
+sh("draft-pr: a PowerShell double-quoted here-string piped to pwsh -File x.ps1, with a bare gh pr create line, is allowed",
+   '@"\n' + PS_PR_LINE + '\n"@ | pwsh -File x.ps1', "allow", tool="PowerShell", cwd=NOGIT)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
