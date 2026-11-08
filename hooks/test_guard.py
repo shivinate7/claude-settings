@@ -5779,15 +5779,17 @@ add("wait-until: a clock loop then a second loop with no pause stays refused und
     command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
             r'until [ -f x ]; do :; done; cmd',
     run_in_background=True)
-# A variable is no date read, so its ordering against a literal is refused: nothing says the variable moves.
-add("wait-until: a loop on a variable with no date read stays refused under run_in_background", "deny",
-    "waiter", cwd=NOGIT, command='until [ "$NOW" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+# A read of another command is no clock read, even with a +%s format, so its order against an epoch never
+# reaches a clock time.
+add("wait-until: a loop on a read of another command with a +%s format stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until [ "$(clock +%s)" -gt 1762470000 ]; do sleep 15; done; cmd',
+    run_in_background=True)
 add("wait-until: a loop that tests the clock for equality with a full ISO time stays refused under "
     "run_in_background", "deny", "waiter", cwd=NOGIT,
     command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" = "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
     run_in_background=True)
 add("wait-until: a loop written as an arithmetic test stays refused under run_in_background", "deny",
-    "waiter", cwd=NOGIT, command='until (( $(date +%s) > 1762470000 )); do sleep 15; done; cmd',
+    "waiter", cwd=NOGIT, command='until (( $(date +%s) -gt 1762470000 )); do sleep 15; done; cmd',
     run_in_background=True)
 # Each read and literal disagree in kind, so the test never turns and the loop never ends: `-gt` and `-ge` on a
 # text read are an error, not an order; a text order of epoch digits against an ISO time puts the digits first,
@@ -5817,6 +5819,28 @@ add("wait-until: a clock loop with a command body, then a for loop with pauses, 
     "deny", "waiter", cwd=NOGIT,
     command='until [ "$(date +%s)" -gt 1762470000 ]; do cmd; done; for i in 1 2; do sleep 15; done',
     run_in_background=True)
+# A numeric order needs an epoch read and an epoch literal; a text order needs an ISO read and an ISO literal.
+# Each pairing here crosses the two, so the test never turns and the loop never ends.
+add("wait-until: a numeric order on a +%s read against an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order on an ISO read against an epoch stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+# A read whose time is not the clock reaches no clock time, whatever its format: a fixed date, a file's time, or a
+# text format that is not an ISO date-time.
+add("wait-until: a loop on a fixed date read with -d stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -d 2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a fixed date read with --date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date --date=2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a file's time read with -r stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -r stamp.txt +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a text format that is not an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%m-%d)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
 # Allowed under run_in_background: a numeric order of an epoch read, and a while loop that waits while the clock is
 # earlier than a literal. The order and the read agree in kind, so the test turns at the time it names.
 add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
@@ -5825,6 +5849,11 @@ add("wait-until: a while loop that waits while the clock is earlier than a liter
     "run_in_background", "allow", cwd=NOGIT,
     command=r'while [ "$(date -u +%FT%T)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
     run_in_background=True)
+# The ISO formats a session writes for a text order, with and without the zone suffix and the -u flag.
+add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date -u +%FT%TZ)" \> "2026-11-06T22:48:00Z" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
 
 # The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
 sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
