@@ -719,6 +719,40 @@ class CannotClaimTests(unittest.TestCase):
         self.assertIn("cannot-claim guard: UNKNOWN", run.stderr, "no UNKNOWN note on stderr: %r" % run.stderr[-300:])
         self.assertFalse(run.stdout.strip(), "an unread refusals file refused the claim: %s" % run.stdout)
 
+    # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is the incident's own hand-off
+    # form. The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
+
+    def test_cc_red_a_claim_after_a_bold_input_needed_label_has_no_try(self):
+        # Catches: the bold label read as the phrase's subject, so the line passed as no claim. The only evidence is a
+        # connect notice, which is no try.
+        line = "**Input Needed** Could not open the PR."
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_claim_in_an_input_needed_report_line_has_no_try(self):
+        # The same claim as the Input Needed line of a report, where the incident's hand-off form sits.
+        line = "**Input Needed** Could not open the PR."
+        report = "\n".join(["> **Done** BUILT abc123", "> **Deviations** none", "> " + line, "> **Next** wait"])
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(report)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_claim_in_a_next_report_line_has_no_try(self):
+        # The same claim under Next: the label is the phrase's clause opener under every label, not Input Needed only.
+        line = "**Next** Could not open the PR."
+        report = "\n".join(["> **Done** BUILT abc123", "> **Deviations** none", "> **Input Needed** none", "> " + line])
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(report)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_third_party_after_a_bold_label_passes(self):
+        # Control: the label opens the clause, and the subject after it is still judged. A builder is third party.
+        line = "**Input Needed** The builder could not open the PR."
+        out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
+                         trg.assistant_text(line)])
+        self.assert_passes(out, "a third-party subject after a bold label")
+
     def opened_by_stop(self, reply):
         """(stdout, paths the Stop process opened, the refusals path, the transcript path) for one reply, with a refusals
         file and the route rows in place. The refusals file is written again for each run: a run that settles it removes
