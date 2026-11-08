@@ -1981,18 +1981,21 @@ def _build_branch():
 
     # design-torn: its tip is a commit whose tree object is missing from this clone, so the design
     # read cannot list its files. origin does not hold it; the tracking ref names it, as a damaged
-    # clone's would. The tree id is a real one, hashed from one blob entry and never written, since
-    # newer git's hash-object -w fsck-checks a commit's tree line and refuses a malformed id.
+    # clone's would. The tree id is a real one, hashed from one blob entry and never written. The
+    # commit text goes in as bytes: text mode writes CRLF on Windows, and newer git's hash-object -w
+    # fsck-checks the tree line and refuses one that ends in a carriage return.
     tree_blob = subprocess.run([VCS, "hash-object", "--stdin"], cwd=BRANCHREPO,
-                               input="design-torn's tree is never stored\n", capture_output=True, text=True)
-    if tree_blob.returncode != 0 or not tree_blob.stdout.strip():
+                               input=b"design-torn's tree is never stored\n", capture_output=True)
+    blob_id = tree_blob.stdout.decode("ascii", "replace").strip()
+    if tree_blob.returncode != 0 or not blob_id:
         sys.exit("fixture setup failed in build_fixtures: hashing design-torn's blob failed. stderr: %s"
-                 % tree_blob.stderr.strip())
-    tree_entry = b"100644 torn.html\x00" + bytes.fromhex(tree_blob.stdout.strip())
+                 % tree_blob.stderr.decode("utf-8", "replace").strip())
+    tree_entry = b"100644 torn.html\x00" + bytes.fromhex(blob_id)
     tree_hashed = subprocess.run([VCS, "hash-object", "-t", "tree", "--stdin"], cwd=BRANCHREPO,
                                  input=tree_entry, capture_output=True)
     missing_tree = tree_hashed.stdout.decode("ascii", "replace").strip()
-    if tree_hashed.returncode != 0 or len(missing_tree) != 40:
+    if (tree_hashed.returncode != 0 or len(missing_tree) != len(rev("main"))
+            or not re.fullmatch(r"[0-9a-f]+", missing_tree)):
         sys.exit("fixture setup failed in build_fixtures: hashing design-torn's tree failed. stderr: %s"
                  % tree_hashed.stderr.decode("utf-8", "replace").strip())
     if run_vcs(BRANCHREPO, "cat-file", "-e", missing_tree).returncode == 0:
@@ -2002,11 +2005,11 @@ def _build_branch():
                  "committer cases <cases@example.invalid> 1700000000 +0000\n\n"
                  "design-torn: its tree is missing\n") % (missing_tree, rev("main"))
     made = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], cwd=BRANCHREPO,
-                          input=torn_text, capture_output=True, text=True)
-    torn = made.stdout.strip()
+                          input=torn_text.encode("utf-8"), capture_output=True)
+    torn = made.stdout.decode("ascii", "replace").strip()
     if made.returncode != 0 or not torn:
         sys.exit("fixture setup failed in build_fixtures: writing design-torn's commit failed. "
-                 "stderr: %s" % made.stderr.strip())
+                 "stderr: %s" % made.stderr.decode("utf-8", "replace").strip())
     if run_vcs(BRANCHREPO, "update-ref", "refs/remotes/origin/design-torn", torn).returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: naming design-torn's commit failed")
     if rev(torn + "^{commit}") != torn:
