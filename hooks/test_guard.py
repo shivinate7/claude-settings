@@ -9194,12 +9194,6 @@ sh("env: heredoc-allow: a cat write, the same body with a bash <<X inner word, i
    "cat > /tmp/b.md <<'EOF'\nbash <<X cat " + ENV + "\nEOF", "allow", cwd=NOGIT)
 sh("env: heredoc-allow: a cat write, the same body with a lone apostrophe and a hash, is allowed",
    "cat > /tmp/b.md <<'EOF'\nDon't stop here\nbash <<EOF cat " + ENV + "\n# a note\nEOF", "allow", cwd=NOGIT)
-# A LONE QUOTE IN A PYTHON BODY DOES NOT HIDE THE PUSH AFTER THE EOF. The body is data, so the `;` after EOF starts
-# the commands: the commit, then the push, which runs whatever the commit did. The unmatched `'` in the body must not
-# open a quote that runs to the end of the command.
-sh("env: heredoc-refuse: a python heredoc body with a lone quote, then ; a git commit and a git push, is refused",
-   "python3 - <<'EOF'\nprint('don't')\nEOF\n%s commit -m x; %s push origin b" % (VCS, VCS), "deny", "git-after-cd",
-   cwd=NOGIT, carries=("&&",))
 
 # A body that a shell or an interpreter runs stays in view, and its env read still refuses.
 sh("env: heredoc-refuse: a bash heredoc with a quoted delimiter and an env read in the body, denies",
@@ -10442,6 +10436,15 @@ record_allow("the newest own record wins: a lane record, then a triage record, i
 # The incident python write is a triage command that ends in a push to roadmap, so it runs under a triage record.
 sh("env: heredoc-allow: the incident python write, an escaped quote and an env folder in the body, is allowed",
    INCIDENT_PYTHON_WRITE, "allow", cwd=NOGIT, transcript=TRIAGE_TRANSCRIPT, env=ROLE_ENV)
+# A LONE QUOTE IN A PYTHON BODY DOES NOT HIDE THE PUSH AFTER THE EOF. The body is data, so the `;` after EOF starts
+# the commands: the commit, then the push, which runs whatever the commit did. The unmatched `'` must not open a quote
+# that runs to the end of the command. The balanced body after it is the control: the same tail, refused for the same rule.
+sh("env: heredoc-refuse: a python heredoc body with a lone quote, then ; a git commit and a git push, is refused",
+   "python3 - <<'EOF'\nprint('don't')\nEOF\n%s commit -m x; %s push origin b" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("env: heredoc-refuse: a python heredoc body with a balanced quote, then ; a git commit and a git push, is refused",
+   "python3 - <<'EOF'\nprint('don' + 't')\nEOF\n%s commit -m x; %s push origin b" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 # A lane's pushes to other branches, and the fork's own name, are not the record branch.
 record_allow("a lane's push to lane/foo is allowed", VCS + " push origin lane/foo", LANE_TRANSCRIPT)
 record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS + " push origin roadmap-notes",
