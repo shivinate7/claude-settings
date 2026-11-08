@@ -10332,11 +10332,12 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 
 # The pull request a reviewer brief names (rule review-needs-pr, decision pr-review-record). A reviewer or
 # design-reviewer spawn by an orchestrator (no agent_id) whose brief carries a review-round marker (`Round N of 3`,
-# BRIEF_MARKERS kind round) is refused when the brief names no pull request: `PR #<n>`, `PR <n>`, `pull request #<n>`,
-# or a github.com pull URL. `#<n>` alone is an issue and does not count. A brief with no round marker is not judged:
-# a blind design-review brief names pages only. The rule reads the git config at the payload's cwd only: a linked
-# worktree's `.git` file leads to the common config. A repo with no github.com remote is exempt, and so is a config
-# the rule cannot read. A builder or Explore spawn is not judged.
+# BRIEF_MARKERS kind round) is refused when the brief names no pull request: `PR #<n>`, `PR <n>`, `PR: <n>`,
+# `PR (#<n>)`, `PR number <n>`, `pull request #<n>`, or a github.com pull URL. `#<n>` alone is an issue and does
+# not count. A brief with no round marker is not judged: a blind design-review brief names pages only. The rule
+# reads the git config at the payload's cwd only: a linked worktree's `.git` file leads to the common config. A repo
+# with no GitHub remote is exempt, and so is a config the rule cannot read. A github.com remote and a cloud proxy
+# origin both count as GitHub remotes. A builder or Explore spawn is not judged.
 # The refusal names the rule, says to open the draft PR first and name it in the brief, and cites the decision.
 NPR_RULE = "review-needs-pr"
 NPR_CARRIES = ("pr-review-record", "draft", "brief")
@@ -10364,6 +10365,12 @@ NPR_PR_WORD_NO_NUMBER = "Run a PR review of the diff on branch lane-x and report
 NPR_PRS = "Review PRs #1908 and #1909 and report PASS or FAIL."
 NPR_PR_DASH = "Review PR-1908 and report PASS or FAIL."
 NPR_PULL_REQUESTS = "Review pull requests #1908 and report PASS or FAIL."
+NPR_PR_COLON = "Review PR: 12 and report PASS or FAIL."
+NPR_PR_COLON_HASH = "Review PR: #12 and report PASS or FAIL."
+NPR_PR_PAREN = "Review PR (#12) and report PASS or FAIL."
+NPR_PR_NUMBER_WORD = "Review PR number 12 and report PASS or FAIL."
+NPR_PROXY = "http://local_proxy@127.0.0.1:1234/git/owner/name"
+NPR_GITLAB_COM = "https://gitlab.com/owner/repo.git"
 
 
 def npr_path(name):
@@ -10381,9 +10388,9 @@ def npr_spawn(kind, prompt, model, round_line=NPR_ROUND_1):
 
 def npr_build():
     """The checkouts the cases name, each a real git tree from make_repo, so its config is git's own. The shapes the
-    rule reads: a github remote in https and scp form, a gitlab remote, a gitlab origin with a github mirror, no
-    remote, a linked worktree of a github checkout, a config that is a folder, a config that is missing, a `.git`
-    file that names no folder, and a folder that is not a git tree."""
+    rule reads: a github remote in https and scp form, a gitlab remote, a gitlab.com remote, a cloud proxy origin, a
+    gitlab origin with a github mirror, no remote, a linked worktree of a github checkout, a config that is a folder,
+    a config that is missing, a `.git` file that names no folder, and a folder that is not a git tree."""
     def checkout(name, *remotes):
         where = npr_path(name)
         make_repo(where, {"a.txt": "base\n"})
@@ -10394,6 +10401,8 @@ def npr_build():
     checkout("github-https", ("origin", NPR_GITHUB_HTTPS))
     checkout("github-scp", ("origin", NPR_GITHUB_SCP))
     checkout("gitlab", ("origin", NPR_GITLAB))
+    checkout("gitlab-com", ("origin", NPR_GITLAB_COM))
+    checkout("proxy-origin", ("origin", NPR_PROXY))
     checkout("gitlab-then-github", ("origin", NPR_GITLAB), ("mirror", NPR_GITHUB_HTTPS))
     checkout("no-remote")
     main = checkout("worktree-main", ("origin", NPR_GITHUB_HTTPS))
@@ -10451,6 +10460,9 @@ npr_refuse("a github remote behind a gitlab origin counts: a brief that names no
            "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitlab-then-github"))
 npr_refuse("a linked worktree reads the github remote in its common config: a brief with no pull request is refused",
            "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("worktree-lane"))
+# A cloud proxy origin has no github.com host, but origin_slug reads its owner and name: it counts as a GitHub remote.
+npr_refuse("a cloud proxy origin counts as a github remote: a brief with no pull request is refused",
+           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("proxy-origin"))
 # Refused: a round-2 reviewer, on sonnet. Its step-up (rule roles-third-round-steps-up) refuses a round-2 reviewer on
 # haiku first, so the case names sonnet and reaches this rule.
 npr_refuse("a reviewer on round 2 with no pull request is refused",
@@ -10480,6 +10492,14 @@ npr_allow("a brief that names PR-1908 with a dash is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_DASH, "haiku"), npr_path("github-https"))
 npr_allow("a brief that names pull requests #1908 in the plural is allowed",
           "Agent", npr_spawn("reviewer", NPR_PULL_REQUESTS, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PR: 12, a colon after PR, is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_COLON, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PR: #12, a colon and a hash, is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_COLON_HASH, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PR (#12) in parentheses is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_PAREN, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PR number 12 is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_NUMBER_WORD, "haiku"), npr_path("github-https"))
 # A blind design-review brief names pages only and carries no round marker: the rule does not judge it.
 npr_allow("a reviewer brief with no round marker, a blind design-review brief that names pages only, is allowed",
           "Agent", npr_spawn("reviewer", NPR_PAGES, "haiku", round_line=None), npr_path("github-https"))
@@ -10487,6 +10507,8 @@ npr_allow("a design-reviewer brief with no round marker and no pull request is a
           "Agent", npr_spawn("design-reviewer", NPR_NO_PR, "opus", round_line=None), npr_path("github-https"))
 npr_allow("a brief with no pull request is allowed in a repo whose only remote is gitlab",
           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitlab"))
+npr_allow("a brief with no pull request is allowed in a repo whose only remote is gitlab.com",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitlab-com"))
 npr_allow("a brief with no pull request is allowed in a repo with no remote",
           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("no-remote"))
 npr_allow("a brief with no pull request is allowed in a folder that is not a git tree",
