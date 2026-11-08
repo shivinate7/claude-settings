@@ -1122,6 +1122,97 @@ def case_full_size_only_the_unhomed_label_named():
     check("full size: all rulings homed and NO HOME YET empty is silent", reason == "", reason)
 
 
+def case_no_home_list_forms_are_ruling_lines():
+    """Under NO HOME YET every non-blank, non-fenced line is a ruling line. A `+` bullet, a numbered line and a
+    plain paragraph line each block when unhomed, and the reason names that line's own label only. The `*`
+    bullet is the control. `- none`, `- NONE` and `- None` claim nothing: beside an unhomed P6 they add no label."""
+    forms = (
+        ("plus bullet", "+ P3. Source: coordinator 2026-11-07.", "P3"),
+        ("numbered line", "2. P4. Source: coordinator 2026-11-07.", "P4"),
+        ("paragraph line", "P5. A guard or check change batches alone. Source: coordinator 2026-11-07.", "P5"),
+        ("star bullet (control)", "* P8. Source: coordinator 2026-11-07.", "P8"),
+    )
+    for n, (tag, line, pid) in enumerate(forms):
+        reason = handoff_reason("hand_noh_form_%d" % n, handoff_text(no_home=[line]), wrote=True)
+        check("NO HOME YET %s with no Home: blocks" % tag, bool(reason), "reason is empty")
+        check("NO HOME YET %s: the reason names %s only" % (tag, pid), labels_in(reason) == {pid}, reason)
+    for n, none_line in enumerate(("- none", "- NONE", "- None")):
+        text = handoff_text(no_home=[none_line], premises=[ruling("P6")])
+        reason = handoff_reason("hand_noh_none_%d" % n, text, wrote=True)
+        check("NO HOME YET %s claims no ruling: beside an unhomed P6 the reason names P6 only" % none_line,
+              labels_in(reason) == {"P6"} and NO_HOME_HEADING not in reason, reason)
+    rows = ["%d. P%d. Source: coordinator 2026-11-07.%s" % (i, 20 + i, (" Home: %s" % KNOWN_HOME) if i == 6 else "")
+            for i in range(1, 13)]
+    reason = handoff_reason("hand_noh_full", handoff_text(no_home=rows), wrote=True)
+    want = {"P%d" % (20 + i) for i in range(1, 13) if i != 6}
+    check("NO HOME YET full size: twelve numbered lines, one homed, name the eleven unhomed labels only",
+          labels_in(reason) == want, reason)
+
+
+def case_premise_bold_and_colon_ids_are_checked():
+    """A ruling premise written `- **P4** [ruling]` or `- P5: [ruling]` has the label P4 or P5. Unhomed, it
+    blocks and the reason names that label only. Homed on a tracked path, the same line is silent."""
+    forms = (
+        ("bold id", "- **P4** [ruling] %s. Source: coordinator 2026-11-07. Checked never." % STATEMENT, "P4"),
+        ("colon id", "- P5: [ruling] %s. Source: coordinator 2026-11-07. Checked never." % STATEMENT, "P5"),
+    )
+    for n, (tag, line, pid) in enumerate(forms):
+        reason = handoff_reason("hand_prem_form_%d" % n, handoff_text(premises=[line]), wrote=True)
+        check("ruling premise, %s, unhomed: blocks" % tag, bool(reason), "reason is empty")
+        check("ruling premise, %s, unhomed: the reason names %s only" % (tag, pid),
+              labels_in(reason) == {pid}, reason)
+        homed = handoff_text(premises=[line + " Home: %s" % KNOWN_HOME])
+        reason = handoff_reason("hand_prem_form_homed_%d" % n, homed, wrote=True)
+        check("ruling premise, %s, homed on a tracked path: silent" % tag, reason == "", reason)
+
+
+def case_home_trailing_period_is_ignored():
+    """One trailing period after a Home: value is ignored, in a ruling premise and on a NO HOME YET line. A
+    tracked path with a period passes (control), and so does `NO HOME YET (branch <real ref>).`. The period
+    does not excuse the value: an untracked path and a branch no ref holds still block, naming their label."""
+    path = KNOWN_HOME + "."
+    real = "NO HOME YET (branch %s)." % REAL_BRANCH
+    cases = (
+        ("ruling premise, tracked path with a period", handoff_text(premises=[ruling("P3", path)]), set()),
+        ("ruling premise, NO HOME YET (branch <real ref>).", handoff_text(premises=[ruling("P3", real)]), set()),
+        ("NO HOME YET line, tracked path with a period", handoff_text(no_home=[no_home_line(path)]), set()),
+        ("NO HOME YET line, NO HOME YET (branch <real ref>).", handoff_text(no_home=[no_home_line(real)]), set()),
+        ("ruling premise, untracked path with a period",
+         handoff_text(premises=[ruling("P3", "docs/decisions/missing.md.")]), {"P3"}),
+        ("ruling premise, NO HOME YET (branch <no ref>).",
+         handoff_text(premises=[ruling("P3", "NO HOME YET (branch %s)." % FAKE_BRANCH)]), {"P3"}),
+    )
+    for n, (tag, text, want) in enumerate(cases):
+        reason = handoff_reason("hand_period_%d" % n, text, wrote=True)
+        if want:
+            check("trailing period, %s: blocks, naming %s only" % (tag, ", ".join(sorted(want))),
+                  labels_in(reason) == want, reason)
+        else:
+            check("trailing period, %s: silent" % tag, reason == "", reason)
+
+
+def case_handoff_fenced_heading_is_prose():
+    """A `# ` line inside a code fence, under NO HOME YET or Working premises, is prose: it neither ends its
+    section nor counts as a line. Beside `- none` it blocks nothing. An unhomed line after it still blocks. A
+    plain paragraph after it is line 1, so the reason names `NO HOME YET line 1` and never line 2."""
+    fenced = ["```", "# shell comment", "```"]
+    reason = handoff_reason("hand_fence_hash_none", handoff_text(no_home=fenced + ["- none"]), wrote=True)
+    check("fenced # under NO HOME YET beside - none: silent, the fenced line counts as no line", reason == "",
+          reason)
+    line = "- P4. Source: coordinator 2026-11-07."
+    reason = handoff_reason("hand_fence_hash_line", handoff_text(no_home=fenced + [line]), wrote=True)
+    check("fenced # under NO HOME YET: the unhomed line after it blocks, naming P4 only",
+          labels_in(reason) == {"P4"}, reason)
+    para = "A guard or check change batches alone. Source: coordinator 2026-11-07."
+    reason = handoff_reason("hand_fence_hash_para", handoff_text(no_home=fenced + [para]), wrote=True)
+    check("fenced # under NO HOME YET: the paragraph after it is line 1, not line 2",
+          "NO HOME YET line 1" in reason and "NO HOME YET line 2" not in reason, reason)
+    prem = handoff_text(premises=[DEFAULT_PREMISE, "```", "# run the check", "```", ruling("P3")])
+    reason = handoff_reason("hand_fence_hash_prem", prem, wrote=True)
+    check("fenced # in Working premises: the unhomed ruling after it blocks, naming P3 only",
+          labels_in(reason) == {"P3"}, reason)
+
+
 def main():
     case_a_no_home_line()
     case_b_process_only_passes()
@@ -1167,6 +1258,10 @@ def main():
     case_handoff_no_memory_folder_blocks()
     case_handoff_scanner_odd_text()
     case_full_size_only_the_unhomed_label_named()
+    case_no_home_list_forms_are_ruling_lines()
+    case_premise_bold_and_colon_ids_are_checked()
+    case_home_trailing_period_is_ignored()
+    case_handoff_fenced_heading_is_prose()
 
     if FAILED:
         print("test_ruling_home FAIL: %d failing check(s)" % len(FAILED))
