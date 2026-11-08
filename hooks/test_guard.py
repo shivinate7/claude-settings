@@ -7077,6 +7077,14 @@ push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask
 push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
+# A space beside a refspec name is no branch. git's ref-name check refuses " main" and "main ", so no push of either reaches
+# main, and the guard allows each. names_default_branch strips the space, so an escaped space, which the reader keeps in the
+# name, reaches that strip and asks. A quoted space never reaches it: push_text blanks quoted text, so the two quoted forms
+# are controls that allow already.
+push_case("a refspec with an escaped leading space allows, git refuses that ref", "origin \\ main", "allow")
+push_case("a refspec with an escaped trailing space allows, git refuses that ref", "origin main\\ ", "allow")
+push_case('a quoted refspec " main" allows, its text is blanked before the reader', 'origin " main"', "allow")
+push_case('a quoted refspec "main " allows, its text is blanked before the reader', 'origin "main "', "allow")
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
 push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
@@ -7115,6 +7123,9 @@ for _tool in ("mcp__github__push_files", "mcp__github__create_or_update_file"):
             owner="y", repo="x", branch=_branch, **dict(PUSH_MAIN_TOOLS)[_tool])
     add("push-main: %s to refs/heads/feat is silent" % _tool, "allow", silent=True, tool=_tool, cwd=NOGIT,
         owner="y", repo="x", branch="refs/heads/feat", **dict(PUSH_MAIN_TOOLS)[_tool])
+# The MCP call with a branch named " main" still asks. The MCP side is judged apart from the shell's strip above.
+add('push-main: mcp__github__push_files to " main" still asks', "ask", PUSH_MAIN_RULE, tool="mcp__github__push_files",
+    cwd=NOGIT, owner="y", repo="x", branch=" main", **dict(PUSH_MAIN_TOOLS)["mcp__github__push_files"])
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
