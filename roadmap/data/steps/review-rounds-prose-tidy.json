@@ -1,0 +1,11 @@
+{
+  "title": "#1789's five fix-check notes get fixed after it merges",
+  "why": "Lane review-rounds-rework left five fix-check notes on #1789, to fix after the merge, not before (coordinator, 23:55 CST Nov 7).",
+  "note": "Waits on #1789 merging. Title by triage from the coordinator's message. Filed 23:56 CST Nov 7.",
+  "phase": "now",
+  "status": "todo",
+  "order": 542,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-07T23:54:00-06:00"
+}
