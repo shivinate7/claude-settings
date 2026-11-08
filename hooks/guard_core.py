@@ -570,11 +570,8 @@ def _skip_assignments_and_keywords(tokens, index=0):
     end = len(tokens)
     while index < end:
         token = tokens[index]
-        if ASSIGNMENT.match(token):
-            index = _after_assignment(tokens, index)
-            continue
-        if token in LOOP_KEYWORDS:
-            index += 1
+        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
+            index = _after_assignment(tokens, index) if ASSIGNMENT.match(token) else index + 1
             continue
         if token[:1] == "(" and ASSIGNMENT.match(token[1:]):
             index += 1   # `(VAR=x cmd`: a subshell paren glued to the first assignment
