@@ -886,6 +886,15 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
+    for node in ast.walk(tree):   # a node `-e` script held in a list argv runs as node code
+        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], (ast.List, ast.Tuple)):
+            words = [item.value if isinstance(item, ast.Constant) and isinstance(item.value, str) else ""
+                     for item in node.args[0].elts]
+            if words and _NODE_COMMAND.match(basename(words[0])):
+                for flag, script in zip(words, words[1:]):
+                    hit = _js_hit(script, cwd, predicate) if _NODE_EVAL_FLAG.match(flag) else ""
+                    if hit:
+                        return hit
     return ""
 
 
@@ -909,19 +918,21 @@ _PY_INTERPRETER = re.compile(r"python[\d.]*|py")
 
 def _py_list_argv_call(node) -> bool:
     """True when NODE is `subprocess.<run|call|check_call|check_output|Popen>(...)` that runs a python
-    script with no shell: the first argument is a list or tuple literal; its first element is
-    `sys.executable` or a python interpreter's name, not a shell name; no literal element is `-c`; `shell=`
-    is absent or the literal False; and there is no `**kwargs` and no `executable=`, which would swap the
-    program the argv names. Any other program, such as `cp`, writes files the body's text does not show."""
+    script file with no shell: the first argument is a list or tuple literal; its first element is
+    `sys.executable` or a python interpreter's name, not a shell name; its second element is a literal
+    script path ending in `.py`; no element is starred, `-`, or a `-c` flag (`_PY_C_FLAG`); `shell=` is
+    absent or the literal False; and there is no `**kwargs` and no `executable=`, which would swap the
+    program the argv names. Python that the child reads from stdin or `-c` runs code the body's text
+    does not show, as does any other program, such as `cp`."""
     import ast
     func = node.func
     if not (isinstance(func, ast.Attribute) and func.attr in _PY_ARGV_CALLS
             and isinstance(func.value, ast.Name) and func.value.id == "subprocess"):
         return False
-    if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)) or not node.args[0].elts:
+    if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)) or len(node.args[0].elts) < 2:
         return False
     elements = node.args[0].elts
-    first = elements[0]
+    first, script = elements[0], elements[1]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):
         name = os.path.splitext(basename(first.value))[0]
         if name in _PY_SHELL_NAMES or not _PY_INTERPRETER.fullmatch(name):
@@ -929,8 +940,15 @@ def _py_list_argv_call(node) -> bool:
     elif not (isinstance(first, ast.Attribute) and first.attr == "executable"
               and isinstance(first.value, ast.Name) and first.value.id == "sys"):
         return False
-    if any(isinstance(item, ast.Constant) and item.value == "-c" for item in elements):
+    if not (isinstance(script, ast.Constant) and isinstance(script.value, str)
+            and script.value.endswith(".py") and not script.value.startswith("-")):
         return False
+    for item in elements:
+        if isinstance(item, ast.Starred):
+            return False
+        if isinstance(item, ast.Constant) and isinstance(item.value, str) and (
+                item.value == "-" or _PY_C_FLAG.match(item.value)):
+            return False
     for keyword in node.keywords:
         if keyword.arg is None or keyword.arg == "executable":
             return False
