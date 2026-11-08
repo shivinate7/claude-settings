@@ -7697,6 +7697,10 @@ sh("archive then delete: a loop whose push word holds a variable pairs with a la
    'for b in a c; do ' + VCS + ' push origin "${b}:archive/${b}" | tail -1; done && ' + VCS + ' push origin --delete a c',
    "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
 
+sh("archive then delete: an if whose body holds no stop, refused",
+   "if ! " + VCS + " push origin b:archive/b; then\n  echo failed\nfi\n" + VCS + " push origin --delete b",
+   "deny", ARCHIVE_DELETE_RULE, cwd=PUSHFEAT, carries=ARCHIVE_DELETE_CARRY)
+
 # REFUSED, zsh. In zsh an unbraced `$name:` followed by a letter takes a filename modifier (zsh manual,
 # Parameter Expansion, Modifiers: `:a`, `:r`, `:e` and the rest), so `$b:archive/` or `$b:refs/` changes the
 # word the push sends. Unmeasured here: the container has no zsh. A brace ends the name, so `${b}:archive`
@@ -7771,6 +7775,27 @@ sh("archive then delete: || with a brace group that exits keeps the delete, sile
 sh("archive then delete: a brace group around the push keeps && gating, silent",
    "{ " + VCS + " push origin b:archive/b; } && " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
    silent=True)
+sh("archive then delete: an if that exits over lines on a failed push keeps the delete, silent",
+   "if ! " + VCS + " push origin b:archive/b; then\n  exit 1\nfi\n" + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: an if that prints and exits on a failed push keeps the delete, silent",
+   "if ! " + VCS + " push origin b:archive/b; then echo failed >&2; exit 1; fi; " + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: an if with an else that exits keeps the delete, silent",
+   "if " + VCS + " push origin b:archive/b; then :; else exit 1; fi; " + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: && over a line break keeps the delete, silent",
+   VCS + " push origin b:archive/b &&\n  " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT, silent=True)
+sh("archive then delete: && into a brace group over lines keeps the delete, silent",
+   VCS + " push origin b:archive/b && {\n  " + VCS + " push origin --delete b\n}", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive then delete: || exit over a line break keeps the delete, silent",
+   VCS + " push origin b:archive/b ||\n  exit 1\n" + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive then delete: a loop body with && over lines keeps the delete, silent",
+   'for b in x; do\n  ' + VCS + ' push origin "${b}:archive/${b}" &&\n    ' + VCS + ' push origin --delete "$b"\ndone',
+   "allow", cwd=PUSHFEAT, silent=True)
+
 # The zsh rule reads only git push words, and a quote or a hash in a comment is no word of the push.
 sh("zsh modifier: docker push with a $IMG:latest word is not a git push, silent",
    "docker push $IMG:latest", "allow", cwd=PUSHFEAT, silent=True)
