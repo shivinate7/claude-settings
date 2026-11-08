@@ -6,6 +6,7 @@ without loading the whole guard.
 Cost: one transcript read per call, no file written.
 """
 import json
+import os
 import re
 
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
@@ -44,6 +45,20 @@ def _record_json(body):
     if inner[end:].strip():
         raise ValueError("text after the record")
     return record
+
+
+_AGENT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def agent_transcript_path(transcript, agent_id):
+    """The path of subagent `agent_id`'s transcript, `<transcript minus .jsonl>/subagents/agent-<agent_id>.jsonl`,
+    else None when the main transcript is not a `.jsonl` path or the id is not a plain id. The one home of this path:
+    guard_kill.py and guard_merge.py both call it. The file may not exist."""
+    if not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
+        return None
+    if not isinstance(agent_id, str) or not _AGENT_ID.fullmatch(agent_id):
+        return None
+    return os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % agent_id)
 
 
 def own_session_read(transcript, own_id, created=False):

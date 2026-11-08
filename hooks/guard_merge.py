@@ -1027,19 +1027,32 @@ def _head_landed(module, repo: str, row) -> bool:
         raise RuntimeError("the compare read failed: " + str(e))
 
 
-def archive_hit(tool: str, tool_input, transcript: str):
+def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
     while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
     head commit is already in its base (compare: behind or identical). Fails closed:
-    any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    any error in the reads is a refusal, because the guard-wide crash path fails open.
+    A call from an agent (`agent_id`) reads the agent's own transcript too. With a record of the target in both, the
+    stricter governs: a newest record tagged cs-build:lane wins, the agent's when both are lane records, else the
+    agent's. With a record in one, that one governs. An unreadable, empty or absent agent file reads as no record, so it
+    never allows by itself. Cost: at most one extra transcript read per archive call from an agent."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
-    try:  # cost: one transcript read per archive call
-        tags = _own_get_session_tags(transcript, target) if transcript and isinstance(target, str) and target else None
-    except Exception:
-        tags = None
+    found = []  # newest tags of the target per transcript, the agent's first
+    if transcript and isinstance(target, str) and target:
+        agent_file = own_session.agent_transcript_path(transcript, agent_id) if agent_id else None
+        for path in (agent_file, transcript):
+            if not path:
+                continue
+            try:
+                tags = _own_get_session_tags(path, target)
+            except Exception:
+                tags = None
+            if tags is not None:
+                found.append(tags)
+    tags = next((t for t in found if ARCHIVE_LANE_TAG in t), found[0] if found else None)
     if tags is None:
         return "archive with no record of the target", ARCHIVE_NO_RECORD_REASON
     if ARCHIVE_LANE_TAG not in tags:

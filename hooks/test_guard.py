@@ -9459,6 +9459,7 @@ def write_role_transcripts():
         with open(role_path(name), "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
     os.makedirs(role_path("unreadable"), exist_ok=True)
+    write_agent_transcripts()
 
 
 lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
@@ -9998,6 +9999,146 @@ archive_refuse("a get_session result whose content is a dict before the lane's r
                role_path("body-dict-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
 archive_refuse("a get_session result whose content is an int before the lane's record: the lane's open pull request refuses",
                role_path("body-int-then-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+
+
+# lane-closes-after-records, an agent's own record. An archive_session from a subagent carries the agent's `agent_id`,
+# and the payload's `transcript_path` names the MAIN session's transcript. The agent's get_session record of the target
+# sits in `<main minus .jsonl>/subagents/agent-<agent_id>.jsonl`, the folder guard_kill.py reads too. A record there
+# counts as the record, and every other archive check applies unchanged.
+ROLE_OTHER_TWO = "session_ROLEOTHER02"  # the target id that an agent's record of another session names
+# Agent ids, shaped as Claude Code gives them (17 characters). Each agent has its own transcript, so one main fixture
+# serves every case below, and the agent id picks the file a case reads.
+AG_LANE_CLOSED = "c1a0e5d4b3a29081f"
+AG_TRIAGE = "c2b1f6e5d4c3a2908"
+AG_LANE_OPEN = "c3d2a7f6e5d4c3b2a"
+AG_FULL = "c4e3b8a7f6e5d4c3b"
+AG_NO_RECORD = "c5f4c9b8a7f6e5d4c"
+AG_OTHER_SESSION = "c6a5d0c9b8a7f6e5d"
+AG_UNREADABLE = "c7b6e1d0c9b8a7f6e"
+AG_EMPTY = "c8c7f2e1d0c9b8a7f"
+AG_ABSENT = "c9d8a3f2e1d0c9b8a"  # no transcript file is written for this id
+AG_DECOY = "cad9b4a3f2e1d0c9b"  # written beside the MAIN lane fixture: a lane record on another step
+AG_TRIAGE_OVER_LANE = "cb0a9f8e7d6c5b4a3"  # beside the MAIN lane fixture: a triage record, which the main lane must beat
+AG_LANE_OVER_TRIAGE = "cc1b0a9f8e7d6c5b4"  # beside the MAIN triage fixture: a lane record with no open pull request
+ARCH_DECOY_TAGS = ["cs-build:lane", "cs-step:agent-step", "cs-repo:o/r"]  # a lane on a step other than the main lane's
+AG_FILLER = [line for i in range(400)
+             for line in (role_use("f%d" % i, "Bash", {"command": "true"}), role_result("f%d" % i, "ok"))]
+AG_SPECS = (
+    ("archive-no-target", AG_LANE_CLOSED, role_target_call("t1", ARCH_LANE_TAGS)),
+    ("archive-no-target", AG_TRIAGE, role_target_call("t1", ARCH_TRIAGE_TAGS)),
+    ("archive-no-target", AG_LANE_OPEN, role_target_call("t1", ARCH_LANE_TAGS)),
+    ("archive-no-target", AG_FULL, AG_FILLER + role_target_call("t1", ARCH_LANE_TAGS)),
+    ("archive-no-target", AG_NO_RECORD, [role_use("b1", "Bash"), role_result("b1", "ok")]),
+    ("archive-no-target", AG_OTHER_SESSION, role_target_call("t1", ARCH_LANE_TAGS, target=ROLE_OTHER_TWO)),
+    ("archive-lane", AG_DECOY, role_target_call("t1", ARCH_DECOY_TAGS)),
+    ("archive-lane", AG_EMPTY, []),  # no lines: a zero-byte file
+    ("archive-lane", AG_TRIAGE_OVER_LANE, role_target_call("t1", ARCH_TRIAGE_TAGS)),
+    ("archive-triage", AG_LANE_OVER_TRIAGE, role_target_call("t1", ARCH_LANE_TAGS)),
+)
+# An unreadable transcript is a folder at its path, so the guard's open() fails on it.
+AG_FOLDERS = (("archive-no-target", AG_UNREADABLE), ("archive-lane", AG_UNREADABLE))
+
+
+def agent_transcript(main, agent_id):
+    """The path of `agent_id`'s transcript, beside the main transcript `main`."""
+    return os.path.join(main[:-len(".jsonl")], "subagents", "agent-" + agent_id + ".jsonl")
+
+
+def agent_line(agent_id, line):
+    """One line as a subagent's transcript holds it: the line the tool wrote, plus the keys a subagent record carries."""
+    record = json.loads(line)
+    record.update({"isSidechain": True, "agentId": agent_id, "sessionId": ROLE_OWN})
+    return json.dumps(record)
+
+
+def write_agent_transcripts():
+    """The agent transcripts beside the main fixtures, and the folders that stand for unreadable ones."""
+    for main, agent_id, lines in AG_SPECS:
+        path = agent_transcript(role_path(main), agent_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("".join(agent_line(agent_id, line) + "\n" for line in lines))
+    for main, agent_id in AG_FOLDERS:
+        os.makedirs(agent_transcript(role_path(main), agent_id), exist_ok=True)
+
+
+def archive_agent_refuse(name, transcript, agent_id, env_path, carries=(), lacks=()):
+    """An archive_session of the target, from the agent `agent_id`, that the guard refuses."""
+    more = (lacks,) if isinstance(lacks, str) else tuple(lacks)
+    add("lane-closes-after-records: " + name, "deny", rule=ARCHIVE_RULE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED + more, carries=carries, transcript=transcript, agent_id=agent_id, env=ROLE_ENV,
+        env_path=env_path, session_id=ROLE_OTHER)
+
+
+def archive_agent_allow(name, transcript, agent_id, env_path):
+    """An archive_session of the target, from the agent `agent_id`, that the guard lets through silently."""
+    add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
+        transcript=transcript, agent_id=agent_id, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER)
+
+
+def agent_scope_case():
+    """A check: the main fixture holds no record of the target, and the lane agent's transcript holds the lane's record.
+    The agent cases judge that record, so the check proves its shape first."""
+    def check():
+        reader = _load_own_session()
+        main = role_path("archive-no-target")
+        try:
+            main_tags = reader.own_session_read(main, ROLE_OTHER)[0]
+            agent_tags = reader.own_session_read(agent_transcript(main, AG_LANE_CLOSED), ROLE_OTHER)[0]
+        except Exception as error:
+            return False, "the fixture read raises %s: %s" % (type(error).__name__, error)
+        if main_tags is not None:
+            return False, "the main fixture holds a record of the target, so the agent cases prove nothing"
+        if agent_tags != ARCH_LANE_TAGS:
+            return False, "the agent transcript reads %r for the target, want the lane tags" % (agent_tags,)
+        return True, "the main fixture holds no record, and the agent transcript holds the lane's record"
+    return check
+
+
+# The four cases below judge the agent's own record. A guard that reads the main transcript only fails them: it finds no
+# record of the target there and refuses with the no-record reason.
+archive_agent_allow("an agent's record of a lane with no open pull request is read from its transcript, and allowed",
+                    role_path("archive-no-target"), AG_LANE_CLOSED, fake_gh_path(ARCHCLOSED))
+archive_agent_allow("an agent's record of a triage target is read from its transcript, and allowed though a slug pull "
+                    "request is open", role_path("archive-no-target"), AG_TRIAGE, fake_gh_path(ARCHOPEN))
+archive_agent_allow("an agent's record of a lane, after 400 earlier calls in its transcript, is read and allowed",
+                    role_path("archive-no-target"), AG_FULL, fake_gh_path(ARCHCLOSED))
+archive_agent_refuse("an agent's record of a lane with an open pull request is refused for that pull request",
+                     role_path("archive-no-target"), AG_LANE_OPEN, fake_gh_path(ARCHOPEN),
+                     carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
+# Controls: each holds on the base guard and on the fixed guard.
+archive_agent_refuse("an agent with no record in either transcript is refused, and the remedy steers to get_session",
+                     role_path("archive-no-target"), AG_NO_RECORD, fake_gh_path(ARCHCLOSED),
+                     carries=ARCHIVE_STEER + ARCHIVE_NO_RECORD_PIN)
+archive_agent_refuse("an agent's record of another session does not count: the target has no record, so it is refused",
+                     role_path("archive-no-target"), AG_OTHER_SESSION, fake_gh_path(ARCHCLOSED),
+                     carries=ARCHIVE_NO_RECORD_PIN)
+archive_agent_refuse("an agent's record of a lane with an open pull request is still refused",
+                     role_path("archive-no-target"), AG_LANE_OPEN, fake_gh_path(ARCHOPEN))
+archive_agent_refuse("an agent with an unreadable transcript and no record in the main one is refused: it never allows "
+                     "on its own", role_path("archive-no-target"), AG_UNREADABLE, fake_gh_path(ARCHCLOSED),
+                     carries=ARCHIVE_NO_RECORD_PIN)
+archive_agent_refuse("an agent with an unreadable transcript falls back to the main one: the main lane's open pull "
+                     "request refuses", role_path("archive-lane"), AG_UNREADABLE, fake_gh_path(ARCHOPEN),
+                     carries=ARCHIVE_OPEN_PIN)
+archive_agent_refuse("an agent with an empty transcript reads the main one: the main lane's open pull request refuses",
+                     role_path("archive-lane"), AG_EMPTY, fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+archive_agent_refuse("an agent with no transcript file reads the main one: the main lane's open pull request refuses",
+                     role_path("archive-lane"), AG_ABSENT, fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN)
+archive_agent_refuse("an agent call with no transcript_path is refused: there is no folder to read",
+                     None, AG_LANE_CLOSED, fake_gh_path(ARCHCLOSED), carries=ARCHIVE_NO_RECORD_PIN)
+archive_refuse("a main-session call reads the main transcript, not the agent folder beside it: the open lane pull "
+               "request refuses", role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN,
+               lacks=ARCHIVE_READ_PIN)
+# Both transcripts hold a record of the target. A lane record governs over a non-lane one, and of two lane records the
+# agent's own record is the one that counts.
+archive_agent_allow("an agent's lane record on another step beats the main lane record: the main lane's open pull request "
+                    "does not refuse", role_path("archive-lane"), AG_DECOY, fake_gh_path(ARCHOPEN))
+archive_agent_refuse("a main lane record with an open pull request beats an agent's triage record: the open pull request "
+                     "refuses", role_path("archive-lane"), AG_TRIAGE_OVER_LANE, fake_gh_path(ARCHOPEN),
+                     carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+archive_agent_allow("a main triage record does not beat an agent's lane record: with no open pull request the lane is allowed",
+                    role_path("archive-triage"), AG_LANE_OVER_TRIAGE, fake_gh_path(ARCHCLOSED))
 
 
 # =========================================================================== 5h. one lane, one topic
@@ -13997,6 +14138,9 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
+# The agent fixture's shape, proved before the agent cases judge it. It reads the existing reader, so it holds on the base too.
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: agent fixture scope: the main fixture holds no record, and the "
+                         "lane agent's transcript holds the lane's", agent_scope_case()))
 FAMILY = "paths"
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [

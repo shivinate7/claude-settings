@@ -26,6 +26,7 @@ from guard_core import (
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
+import own_session  # the one home of the agent transcript path
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -317,8 +318,8 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         return False   # left-behind only: a pid whose parent is alive stays foreign
     cwd = _pid_cwd(pid)
     found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
-    return bool(found) and os.path.isfile(
-        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+    agent_file = own_session.agent_transcript_path(transcript, found.group(1)) if found else None
+    return bool(agent_file) and os.path.isfile(agent_file)
 
 
 def _kill_pids(tokens):
