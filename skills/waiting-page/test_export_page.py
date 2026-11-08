@@ -1347,7 +1347,7 @@ COOKIE_CONTROL = ("cookie: " * 5700)[:len(COOKIE_PATHO)]  # the same length, a s
 COOKIE_RATIO_LIMIT = 10  # the old pattern is far above this on the pathological text; a linear pattern is far below it
 COOKIE_REPEATS = 5
 
-# (label, text, cookie-header found). Each row is what the old pattern, `\bCookie:\s*[^\s=;]+=\S+`, returns on 174b005c1.
+# (label, text, cookie-header found). Each row is what the old pattern, `\bCookie:\s*[^\s=;]+=\S+`, returns.
 # A text whose literal would read as a cookie header in this source is joined from parts.
 COOKIE_VERDICTS = [
     ("empty text", "", False),
@@ -1418,7 +1418,7 @@ class CookieHeaderShape(unittest.TestCase):
                 kinds = export_page.kinds_in(text)
                 self.assertIsInstance(kinds, list, "kinds_in did not return a list for %s" % label)
                 self.assertEqual("cookie-header" in kinds, want,
-                                 "%s: cookie-header is %s on 174b005c1 (the old pattern) and is not now" % (label, want))
+                                 "%s: cookie-header is %s under the old pattern and is not now" % (label, want))
 
     def test_a_repeated_keyword_with_no_space_is_not_quadratic(self):
         export_page = load_export_page(self)
