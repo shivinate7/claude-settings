@@ -1254,7 +1254,8 @@ def build_fixtures():
     """The EAGER fixtures: config folders, fake gh files, message files and the link probe. Each git
     repo is a builder below, and it is built on first use."""
     global LINKS_MADE, SYMWT_MADE
-    for folder in (CFG, LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
+    # `sub` is the folder a foreground cd reaches from the config folder. A folder that does not exist is never entered.
+    for folder in (CFG, os.path.join(CFG, "sub"), LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
                    os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
@@ -12602,6 +12603,20 @@ sh("frozen shell: cd into the config folder && sleep 1 & echo $!, then sed -i on
 sh("frozen shell: cd into the config folder && sleep 1 & echo $!, then sed -i on the config settings by its full "
    "path, denies [reader-limits pin]",
    "cd " + slash(CFG) + " && sleep 1 & echo $!; sed -i s/a/b/ " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A foreground cd moves the shell, so a relative write is judged in the folder the cd reaches. A cd into the config
+# folder makes its settings.json the frozen file, so the write is refused. A cd into `sub`, a folder in it, reaches a
+# file that is not frozen, so the same write is allowed there. A backgrounded cd moves nothing, so its write stays
+# judged where the shell stood.
+sh("frozen shell: cd into the config folder; then sed -i on settings.json by its name, from outside, denies "
+   "[follow_cd red]", "cd " + slash(CFG) + "; sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: cd into the config folder && sed -i on settings.json by its name, from outside, denies "
+   "[follow_cd red]", "cd " + slash(CFG) + " && sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: cd sub; sed -i on settings.json by its name, from the config folder, a file that is not frozen, "
+   "allows [follow_cd red]", "cd sub; sed -i s/a/b/ settings.json", "allow", cwd=CFG)
+sh("frozen shell: cd sub &sed -i on settings.json by its name, from the config folder, a backgrounded cd, denies "
+   "[follow_cd pin]", "cd sub &sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
+sh("frozen shell: cd into the config folder &sed -i on settings.json by its name, from outside, a backgrounded cd, "
+   "allows [follow_cd pin]", "cd " + slash(CFG) + " &sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
 
 # An output flag writes its file wherever its command runs. A spaced subshell is already read. The subshell
 # glued to its command word, and the text of `sh -c`, are not.
