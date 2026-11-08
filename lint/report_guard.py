@@ -756,13 +756,18 @@ def input_needed_section(text):
 _ITEM_JOIN = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s*&\s*|\s+(?:and|or)\s+)"
 ITEM_CITE_RE = re.compile(
     r"\b(?:items?(?:\*\*|__)?\s*:?(?:\*\*|__)?\s+(\d+(?:" + _ITEM_JOIN + r"\d+)*)|page:(\d+))(?!\d)", re.IGNORECASE)
-# A ref followed by an option letter, `pick <letter>`, or a `note` that ends its clause cites the owner's ruling on
-# it, not an open question. Letters may combine: a+c, a/c, a and c. A letter counts only before the end or a mark.
+# A ref followed by an option letter, `pick <letter>`, `option <letter>`, or a `note` that ends its clause cites the
+# owner's ruling on it, not an open question. Letters join only with "+", "/" or "and" (a+c, a/c, a and c): "a or b"
+# and "a, b" still ask, so they are no ruling. A letter counts only before the end, a mark, " (", a dash or a closing
+# `**`; and never when "or", or a comma and another letter, follows it past spaces and marks.
 _LETTER = r"\(?[a-z]\)?"
-_LETTERS = _LETTER + r"(?:\s*(?:\+|/|&|,|\band\b|\bor\b)\s*" + _LETTER + r")*(?=\s*(?:$|[.,;:)\]]))"
+_LETTERS = (_LETTER + r"(?:\s*(?:\+|/|\band\b)\s*" + _LETTER + r")*"
+            r"(?=\s*(?:$|[.,;:)\](\u2013\u2014]|\*\*))"
+            r"(?![\s)(,*\u2013\u2014\-]*\bor\b)(?![\s)]*,\s*\(?[a-z]\)?(?!\w))")
 _RULING_LEAD = r"[\s:,;(\-]*"
 RULING_AFTER_RE = re.compile(
-    _RULING_LEAD + r"(?:" + _LETTERS + r"|pick\s+" + _LETTERS + r"|note(?=\s*(?:$|[.,;:)\]\-\u2014])))", re.IGNORECASE)
+    _RULING_LEAD + r"(?:" + _LETTERS + r"|(?:pick|option)\s+" + _LETTERS
+    + r"|note(?=\s*(?:$|[.,;:)\]\-\u2014])))", re.IGNORECASE)
 # "closed" counts only straight after the ref: `item 214 closed`, `item 214 is closed`, `item 214 (closed)`.
 CLOSED_AFTER_RE = re.compile(_RULING_LEAD + r"(?:(?:is|are|now)\s+)?\(?closed\b", re.IGNORECASE)
 # Only the question-form labels exempt a line: `Based on (` and `Departs from:`, after a list marker and bold.
@@ -775,7 +780,8 @@ CLOSED_ITEM_UNKNOWN = ("Closed-item guard: UNKNOWN, the waiting copy could not b
 def cited_items(section):
     """The page item numbers (ints) that the Input Needed lines in `section` cite as waiting on the owner. A line
     that starts (after a list marker and bold) with `Based on (` or `Departs from:` is skipped. A ref is skipped
-    when a ruling cite (option letters, `pick <letter>`, `note` ending its clause) or "closed" follows it directly."""
+    when a ruling cite (option letters, `pick <letter>`, `option <letter>`, `note` ending its clause) or "closed"
+    follows it directly."""
     found = set()
     for line in section.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1)
