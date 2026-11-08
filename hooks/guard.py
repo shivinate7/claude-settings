@@ -207,11 +207,16 @@ Other tools, in `judge` order:
                        each at line start) or a verdict line (a line with `verdict`, or a round label
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
                        right after it, or a leading verdict: a verdict word, a comma and `round N`, as in
-                       `FAIL, round N` or `PASS, round N of 3`). Marks (`-`, `*`,
+                       `FAIL, round N` or `PASS, round N of 3`). One short label of one to four
+                       words and a colon may come first (`Done: FAIL, round N of 3`, `Prior review:
+                       verdict: FAIL`, `Context: prior verdict: FAIL`, `Round N: reviewer verdict:
+                       FAIL`). Marks (`-`, `*`,
                        `#`, bold) before a line's first word are skipped, and so are marks right after the
-                       colon (`**Verdict:** FAIL`). A dash after a round label and before a verdict word
+                       colon (`**Verdict:** FAIL`). A dash after a round label or the word `verdict`
+                       and before a verdict word
                        reads as the colon (`Round N - FAIL`, `Round N result - FAIL`, `Prior round
-                       result - FAIL`) unless the verdict word runs on into a hyphenated word
+                       result - FAIL`, `Prior verdict - FAIL`, `Verdict - FAIL`) unless the verdict word
+                       runs on into a hyphenated word
                        (`Round N - FAIL-safe`), and `round result` reads as `verdict`
                        (`Prior round result: FAIL`). The verdict scan reads the
                        brief after four steps: each backtick span is blanked (a quote) unless it
@@ -2659,10 +2664,16 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # choice list that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format
 # line). The period must be followed by a space, a capital or the line end, so `**...PASS, FAIL or PARTIAL.**` is refused. An
 # exemption hides only its own span or sentence, never the rest of its line: `Give a verdict: PASS or FAIL. Prior verdict:
-# FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon. Some
-# long lines are still slow (debt note verdict-regex-slow-line).
+# FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon, after
+# at most one short label before them (`_BRIEF_BLIND_PREFIX`). Some long lines are still slow (debt note
+# verdict-regex-slow-line); the prefix is bounded and adds no slowness of its own.
+# A short label may come first (`Done: FAIL, round N`, `Prior review: verdict: FAIL`, `Round N: reviewer verdict: FAIL`): one to
+# four plain words and a colon, tried once and given up if the rest does not read as a verdict line. It is bounded, so it adds
+# a fixed cost at each line start.
+_BRIEF_BLIND_PREFIX = r"(?:[A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3}[*_]*[ \t]*:[ \t]*)?"
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
+    BRIEF_BLIND_OPEN + _BRIEF_BLIND_PREFIX
+    + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
     r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
 # A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
@@ -2679,12 +2690,13 @@ BRIEF_BLIND_CHOICES = re.compile(
     r"[*_`]*\b(?:%(w)s)\b[*_`]*(?:%(sep)s[*_`]*\b(?:%(w)s)\b[*_`]*)+" % {"w": BRIEF_BLIND_VERDICT_WORDS, "sep": _BRIEF_BLIND_SEP})
 _BRIEF_BLIND_LINE_END = re.compile(r"[ \t]*$", re.M)
 # Three spellings of a verdict label that the regex reads after a plain rewrite, each a single linear pass. Emphasis marks
-# after a colon (`**Verdict:** FAIL`) go. A dash after a round label and before a verdict word (`Round N - FAIL`) reads as
-# a colon, with or without `result` (`Round N result - FAIL`, `Prior round result - FAIL`), but not inside a hyphenated
-# word (`Round N - FAIL-safe`). `round result` then reads as `verdict` (`Prior round result: FAIL`).
+# after a colon (`**Verdict:** FAIL`) go. A dash after a round label or the word `verdict` and before a verdict word
+# (`Round N - FAIL`, `Prior verdict - FAIL`) reads as a colon, with or without `result` (`Round N result - FAIL`, `Prior round
+# result - FAIL`), but not inside a hyphenated word (`Round N - FAIL-safe`). `round result` then reads as `verdict` (`Prior round result: FAIL`).
 BRIEF_BLIND_COLON_MARKS = re.compile(r"(?<=:)[*_]+")
 BRIEF_BLIND_ROUND_DASH = re.compile(
-    r"(\b[Rr]ound[ \t]+(?:\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+[Rr]esult)?|[Rr]esult))[ \t]*[\u2014\u2013-][ \t]*"
+    r"(\b[Rr]ound[ \t]+(?:\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+[Rr]esult)?|[Rr]esult)|\b[Vv]erdict(?=[ \t]))"
+    r"[ \t]*[\u2014\u2013-][ \t]*"
     r"(?=[*_`\"'(]*(?:%s)(?![\w-]))" % BRIEF_BLIND_VERDICT_WORDS)
 BRIEF_BLIND_ROUND_RESULT = re.compile(r"\b[Rr]ound[ \t]+[Rr]esult\b")
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
