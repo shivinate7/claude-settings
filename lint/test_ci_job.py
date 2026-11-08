@@ -977,6 +977,8 @@ class SuiteSteps(Job):
     CHECK_A = step("Check A suite", "python3 hooks/test_check_a.py")
     CHECK_B = step("Check B suite", "python3 hooks/test_check_b.py")
     UNDO = step("Undo suite", "python3 hooks/test_undo_loads.py")
+    LINT_STEP = NotRunLines.DEGEN[2]  # a lint step that runs and passes: NotRunLines' `python3 lint/check_clean.py`
+    LINT_FILE = ("lint/check_clean.py", "print('clean')\n")  # the file that step runs, as NotRunLines.setUp writes it
 
     def write(self, rel, text):
         path = os.path.join(self.root, rel)
@@ -987,9 +989,11 @@ class SuiteSteps(Job):
     def git(self, *a):
         LintBase.git(self, *a)  # the one home of this helper
 
-    def make_repo(self, base, lane):
+    def make_repo(self, base, lane, lint=False):
         """A base commit holding `base` (path -> text), origin/main at it, then a branch that writes `lane` and commits,
-        so the diff base...HEAD is the files `lane` names."""
+        so the diff base...HEAD is the files `lane` names. `lint` puts LINT_FILE in the base, so LINT_STEP runs and passes."""
+        if lint:
+            base = {**base, self.LINT_FILE[0]: self.LINT_FILE[1]}
         for rel, text in base.items():
             self.write(rel, text)
         self.git("add", ".")
@@ -1016,18 +1020,31 @@ class SuiteSteps(Job):
 
     def test_a_diff_that_no_suite_opens_runs_no_suite_step(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",)),
-                        "docs/notes.md": "one\n"}, {"docs/notes.md": "two\n"})
+                        "docs/notes.md": "one\n"}, {"docs/notes.md": "two\n"}, lint=True)
         self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds a file no suite opens")
-        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
-        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run"}),
+        rc, lines, out = self.run_job(self.WIRING, self.LINT_STEP, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run", "Python lint": "PASS"}),
                          "--lint must not run a suite that opens no changed file\n" + out)
 
     def test_an_empty_diff_runs_no_suite_step(self):
-        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))}, {})
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))}, {}, lint=True)
         self.assertEqual(self.diff(), [], "the scope: the diff is empty")
-        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
-        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run"}),
+        rc, lines, out = self.run_job(self.WIRING, self.LINT_STEP, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run", "Python lint": "PASS"}),
                          "--lint with an empty diff must run no suite\n" + out)
+
+    def test_a_job_whose_suite_is_not_picked_and_whose_only_lint_step_is_skipped_reads_unknown_and_exits_two(self):
+        # the control is test_a_diff_that_no_suite_opens_runs_no_suite_step: the same job, with a lint step that runs and passes
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",)),
+                        "docs/notes.md": "one\n"}, {"docs/notes.md": "two\n"}, lint=True)
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds a file no suite opens")
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(self.WIRING, push_only, args=self.LINT)
+        self.assertEqual((by_step(lines).get("Wiring suite"), by_step(lines).get("Push-only lint")), ("not run", "skipped"),
+                         "the scope: no suite is picked, and the only lint step is skipped on a pull-request run\n" + out)
+        self.assertEqual(rc, 2, "a --lint run that ran no lint step must exit 2, never 0, though the job holds a suite step\n" + out)
+        self.assertTrue(any(ln.startswith("unknown") and "no lint CI step" in ln for ln in lines),
+                        "a --lint run that ran no lint step must print one unknown line that says so\n" + out)
 
     def test_a_picked_suite_that_fails_reads_fail_and_the_job_exits_one(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",), code=1)},
@@ -1220,9 +1237,10 @@ class SuiteSteps(Job):
 
     def test_a_picked_suite_whose_step_is_only_in_another_job_is_one_not_run_line_that_names_it(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
-                       {"hooks/bridge.py": "V = 2\n"})
+                       {"hooks/bridge.py": "V = 2\n"}, lint=True)
         self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
-        rc, lines, out = self.run_job(step("Docs", "echo docs"), job="checks", other=[self.WIRING], args=self.LINT)
+        rc, lines, out = self.run_job(step("Docs", "echo docs"), self.LINT_STEP, job="checks", other=[self.WIRING],
+                                      args=self.LINT)
         named = [ln for ln in lines if "Wiring suite" in ln or "hooks/test_wiring.py" in ln]
         self.assertEqual(len(named), 1,
                          "--lint must print one line for a picked suite whose step is only in job other, never silence\n" + out)
