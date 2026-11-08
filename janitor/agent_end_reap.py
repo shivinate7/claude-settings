@@ -61,13 +61,13 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
-LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock and the replace together
-LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock or the replace
+LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock, the read and the replace together
+LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock, the read or the replace
 LOG_DONE_BY = 58  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60
 
 
 class LogWaitTimeout(OSError):
-    """A log() call waited past its deadline for the lock or the replace."""
+    """A log() call waited past its deadline for the lock, the read or the replace."""
 
 
 def log_path() -> str:
