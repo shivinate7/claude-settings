@@ -13281,18 +13281,27 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
-# Other spellings that keep a test step green while its test fails, or that disable the step, are refused: a
-# trailing `|| true`, `; true` or `|| exit 0`, and an `if:` that is quoted, capitalised or `${{ false }}`. The
-# `${{ false }}` row is already refused (a control). A respelling that still runs the same test is allowed.
+# A test step that keeps going while its test fails is refused: a trailing `|| true` or `|| exit 0`, a `|| true`
+# before a later `|| exit 1` (`true` makes the first `||` succeed, so the `exit 1` never runs), and a `|| true` on a
+# block `run: |` line. GitHub drops a YAML `# comment` from a run line, so `|| true  # don't fail` is still a `|| true`.
+# A `|| echo failed` tail cannot fail the step either. A `#` inside quotes is an argument, not a comment.
 TEST_OR_TRUE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || true\n")
-TEST_SEMI_TRUE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py ; true\n")
 TEST_OR_EXIT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || exit 0\n")
+TEST_OR_TRUE_COMMENT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || true  # don't fail the build\n")
+TEST_OR_TRUE_THEN_EXIT = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || true || exit 1\n")
+TEST_OR_ECHO = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || echo failed\n")
+TEST_QUOTED_HASH_OR_TRUE = TEST_LINUX.replace("test_guard.py\n", 'test_guard.py "#" || true\n')
+BLOCK_OR_TRUE = "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py || true\n"
 RESPELL_WORKDIR = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
 RESPELL_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
 for _name, _new in (
     ("a trailing || true on a test run", TEST_OR_TRUE),
-    ("a trailing ; true on a test run", TEST_SEMI_TRUE),
     ("a trailing || exit 0 on a test run", TEST_OR_EXIT),
+    ("a || true with an apostrophe in its # comment", TEST_OR_TRUE_COMMENT),
+    ("a || true followed by || exit 1, which never runs", TEST_OR_TRUE_THEN_EXIT),
+    ("a || echo failed tail on a test run (control)", TEST_OR_ECHO),
+    ("a || true after a quoted # argument (control)", TEST_QUOTED_HASH_OR_TRUE),
+    ("a block run: | with a trailing || true", BLOCK_OR_TRUE),
 ):
     add("builder-test: %s in checks.yml is refused" % _name, "deny", rule=BT, tool="Edit",
         file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + _new, carries=("test-author", "Report"), **B)
@@ -13308,6 +13317,47 @@ add("builder-test: a test run respelled with working-directory: hooks and a bare
     "allow", tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + RESPELL_WORKDIR, **B)
 add("builder-test: a test run respelled as cd hooks && python3 test_guard.py is allowed", "allow", tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + RESPELL_CD, **B)
+# A `|| <tail>` keeps the step failing when the tail fails: `exit N` (N nonzero), `false`, a group ending in one, or a
+# retry of the test. Under `bash -e` a failing test ends the step before a `; true`, `; :` or `; exit 0` tail runs, so
+# those tails change nothing and are allowed. A `#` inside quotes is an argument, and a block `run: |` line is code.
+TEST_OR_EXIT1 = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || exit 1\n")
+TEST_OR_FALSE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || false\n")
+TEST_OR_BRACE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || { echo fail; exit 1; }\n")
+TEST_OR_EXIT_STATUS = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || exit $?\n")
+TEST_OR_RETRY = TEST_LINUX.replace("test_guard.py\n", "test_guard.py || python3 hooks/test_guard.py --lf\n")
+TEST_QUOTED_HASH_OR_EXIT1 = TEST_LINUX.replace("test_guard.py\n", 'test_guard.py --name "a#b" || exit 1\n')
+TEST_SEMI_TRUE = TEST_LINUX.replace("test_guard.py\n", "test_guard.py ; true\n")
+TEST_SEMI_EXIT0 = TEST_LINUX.replace("test_guard.py\n", "test_guard.py ; exit 0\n")
+BLOCK_OR_EXIT1 = "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py || exit 1\n"
+BLOCK_SEMI_COLON = "      - name: Guard tests\n        run: |\n          python3 hooks/test_guard.py; :\n"
+for _name, _new in (
+    ("a trailing || exit 1 on a test run (control)", TEST_OR_EXIT1),
+    ("a trailing || false on a test run (control)", TEST_OR_FALSE),
+    ("a trailing || { echo fail; exit 1; } on a test run", TEST_OR_BRACE),
+    ("a trailing || exit $? on a test run", TEST_OR_EXIT_STATUS),
+    ("a trailing || retry of the test, python3 hooks/test_guard.py --lf", TEST_OR_RETRY),
+    ("a || exit 1 after a quoted # argument (control)", TEST_QUOTED_HASH_OR_EXIT1),
+    ("a block run: | with a trailing || exit 1 (control)", BLOCK_OR_EXIT1),
+    ("a trailing ; true on a test run (bash -e makes it a no-op)", TEST_SEMI_TRUE),
+    ("a trailing ; exit 0 on a test run (bash -e makes it a no-op)", TEST_SEMI_EXIT0),
+    ("a block run: | with a trailing ; : (bash -e makes it a no-op) (control)", BLOCK_SEMI_COLON),
+):
+    add("builder-test: %s is allowed" % _name, "allow", tool="Edit",
+        file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + _new, **B)
+# A respelled run that names the test at another path drops it, so the step no longer runs hooks/test_guard.py.
+RESPELL_DROP_CD = "      - name: Guard tests\n        run: cd .. && python3 test_guard.py\n"
+RESPELL_DROP_WORKDIR = "      - name: Guard tests\n        working-directory: ..\n        run: python3 test_guard.py\n"
+for _name, _new in (
+    ("a test run respelled as cd .. && python3 test_guard.py", RESPELL_DROP_CD),
+    ("a test run respelled with working-directory: .. and a bare test_guard.py", RESPELL_DROP_WORKDIR),
+):
+    add("builder-test: %s drops the test and is refused" % _name, "deny", rule=BT, tool="Edit",
+        file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + _new, carries=("test-author", "Report"), **B)
+# The same script runs from its own folder, now the step's working-directory. Its bare name is not test-named.
+RUN_ALL_OLD = "      - name: Guard tests\n        run: python3 tests/run_all.py\n"
+RESPELL_RUN_ALL = "      - name: Guard tests\n        working-directory: tests\n        run: python3 run_all.py\n"
+add("builder-test: a test run respelled with working-directory: tests and a bare run_all.py is allowed",
+    "allow", tool="Edit", file_path=WF, old_string=LINT + RUN_ALL_OLD, new_string=LINT + RESPELL_RUN_ALL, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
