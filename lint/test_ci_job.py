@@ -95,10 +95,11 @@ class Job(unittest.TestCase):
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
 
     def body_file(self, body):
-        """A UTF-8 file in this run's folder that holds `body`: the form ci-job reads the pull request body in, named by CI_JOB_PR_BODY_FILE."""
+        """A file in this run's folder that holds `body`: the form ci-job reads the pull request body in, named by CI_JOB_PR_BODY_FILE.
+        `body` is text, written as UTF-8, or bytes, written as they are (a file that is not UTF-8)."""
         fd, path = tempfile.mkstemp(prefix="body-", suffix=".txt", dir=RUN_FOLDER)
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(body)
+        with os.fdopen(fd, "wb") as f:
+            f.write(body if isinstance(body, bytes) else body.encode("utf-8"))
         return path
 
 
@@ -535,6 +536,20 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
                                               env={"CI_JOB_PR_BODY_FILE": self.body_file("")})
         self.assertEqual((verdicts, seen), (["PASS"], ""), out)
+
+    def test_a_missing_body_file_gives_the_body_step_the_sentinel_not_an_empty_body(self):
+        """A body file that cannot be read gives the step no body: its reader reads the sentinel, never "", which a body check would pass."""
+        path = os.path.join(self.root, "no-such-body.txt")
+        self.assertFalse(os.path.exists(path), "the premise: the body file is missing")
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": path})
+        self.assertEqual((verdicts, seen), (["PASS"], "<no body in the event file>"), out)
+
+    def test_a_body_file_that_is_not_utf_8_gives_the_body_step_the_sentinel_not_an_empty_body(self):
+        """A body file of bytes that are not UTF-8 is unreadable, so the step reads the sentinel, never ""."""
+        verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
+                                              env={"CI_JOB_PR_BODY_FILE": self.body_file(b"\xff")})
+        self.assertEqual((verdicts, seen), (["PASS"], "<no body in the event file>"), out)
 
     def test_a_step_env_that_holds_the_pull_request_body_reads_unknown_even_with_a_body_file(self):
         """The body is data, never an expression: a step env that holds `${{ github.event.pull_request.body }}` reads unknown,
