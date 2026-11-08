@@ -25,14 +25,21 @@ def job_block(text, name):
     return m.group(1) if m else None
 
 
+def job_key_raw(block, key):
+    """The text after a job-level `key:` (4 spaces under the job), outer blanks stripped and any comment kept, or None when
+    the job lacks the key. The one reader of that line: each caller parses the value its own way."""
+    m = re.search(rf"^    {re.escape(key)}:[ \t]*(.*?)[ \t]*$", block or "", re.M)
+    return m.group(1) if m else None
+
+
 def job_runs_on(block):
     """A job's `runs-on:` as one literal label, quotes stripped and a one-item flow list unwrapped, or None. None means the
     label is no single literal this reader can name: an expression (`${{ ... }}`), a map, a list of several, an empty or
     absent key. The caller reads None as unknown, never as a guess."""
-    m = re.search(r"^    runs-on:[ \t]*(.*?)[ \t]*$", block or "", re.M)
-    if not m:
+    raw = job_key_raw(block, "runs-on")
+    if raw is None:
         return None
-    value = drop_comment(m.group(1)).strip()
+    value = drop_comment(raw).strip()
     flow = re.fullmatch(r"\[\s*([^,\[\]{}]*?)\s*,?\s*\]", value)
     if flow:
         value = flow.group(1)
@@ -48,10 +55,10 @@ def job_timeout_minutes(block):
     """A job's own `timeout-minutes:` as a whole number, quotes stripped, or None. None means no number this reader can
     name: an absent key, an expression (`${{ ... }}`), a fraction. A step's cap sits deeper and never counts. The caller keeps its
     own bound for None, never a guess."""
-    m = re.search(r"^    timeout-minutes:[ \t]*(.*?)[ \t]*$", block or "", re.M)
-    if not m:
+    raw = job_key_raw(block, "timeout-minutes")
+    if raw is None:
         return None
-    value = drop_comment(m.group(1)).strip().strip("'\"")
+    value = drop_comment(raw).strip().strip("'\"")
     return int(value) if value.isdigit() and int(value) > 0 else None
 
 

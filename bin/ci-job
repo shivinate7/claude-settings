@@ -52,8 +52,8 @@
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.workspace }} is the top folder of the tree under test, as the
 # runner's workspace is the checkout. Any other expression makes the step unknown.
 # An env NODE_PATH entry that is no folder here reads unknown, naming it: the CI step that installs it is a uses: that never runs here (checks-guard's
-# Playwright). Cost: one stat per entry. A CI step whose verdict printed no verdict line with a nonzero exit (the time-limit cut, a kill of
-# verdict itself) reads unknown, never FAIL: the run was cut, so the tree is not shown at fault. A CI step whose own shell a signal kills
+# Playwright). Cost: one stat per entry. A CI step whose verdict printed no verdict line with a nonzero exit (an outside signal that kills verdict,
+# as a time limit set elsewhere does) reads unknown, never FAIL: the run was cut, so the tree is not shown at fault. A CI step whose own shell a signal kills
 # prints a FAIL line naming the signal and reads FAIL, as on main.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
@@ -558,7 +558,7 @@ def main(argv):
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
-        elif rc and no_verdict:  # the run was cut before verdict could say what failed (a time limit, a kill of verdict): the tree is not shown at fault. A step whose own shell a signal kills prints a FAIL line and reads FAIL.
+        elif rc and no_verdict:  # the run was cut before verdict could say what failed (an outside signal that kills verdict): the tree is not shown at fault. A step whose own shell a signal kills prints a FAIL line and reads FAIL.
             state = "unknown"
             first = "verdict ended with no verdict line (exit %s)%s" % (rc, " by signal %d" % -rc if rc < 0 else "")
         elif unstarted and only:

@@ -17,7 +17,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_windows_split import ALL_JOBS_PASSED_JOB, all_jobs, eval_if, shard_base, yaml_scalar  # noqa: E402  the one home of the scope condition and scalar parsers
-from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import job_block, job_key_raw, step_blocks, step_key  # noqa: E402  the one home of the step parser
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -32,8 +32,8 @@ COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 def job_key(block, key):
     """A job-level key's value (4 spaces under the job), comment removed, or None when the job lacks the key."""
-    m = re.search(rf"^    {re.escape(key)}:[ \t]*(.*?)[ \t]*$", block or "", re.M)
-    return yaml_scalar(m.group(1)) if m else None
+    raw = job_key_raw(block, key)
+    return yaml_scalar(raw) if raw is not None else None
 
 
 def steps_part(block):
