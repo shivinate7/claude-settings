@@ -569,14 +569,16 @@ def run(hook):
     unhomed = handoff_findings(hook, after, baseline, cwd)
     if not unhomed:
         return memory
+    import precompact_handoff  # lazy, and already loaded by handoff_findings
+    counts_from_one = any(label.startswith(precompact_handoff.NO_HOME_LABEL) for label in unhomed)
+    # One expression, no `+=` and no `.strip()`: the rule audit reads a return's text only from
+    # an expression it can follow, and a `+=` or a method call on it leaves the text unread.
     reason = ("Ruling home: this turn's handoff has ruling lines with no home a branch holds: %s. "
               "End each with `Home: <ruling record path>` or `Home: NO HOME YET (branch <name>)`. "
-              "A pick the owner did not rule is [read] or [assumed], with its source." % ", ".join(unhomed))
-    import precompact_handoff  # lazy, and already loaded by handoff_findings
-    if any(label.startswith(precompact_handoff.NO_HOME_LABEL) for label in unhomed):
-        reason += " Lines under `## Rulings with NO HOME YET` count from 1."
-    reason += " (decision premise-format)"
-    return (memory + " " + reason).strip()
+              "A pick the owner did not rule is [read] or [assumed], with its source." % ", ".join(unhomed)
+              + (" Lines under `## Rulings with NO HOME YET` count from 1." if counts_from_one else "")
+              + " (decision premise-format)")
+    return memory + " " + reason if memory else reason
 
 
 def _memory_reason(memory_dir, after, baseline, cwd):
