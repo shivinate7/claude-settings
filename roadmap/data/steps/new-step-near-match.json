@@ -1,0 +1,11 @@
+{
+  "title": "The roadmap build flags a new step whose title shares its key words with an open step",
+  "why": "Triage filed record-at-round-head at 09:22 CST Nov 8, a duplicate of review-record-before-any-push and record-before-fix-push, because its grep used the wrong words; the coordinator had ruled one home for that defect at 07:43 CST.",
+  "note": "Filed 09:44 CST Nov 8 by triage for its own mistake (rule building-mistake-names-its-guard). Fix: roadmap/build.py prints, for each step added since the last build, the open steps whose titles share two or more key words, so the writer reads them before pushing. Red case: record-at-round-head against review-record-before-any-push.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 707,
+  "updatedAt": "2026-11-08T09:44:00-06:00"
+}
