@@ -526,7 +526,7 @@ class JudgeModelRows(unittest.TestCase):
 
 
 # Mac names of the cloud artifact tools, by the cloud tool each stands in for. Owner-relayed waiting-page item 434
-# (home-artifact-tool-names, 2026-11-08 18:22Z) is the source. The tests below read this one constant; no copy.
+# (home-artifact-tool-names) is the source. The tests below read this one constant; no copy.
 MAC_ARTIFACT_TOOLS = {
     "Artifact": ("publish_files", "get_artifact", "read_artifact", "list_artifacts",
                  "declare_capabilities", "describe_capabilities", "watch", "guide"),

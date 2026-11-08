@@ -1,6 +1,6 @@
 """The Mac input shapes of the artifact tools: the one home that the suites judging them share.
 
-Owner item 440 (home-artifact-input-shapes, 2026-11-08 12:28 CST, from Home transcripts) gives the input of each Mac
+Owner item 440 (home-artifact-input-shapes, from Home transcripts) gives the input of each Mac
 tool. Each Mac name is `mcp__claude-artifacts__<name>`. `mac_of_cloud` turns the input of one cloud call into the Mac
 input of the same call, so a Mac case is a twin of a cloud case: both carry the same data and expect the same verdict.
 The suites that use it are hooks/test_guard.py, hooks/test_call_judge.py, hooks/test_feedback_inbox.py,
