@@ -44,3 +44,4 @@ A hand-back is judged before any other guard rule reads git, so a hand-back with
 - A sha that exists but that the agent did not make (an old commit) passes. This check proves the commit exists, not that the agent did the work.
 - A sha written in uppercase is not read.
 - A sha in quotes or JSON, `key=<sha>`, and a 13-39 hex token pass (note report-sha-quoted-forms-pass).
+- A made-up sha inside a word that holds `://` passes, such as `[8c1f0e2a7](https://…)` link text, and so does one on a line that starts with `index ` (note report-sha-link-text-pass).

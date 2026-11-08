@@ -53,6 +53,7 @@ The worst case is about 45 s. A message with no ref starts no process. A guard.l
 - An issue number, a branch name and a record path are not judged.
 - A fork's `origin` lacks the upstream's `refs/pull`, so a PR of the upstream reads as missing. Fix: none — the owner's repos are not worked from forks. Until: 2026-11-21.
 - A ref that exists but is the wrong one passes.
+- A sha resolves only in the cwd's local clone. A commit pushed from another clone and not yet fetched reads as missing, and the message is refused. The remedy is `git fetch`.
 - A repo whose name ends like a file extension (`vercel/next.js: PR #5`) reads as a path, so its PR is judged against this repo and can refuse.
 - A path or branch followed by `:` reads as another repo, so its line is skipped (`lane/x: head <sha>`, `hooks/guard_merge: PR #5`).
 - A PR list split across a line break is judged on its first line only.
