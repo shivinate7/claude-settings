@@ -111,7 +111,7 @@ from _transcript import last_human_epoch, head_moved_since, is_last_human  # noq
 # invoke_model, which the caller reports as UNKNOWN, never ALLOW.
 MODEL = "haiku"
 MODEL_TIMEOUT = 120
-# `--tools ""` leaves the model asking for tools in its reply text, so the JSON never comes; this system-prompt note stops that where a note in the prompt text would skew the verdicts.
+# `--tools ""` leaves the model asking for tools in its reply text, so the JSON never comes; this system-prompt note stops that where a note in the prompt text would skew the verdicts. Only a line-verdict call (LINE_VERDICTS) carries it.
 NO_TOOLS_NOTE = "You have no tools and cannot read files. Never call a tool. Reply with the JSON only."
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
@@ -695,6 +695,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
         return None, "token file could not be read"
     token = env.get(TOKEN_ENV, "")
     scrub = lambda text: text.replace(token, "[token]") if token else text
+    line_verdicts = any(isinstance(values, EachOf) for values in shape.values())
     try:
         run = _nowindow.run(
             [
@@ -705,8 +706,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
                 "--tools", "",
                 "--safe-mode",
                 "--permission-mode", "plan",
-                "--append-system-prompt", NO_TOOLS_NOTE,
-            ],
+            ] + (["--append-system-prompt", NO_TOOLS_NOTE] if line_verdicts else []),  # other shapes measured 0 unread, and the note shifted two guards toward allow
             input=prompt.encode("utf-8", "replace"), capture_output=True,  # bytes: text mode turns LF into CRLF on Windows
             timeout=timeout, cwd=root, env=env,
         )
