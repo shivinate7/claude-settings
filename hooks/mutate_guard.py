@@ -2842,16 +2842,17 @@ def _loads_module(source: str, stem: str) -> bool:
     imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
     `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
     it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
-    (`helper = load`), a loader that takes the path as `*args` or `**kwargs`, a call that spreads the path in (a starred
+    (`helper = load`), a loader that takes the path as `*args` or `**kwargs` (a `**kwargs` loader that copies the
+    keyword into a local of the same name, `path = kwargs["path"]`, is followed; `p = kwargs["path"]` is not), a call
+    that spreads the path in (a starred
     argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name bound only as a `for` or
     comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking, augmented assignment,
     `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that takes the path
     (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
     literal (`"widget" + ".py"`).
     Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
-    name in the file, as every def of that name takes the call; a loader that reassigns its path before the load reads
-    the argument its calls pass, not the new value; and a `**kwargs` loader that copies the path into a local
-    (`path = kwargs["path"]`) reads the keyword its calls pass, so it is followed, not skipped as `**kwargs` above.
+    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
+    the argument its calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
