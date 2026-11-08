@@ -2333,6 +2333,16 @@ MUTATIONS = [
      '        return layout.record_branch(root)',
      '        return DEFAULT_RECORD_BRANCH', "guard",
      "a lane's push of roadmap-fork is refused in the fork that names it its record branch"),
+    # RULE merge-confirm-repo, the merge's glued-paren read (guard_merge._merge_words) and the merge tool's refusal of a flag
+    # (_merge_flags, raised as _FlagsUnreadable). Each mutant breaks one arm; its named case reads that arm.
+    ("merge-confirm-repo: every glued ) or & closes the word, whatever its quote state",
+     '    return None if args is None else _command_words(args, _glued_counts(segment, args))',
+     '    return None if args is None else _command_words(args)', "guard",
+     "a reason ending in ) before -C naming another checkout is denied"),
+    ("merge-confirm-repo: a flag the merge tool refuses is read as unset, not raised as unreadable",
+     '        raise _FlagsUnreadable(message)',
+     '        pass', "guard",
+     "a flag with no value is denied"),
     # RULE simulator-boot-bypass (decision sim-test-is-the-one-boot-path, ruling 4). Each mutant breaks one arm.
     ("simulator-boot-bypass: a raw simctl boot is never read",
      '        if _simctl_boot_args(word, rest) is not None:\n            return',
@@ -3445,6 +3455,12 @@ def run_mutant(sources, work: str, entry):
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
+        # guard_merge.merge_module loads merge/merge.py from the copy's root, and merge.py reads its ci-alarm and stamp
+        # files from ../actions at import. Without both every merge arm reads as unloadable and denies, so a mutant
+        # of a merge rule dies on a case that has nothing to do with its anchor.
+        for name in ("merge", "actions"):
+            shutil.copytree(os.path.join(HERE, "..", name), os.path.join(root, name),
+                            ignore=shutil.ignore_patterns("__pycache__", "test_*"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
