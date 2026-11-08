@@ -2405,15 +2405,25 @@ def report_sha_token(token: str) -> bool:
             and re.search(r"[0-9]", token) is not None and re.search(r"[a-f]", token) is not None)
 
 
+def report_unquoted(line: str):
+    """`line` with each double-quoted span that closes on it blanked to spaces, or None when the line is a `> ` quote.
+    The one quote rule of report shas and of message refs (decision agent-report-shas-resolve)."""
+    if REPORT_QUOTE_LINE.match(line):
+        return None
+    return REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
+
+
 def report_shas(text, limit=REPORT_SHA_MAX) -> list:
     """The sha-like tokens of a report, each once, in order of first sight, up to `limit` (None: all)."""
     if not isinstance(text, str):
         return []
     found = []
     for line in text.split("\n"):
-        if REPORT_QUOTE_LINE.match(line) or line.startswith("index "):
+        if line.startswith("index "):
             continue
-        line = REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
+        line = report_unquoted(line)
+        if line is None:
+            continue
         line = REPORT_URL_WORD.sub(lambda m: " " * len(m.group()), line)
         for run in REPORT_HEX_RUN.finditer(line):
             token = run.group()
@@ -2504,6 +2514,9 @@ MESSAGE_PR_ITEMS = (
 MESSAGE_GH_URL = re.compile(
     r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
     r"(?:#issuecomment-(\d+))?", re.IGNORECASE)
+# The link text of a markdown link whose target is a github.com repo: group 1 is the text, 2 and 3 the owner and repo.
+MESSAGE_LINK_TEXT = re.compile(
+    r"\[([^\]\n]*)\]\(\s*(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/", re.IGNORECASE)
 MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 # An owner/repo and the mark right after it: `#` or `@`, `:`, or the word PR.
 MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=([#@:]|\s+(?i:PRs?)\b))")
@@ -2542,6 +2555,20 @@ def message_names_other_repo(line: str, this) -> bool:
     return False
 
 
+def message_other_link_text_blanked(line: str, this) -> str:
+    """`line` with the link text of each link to another repo's github.com page blanked, so `[PR #8](.../o/other/pull/8)`
+    names no PR of this repo. A link to this repo keeps its text. `this` is the origin (owner, repo), or None."""
+    if this is None:
+        return line
+
+    def blank(found):
+        if (found.group(2).lower(), found.group(3).lower()) == this:
+            return found.group()
+        return " " * (len(found.group(1)) + 2) + found.group()[len(found.group(1)) + 2:]
+
+    return MESSAGE_LINK_TEXT.sub(blank, line)
+
+
 def message_line_prs(line: str) -> list:
     """The PR numbers a line names in words: `PR #N`, `PR: #N`, `PR (#N)`, `PR number N`, `PRs 7 and 8`, `PRs #7 #8`,
     `pull request #N`, `#N (PR)`. After a singular word, a further number in a list needs its own `#`, so
@@ -2578,13 +2605,22 @@ def message_refs(text: str, where: str):
         return origin[0]
 
     shas, prs, comments = [], [], []
-    for line in text.split("\n"):
-        found, numbers = report_shas(line, None), message_line_prs(line)
+    kept = []   # the lines outside `> ` quotes and double-quoted spans: quoted text may come from another repo
+    for raw in text.split("\n"):
+        line = report_unquoted(raw)
+        if line is None:
+            continue
+        kept.append(line)
+        found = report_shas(line, None)
+        if MESSAGE_LINK_TEXT.search(line) and this() is not None:
+            line = message_other_link_text_blanked(line, this())
+        numbers = message_line_prs(line)
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
         shas += [sha for sha in found if sha not in shas]
         prs += [n for n in numbers if n not in prs]
+    text = "\n".join(kept)
     if re.search(r"github\.com", text, re.IGNORECASE):
         for owner, repo, kind, ident, comment in MESSAGE_GH_URL.findall(text):
             # With no origin no link can be matched to this repo, so a pull or comment link is named unchecked below.
