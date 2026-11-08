@@ -11384,6 +11384,8 @@ RR_TREEBACK = os.path.join(RRROOT, "rr-treeback")      # a pushed test edit, the
 RR_LANETREE = os.path.join(RRROOT, "rr-lanetree")      # a lane commit, two unpushed trims, then a restore to the lane commit's tree
 RR_NEARMISS = os.path.join(RRROOT, "rr-nearmiss")      # the same shape, with one more test line in the restore
 RR_SIBLING = os.path.join(RRROOT, "rr-sibling")        # a commit whose tree equals a pushed sibling branch's, not its ancestor
+RR_RAWREF = os.path.join(RRROOT, "rr-rawref")          # an untrailered test commit, named by its raw sha in a push to feat
+RR_RAWOK = os.path.join(RRROOT, "rr-rawok")            # the same commit with a valid trailer
 RR_EDIT_V2 = "def test_x():\n    assert 9 == 9\n"
 RR_FULL = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 3\n"
 RR_TRIM1 = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n"
@@ -11446,6 +11448,26 @@ def _rr_msg(subject, trailer=None):
 def _rr_tree(where, rev):
     """The tree of `rev`, as git names it."""
     return _rr_read(where, "rev-parse", rev + "^{tree}").stdout.strip()
+
+
+def _rr_sha(where, rev):
+    """The full sha `rev` names in a red-run fixture, or "" when it names none."""
+    done = _rr_read(where, "rev-parse", "--verify", "-q", rev)
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _rr_rawpush(where, trailer=None):
+    """A lane's test commit, named by its raw sha in a push to feat. feat's tracking ref sits at the lane
+    commit before it, so the commit is past the tracking ref, and no feat branch on the remote holds it."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    _rr_commit(where, {"b.txt": "lane\n"}, "lane change")
+    _rr_run(where, "push", "-q", "origin", "topic:refs/heads/feat")
+    _rr_commit(where, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, trailer))
+    _rr_must(where, _rr_sha(where, "refs/remotes/origin/feat") == _rr_sha(where, "HEAD~1"),
+             "origin/feat holds the lane commit before the test commit")
+    _rr_must(where, _rr_subjects(where, "refs/remotes/origin/feat..HEAD") == [RR_SUBJECT],
+             "the test commit alone is past feat's tracking ref")
+    _rr_must(where, _rr_sha(where, "refs/remotes/origin/fresh") == "", "no tracking ref for a fresh destination")
 
 
 def _rr_lane_restore(where, restored):
@@ -11663,10 +11685,14 @@ def _build_red_run():
     must(RR_SIBLING, _rr_subjects(RR_SIBLING, "origin/topic..HEAD") == ["add test_x on the lane"],
          "the push holds the lane commit alone")
 
+    _rr_rawpush(RR_RAWREF)
+    _rr_rawpush(RR_RAWOK, RR_RED_LINE)
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
-              RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING],
+              RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING,
+              RR_RAWREF, RR_RAWOK],
              _build_red_run)
 
 
@@ -11723,8 +11749,8 @@ rr_allow("a test commit made before the check landed, then the commit that lands
          RR_ROLLOLD)
 rr_refuse("a test commit made after the check landed, with no trailer", VCS + " push", RR_ROLLNEW)
 
-# Round 1. With no default base readable, the check reads no hit: the trunk's test commit is not excluded, so
-# a read it cannot finish is no hit, and the push is allowed.
+# With no default base readable, a read the check cannot finish is no hit, so the push is allowed,
+# even though the trunk's test commit sits in its range.
 rr_allow("a lane merged a trunk that holds an untrailered test commit, and no default base can be read",
          VCS + " push", RR_NODEFAULT)
 
@@ -11766,6 +11792,17 @@ rr_refuse("a restore one test line past an earlier lane commit's tree, which mat
 # The tree equals a pushed sibling branch's. The sibling is not an ancestor, so the lane commit is judged.
 rr_refuse("a lane commit whose tree equals a pushed sibling branch's, which is not its ancestor",
           VCS + " push", RR_SIBLING)
+
+# A raw sha in a push. The sha names an untrailered test commit past feat's tracking ref, so the push judges it.
+# The command is built after the fixture exists, once the sha is known (see decide).
+rr_refuse("git push origin <sha>:refs/heads/feat, a raw sha of an untrailered test commit past feat's tracking ref",
+          lambda: VCS + " push origin " + _rr_sha(RR_RAWREF, "HEAD") + ":refs/heads/feat", RR_RAWREF)
+# The same raw-sha form to a fresh destination with no tracking ref: the commit is still judged.
+rr_refuse("git push origin <sha>:refs/heads/fresh, a raw sha of an untrailered test commit, no tracking ref for fresh",
+          lambda: VCS + " push origin " + _rr_sha(RR_RAWREF, "HEAD") + ":refs/heads/fresh", RR_RAWREF)
+# Control: the same raw-sha form, with the commit carrying a valid trailer.
+rr_allow("git push origin <sha>:refs/heads/feat, the same commit with a valid Red-run trailer",
+         lambda: VCS + " push origin " + _rr_sha(RR_RAWOK, "HEAD") + ":refs/heads/feat", RR_RAWOK)
 
 
 def rr_nolint_probe_case():
@@ -18122,6 +18159,11 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 def decide(case):
     """Return (decision, reason) for one case."""
     materialize_for(case)
+    for key, value in list(case["tool_input"].items()):
+        # A tool input may be a function, built here once its fixture exists: a command that names a
+        # commit's sha, which only the fixture's own git knows (see _rr_head).
+        if callable(value):
+            case["tool_input"][key] = value()
     if case["raw"] is not None:
         payload = case["raw"]
     else:
