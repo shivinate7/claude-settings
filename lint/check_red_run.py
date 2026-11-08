@@ -18,7 +18,7 @@ commit, even beside a valid one. A line counts as a Red-run line when its key re
 start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exactly `Red-run:` is malformed. Prose that
 mentions red-run mid-line is not judged. The failed form judges the label word of its command in two layers, so a
 typo is not read as a failed form. `label_word(line)` is the one normaliser: it reads the text after `Red-run:`, takes the
-first word, and strips from both ends to a fixed point, so the order of nesting never matters: list markers at the start only (`-`, `+`,
+first word, and strips from both ends to a fixed point, so the order of nesting never matters: list markers (`-`, `+`,
 `>`, `1)`, `1.`), emphasis (`*`, `~`, `_`), backticks, quotes straight and curly, brackets, `#`, and a trailing `,` or `:`.
 A leading underscore that belongs to a name stays (`_build/run_tests.sh`, `__main__.py`, `_mutant.sh`): it goes only when
 the word closes with an underscore too, or its core is bare letters once wrappers and list markers go (`_mutant`,
