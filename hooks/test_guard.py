@@ -5756,6 +5756,24 @@ add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is ref
 # the line's end as a background job and refuses the pipeline.
 add("check-tail: ci-job checks piped to tail -3&, a newline, then echo $! capturing the pid, is refused", "deny",
     "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&\necho $!")
+# A `&` glued to a word mid-line ends that word's job, and the next command runs on the same line. The reader
+# takes only the last token, so these were missed. `tail -3& echo $!` captures a pid on its line, so
+# detached-launch does not refuse it (bare_background_hit returns on `$!`), and check-tail refuses it, as it
+# refuses the spaced `tail -3 & echo $!`. `tail&echo done` captures no pid, so detached-launch refuses it, as
+# it refuses the spaced `tail & echo done`.
+sh("check-tail: ci-job checks | tail -3& echo $!, a glued & mid-line with the pid captured, is refused",
+   "ci-job checks | tail -3& echo $!", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: ci-job checks|tail&echo done, a glued & mid-line with no pid, is refused; "
+   "detached-launch refuses it first", "ci-job checks|tail&echo done", "deny", "detached-launch", cwd=NOGIT)
+# Controls for that reading, each held in the foreground and each allowed on fd92ee52a. A `&` that is no job
+# is a `&&`, a quoted `&`, a redirect's `&`, or the `&` of `|&`. None of these may turn into a background job.
+sh("check-tail: a&&b, an && glued to both words, is allowed", "a&&b", "allow", cwd=NOGIT)
+sh("check-tail: x |& tail, the & of |& is a pipe, is allowed", "x |& tail", "allow", cwd=NOGIT)
+sh("check-tail: echo 'a& b', a & inside quotes, is allowed", "echo 'a& b'", "allow", cwd=NOGIT)
+sh("check-tail: cmd 2>&1 | tail, the & of a redirect is no job, is allowed", "cmd 2>&1 | tail", "allow",
+   cwd=NOGIT)
+sh("check-tail: cmd >&2; echo x, the & of a redirect is no job, is allowed", "cmd >&2; echo x", "allow",
+   cwd=NOGIT)
 
 # Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
 # background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
@@ -7975,6 +7993,12 @@ rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 # `rm -rf ..&` before any delete rule reads it. destructive-delete still reads no target glued to a
 # shell operator, so this row shows only the detached-launch refusal.
 rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detached-launch")
+# With a pid captured on the same line, detached-launch does not refuse the job (bare_background_hit returns on
+# `$!`), as it does not refuse the spaced `rm -rf .. & echo $!`. That spaced form is refused by destructive-delete,
+# so this glued form is too. destructive-delete reads no target glued to a shell operator (above), so this row
+# is red on fd92ee52a, and a fix to the job reader alone leaves it red.
+rm_parent("rm -rf ..& echo $!, a glued & with the pid captured, is refused by destructive-delete",
+          "rm -rf ..& echo $!", rule="destructive-delete")
 # KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
 # both the token read and the raw read. These cases record today's verdict and are not a ruling that
 # it is right: when a fix makes one deny, re-point it here.
@@ -10017,6 +10041,11 @@ record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd i
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
               VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
+# The pid is captured on the same line, so detached-launch lets this push through. roadmap-one-writer refuses it:
+# the glued & ends the word, so the push reads the record branch. The glued-& mutant in the mutation table names
+# this row by the words it starts with, so keep those words.
+record_refuse("a lane's push to roadmap with a trailing background & is refused, the pid captured by echo $!",
+              VCS + " push origin roadmap& echo $!", LANE_TRANSCRIPT)
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
