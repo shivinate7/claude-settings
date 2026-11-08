@@ -7,23 +7,26 @@ Run it from the repository root:
 
 GUARD_UNDER_TEST points the run at another copy of the guard, as in hooks/test_guard.py.
 
-WHAT IT PROVES. Before a `git push` leaves, the guard runs the lane lint's fast range check, the silent-undo
-check (lint/check_silent_undo.py), on the pushed head against origin's default branch. It runs the command that
-CI's silent-undo step names in the workflow file of the pushed head, with the step's own env. A range that
-fails is refused before the push runs. A range that cannot be read (UNKNOWN) is allowed, with one guard.log line
-and one stderr line that say unknown. A push the lint does not judge starts no lint.
+WHAT IT PROVES. Before a `git push` leaves, the guard judges the findings the sent commits add. It runs the
+silent-undo check (lint/check_silent_undo.py) on the pushed head against origin's default branch, with the command
+that CI's silent-undo step names in the pushed head's workflow file, and that step's own env. When origin already
+holds the destination branch, it runs the same check on that remote tip too, and refuses only the findings the
+first run has and the second lacks. So a finding origin already holds does not refuse a later push, and a finding
+the sent commits add does. A ref other than HEAD is judged by its own sha. A range that cannot be read (UNKNOWN)
+is allowed, with one guard.log line and one stderr line that say unknown. A push the lint does not judge starts
+no lint.
 
 THE SEAMS THE GUARD HONORS.
-  CAP_ENV          seconds one lint run may take, read from the guard's environment. Case 7b sets it to 1 and
-                   runs a lint step that sleeps. A guard that reads no such name waits for its own default cap,
-                   and the case still passes once the lint is cut.
+  CAP_ENV          seconds one lint run may take, read from the guard's environment. Case 7b sets it to 1 and runs
+                   a lint step that sleeps. A guard that reads no such name waits for its own default cap, and the
+                   case still passes once the lint is cut.
   LINT_TOKEN       a lint launch is a child whose argv names check_silent_undo or undo_step_stub.
-  Launch counts    the guard's own process starts: its children, and each git read it makes. A probe runs the
-                   guard as __main__ in a child, with subprocess.Popen recorded. PUSH_LAUNCHES_BEFORE and
-                   NON_PUSH_LAUNCHES are measured before the lane lint, on the fixtures of cases 8a and 8b.
-                   LINT_LAUNCHES is what one lint run adds: one child, whose git reads run inside that child and
-                   are not the guard's starts. A lint run built in-process would count its git reads here, so
-                   that design changes these constants and its record.
+  Launch counts    the guard's own process starts: its children, and each git read it makes. A probe runs the guard
+                   as __main__ in a child, with subprocess.Popen recorded. PUSH_LAUNCHES_BEFORE,
+                   PUSH_LAUNCHES_BEFORE_EXISTING and NON_PUSH_LAUNCHES are measured before the lane lint. Each lint
+                   run is one child process, and its git reads run inside it, so they are not the guard's starts.
+                   A lint built in-process would count its git reads here, so that design changes these constants
+                   and its record.
 
 FIXTURES. Each case builds its own repository under the run folder: a bare origin, a clone, a
 lint/check_silent_undo.py that runs the product's own check at its real path, and .github/workflows/checks.yml.
@@ -54,9 +57,11 @@ RUN = _test_temp.run_folder()
 RULE = "lane-lint-push"
 CAP_ENV = "LANE_LINT_PUSH_SECONDS"
 LINT_TOKEN = re.compile(r"check_silent_undo|undo_step_stub")
-PUSH_LAUNCHES_BEFORE = 10  # a clean push's guard launches, measured before the lane lint (case 8b's fixture)
-NON_PUSH_LAUNCHES = 9      # a `git commit` call's guard launches, measured before the lane lint (case 8a's command)
-LINT_LAUNCHES = 1          # what one lint run adds to a push's launches: one child process
+PUSH_LAUNCHES_BEFORE = 10            # a clean push to a new destination (case 8b's fixture)
+PUSH_LAUNCHES_BEFORE_EXISTING = 5   # a clean push to a destination origin holds (case 8c's fixture)
+NON_PUSH_LAUNCHES = 9                # a `git commit` call (case 8a's command)
+LINT_LAUNCHES = 1                    # a push to a new destination: one run, against the pushed head
+LINT_LAUNCHES_EXISTING = 2           # a push to a destination origin holds: that run, and one against its remote tip
 
 GIT = ["git", "-c", "user.name=lane-lint test", "-c", "user.email=lane-lint-test@example.invalid"]
 NOTES = "alpha\nbeta\n"
@@ -128,13 +133,19 @@ def workflow(run=SILENT_RUN):
 
 
 def stub_program(seen, lines, code, sleep_s=0):
-    """A fixture stand-in for the lint step's program. It records its argv in `seen`, prints `lines`, waits
-    `sleep_s` seconds and exits `code`. It is not the product."""
+    """A fixture stand-in for the lint step's program. Each run appends its argv to the list in the file `seen`,
+    prints `lines`, waits `sleep_s` seconds and exits `code`. It is not the product."""
     return ("#!/usr/bin/env python3\n"
             "# A fixture stand-in for the lint step's program (hooks/test_guard_lane_lint_push.py). Not the product.\n"
-            "import json, sys, time\n"
-            "with open(%r, 'w', encoding='utf-8') as handle:\n"
-            "    json.dump(sys.argv[1:], handle)\n"
+            "import json, os, sys, time\n"
+            "seen = %r\n"
+            "runs = []\n"
+            "if os.path.exists(seen):\n"
+            "    with open(seen, encoding='utf-8') as handle:\n"
+            "        runs = json.load(handle)\n"
+            "runs.append(sys.argv[1:])\n"
+            "with open(seen, 'w', encoding='utf-8') as handle:\n"
+            "    json.dump(runs, handle)\n"
             "time.sleep(%r)\n"
             "for line in %r:\n"
             "    print(line)\n"
@@ -179,6 +190,19 @@ def drop_repo(case, pushed=False, run=SILENT_RUN, lane_step=None, merge_body="")
     return clone
 
 
+def second_undo_repo(case):
+    """drop_repo, pushed: origin/topic holds the first merge, and the lane's last commit is on top. Then main gains
+    extra.txt, and the lane merges it and empties the file: a second silent undo, not yet pushed."""
+    clone = drop_repo(case, pushed=True)
+    git(clone, "checkout", "-q", "main")
+    commit(clone, {"extra.txt": "keep\n"}, "main adds keep")
+    git(clone, "push", "-q", "origin", "main")
+    git(clone, "checkout", "-q", "topic")
+    git(clone, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+    commit(clone, {"extra.txt": ""}, "merge main into lane, emptying extra.txt")
+    return clone
+
+
 def revert_repo(case, existing_topic):
     """main's commit X sets policy.txt to v2. The lane reverts X: on a new branch `lane` cut from main
     (existing_topic False), or on `topic`, whose origin/topic predates X, after a merge of main (True)."""
@@ -198,6 +222,14 @@ def revert_repo(case, existing_topic):
     else:
         git(clone, "checkout", "-q", "-b", "lane")
         git(clone, "revert", "--no-edit", "HEAD")
+    return clone
+
+
+def reverted_on_remote_repo(case):
+    """The lane's revert of main's X is pushed to origin/topic, and one more lane commit is left to push."""
+    clone = revert_repo(case, existing_topic=True)
+    git(clone, "push", "-q", "origin", "topic")
+    commit(clone, {"more.txt": "more\n"}, "lane: more")
     return clone
 
 
@@ -223,9 +255,9 @@ def shallow_repo(case):
     return shallow
 
 
-def real_undo(where, upstream):
-    """(exit code, stdout) of the real silent-undo check over `upstream`..HEAD in `where`, with --strict."""
-    done = subprocess.run([sys.executable, REAL_UNDO, "--repo", where, "--upstream", upstream, "--head", "HEAD",
+def real_undo(where, upstream, head="HEAD"):
+    """(exit code, stdout) of the real silent-undo check over `upstream`..`head` in `where`, with --strict."""
+    done = subprocess.run([sys.executable, REAL_UNDO, "--repo", where, "--upstream", upstream, "--head", head,
                            "--strict"], cwd=where, capture_output=True, text=True)
     return done.returncode, done.stdout
 
@@ -290,8 +322,8 @@ def lint_starts(out):
     return [s for s in out.starts if any(LINT_TOKEN.search(part) for part in s["argv"])]
 
 
-def seen_argv(case):
-    """The argv a stand-in lint program recorded in `case`, or None when it never ran."""
+def seen_runs(case):
+    """The argv of each run a stand-in lint program made in `case`, in order, or None when none ran."""
     path = os.path.join(case, "seen.json")
     if not os.path.exists(path):
         return None
@@ -307,7 +339,7 @@ class LaneLintCase(unittest.TestCase):
     def case(self):
         return tempfile.mkdtemp(prefix="case-", dir=RUN)
 
-    def assert_denied(self, out, finding_file, lints=1):
+    def assert_denied(self, out, finding_file, lints=LINT_LAUNCHES):
         """Each part is its own subtest, so a failure names the one cause it shows."""
         with self.subTest("the guard ran"):
             self.assertEqual(out.error, "", "the guard did not run: %s" % out.error)
@@ -317,7 +349,7 @@ class LaneLintCase(unittest.TestCase):
             self.assertIn(RULE, out.reason, "the refusal does not name rule %s" % RULE)
         with self.subTest("the refusal names the file that holds the finding"):
             self.assertIn(finding_file, out.reason, "the refusal does not name %s" % finding_file)
-        with self.subTest("the lint runs once before the refusal"):
+        with self.subTest("the lint launches before the refusal"):
             self.assertEqual(len(lint_starts(out)), lints, "lint launches before the refusal")
 
     def assert_allowed(self, out, lints=None):
@@ -348,17 +380,18 @@ class DenyCases(LaneLintCase):
         code, stdout = real_undo(clone, "origin/main")
         scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge against origin/main")
         out = guard_run(case, clone, "git push origin topic")
-        self.assert_denied(out, "notes.txt")
+        self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
 
-    def test_1b_bad_merge_already_on_the_remote_branch_refuses_a_clean_commit_sent_on_top(self):
+    def test_1c_a_new_silent_undo_in_the_sent_commits_refuses_the_push(self):
         case = self.case()
-        clone = drop_repo(case, pushed=True)
-        code, _stdout = real_undo(clone, "origin/main")
-        scope(code == 1, "the real check does not fail the merge against origin/main")
-        code, _stdout = real_undo(clone, "origin/topic")
-        scope(code == 0, "the real check fails against origin/topic, so the tracking-ref trap is not set")
+        clone = second_undo_repo(case)
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "extra.txt" in stdout, "the real check does not fail the new merge against origin/main")
+        code, stdout = real_undo(clone, "origin/main", "origin/topic")
+        scope(code == 1 and "notes.txt" in stdout and "extra.txt" not in stdout,
+              "the remote tip does not hold exactly the old finding")
         out = guard_run(case, clone, "git push origin topic")
-        self.assert_denied(out, "notes.txt")
+        self.assert_denied(out, "extra.txt", lints=LINT_LAUNCHES_EXISTING)
 
     def test_2a_pushed_revert_of_a_main_commit_is_refused(self):
         case = self.case()
@@ -366,21 +399,51 @@ class DenyCases(LaneLintCase):
         code, stdout = real_undo(clone, "origin/main")
         scope(code == 1 and "policy.txt" in stdout, "the real check does not fail the revert against origin/main")
         out = guard_run(case, clone, "git push origin lane")
-        self.assert_denied(out, "policy.txt")
+        self.assert_denied(out, "policy.txt", lints=LINT_LAUNCHES)
 
-    def test_2b_revert_of_a_main_commit_on_an_existing_branch_is_refused(self):
+    def test_2b_revert_of_a_main_commit_sent_on_an_existing_branch_is_refused(self):
         case = self.case()
         clone = revert_repo(case, existing_topic=True)
         code, stdout = real_undo(clone, "origin/main")
         scope(code == 1 and "policy.txt" in stdout, "the real check does not fail the revert against origin/main")
-        code, _stdout = real_undo(clone, "origin/topic")
-        scope(code == 0, "the real check fails against origin/topic, so the tracking-ref trap is not set")
+        code, _stdout = real_undo(clone, "origin/main", "origin/topic")
+        scope(code == 0, "the remote tip already holds the reversal, so the finding is not new")
         out = guard_run(case, clone, "git push origin topic")
-        self.assert_denied(out, "policy.txt")
+        self.assert_denied(out, "policy.txt", lints=LINT_LAUNCHES_EXISTING)
+
+    def test_7a_a_ref_other_than_head_is_linted_by_its_own_sha(self):
+        case = self.case()
+        clone = drop_repo(case)
+        git(clone, "checkout", "-q", "-b", "other-branch")
+        git(clone, "checkout", "-q", "-b", "clean-head", "origin/main")
+        code, stdout = real_undo(clone, "origin/main", "other-branch")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail other-branch")
+        code, _stdout = real_undo(clone, "origin/main")
+        scope(code == 0, "the clean HEAD does not pass the real check")
+        out = guard_run(case, clone, "git push origin other-branch:topic")
+        self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
 
 
 class AllowCases(LaneLintCase):
-    def test_3_clean_lane_push_is_allowed_and_linted_once(self):
+    def test_1b_a_finding_origin_already_holds_does_not_refuse_a_clean_commit_sent_on_top(self):
+        case = self.case()
+        clone = drop_repo(case, pushed=True)
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge the lane pushed earlier")
+        code, stdout = real_undo(clone, "origin/main", "origin/topic")
+        scope(code == 1 and "notes.txt" in stdout, "the remote tip does not hold the finding")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_allowed(out, lints=LINT_LAUNCHES_EXISTING)
+
+    def test_2c_a_reversal_origin_already_holds_does_not_refuse_a_clean_commit_sent_on_top(self):
+        case = self.case()
+        clone = reverted_on_remote_repo(case)
+        code, stdout = real_undo(clone, "origin/main", "origin/topic")
+        scope(code == 1 and "policy.txt" in stdout, "the remote tip does not hold the reversal")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_allowed(out, lints=LINT_LAUNCHES_EXISTING)
+
+    def test_3_clean_lane_push_is_allowed_and_linted(self):
         for commits in (2, 25):
             with self.subTest(commits=commits):
                 case = self.case()
@@ -413,7 +476,7 @@ class AllowCases(LaneLintCase):
         code, stdout = real_undo(clone, "origin/main")
         scope(code == 0 and "ALLOWED" in stdout, "the real check does not excuse the drop with the trailer")
         out = guard_run(case, clone, "git push origin topic")
-        self.assert_allowed(out, lints=LINT_LAUNCHES)
+        self.assert_allowed(out, lints=LINT_LAUNCHES_EXISTING)
 
 
 class SkipCases(LaneLintCase):
@@ -439,25 +502,19 @@ class SkipCases(LaneLintCase):
             self.assertEqual(len(lint_starts(out)), 0, "lint launches on a record-branch push")
         with self.subTest("control: the same merge, pushed plainly, is linted"):
             out = guard_run(case, clone, "git push origin topic")
-            self.assert_denied(out, "notes.txt")
+            self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
 
 
 class UnknownCases(LaneLintCase):
-    def test_7a_a_ref_other_than_head_is_unknown_and_allowed(self):
-        case = self.case()
-        clone = drop_repo(case)
-        git(clone, "checkout", "-q", "-b", "other", "origin/main")
-        commit(clone, {"lane-other.txt": "other\n"}, "lane: other")
-        out = guard_run(case, clone, "git push origin topic:topic")
-        self.assert_unknown_note(out)
-
     def test_7b_a_lint_run_past_the_time_cap_is_unknown_and_allowed(self):
         case = self.case()
-        clone = drop_repo(case, lane_step=(STUB_RUN, stub_program(os.path.join(case, "seen.json"), [], 0,
-                                                                   sleep_s=600)))
-        scope(seen_argv(case) is None, "the stand-in ran before the push")
+        seen = os.path.join(case, "seen.json")
+        clone = drop_repo(case, lane_step=(STUB_RUN, stub_program(seen, [], 0, sleep_s=600)))
+        scope(seen_runs(case) is None, "the stand-in ran before the push")
         out = guard_run(case, clone, "git push origin topic", env={CAP_ENV: "1"})
-        self.assert_allowed(out, lints=LINT_LAUNCHES)
+        with self.subTest("a lint run started and was cut"):
+            self.assertGreaterEqual(len(lint_starts(out)), 1, "no lint launch on the push")
+        self.assert_allowed(out)
         self.assert_unknown_note(out)
 
     def test_7c_a_workflow_with_no_silent_undo_step_is_unknown_and_allowed(self):
@@ -479,15 +536,27 @@ class CostCases(LaneLintCase):
                          "guard launches for a non-push call, want %d (the old count: no lint on a non-push)"
                          % NON_PUSH_LAUNCHES)
 
-    def test_8b_a_push_starts_only_the_processes_the_record_names(self):
+    def test_8b_a_push_to_a_new_destination_starts_only_the_processes_the_record_names(self):
         case = self.case()
         clone = clean_repo(case, commits=2)
         out = guard_run(case, clone, "git push origin lane-clean")
         self.assert_allowed(out)
         want = PUSH_LAUNCHES_BEFORE + LINT_LAUNCHES
         self.assertEqual(len(out.starts), want,
-                         "guard launches for a clean push, want %d (%d before the lint, plus %d lint launch)"
-                         % (want, PUSH_LAUNCHES_BEFORE, LINT_LAUNCHES))
+                         "guard launches for a clean push to a new destination, want %d (%d before the lint, "
+                         "plus %d lint launch)" % (want, PUSH_LAUNCHES_BEFORE, LINT_LAUNCHES))
+
+    def test_8c_a_push_to_an_existing_destination_starts_one_more_lint_run(self):
+        case = self.case()
+        clone = clean_repo(case, commits=1)
+        git(clone, "push", "-q", "origin", "lane-clean")
+        commit(clone, {"lane-next.txt": "next\n"}, "lane: add lane-next.txt")
+        out = guard_run(case, clone, "git push origin lane-clean")
+        self.assert_allowed(out)
+        want = PUSH_LAUNCHES_BEFORE_EXISTING + LINT_LAUNCHES_EXISTING
+        self.assertEqual(len(out.starts), want,
+                         "guard launches for a clean push to an existing destination, want %d (%d before the lint, "
+                         "plus %d lint launches)" % (want, PUSH_LAUNCHES_BEFORE_EXISTING, LINT_LAUNCHES_EXISTING))
 
 
 class StepCases(LaneLintCase):
@@ -501,12 +570,12 @@ class StepCases(LaneLintCase):
         code, _stdout = real_undo(clone, "origin/main")
         scope(code == 0, "the real check fails the clean lane, so the stand-in is not the only failure")
         out = guard_run(case, clone, "git push origin lane-clean")
-        self.assert_denied(out, "notes.txt")
-        argv = seen_argv(case)
-        self.assertIsNotNone(argv, "the step's program did not run")
-        head = git(clone, "rev-parse", "lane-clean")
-        self.assertIn("origin/main", argv, "the step's --upstream is not origin's default branch: %r" % argv)
-        self.assertIn(head, argv, "the step's --head is not the pushed head: %r" % argv)
+        self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES)
+        runs = seen_runs(case)
+        self.assertIsNotNone(runs, "the step's program did not run")
+        flat = [arg for run in runs for arg in run]
+        self.assertIn("origin/main", flat, "the step's --upstream is not origin's default branch: %r" % runs)
+        self.assertIn(git(clone, "rev-parse", "lane-clean"), flat, "the step's --head is not the pushed head")
 
     def test_9b_the_guard_allows_a_merge_the_step_passes(self):
         case = self.case()
@@ -515,11 +584,12 @@ class StepCases(LaneLintCase):
         code, _stdout = real_undo(clone, "origin/main")
         scope(code == 1, "the real check passes the merge, so the stand-in does not decide alone")
         out = guard_run(case, clone, "git push origin topic")
-        self.assert_allowed(out, lints=LINT_LAUNCHES)
-        argv = seen_argv(case)
-        self.assertIsNotNone(argv, "the step's program did not run")
-        head = git(clone, "rev-parse", "topic")
-        self.assertIn(head, argv, "the step's --head is not the pushed head: %r" % argv)
+        self.assert_allowed(out, lints=LINT_LAUNCHES_EXISTING)
+        runs = seen_runs(case)
+        self.assertIsNotNone(runs, "the step's program did not run")
+        heads = [run[run.index("--head") + 1] for run in runs if "--head" in run]
+        self.assertIn(git(clone, "rev-parse", "topic"), heads, "the step was not run on the pushed head")
+        self.assertIn(git(clone, "rev-parse", "origin/topic"), heads, "the step was not run on the remote tip")
 
 
 if __name__ == "__main__":
