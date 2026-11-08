@@ -37,6 +37,8 @@
 //   N15      a README.md in decisionsDir is no record: a file only it names needs no map line.
 //   N16      map-show <decision-id> lists a non-code file whose Decisions line carries that id.
 //   N17      a notes.md directly in decisionsDir is no record: a file only it names needs no map line.
+//   N18      README and notes under a slug-style decisionIdPattern: an id of either names no record, and MAP10 fails on each by name.   [green]
+//   N19      map-show README and notes name no record: exit 1, nothing on stdout, and no record file printed.                          [green]
 //   DB1      a .svg a debt record names needs a map line: MAP1 fails and names it.
 //   DB2      its map line needs a Debts line with the slug: the failure names the file and the slug.
 //   DB3      control: a map line with `  - Debts: ` naming the slug: no check fails.                     [green]
@@ -52,7 +54,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { HERE, SKILL, debtsDirOf, failLines, gitIn, readIn, run, scratchRepo, subLineIds, tail, verdictOf, writeIn } from './helpers.mjs';
+import { HERE, SKILL, debtsDirOf, failLines, gitIn, readIn, run, scratchRepo, setSubLine, subLineIds, tail, verdictOf, writeIn } from './helpers.mjs';
 import { MAP_FORMAT_VERSION, loadMapConfig } from '../scripts/lib/map-config.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
@@ -79,14 +81,14 @@ const mapLine = (file, sentence) => `- \`${file}\` — ${sentence}`;
 
 /**
  * A scratch repository on the decisions fixture. Its config is at MAP_FORMAT_VERSION, and its layout is rolled out, so the debts folder is the one
- * lint/layout.json gives. `keys: false` leaves out both decision keys. `mapPaths` adds that key.
+ * lint/layout.json gives. `keys: false` leaves out both decision keys. `mapPaths` adds that key. `idPattern` is the decision id pattern, D\d+ by default.
  */
-const scratch = ({ keys = true, mapPaths } = {}) => {
+const scratch = ({ keys = true, mapPaths, idPattern = 'D\\d+' } = {}) => {
   const dir = scratchRepo({ fixture: FIXTURE, track: TRACK });
   const cfg = {
     formatVersion: MAP_FORMAT_VERSION,
     ...BASE,
-    ...(keys ? { decisionsDir: `${RECORDS}/`, decisionIdPattern: 'D\\d+' } : {}),
+    ...(keys ? { decisionsDir: `${RECORDS}/`, decisionIdPattern: idPattern } : {}),
     ...(mapPaths ? { mapPaths } : {}),
   };
   writeIn(dir, CONFIG, `${JSON.stringify(cfg, null, 2)}\n`);
@@ -282,6 +284,43 @@ test('N17. a notes.md directly in decisionsDir is no record: a file only it name
   assert.match(readIn(dir, `${RECORDS}/notes.md`), /notes-only\.png/, 'scope: the notes.md in the decisions folder names the .png');
   const out = run([CHECK], dir).out;
   assert.equal(verdictOf(out, 'MAP1'), 'PASS', `MAP1 must pass: a notes.md in the decisions folder is no record\n${tail(out)}`);
+});
+
+// A slug-style id: the pattern accepts `README` and `notes` as ids, so only the record readers' skip stops either one naming a record.
+const SLUG_ID = '[A-Za-z][A-Za-z0-9-]*';
+
+/** A README.md and a notes.md in the decisions folder, the files a record reader must skip. */
+const addNonRecords = (dir) => {
+  addFile(dir, `${RECORDS}/README.md`, '# Records\n\nThe index of this folder.\n');
+  addFile(dir, `${RECORDS}/notes.md`, '# Notes\n\nA note, and no record.\n');
+};
+
+test('N18. README and notes are no record: an id of either on a Decisions line names none, and MAP10 fails on each by name', () => {
+  const dir = scratch({ idPattern: SLUG_ID });
+  addNonRecords(dir);
+  setSubLine(dir, MAP, 'src/strings.ts', 'Decisions', ['README', 'notes']);
+  // The scope first: the folder holds notes.md, and the decisions line of the code file holds both ids.
+  assert.ok(existsSync(join(dir, RECORDS, 'notes.md')), 'scope: the decisions folder holds notes.md');
+  assert.deepEqual(subLineIds(dir, MAP, 'src/strings.ts', 'Decisions'), ['README', 'notes'], 'scope: the decisions line of src/strings.ts holds README and notes');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP10', 'lists README, and no record in docs/records/ names it'), `MAP10 must fail on the id README: no record names it\n${tail(out)}`);
+  assert.ok(failed(out, 'MAP10', 'lists notes, and no record in docs/records/ names it'), `MAP10 must fail on the id notes: no record names it\n${tail(out)}`);
+});
+
+test('N19. map-show README and notes name no record: each exits 1 with nothing on stdout, and no record file is printed', () => {
+  const dir = scratch({ idPattern: SLUG_ID });
+  addNonRecords(dir);
+  setSubLine(dir, MAP, 'src/strings.ts', 'Decisions', ['README', 'notes']);
+  // The scope first: under the slug pattern a real id still prints its citing line, or "no record" holds for a command that printed nothing.
+  const scope = run([SHOW, 'D18'], dir);
+  assert.equal(scope.status, 0, `the real id D18 must exit 0 under the slug pattern\n${tail(scope.out)}`);
+  assert.ok(scope.stdout.includes('src/cache.ts'), `D18 must print the map line of src/cache.ts\n${tail(scope.out)}`);
+  for (const id of ['README', 'notes']) {
+    const r = run([SHOW, id, '--full'], dir);
+    assert.equal(r.status, 1, `${id} names no record, so map-show must exit 1\n${tail(r.out)}`);
+    assert.equal(r.stdout.trim(), '', `${id} names no record, so nothing may print on stdout\n${tail(r.out)}`);
+    assert.equal(r.out.trim(), `no record names ${id} in docs/records/`, `stderr must hold one line: no record names ${id}\n${tail(r.out)}`);
+  }
 });
 
 // ---- Debt records: a non-code file that a debt record names needs a map line, and the debt's slug on a Debts line.
