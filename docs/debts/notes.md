@@ -2184,3 +2184,5 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- lane-lint-worktree-add-no-beat: the worktree add in merge --lane-lint runs before ci-job writes any beat, so it can be quiet; unmeasured (merge/merge.py). Decision: stall-watch.
+- ci-job-timeout-kills-only-ci-job: ci_job_run's timeout (LINT_SECONDS) kills only ci-job, which may leave verdict and the step shell running; unverified (merge/merge.py). Decision: stall-watch.

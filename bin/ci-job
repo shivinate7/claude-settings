@@ -154,6 +154,7 @@ def unshallow(block, top, dry, tally):
         print("%-15s the clone is shallow and CI checks out full history: git fetch --unshallow" % "would fetch")
         return
     remotes = (git("remote", cwd=top) or "").split()
+    append_beat("fetch: git fetch --unshallow")  # this fetch runs before the first start line and may be quiet for a while
     done = _nowindow.run(["git", "fetch", "--unshallow", *(["origin"] if "origin" in remotes else remotes[:1])],
                          cwd=top, capture_output=True, text=True)
     if done.returncode == 0:
