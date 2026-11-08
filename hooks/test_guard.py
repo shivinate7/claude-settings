@@ -19785,6 +19785,19 @@ add("brief-destructive-git: a nested discard bullet under a - Never run: bullet 
 add("brief-destructive-git: a plugin-prefixed reviewer role my-plugin:reviewer that says a reset is refused is allowed",
     "allow", tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
     subagent_type="my-plugin:reviewer", model="sonnet")
+# Failure classes: a false allow on a Workflow spawn that names no model, or names one through a variable (spawn_inputs
+# skips both, so no brief is read), and a false deny on prohibitions joined by commas (the comma ends the clause the
+# negator sits in, so the second span reads as an order).
+add("brief-destructive-git: Workflow builder agent with no model key that orders `git reset --hard origin/main` "
+    "is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script=_step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder'"))
+add("brief-destructive-git: Workflow builder agent whose model is held in a variable and that orders "
+    "`git reset --hard origin/main` is denied", "deny", BRIEF_DESTRUCTIVE, tool="Workflow",
+    script="const m = 'sonnet'; "
+           + _step_flow("'Run `git reset --hard origin/main`'", "agentType: 'builder', model: m"))
+add("brief-destructive-git: builder brief whose comma list of prohibitions names `git stash`, `git reset --hard` and "
+    "`git clean -fd` is allowed", "allow", tool="Agent",
+    prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
 # Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
 # builder's refusal text still orders a reset.
 add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
