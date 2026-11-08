@@ -100,7 +100,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost",
+    "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost; a reviewer or design-reviewer brief that names no pull request, in a repo with a github.com remote, is refused (rule review-needs-pr)",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10330,6 +10330,164 @@ def review_send_matcher_case():
 RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher routes every send tool to the guard"
 
 
+# The pull request a reviewer brief names (rule review-needs-pr, decision pr-review-record). A reviewer or
+# design-reviewer spawn by an orchestrator (no agent_id) is refused when its brief names no pull request: `PR #<n>`,
+# `pull request #<n>`, or a github.com pull URL. `#<n>` alone is an issue and does not count. The rule reads the git
+# config at the payload's cwd only: a linked worktree's `.git` file leads to the common config. A repo with no
+# github.com remote is exempt, and so is a config the rule cannot read. A builder or Explore spawn is not judged.
+# The refusal names the rule, says to open the draft PR first and name it in the brief, and cites the decision.
+NPR_RULE = "review-needs-pr"
+NPR_CARRIES = ("pr-review-record", "draft", "brief")
+NPR_DIR = os.path.join(ROOT, "reviewneedspr")
+NPR_AGENT = "agent-NPR0001"
+NPR_GITHUB_HTTPS = "https://github.com/owner/repo.git"
+NPR_GITHUB_SCP = "git@github.com:owner/repo.git"
+NPR_GITLAB = "https://gitlab.example.com/owner/repo.git"
+NPR_GITHUB_CONFIG = '[remote "origin"]\n\turl = %s\n' % NPR_GITHUB_HTTPS
+NPR_NO_PR = "Review the diff on branch lane-x and report PASS or FAIL."
+NPR_PR = "Review PR #1864 and report PASS or FAIL."
+NPR_PULL_WORD = "Review pull request #1864 and report PASS or FAIL."
+NPR_PULL_URL = "Review https://github.com/shivinate7/claude-settings/pull/1864 and report PASS or FAIL."
+NPR_ISSUE_NUMBER = "Review #12 and report PASS or FAIL."
+NPR_ISSUE_URL = "Review https://github.com/owner/repo/issues/12 and report PASS or FAIL."
+
+
+def npr_path(name):
+    return os.path.join(NPR_DIR, name)
+
+
+def npr_spawn(kind, prompt, model):
+    """A spawn's input as the orchestrator writes it. The models are the role rows (reviewer haiku, design-reviewer
+    opus, decision agent-model-cap), so no other rule refuses the spawn before this one judges it."""
+    return {"subagent_type": kind, "prompt": prompt, "model": model}
+
+
+def npr_build():
+    """The checkouts the cases name, each a real git tree from make_repo, so its config is git's own. The shapes the
+    rule reads: a github remote in https and scp form, a gitlab remote, a gitlab origin with a github mirror, no
+    remote, a linked worktree of a github checkout, a config that is a folder, a config that is missing, a `.git`
+    file that names no folder, and a folder that is not a git tree."""
+    def checkout(name, *remotes):
+        where = npr_path(name)
+        make_repo(where, {"a.txt": "base\n"})
+        for remote, url in remotes:
+            run_vcs(where, "remote", "add", remote, url)
+        return where
+
+    checkout("github-https", ("origin", NPR_GITHUB_HTTPS))
+    checkout("github-scp", ("origin", NPR_GITHUB_SCP))
+    checkout("gitlab", ("origin", NPR_GITLAB))
+    checkout("gitlab-then-github", ("origin", NPR_GITLAB), ("mirror", NPR_GITHUB_HTTPS))
+    checkout("no-remote")
+    main = checkout("worktree-main", ("origin", NPR_GITHUB_HTTPS))
+    lane = npr_path("worktree-lane")
+    run_vcs(main, "worktree", "add", "-q", lane, "-b", "npr-lane")
+    # The case reaches the worktree shape it names: a `.git` file, and a github remote in the common config.
+    with open(os.path.join(main, ".git", "config"), encoding="utf-8") as handle:
+        common = handle.read()
+    if not os.path.isfile(os.path.join(lane, ".git")) or "github.com" not in common:
+        sys.exit("review-needs-pr fixture: %r is not a worktree whose common config names github.com" % lane)
+    checkout("config-unreadable", ("origin", NPR_GITHUB_HTTPS))
+    unreadable = os.path.join(npr_path("config-unreadable"), ".git", "config")
+    os.remove(unreadable)
+    os.makedirs(unreadable)   # a folder: the rule's read of it fails
+    checkout("config-missing", ("origin", NPR_GITHUB_HTTPS))
+    os.remove(os.path.join(npr_path("config-missing"), ".git", "config"))
+    write(os.path.join(npr_path("gitdir-missing"), ".git"), "gitdir: %s\n" % npr_path("no-such-git-dir"))
+    os.makedirs(npr_path("not-a-tree"))
+
+
+lazy_fixture([NPR_DIR], npr_build)
+
+
+def npr_refuse(name, tool, tool_input, cwd, agent_id=None):
+    """A spawn the guard refuses for the rule: the reason names it, the remedy and the decision."""
+    add("review-needs-pr: " + name, "deny", rule=NPR_RULE, tool=tool, cwd=cwd, carries=NPR_CARRIES,
+        agent_id=agent_id, **tool_input)
+
+
+def npr_allow(name, tool, tool_input, cwd, agent_id=None):
+    """A spawn the guard lets through silently."""
+    add("review-needs-pr: " + name, "allow", tool=tool, cwd=cwd, silent=True, agent_id=agent_id, **tool_input)
+
+
+# Refused: a reviewer or design-reviewer brief that names no pull request, in a repo with a github.com remote.
+npr_refuse("a reviewer brief that names no pull request, in a repo with a github remote, is refused",
+           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-https"))
+npr_refuse("a design-reviewer brief that names no pull request is refused",
+           "Agent", npr_spawn("design-reviewer", NPR_NO_PR, "opus"), npr_path("github-https"))
+npr_refuse("a reviewer spawned by Task with a brief that names no pull request is refused",
+           "Task", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-https"))
+npr_refuse("a brief that names only #12, an issue-like number with no PR word, is refused",
+           "Agent", npr_spawn("reviewer", NPR_ISSUE_NUMBER, "haiku"), npr_path("github-https"))
+npr_refuse("a brief that names a github issue URL is no pull request and is refused",
+           "Agent", npr_spawn("reviewer", NPR_ISSUE_URL, "haiku"), npr_path("github-https"))
+npr_refuse("a github remote in scp form counts: a brief that names no pull request is refused",
+           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-scp"))
+npr_refuse("a github remote behind a gitlab origin counts: a brief that names no pull request is refused",
+           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitlab-then-github"))
+npr_refuse("a linked worktree reads the github remote in its common config: a brief with no pull request is refused",
+           "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("worktree-lane"))
+# Allowed: a brief that names a pull request in any form the rule names, and the exemptions.
+npr_allow("a brief that names PR #1864 is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names pull request #1864 is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PULL_WORD, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names a github pull URL is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PULL_URL, "haiku"), npr_path("github-https"))
+npr_allow("a design-reviewer brief that names PR #1864 is allowed",
+          "Agent", npr_spawn("design-reviewer", NPR_PR, "opus"), npr_path("github-https"))
+npr_allow("a brief with no pull request is allowed in a repo whose only remote is gitlab",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitlab"))
+npr_allow("a brief with no pull request is allowed in a repo with no remote",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("no-remote"))
+npr_allow("a brief with no pull request is allowed in a folder that is not a git tree",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("not-a-tree"))
+npr_allow("a brief with no pull request is allowed when the git config is a folder the rule cannot read",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("config-unreadable"))
+npr_allow("a brief with no pull request is allowed when the git config is missing",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("config-missing"))
+npr_allow("a brief with no pull request is allowed when `.git` names no folder",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("gitdir-missing"))
+npr_allow("an agent's own reviewer spawn (payload with agent_id) is not judged by this rule",
+          "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-https"), agent_id=NPR_AGENT)
+npr_allow("a builder spawn with no pull request is not judged by this rule",
+          "Agent", npr_spawn("builder", NPR_NO_PR, "sonnet"), npr_path("github-https"))
+npr_allow("an Explore spawn with no pull request is not judged by this rule",
+          "Agent", npr_spawn("Explore", NPR_NO_PR, "haiku"), npr_path("github-https"))
+
+
+def npr_cost_case():
+    """The refusal starts no child process and makes no network call. The probe counts both for each run. The deny
+    is asserted first, so the counts mean something only once the rule reached its refusal. The control run names a
+    pull request in the same checkout: it is let through, and it starts no child process and makes no network call."""
+    refused, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "network": True},
+                                   tool_input=npr_spawn("reviewer", NPR_NO_PR, "haiku"),
+                                   git_config=NPR_GITHUB_CONFIG)
+    if refused == "error":
+        return False, reason
+    if refused != "deny" or NPR_RULE not in reason:
+        return False, "%s, want a deny that names %s: %s" % (refused, NPR_RULE, reason[:80])
+    if side["children"]:
+        return False, "%d child process(es) started: %s" % (len(side["children"]), side["children"][:3])
+    if side["network"]:
+        return False, "%d network call(s) made: %s" % (len(side["network"]), side["network"][:3])
+    named, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "network": True},
+                                 tool_input=npr_spawn("reviewer", NPR_PR, "haiku"), git_config=NPR_GITHUB_CONFIG)
+    if named == "error":
+        return False, reason
+    if named != "allow":
+        return False, "%s, want an allow for a brief that names a pull request: %s" % (named, reason[:80])
+    if side["children"] or side["network"]:
+        return False, "the allow path started %d child process(es) and made %d network call(s)" % (
+            len(side["children"]), len(side["network"]))
+    return True, ("the deny names the rule and starts no child process or network call; "
+                  "the named pull request is allowed the same way")
+
+
+NPR_COST_LABEL = "review-needs-pr: a refused reviewer spawn starts no child process and makes no network call"
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
@@ -13960,6 +14118,9 @@ FIXTURELESS_CHECKS.add(rr_cost_case)
 LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
 LOG_FAMILY[RR_SEND_MATCHER_LABEL] = "review-record-after-round"
 FIXTURELESS_CHECKS.add(review_send_matcher_case)
+LOG_CHECKS_EXTRA.append((NPR_COST_LABEL, npr_cost_case))
+LOG_FAMILY[NPR_COST_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(npr_cost_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -26050,7 +26211,7 @@ LB_FOLDER = "folder"     # a transcript sentinel: the payload names a folder, so
 
 
 def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None, own_env=None, transcript=None,
-           spy=False):
+           spy=False, git_config=None):
     """One guard run in the probe. Returns (decision, reason, side): the decision the run printed,
     and what the probe saw (reads, children, files, had_reader, reading, opened, lane...). `agent` is the payload's
     agent_id, so the call is an agent's own; None leaves it out (the orchestrator's call). `remote` is the
@@ -26065,6 +26226,8 @@ def lb_run(tool, spec, tool_input=None, event=None, agent=None, remote=None, own
         dirs = {name: os.path.join(run, name) for name in ("cfg", "tmp", "side", "cwd")}
         for path in dirs.values():
             os.makedirs(path)
+        if git_config is not None:   # the run's cwd is a checkout whose git config holds this text
+            write(os.path.join(dirs["cwd"], ".git", "config"), git_config)
         side_file = os.path.join(dirs["side"], "probe.json")
         spec = dict(spec, watch=[dirs["cfg"], dirs["tmp"]])
         if event:
