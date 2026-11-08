@@ -156,7 +156,14 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None, timeout=None):
-    return sh(["git", "-C", cwd, *a], input=input, timeout=timeout)
+    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text. A GIT_TRACE* variable that writes
+    its trace to stderr would become part of that text (a sha, a path), so the child runs without them. GIT_TRACE2* stays: it writes to a file."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or k.startswith("GIT_TRACE2")}
+    return sh(["git", "-C", cwd, *a], input=input, env=env, timeout=timeout)
+
+def repo_root():
+    """The one home of root discovery. -> (exit code, root). Stdout only: a stderr line (GIT_TRACE) must not become part of the path; stderr passes through."""
+    return sh(["git", "rev-parse", "--show-toplevel"], live_stderr=True)
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -3308,7 +3315,7 @@ def idle_lanes(live):
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
-    c, root = sh(["git", "rev-parse", "--show-toplevel"])
+    c, root = repo_root()
     if c:
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
         return 1
@@ -3392,7 +3399,7 @@ def main(argv, host=None, lock=None):
         if a.idle_lanes:
             return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
-            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            c, root = repo_root()
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
@@ -3403,7 +3410,7 @@ def main(argv, host=None, lock=None):
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
-        c, root = sh(["git", "rev-parse", "--show-toplevel"])
+        c, root = repo_root()
         if c:
             raise Stop("not in a git checkout")
         lock = lock or default_lock(root)
