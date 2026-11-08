@@ -673,10 +673,11 @@ NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count.
+# and "builder and reviewer sonnet" all count. "design-reviewer" and "design reviewer" name the
+# design reviewer, another role, which is no named one.
 _ROLE = r"(?:builder|reviewer|test-author|record-writer)"
 ROLE_MODEL_RE = re.compile(
-    r"\b(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"(?<![\w-])(?<!design )(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
@@ -729,8 +730,13 @@ def spawn_models(records):
     return found
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, session=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+
+    `spawned` is the in-turn spawns: they set which roles Done must name. `session` is every spawn
+    of the session, and sets which models a name may match, since a reviewer that ran in an
+    earlier turn is still a reviewer this report names. It defaults to `spawned`.
+    """
     if not spawned:
         return ""
     done = " ".join(done_items(block_text(text, keep_indent=True)))
@@ -740,7 +746,7 @@ def done_models_problem(text, spawned):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
+        ran = (spawned if session is None else session).get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
@@ -2506,7 +2512,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
             reasons.append(MODELS_REASON % models)
         if unstarted_problem(text, spawned):
@@ -2998,7 +3004,7 @@ def main():
             "a Done line does not say BUILT, RECORDED or OTHER, or says BUILT or RECORDED with no PR or commit: "
             + repr(item)))
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON % models)
     if shape_ok and unstarted_problem(text, spawned):
