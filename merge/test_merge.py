@@ -1288,7 +1288,8 @@ class SmallBaseMove(Env):
         scope = sh(repo, "git", "diff", "--name-status", "-M", base, n_head)
         self.assertIn("R100\tbase.txt\tmoved.txt", scope, "the batch is not an exact rename, so the case proves nothing:\n" + scope)
         with tempfiles_in_run_folder():
-            _, why = merge.small_base_move(repo, "main", n_head)
+            ok, why = merge.small_base_move(repo, "main", n_head)
+        self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
         self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
 
     def scoped(self, workflow=CHECKS_YML, scope=True):
@@ -13604,7 +13605,7 @@ class ProseJudge(Env):
                 sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
             for path, text in (later or {}).items():
                 put(os.path.join(o, path), text)
-            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: move the prose file" if renames and not later else "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self, cap=PROSE_CAP):
