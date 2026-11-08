@@ -129,7 +129,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        `git push` whose net range (remote-tracking tip, else upstream, else default base, up
                        to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
                        could not judge, when that commit covers a triplet already in the tree or the chain
-                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, am, or revert.
                        (commit-refuses-conflict-markers)
   ste-push             deny. A `git push` whose range from origin's default branch (CI's base, not the
                        destination) changes a file the ste-lint step lints (`changed_paths` and `exclude` of

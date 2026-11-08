@@ -1507,3 +1507,6 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- conflict-markers-revert-untested: `revert` joined the conflict-markers chain verbs with ste-push's shared list, and no case covers a revert then commit and push (hooks/guard_merge.py `_CONFLICT_VERBS`). Decision: commit-refuses-conflict-markers.
+- ste-push-unheld-pin: a pin commit the clone does not hold reads no drift, so a FAIL against an older, laxer CI lint still refuses (hooks/guard_ste.py). Decision: ste-lint-at-push.
+- ste-push-am-code-only: `git am` before a push is refused even for a code-only patch, since the guard does not read the patch; one retry (hooks/guard_merge.py `_ste_brought`). Decision: ste-lint-at-push.
