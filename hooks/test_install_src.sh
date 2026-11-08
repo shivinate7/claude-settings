@@ -64,7 +64,7 @@ normalize_path() {
 }
 
 # The directories install.sh lands, read from the same manifest install.sh itself reads
-# (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps case8 honest about
+# (landed-dirs.txt at the repo root), not a hand-kept list here. Keeps mirror_landed_tree1 honest about
 # every landed directory, not just the two it happened to name by hand.
 landed_dirs() {
   sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
@@ -354,15 +354,14 @@ case7() {
   rm -rf "$h"
 }
 
-# ---- Case 8: fallback mirror lands every tracked file under every landed directory, no hand list
+# ---- The fallback mirror and every landed folder hold each tracked file below them, no hand list
 # Guards against a hand-maintained fetch list drifting behind git. The directory list comes from landed-dirs.txt
-# (landed_dirs() above). Two claims, one per side. The fetched mirror holds every tracked file under each landed
-# directory, subfolders included, since it is a full clone or the full tarball. The config dir holds what land_dir()
-# lands: the plain files directly in each landed folder, so a subfolder such as actions/code-check/tools is not
-# expected there. skills is the exception: land_skills_dir copies each skill folder whole, so its files below the
-# top level are expected there too.
-case8() {
-  name="case8: fallback mirror lands every tracked file under every landed directory"
+# (landed_dirs() above). Every tracked file under a landed directory must be in the fetched mirror, a full clone or
+# the full tarball, and in the config dir, where land_dir() and land_skills_dir() put it. A nested file in a landed
+# folder is a catch, not an exception: a check that looked only at direct files would miss it, and that miss is the
+# debt lane-lint-misses-nested-landed. The one exception is actions/code-check/tools, named in the loop below.
+mirror_landed_tree1() {
+  name="mirror_landed_tree1: the fallback mirror and every landed folder hold each tracked file below them, except actions/code-check/tools"
   h=$(new_home); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
   mkdir -p "$scratch"
 
@@ -380,10 +379,9 @@ case8() {
   for dir in $(landed_dirs); do
     for rel in $(tracked_in "$REPO_ROOT" "$dir" all); do
       [ -f "$h/claude-settings/$dir/$rel" ] || missing="$missing mirror:$dir/$rel"
-    done
-    landing=direct
-    [ "$dir" = skills ] && landing=all
-    for rel in $(tracked_in "$REPO_ROOT" "$dir" "$landing"); do
+      # Node tooling for the mirror only: no installed script reads it, land_dir lands a folder's plain files and
+      # not this subfolder, and code_check.py pins npx and needs no tools/ folder.
+      case $dir/$rel in actions/code-check/tools/*) continue ;; esac
       [ -f "$cfg/$dir/$rel" ] || missing="$missing landed:$dir/$rel"
     done
   done
@@ -2954,9 +2952,9 @@ if not os.path.isfile(mod.STANDARD):
 standard_check() {
   sc_out=$(python3 -B -I -c "$cc_standard_py" "$1" 2>&1); sc_rc=$?
 }
-# True when path $1 is a file under $2/.claude/bin.
+# True when path $1 is a file in the bin folder $2.
 under_bin() {
-  case "$1" in "$2/.claude/bin/"?*) return 0 ;; esac
+  case "$1" in "$2/"?*) return 0 ;; esac
   return 1
 }
 
@@ -3027,9 +3025,9 @@ cloud_env_path1() {
     else
       v=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v verdict' sh "$envf")
       w=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v wait-pid' sh "$envf")
-      if ! under_bin "$v" "$h"; then
+      if ! under_bin "$v" "$h/.claude/bin"; then
         bad "$name" "after sourcing CLAUDE_ENV_FILE, verdict does not resolve under the home's .claude/bin (got: ${v:-nothing})"
-      elif ! under_bin "$w" "$h"; then
+      elif ! under_bin "$w" "$h/.claude/bin"; then
         bad "$name" "after sourcing CLAUDE_ENV_FILE, wait-pid does not resolve under the home's .claude/bin (got: ${w:-nothing})"
       else ok "$name"; fi
     fi
@@ -3069,6 +3067,49 @@ cloud_env_path3() {
     if [ -n "$hits" ]; then bad "$name" "a file under HOME holds the PATH line: $hits"
     else ok "$name"; fi
   fi
+  rm -rf "$h"
+}
+
+cloud_env_config1() {
+  name="cloud_env_config1: a cloud install with CLAUDE_CONFIG_DIR in a folder with a space writes a PATH line that finds verdict and wait-pid under that config dir's bin"
+  h=$(new_home); co="$work/cloud_env_config1-checkout"; cfg="$h/config dir"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  envf="$h/claude-env"; : > "$envf"
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envf" CLAUDE_CONFIG_DIR="$cfg"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  else
+    # Scope first: the tools are landed as executables in the config dir's bin.
+    scope=""
+    for t in verdict wait-pid; do [ -x "$cfg/bin/$t" ] || scope="$scope $t"; done
+    if [ -n "$scope" ]; then
+      bad "$name" "not landed as executables under CLAUDE_CONFIG_DIR/bin:$scope"
+    else
+      v=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v verdict' sh "$envf")
+      w=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v wait-pid' sh "$envf")
+      if ! under_bin "$v" "$cfg/bin"; then
+        bad "$name" "after sourcing CLAUDE_ENV_FILE, verdict does not resolve under CLAUDE_CONFIG_DIR/bin (got: ${v:-nothing})"
+      elif ! under_bin "$w" "$cfg/bin"; then
+        bad "$name" "after sourcing CLAUDE_ENV_FILE, wait-pid does not resolve under CLAUDE_CONFIG_DIR/bin (got: ${w:-nothing})"
+      else ok "$name"; fi
+    fi
+  fi
+  rm -rf "$h"
+}
+
+cloud_env_dir1() {
+  name="cloud_env_dir1: a cloud install whose CLAUDE_ENV_FILE is a directory exits 0, logs that the PATH line was not written, and still lands bin"
+  h=$(new_home); co="$work/cloud_env_dir1-checkout"; envd="$h/env-is-a-dir"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  mkdir -p "$envd"
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envd"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  elif ! contains "$out" "could not write the PATH line to $envd"; then
+    bad "$name" "the install logged no line naming the PATH write that failed on CLAUDE_ENV_FILE"
+  elif [ ! -x "$h/.claude/bin/verdict" ]; then
+    bad "$name" "bin was not landed after the failed PATH write"
+  else ok "$name"; fi
   rm -rf "$h"
 }
 
@@ -5353,7 +5394,7 @@ run case2
 run case3
 run case_origins
 run case7
-run case8
+run mirror_landed_tree1
 run pointer_case1
 run pointer_case2
 run pointer_case3
@@ -5433,6 +5474,8 @@ run local_code_check1
 run cloud_env_path1
 run cloud_env_path2
 run cloud_env_path3
+run cloud_env_config1
+run cloud_env_dir1
 run caseF1
 run caseF2
 run caseF3

@@ -11517,6 +11517,18 @@ add("frozen: Write of the retired config ux folder is allowed", "allow", tool="W
     cwd=NOGIT, file_path=slash(os.path.join(CFG, "ux", "principles.md")))
 add("frozen: Edit of a product repo's own docs/design/principles.md is allowed", "allow", tool="Edit",
     cwd=PROJ, file_path=PROJ_DESIGN)
+# actions/code-check/ holds the narration lint's standard (CONFIG_FROZEN_DIRS in hooks/guard_frozen.py). Its
+# standard.json sets which languages the lint scans, so a session that rewrote it could loosen the lint, and it is
+# frozen like docs/design. A checkout's own copy stays open, and so does a config folder whose name only starts with it.
+CFG_CODECHECK = slash(os.path.join(CFG, "actions", "code-check", "standard.json"))
+PROJ_CODECHECK = slash(os.path.join(PROJ, "actions", "code-check", "x.py"))
+for tool in ("Write", "Edit"):
+    add("frozen: " + tool + " of the config actions/code-check lint standard", "deny", "frozen-path", tool=tool,
+        cwd=NOGIT, file_path=CFG_CODECHECK)
+add("frozen: Write of a checkout's own actions/code-check/x.py is allowed", "allow", tool="Write",
+    cwd=PROJ, file_path=PROJ_CODECHECK)
+add("frozen: Write under a config actions/code-check-old folder is allowed", "allow", tool="Write",
+    cwd=NOGIT, file_path=slash(os.path.join(CFG, "actions", "code-check-old", "x")))
 add("frozen: Write of a skill this repo ships", "deny", "frozen-path", tool="Write", cwd=NOGIT,
     file_path=CFG_SKILL)
 add("frozen: Write of a skill this repo does not ship is allowed", "allow", tool="Write",
