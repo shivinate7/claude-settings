@@ -26,10 +26,12 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               branch's own non-merge commits (upstream..head) are replayed oldest first, each counted from its file
               state and its parent's. A slug is refused when its last count change was a delete and head holds more
               copies than that commit left. A note re-added by a non-merge commit passes, and so does a dedupe that
-              keeps a copy. Cost, per run and per notes path (lint/layout.py, kind debt-notes): a missing file
-              at head, two git reads (`git show`, then `git ls-tree`). A file with no note, one read. A file with a
-              note, three: `git show head:<file>`, one `git log` of upstream..head over the file, and one
-              `git cat-file --batch` run for every commit's file and its parent's. No process stays running.
+              keeps a copy. An edit in place changes no count, so it does not keep a note. Cost, per run and per
+              notes path (lint/layout.py, kind debt-notes): a missing file at head, two git reads (`git show`, then
+              `git ls-tree`). A file with no note, one read. A file with a note, two: `git show head:<file>` and one
+              `git log` of upstream..head over the file. When that log names a commit, one `git cat-file --batch`
+              process more (class Blobs) reads each commit's file and its parent's, one commit at a time, so at most
+              two texts are held; each side whose tree lacks the file adds one `git ls-tree`. No process stays running.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -572,42 +574,15 @@ def note_counts(text):
     return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
 
 
-def blobs_at(cwd, specs):
-    """The text of each `rev:path` in specs ("" for one the tree lacks), through one `git cat-file --batch` run."""
-    try:
-        r = _nowindow.run(["git", "-C", cwd, "cat-file", "--batch"], input="".join(s + "\n" for s in specs).encode("utf-8", "surrogateescape"),
-                          capture_output=True)
-    except OSError as e:
-        raise Unknown("git cat-file failed: %s" % e)
-    if r.returncode != 0:
-        raise Unknown("git cat-file failed: %s" % (r.stderr.decode("utf-8", "replace").strip() or r.returncode))
-    out, at, texts = r.stdout, 0, []
-    for spec in specs:
-        end = out.find(b"\n", at)
-        head = out[at:end].split() if end >= 0 else []
-        if end < 0 or not head:
-            raise Unknown("git cat-file gave no usable header for %s" % spec[:60])
-        at = end + 1
-        if head[-1] == b"missing":
-            texts.append("")
-        elif len(head) == 3 and head[2].isdigit():
-            size = int(head[2])
-            if len(out) < at + size:
-                raise Unknown("git cat-file ended early on %s" % spec[:60])
-            texts.append(out[at:at + size].decode("utf-8", "replace") if head[1] == b"blob" else "")
-            at += size + 1
-        else:
-            raise Unknown("git cat-file gave no usable header for %s: %r" % (spec[:60], b" ".join(head)[:80]))
-    return texts
-
-
 def revived_notes(cwd, upstream, head):
     """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
     counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
     state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
     The slug is refused when its last event lowered the count and head holds more copies than that commit left: a merge
-    put a copy back. A last event that raised the count is a deliberate re-add and passes. A note with no `- <slug>:` form
-    has no slug, so the check does not see it."""
+    put a copy back. A last event that raised the count is a deliberate re-add and passes. An edit in place changes no
+    count, so it keeps nothing: a sweep edit, such as a mass `Until:` change, would otherwise keep every revived note. A
+    note with no `- <slug>:` form has no slug, so the check does not see it. The texts are read one commit at a time, so
+    at most two are held at once."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
     try:
@@ -621,22 +596,29 @@ def revived_notes(cwd, upstream, head):
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
         # simplification would then drop the branch's own delete commit from the walk.
-        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H", "%s..%s" % (upstream, head), "--", path)
-        shas = out.split()
-        texts = blobs_at(cwd, [spec for sha in shas for spec in ("%s^:%s" % (sha, path), "%s:%s" % (sha, path))])
+        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
+        commits = [line.split() for line in out.splitlines() if line.strip()]
+        if not commits:
+            continue
         last = {}  # slug -> (commit, copies it left) for the last commit that lowered the slug's count
-        for i, sha in enumerate(shas):
-            before, after = note_counts(texts[2 * i]), note_counts(texts[2 * i + 1])
-            for slug in present:
-                if after[slug] < before[slug]:
-                    last[slug] = (sha, after[slug])
-                elif after[slug] > before[slug]:
-                    last.pop(slug, None)
+        blobs = Blobs(cwd)
+        try:
+            for sha, *parents in commits:
+                before = note_counts(blobs.get(sha + "^", path)) if parents else collections.Counter()  # a root commit has no parent
+                after = note_counts(blobs.get(sha, path))
+                for slug in present:
+                    if after[slug] < before[slug]:
+                        last[slug] = (sha, after[slug])
+                    elif after[slug] > before[slug]:
+                        last.pop(slug, None)
+        finally:
+            blobs.close()
         for slug in sorted(last):
             sha, left = last[slug]
             if present[slug] > left:
-                found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back. "
-                              "Delete the extra %s to bring the count back to %d, or, if the re-add is wanted, re-add it in a non-merge commit."
+                found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back, and "
+                              "an edit in place does not keep a note. Delete the extra %s to bring the count back to %d. To keep "
+                              "it on purpose, delete it in one commit and add it back in a later commit."
                               % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
                                  "line" if present[slug] - left == 1 else "lines", left)))
     return found
