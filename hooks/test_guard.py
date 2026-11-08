@@ -28646,8 +28646,8 @@ def register_simulator_lease_cases():
 
 
 # --------------------------------------------------------------------------- the simulator drive rule
-# Debt sim-drive-without-lease, closed by the coordinator's ruling of 2026-11-07 16:13 CST (from the owner's
-# 2026-11-02 simulator rulings): a session drives a booted device only under its own live lease for it.
+# Decision sim-test-is-the-one-boot-path, ruling 12: a session drives a booted device only under its own live lease
+# for it.
 # simulator-drive-lease refuses a drive, and its reason names `sim-lease take` and `sim-test --hold`.
 #   A drive, on a booted device, is:
 #     - a simulator MCP call whose action is not read-only. The read set is screenshot, describe and list.
@@ -28658,7 +28658,7 @@ def register_simulator_lease_cases():
 #     - inside `sim-test --hold [--for S] -- CMD`, a drive whose target is not `$SIM_TEST_UDID` inside a single-quoted
 #       `sh -c '...'`, booted or shut down. A hold starts before its lease exists, so the lease cannot cover a UDID
 #       that CMD names. A double-quoted or unquoted `$SIM_TEST_UDID` (or `${SIM_TEST_UDID}`) expands to empty in the
-#       caller's shell before the hold exports it (coordinator ruling 2026-11-07 16:13 CST: every session leases the
+#       caller's shell before the hold exports it (decision sim-test-is-the-one-boot-path, ruling 12: every session leases the
 #       shared phone before it uses it; an empty -d may act on the booted phone). The refusal names `$SIM_TEST_UDID`
 #       and the `sh -c '...'` remedy (HOLD_CARRIES).
 #   `booted` names every booted device, so each of them needs a lease. A lease covers a UDID when its slot
@@ -28676,7 +28676,7 @@ DRIVE_SIMCTL = (("ui", "appearance dark"), ("openurl", "https://example.com"), (
                 ("location", "set 37.3,-122.0"), ("addmedia", "photo.jpg"), ("keychain", "reset"),
                 ("pbcopy", ""), ("spawn", "defaults read com.example.app"),
                 ("shutdown", ""), ("erase", ""))
-DRIVE_NOW = 1794088800  # 2026-11-07 22:00 UTC. SIM_LEASE_NOW fixes the lease clock, so no case reads the real one.
+DRIVE_NOW = 1794088800  # A fixed epoch. SIM_LEASE_NOW fixes the lease clock, so no case reads the real one.
 DRIVE_ENV = dict(LEASE_ENV, SIM_LEASE_NOW=str(DRIVE_NOW), SIM_LEASE_MAX="1800")
 # The spare phone is a phone no slot maps: an `other` lease can hold it. Each booted phone needs a launchd_sim.
 LAUNCHD_PID.update({LEASE_DUO1: 4006, LEASE_DUO2: 4007, LEASE_PRO: 4008, LEASE_DECOY: 4009})
@@ -28907,7 +28907,7 @@ def register_simulator_drive_cases():
     # A drive of $SIM_TEST_UDID passes only inside a single-quoted sh -c, where the hold's own shell has the variable.
     # So does a read of a named UDID, a plain test run, and a hold drive that is only text (quoted, echoed or in a
     # heredoc body). An unquoted or double-quoted $SIM_TEST_UDID expands to empty in the caller's shell, so these are
-    # refused: an empty -d may act on the booted phone (coordinator ruling 2026-11-07 16:13 CST).
+    # refused: an empty -d may act on the booted phone (decision sim-test-is-the-one-boot-path, ruling 12).
     drive_sh("drive: a hinge open of double-quoted $SIM_TEST_UDID inside sim-test --hold is refused, no lease",
              'bin/sim-test --hold -- hinge -d "$SIM_TEST_UDID" open', "deny", nolease, carries=HOLD_CARRIES)
     drive_sh("drive: a simctl ui of double-quoted $SIM_TEST_UDID inside sim-test --hold is refused, no lease",
