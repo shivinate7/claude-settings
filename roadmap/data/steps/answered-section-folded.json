@@ -1,11 +1,11 @@
 {
   "title": "The waiting page folds the Answered section to one line while nothing in it needs the owner",
   "why": "Owner 12:31 CST Nov 8, with a screenshot of items 354 and 440 shown as \"Filing pending\": \"theres rly not much to see or do in this part so idk why it is on the artifact for me as the artifact is for me\". The page is for the owner, and a sent answer waiting for its session to file it asks nothing of him. Fix in skill waiting-page: show the Answered section closed, as one line with its count, and open it on a tap to change an answer. Related: c145 and c193 (answered cards, done). The lane picks the form; it is undoable, so no owner question.",
-  "note": "Coordinator 12:33 CST Nov 8: lane session_013NEJL25kXsYSFJpzGQnKKe (Sonnet, designer first).",
+  "note": "Coordinator 12:33 CST Nov 8: lane session_013NEJL25kXsYSFJpzGQnKKe (Sonnet, designer first). PR #2317 (lane report 16:17 CST Nov 8). After it merges, triage republishes the live waiting page.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL25kXsYSFJpzGQnKKe",
-  "status": "doing",
+  "status": "ready",
   "order": 785,
-  "updatedAt": "2026-11-08T12:34:00-06:00"
+  "updatedAt": "2026-11-08T16:18:00-06:00"
 }
