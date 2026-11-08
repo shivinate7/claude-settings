@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""Cases for lint/check_report_in_head.py. Standard library and git only.
+
+    python3 lint/test_check_report_in_head.py
+
+A builder's report names the files it changed. The check reads the one `Files:` line of the report and
+checks each listed path against the diff of the pushed branch head (refs/heads/<branch> on origin).
+Exit contract:
+
+    0  every listed path is in the diff
+    1  a listed path is not in the diff; the output names each one
+    2  UNKNOWN: branch not on origin, a git failure, no Files line, an empty list, or an absolute path entry
+
+Each case builds a fixture under this run's folder (lint/_test_temp.py): a bare origin and a work tree.
+The check runs as lint/check_report_in_head.py by its absolute path. CHECK_REPORT_IN_HEAD_UNDER_TEST
+overrides that path, which a mutant run uses.
+
+CheckCase needs the check. On a tree without it, each case fails at its module assert, before it builds a
+fixture. ControlCase needs no check: it proves the fixture facts the check cases rely on, and passes there.
+"""
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  rm_tree removes a fixture, read-only git objects included (testing/tracked_tree.py)
+
+MODULE = os.path.abspath(os.environ.get("CHECK_REPORT_IN_HEAD_UNDER_TEST")
+                         or os.path.join(HERE, "check_report_in_head.py"))
+GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+for _name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+    GIT_ENV.pop(_name, None)  # the outer shell's repo never leaks into a fixture
+
+BRANCH = "lane/widget-edit"
+WIDGET = "lint/widget.py"
+OTHER = "lint/other.py"
+WIDGET_TEXT = "def widget():\n    return 1\n"
+OTHER_TEXT = "def other():\n    return 2\n"
+RENAMED_TEXT = "def renamed():\n    return 3\n"
+WORKTREE = "/home/x/wt"
+ABS_PATH = WORKTREE + "/lint/widget.py"
+
+RUN_FOLDER = None
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        tracked_tree.rm_tree(RUN_FOLDER)  # test-temp-standard: teardown removes the run folder
+
+
+class Fixture(unittest.TestCase):
+    """A bare origin and a work tree whose main is pushed. A case adds branches on top."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="crh_")
+        self.addCleanup(tracked_tree.rm_tree, self.root)
+        self.origin = os.path.join(self.root, "origin.git")
+        self.work = os.path.join(self.root, "work")
+        subprocess.run(["git", "init", "-q", "--bare", self.origin], check=True, capture_output=True, env=GIT_ENV)
+        subprocess.run(["git", "init", "-q", self.work], check=True, capture_output=True, env=GIT_ENV)
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        self.git("remote", "add", "origin", self.origin)
+        self.commit({"lint/base.py": "BASE = 1\n"}, "fixture base")
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+    def git(self, *args):
+        done = subprocess.run(["git", "-C", self.work, "-c", "user.name=test", "-c", "user.email=test@example.com",
+                               "-c", "core.autocrlf=false", *args],
+                              check=True, capture_output=True, text=True, encoding="utf-8", env=GIT_ENV)
+        return done.stdout.strip()
+
+    def commit(self, files, subject):
+        """Write `files` (a None value deletes one), commit them, and return the new head sha."""
+        for rel, text in files.items():
+            path = os.path.join(self.work, *rel.split("/"))
+            if text is None:
+                os.remove(path)
+                continue
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+        self.git("add", "-A", "--", *files)
+        self.git("commit", "-q", "-m", subject)
+        return self.git("rev-parse", "HEAD")
+
+    def on_main(self, files, subject):
+        """A commit on main, pushed, so a branch made after it starts from it."""
+        self.git("checkout", "-q", "main")
+        self.commit(files, subject)
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+
+    def local_only(self, name, files):
+        """A branch off main with one commit of `files`, not pushed. The work tree is left on main."""
+        self.git("checkout", "-q", "-b", name, "main")
+        sha = self.commit(files, "builder work on " + name)
+        self.git("checkout", "-q", "main")
+        return sha
+
+    def pushed_branch(self, name, files):
+        """A branch off main with one commit of `files`, pushed to origin. Returns the pushed head sha."""
+        sha = self.local_only(name, files)
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (name, name))
+        return sha
+
+    def unpushed_commit(self, name, files):
+        """One more commit on the existing branch `name`, not pushed. The work tree is left on main."""
+        self.git("checkout", "-q", name)
+        sha = self.commit(files, "unpushed work on " + name)
+        self.git("checkout", "-q", "main")
+        return sha
+
+    def origin_head(self, name):
+        """The sha origin holds for refs/heads/<name>, or '' when origin lacks the branch."""
+        out = self.git("ls-remote", "origin", "refs/heads/" + name)
+        return out.split()[0] if out else ""
+
+    def diff_names(self, ref):
+        """The paths in the diff from main to `ref`, read with no renames as the check reads it."""
+        return self.git("diff", "--name-only", "--no-renames", "main", ref).split()
+
+    def run_check(self, branch, report="", args=(), cwd=None):
+        """Run the check for `branch` with `report` on stdin. Returns (exit code, stdout and stderr)."""
+        done = subprocess.run([sys.executable, MODULE, "--branch", branch, *args],
+                              cwd=cwd or self.work, input=report, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=GIT_ENV)
+        return done.returncode, done.stdout + done.stderr
+
+
+class CheckCase(Fixture):
+    """Cases that need the check. Each fails on a tree without lint/check_report_in_head.py, the old commit."""
+
+    def setUp(self):
+        self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_report_in_head.py")
+        super().setUp()
+
+    def scope(self, branch, *names):
+        """Scope first: the pushed head's diff holds each name, so the case reaches the diff it probes."""
+        diff = self.diff_names(self.origin_head(branch))
+        for name in names:
+            self.assertIn(name, diff, "the pushed head of %s lacks %s from its diff" % (branch, name))
+
+    def assertPasses(self, branch, report, args=(), cwd=None):
+        rc, out = self.run_check(branch, report, args, cwd)
+        self.assertEqual(rc, 0, "exit %d, want 0:\n%s" % (rc, out))
+        self.assertNotIn("Traceback", out, out)
+
+    def assertFlags(self, branch, report, missing):
+        rc, out = self.run_check(branch, report)
+        self.assertEqual(rc, 1, "exit %d, want 1:\n%s" % (rc, out))
+        for path in missing:
+            self.assertTrue(any(path in line for line in out.splitlines()),
+                            "no output line names missing path %s:\n%s" % (path, out))
+
+    def assertUnknown(self, branch, report, named):
+        rc, out = self.run_check(branch, report)
+        self.assertEqual(rc, 2, "exit %d, want 2 (UNKNOWN):\n%s" % (rc, out))
+        for word in named:
+            self.assertIn(word, out, "output names no %r:\n%s" % (word, out))
+        for stray in ("can't open file", "usage:", "Traceback"):
+            self.assertNotIn(stray, out, "exit 2 from %r, not from the check's UNKNOWN:\n%s" % (stray, out))
+
+    def test_reported_file_missing_from_the_diff_is_flagged(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.assertFlags(BRANCH, "Files: %s, lint/never_applied.py\n" % WIDGET, missing=["lint/never_applied.py"])
+
+    def test_path_in_the_diff_with_a_range_passes(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        for report in ("Files: %s:10-20, %s:5\n" % (WIDGET, OTHER), "Files: %s:5\n" % WIDGET):
+            with self.subTest(report=report):
+                self.assertPasses(BRANCH, report)
+
+    def test_a_deleted_file_listed_passes(self):
+        self.on_main({"lint/old.py": OTHER_TEXT}, "main gets the old file")
+        self.pushed_branch(BRANCH, {"lint/old.py": None})
+        self.scope(BRANCH, "lint/old.py")
+        self.assertPasses(BRANCH, "Files: lint/old.py\n")
+
+    def test_a_renamed_file_passes_under_its_new_and_its_old_name(self):
+        self.on_main({"lint/old_name.py": RENAMED_TEXT}, "main gets the file to rename")
+        self.pushed_branch(BRANCH, {"lint/old_name.py": None, "lint/new_name.py": RENAMED_TEXT})
+        self.scope(BRANCH, "lint/old_name.py", "lint/new_name.py")
+        for name in ("lint/new_name.py", "lint/old_name.py"):
+            with self.subTest(name=name):
+                self.assertPasses(BRANCH, "Files: %s\n" % name)
+
+    def test_worktree_and_branch_lines_are_not_read_as_paths(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.assertPasses(BRANCH, "Worktree: %s\n%s\nBranch: %s\nFiles: %s\n" % (WORKTREE, WORKTREE, BRANCH, WIDGET))
+
+    def test_branch_not_on_origin_is_unknown(self):
+        self.local_only(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.assertEqual(self.origin_head(BRANCH), "")  # scope: the branch exists here and not on origin
+        for branch in (BRANCH, "lane/never-made"):
+            with self.subTest(branch=branch):
+                self.assertUnknown(branch, "Files: %s\n" % WIDGET, named=[branch])
+
+    def test_a_report_with_no_usable_files_line_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)  # the branch is valid, so only the report can fail
+        reports = {
+            "no Files line": "Worktree: %s\nBranch: %s\nDone: widget edited\n" % (WORKTREE, BRANCH),
+            "empty Files line": "Files:\n",
+            "blank Files line": "Files:   \n",
+        }
+        for label, report in reports.items():
+            with self.subTest(label):
+                self.assertUnknown(BRANCH, report, named=["Files"])
+
+    def test_an_absolute_path_entry_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        for report in ("Files: %s\n" % ABS_PATH, "Files: %s, %s\n" % (WIDGET, ABS_PATH)):
+            with self.subTest(report=report):
+                self.assertUnknown(BRANCH, report, named=[ABS_PATH])
+
+    def test_the_pushed_head_is_read_not_the_local_commit(self):
+        self.pushed_branch(BRANCH, {OTHER: OTHER_TEXT})
+        local = self.unpushed_commit(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, OTHER)
+        self.assertNotIn(WIDGET, self.diff_names(self.origin_head(BRANCH)))
+        self.assertIn(WIDGET, self.diff_names(local))
+        report = "Files: %s\n" % WIDGET
+        self.assertFlags(BRANCH, report, missing=[WIDGET])
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (BRANCH, BRANCH))
+        self.assertPasses(BRANCH, report)  # the same report passes once the head is pushed
+
+    def test_markup_around_the_files_line_parses(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        forms = (
+            "Files: `%s`, `%s:10-20`" % (WIDGET, OTHER),
+            "Files: ./%s, ./%s" % (WIDGET, OTHER),
+            "**Files:** %s, %s" % (WIDGET, OTHER),
+            "> Files: %s, %s" % (WIDGET, OTHER),
+            "> **Files:** `%s`, `./%s:5`" % (WIDGET, OTHER),
+            "- Files: %s, %s" % (WIDGET, OTHER),
+            "* Files: %s, %s" % (WIDGET, OTHER),
+            "  Files: %s, %s" % (WIDGET, OTHER),
+        )
+        for line in forms:
+            with self.subTest(line=line):
+                self.assertPasses(BRANCH, line + "\n")
+
+    def test_a_full_size_report_passes_and_a_gap_in_it_is_named(self):
+        names = ["lint/gen_%02d.py" % i for i in range(40)]
+        self.pushed_branch(BRANCH, {name: "VALUE = %d\n" % i for i, name in enumerate(names)})
+        self.scope(BRANCH, *names)
+        entries = [("`%s`" % name) if i % 2 else ("./" + name) for i, name in enumerate(names)]
+        self.assertPasses(BRANCH, "Files: %s\n" % ", ".join(entries))
+        self.assertFlags(BRANCH, "Files: %s\n" % ", ".join(entries + ["lint/never_applied.py"]),
+                         missing=["lint/never_applied.py"])
+
+    def test_report_flag_reads_the_file_and_dash_reads_stdin(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        path = os.path.join(self.root, "builder-report.txt")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write("Files: %s\n" % WIDGET)
+        self.assertPasses(BRANCH, "", args=("--report", path))  # stdin is empty, so the file must be read
+        self.assertPasses(BRANCH, "Files: %s\n" % WIDGET, args=("--report", "-"))
+
+    def test_root_and_base_flags_name_the_repo_and_the_base(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.assertPasses(BRANCH, "Files: %s\n" % WIDGET, args=("--root", self.work, "--base", "origin/main"),
+                          cwd=self.root)
+
+
+class ControlCase(Fixture):
+    """Fixture facts the check cases rely on. No case here runs the check, so each passes on a tree without it."""
+
+    def test_origin_holds_the_pushed_head_and_main(self):
+        head = self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.assertEqual(self.origin_head(BRANCH), head)
+        self.assertEqual(self.origin_head("main"), self.git("rev-parse", "main"))
+
+    def test_a_local_commit_is_not_on_origin(self):
+        self.pushed_branch(BRANCH, {OTHER: OTHER_TEXT})
+        local = self.unpushed_commit(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.assertNotEqual(self.origin_head(BRANCH), local)
+
+    def test_a_local_only_branch_is_not_on_origin(self):
+        self.local_only(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.assertTrue(self.git("rev-parse", "--verify", BRANCH))
+        self.assertEqual(self.origin_head(BRANCH), "")
+
+    def test_a_rename_reads_as_a_rename_under_detection(self):
+        self.on_main({"lint/old_name.py": RENAMED_TEXT}, "main gets the file to rename")
+        head = self.pushed_branch(BRANCH, {"lint/old_name.py": None, "lint/new_name.py": RENAMED_TEXT})
+        status = self.git("diff", "--name-status", "-M", "main", head)
+        self.assertTrue(any(line.startswith("R") for line in status.splitlines()), status)
+
+
+if __name__ == "__main__":
+    unittest.main()
