@@ -69,3 +69,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - #2235 round 3 (lane agent-report-shas-resolve, Nov 8 13:57 CST), each Decision: send-message-refs-resolve:
   - message-ref-link-text-slow: MESSAGE_LINK_TEXT (hooks/guard.py) is quadratic on a line with many `[` and no `]`: 7.8 s at 32,000 characters; message_refs takes 40 s on a 64 KiB line. A hook timeout fails open.
   - message-ref-link-forms: `[PR #8](<https://github.com/other/repo/pull/8>)` and a reference-style link `[PR #8][1]` to another repo are still judged against this repo.
+- time-from-one-helper (lane session_013NEJKyggQsYbfxs62CE1mx, Nov 8 14:24 CST), notes: (1) the `.claude` exemption in REASON_MAY_NAME passes an echoed `added` naming ~/.claude, which echoes Claude's own write. (2) The now-central path is a literal in 4 places: local_time NOW_CENTRAL_POINTER, two guard_merge reasons, and a test constant.
