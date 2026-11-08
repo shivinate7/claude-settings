@@ -14266,6 +14266,59 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane whose record names a
                          archive_branch_reads_case))
 
 
+# The cost of archive_hit's transcript read: one open of the target's transcript per archive call. The count is taken
+# in process, on builtins.open, so a second read of the same file shows as a second open of its path.
+class _EmptyPulls:
+    """The merge tool's Host for one repo: the open list reads empty, and no other read is answered."""
+
+    def __init__(self, repo):
+        self.repo = repo
+
+    def pages(self, route, **kwargs):
+        return []
+
+
+def _load_guard_merge():
+    """guard_merge.py beside the guard under test (GUARD), loaded fresh, so a patch to it touches no other load."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_merge_under_test",
+                                                  os.path.join(os.path.dirname(GUARD), "guard_merge.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def archive_transcript_one_read_case():
+    """An archive of a lane opens its target's transcript once. The open list reads empty and the record names no
+    branch, so the one open is the whole archive's read of the transcript."""
+    import builtins
+    import types
+    guard_merge = _load_guard_merge()
+    transcript = role_path("archive-lane")
+    materialize(transcript)  # the fixture is written on first use: before the count
+    fake_tool = types.SimpleNamespace(Host=_EmptyPulls, shared_deadline=contextlib.nullcontext)
+    real_open = builtins.open
+    opened = []
+
+    def counting_open(file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)) and os.path.abspath(os.fspath(file)) == os.path.abspath(transcript):
+            opened.append(os.fspath(file))
+        return real_open(file, *args, **kwargs)
+
+    with mock.patch.object(guard_merge, "merge_module", return_value=fake_tool), \
+            mock.patch("builtins.open", counting_open):
+        decision = guard_merge.archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, transcript)
+    if decision is not None:
+        return False, "an archive of the lane with an empty open list was refused: %r" % (decision,)
+    if len(opened) != 1:
+        return False, "the archive opened the target's transcript %d times, want 1" % len(opened)
+    return True, "the archive opened the target's transcript once, and the lane is allowed"
+
+
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an archive of a lane opens its target's transcript once",
+                         archive_transcript_one_read_case))
+
+
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
 # where None is no record. The guard's archive and brief reads both go through this reader.
 def _load_own_session():
