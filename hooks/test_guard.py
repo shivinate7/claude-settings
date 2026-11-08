@@ -13583,6 +13583,26 @@ WORKFLOW_GLOB_REFUSED = (
      "yq -i '.on |= \"push\" | .x = 1' .github/workflows/checks.yml"),
     ("yq -i with a ; between two expressions, edits checks.yml", "yq -i '.a = 1; .b = 2' .github/workflows/checks.yml"),
     ("rsync with a --timeout flag after the workflow folder", "rsync -a src/ .github/workflows/ --timeout 30"),
+    # yq's `eval` and `eval-all` subcommands, and an in-place flag before or after the subcommand, write the
+    # file too. Its expression holds | and ; and a quoted string, so the in-place reader must not stop there.
+    ("yq eval -i with a | between two expressions, edits checks.yml",
+     "yq eval -i '.a = 1 | .b = 2' .github/workflows/checks.yml"),
+    ("yq eval-all -i with a | between two expressions, edits checks.yml",
+     "yq eval-all -i '.a = 1 | .b = 2' .github/workflows/checks.yml"),
+    ("yq -i before eval, with a | between two expressions, edits checks.yml",
+     "yq -i eval '.a = 1 | .b = 2' .github/workflows/checks.yml"),
+    ("yq eval --inplace with a ; between two expressions, edits checks.yml",
+     "yq eval --inplace '.a = 1; .b = 2' .github/workflows/checks.yml"),
+    ("yq -i with a double-quoted string holding an escaped quote, edits checks.yml",
+     "yq -i \".a = \\\"x\\\" | .b = 2\" .github/workflows/checks.yml"),
+    # A redirect that sends both streams to the null device writes no file, but it must not hide the target
+    # of the copy or sync beside it.
+    ("rsync into .github/workflows/ with &>/dev/null, writes a workflow file",
+     "rsync -a /tmp/x.yml .github/workflows/ &>/dev/null"),
+    ("rsync into .github/workflows/ with &>> /dev/null, writes a workflow file",
+     "rsync -a /tmp/x.yml .github/workflows/ &>> /dev/null"),
+    ("cp over checks.yml with &>/dev/null, writes a workflow file",
+     "cp /tmp/x.yml .github/workflows/checks.yml &>/dev/null"),
 )
 for _name, _command in WORKFLOW_GLOB_REFUSED:
     sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13607,7 +13627,11 @@ WORKFLOW_GLOB_ALLOWED = (
     ("rsync out of .github/workflows/", "rsync .github/workflows/ /tmp/wf/"),
     # The tests/ source is only read. A redirect word makes the rsync reader take no source as read (_rsync_reads).
     ("rsync of tests/ to /tmp, stderr to /dev/null", "rsync -a tests/ /tmp/t/ 2>/dev/null"),
+    ("rsync of tests/ to /tmp, both streams to /dev/null", "rsync -a tests/ /tmp/t/ &>/dev/null"),
     ("yq reads checks.yml and pipes the value to cat", "yq '.on' .github/workflows/checks.yml | cat"),
+    ("yq eval reads checks.yml and pipes the value to cat", "yq eval '.on' .github/workflows/checks.yml | cat"),
+    ("cp of checks.yml out to /tmp, both streams to /dev/null",
+     "cp .github/workflows/checks.yml /tmp/x.yml &>/dev/null"),
 )
 for _name, _command in WORKFLOW_GLOB_ALLOWED:
     sh("builder-test: workflow shell control, %s, is allowed" % _name, _command, "allow", **dict(B, cwd=WFGIT))
