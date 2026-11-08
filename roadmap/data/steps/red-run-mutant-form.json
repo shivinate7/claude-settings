@@ -1,0 +1,11 @@
+{
+  "title": "A test that pins behaviour the code already has gets its own Red-run form: the mutant form",
+  "phase": "next",
+  "status": "todo",
+  "order": 60,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "#1655 (57526aaec) and #1647 (18b628f73) used `Red-run: none: ...; mutant red` for tests that cannot fail on an old commit; fix checks called it a mislabel.",
+  "note": "Fix: add `Red-run: mutant: <mutation> -> <N> failed on <sha>` to lint/check_red_run.py and rewrite its header. Done check: lint/test_check_red_run.py accepts the mutant form and rejects a malformed one. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask.",
+  "updatedAt": "2026-11-07T18:05:00-06:00"
+}

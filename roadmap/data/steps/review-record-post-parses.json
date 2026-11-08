@@ -1,0 +1,11 @@
+{
+  "title": "A posted review record always parses",
+  "phase": "next",
+  "status": "todo",
+  "order": 60,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Review records on #1502 and #1535 had prose after the CI line, so merge.parse_review returned None and they were fixed by hand.",
+  "note": "Fix: a guard on a PR comment holding `<!-- review-record -->` (gh or MCP) runs parse_review and refuses on None; or merge.py --review-record posts the record itself. Done check: a guard test refuses a record with trailing prose and allows the bare record. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask.",
+  "updatedAt": "2026-11-07T18:05:00-06:00"
+}
