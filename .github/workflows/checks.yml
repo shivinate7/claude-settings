@@ -130,6 +130,10 @@ jobs:
         if: ${{ needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
+      - name: Reap proof Git Bash one-home suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_prove_agent_end_reap.py
+
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
 
@@ -244,6 +248,9 @@ jobs:
 
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
+
+      - name: Stop-hook review-record fixture suite
+        run: python3 lint/test_report_guard_review.py
 
       - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -1173,9 +1180,9 @@ jobs:
         shell: bash
         run: sh hooks/test_install_windows.sh
 
-      # F1 and G1 run session_start.sh, which runs at every Windows session start. Each fetches with the hook's
-      # own 2 s bound (hooks/session_start.sh:15), so a slow runner may kill the fetch. A hang fails this step in 3 min,
-      # by name, not the job's 10 (debt install-checkout-flake).
+      # F1 and G1 run session_start.sh, which runs at each Windows session startup and resume. They run with a 30 s
+      # fetch bound (the CLAUDE_SETTINGS_FETCH_TIMEOUT export in hooks/test_install_src.sh). A hang fails this CI step in 3 min,
+      # by name, not the job's 10.
       - name: Session start freshness cases (caseF1, caseG1)
         if: ${{ (needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         shell: bash
