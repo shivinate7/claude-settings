@@ -2711,6 +2711,22 @@ class DoubleBacktickMaskTests(unittest.TestCase):
         self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
                          "a double-backtick span with no backtick inside adds a finding")
 
+    def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
+        # The `` run has no closing run of two, so it is literal text and opens no span.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
+                      "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+                      "an unclosed double-backtick run hides the words before a later code span")
+
+    def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
+        # The run is literal, so the single-backtick span after it is valid and its words stay masked.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
+                      "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+                         "an unclosed double-backtick run makes a later code span read as prose")
+
     def test_single_backtick_span_content_is_not_linted(self):
         words = " ".join(["word"] * 31)
         self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
