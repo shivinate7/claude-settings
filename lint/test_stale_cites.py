@@ -930,11 +930,11 @@ class CostTests(StaleCase):
     the rule files, starts three git processes and reads no blob, unless an added line needs a read. One such line
     starts one more, a cat-file: a line holding a verb or route word a reader judges (STALE005's list on any governed
     page, and STALE009's looser list, CODE_VERB_WORD, where `check`, `run` and `read` count, on an added decision
-    record), a folder .py name cite (STALE010, which NameCiteTests pins at four starts, or one git log more when the cite
-    names a folder absent at head: the history read), or a value cite of a code
-    file (STALE008). A removed or renamed path makes the check read the tracked Markdown files. So does a name that a
-    touched .py no longer defines. A changed file that is not Markdown also reads the repo's decision records for its
-    Home line, even when nothing was removed. No run writes a file."""
+    record), a folder .py name cite (STALE010, which NameCiteTests pins at four starts, or one git log more when the
+    cite's first part is no top folder at head and no near-miss typo checked at head: the history read), or a value
+    cite of a code file (STALE008). A removed or renamed path makes the check read the tracked Markdown files. So does
+    a name that a touched .py no longer defines. A changed file that is not Markdown also reads the repo's decision
+    records for its Home line, even when nothing was removed. No run writes a file."""
 
     def run_traced(self, rng):
         rc, out, commands = self.run_traced_commands(rng)
@@ -4036,13 +4036,24 @@ class NameCiteTests(StaleCase):
 
     def test_a_cite_through_a_root_symlink_is_no_stale010_as_stale003_reads_it(self):
         """`link` is a root symlink to `lint/`, tracked as an entry of mode 120000, so it is no folder. A cite through
-        it is no cite, as STALE003 reads it: the mode check in `root_folders` keeps the symlink out of the top folders."""
+        it is no cite, as STALE003 reads it: the mode check in `root_folders` keeps the symlink out of the top folders.
+        `link` is one edit from the tracked `lint`, and `lint/x.py` is at head, so only the root-entry clause of
+        `typo_of_tracked_top` keeps the cite out of STALE010. Its first part is no top folder and no typo is checked,
+        so one git log starts."""
         rng, _ = self.route_range([("- (link/x.py foo)", False)], history=(track_root_link,))
         self.assertEqual(touched(rng), {NOTES})  # scope: the range adds the cite to the Markdown page only
         self.assertTrue(git(rng.repo, "ls-tree", rng.head, "link").startswith("120000 "),
                         "scope: link is no symlink at head")
         self.assertNotIn("link", top_folders(rng))  # scope: a symlink is no tracked top folder
-        self.assert_passes(rng)
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder, one edit from link
+        tracked = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        self.assertIn("lint/x.py", tracked)  # scope: the corrected path of the one-edit typo is at head
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(parse(out), [], "a cite through the root symlink was judged as a cite into lint/\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(subs.count("log"), 1, "the root symlink's cite did not start exactly one git log\n%s" % subs)
 
 
 if __name__ == "__main__":
