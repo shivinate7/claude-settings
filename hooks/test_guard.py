@@ -5441,6 +5441,60 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+# --- a pipe out of a verdict stage (extends the live-stream rule)
+#
+# verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
+# so `verdict CMD | tail` reads tail's exit and a red run reads 0. Any pipe out of verdict is refused,
+# whatever the filter. A verdict that is the last stage has no pipe out of it, so it is allowed.
+VERDICT_PIPE = "verdict-pipe"
+
+
+def verdict_pipe(name, command, expected):
+    """One case of the verdict-pipe rule. A deny names the rule; an allow has no reason to name it."""
+    sh("verdict-pipe: " + name, command, expected, VERDICT_PIPE if expected == "deny" else None,
+       cwd=NOGIT)
+
+
+for _name, _command in (
+    ("a bare verdict piped to tail", "verdict false | tail"),
+    ("stderr piped to grep", "verdict false 2>&1 | grep x"),
+    ("a pipe into tee", "verdict false | tee out"),
+    ("the script run by path, piped to tail", "~/.claude/bin/verdict pytest | tail -5"),
+    ("a variable ahead of verdict, piped to head", "VERDICT_LOG=/tmp/x verdict false | head"),
+    ("a cd ahead of verdict, piped to tail", "cd x && verdict false | tail"),
+    ("a pipe that takes stderr too, |&", "verdict false |& tail"),
+    ("the repo's runner form, piped to tail", "python bin/verdict pytest | tail -5"),
+    ("a timeout ahead of verdict, piped to tail", "timeout 600 verdict pytest | tail -5"),
+    ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
+    ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
+):
+    verdict_pipe(_name, _command, "deny")
+for _name, _command in (
+    ("a bare verdict", "verdict false"),
+    ("verdict then a second command, &&", "verdict x && y"),
+    ("verdict then echo, ||", "verdict x || echo red"),
+    ("output redirected to a file", "verdict x > out"),
+    ("a quoted pipe in verdict's own argument", "verdict grep 'a|b' f"),
+    ("a quoted script in verdict's own argument", "verdict bash -c 'a | b'"),
+    ("grep names verdict, pipe out of grep", "grep verdict f | tail"),
+    ("echo names verdict, pipe out of echo", "echo verdict | cat"),
+    ("verdict last in a pipeline", "cat f | verdict pytest"),
+    ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
+    ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
+):
+    verdict_pipe(_name, _command, "allow")
+
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
