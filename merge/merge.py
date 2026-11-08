@@ -32,8 +32,8 @@
                           or that is itself ready with CI running, is left off the batch line. A root whose read fails, or whose folder is
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
-                          Cost per root: the gh calls of one --reviewed, a repo-name read, the batch-line reads when the base has a done
-                          PR, and local git reads. The exact gh formula is the docstring of the ReviewedRoots case
+                          Cost per root: the gh calls of one --reviewed, one to three repo reads, the batch-line reads when the base has a
+                          done PR, a git fetch of the base and local git reads. The exact gh formula is the docstring of the ReviewedRoots case
                           test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr, and its cost cases pin it. No new process,
                           file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
