@@ -2345,11 +2345,11 @@ MUTATIONS = [
     ("review-record-after-round: an agent's own call is judged",
      '    if agent or not isinstance(tool_input, dict) or not transcript:',
      '    if not isinstance(tool_input, dict) or not transcript:',
-     "guard", "a subagent's builder spawn (payload with agent_id) is not judged"),
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
     ("review-record-after-round: the caller never passes the agent_id",
      'trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))',
      'trust_transcript if isinstance(trust_transcript, str) else "", False)',
-     "guard", "a subagent's builder spawn (payload with agent_id) is not judged"),
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
 ]
 
 
@@ -3011,6 +3011,13 @@ def run_mutant(sources, work: str, entry):
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
+        # guard_merge.merge_module loads merge/merge.py beside the hooks folder (the home of the review record
+        # marker, and of the merge reads). The mutant's config folder holds no pointer to a clone, so without
+        # this copy the tool reads as unloadable and the rules that read it pass unjudged.
+        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
+        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)  # merge.py reads the alarm events at import
+        shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"), os.path.join(root, "actions", "ci-alarm"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
