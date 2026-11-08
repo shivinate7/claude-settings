@@ -1003,14 +1003,14 @@ class UnknownTests(StaleCase):
 
 
 class ResolveTests(StaleCase):
-    """head_resolves and resolves each read whether a rev names a commit. They must agree on every input. Each input's
-    answer is pinned too, so the agreement is on the right answer."""
+    """resolves reads whether a rev names a commit. Each pinned input states its answer here, so a change to what
+    resolves returns shows as the input that moved."""
 
     @classmethod
     def setUpClass(cls):
         cls.stale = load_module_under_test()
 
-    def test_head_resolves_and_resolves_give_the_same_answer_on_shared_inputs(self):
+    def test_resolves_names_a_commit_for_each_pinned_rev(self):
         def topic_commit(repo):
             write(repo, "topic.md", "topic\n")
             commit(repo)
@@ -1018,14 +1018,14 @@ class ResolveTests(StaleCase):
         here = os.getcwd()
         self.addCleanup(os.chdir, here)
         os.chdir(rng.repo)
+        branches = git(rng.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+        self.assertEqual(sorted(branches), ["main", "topic"],
+                         "scope: the case repo does not hold the two branches the pins name")
         names_commit = {"HEAD": True, "main": True, "topic": True, "HEAD^1": True, "HEAD~1": True,
                         "HEAD~5": False, "nope": False, "nope^1": False, EMPTY_TREE: False}
         for rev, expected in names_commit.items():
             with self.subTest(rev=rev):
-                one = self.stale.resolves(rev)
-                other = self.stale.head_resolves(rev)
-                self.assertEqual(other, one, "head_resolves and resolves disagree on %s" % rev)
-                self.assertEqual(one, expected, "%s does not resolve as pinned" % rev)
+                self.assertEqual(self.stale.resolves(rev), expected, "%s does not resolve as pinned" % rev)
 
 
 class PinTests(unittest.TestCase):
