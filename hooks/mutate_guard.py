@@ -319,6 +319,55 @@ MUTATIONS = [
      '        for pipeline in re.split(r";|&&|\\|\\||&", line):\n            if _holds_shell(pipeline):',
      '        for pipeline in [line]:\n            if _holds_shell(pipeline):', "guard",
      'heredoc-keep: a brief holding gh pr create --title x, then env.sh sourced and the brief read, allows'),
+    # _walk_heredocs: once any body is kept, a dropped body keeps its closing line, so the re-walk closes it.
+    ("heredoc: a dropped body loses its closing line beside a kept body, the launch after both reads as body",
+     '                first = start if header_at in keep else index',
+     '                first = start if header_at in keep else end', "guard",
+     'heredoc-keep: a kept body and a data body, then a bash run and a background npm start, denies'),
+    # _CODE_FLAGS: a flag whose value is code, so the interpreter's operands are no data.
+    ("heredoc: no flag gives code, node -p require of a file runs nothing",
+     '_CODE_FLAGS = {"-c", "-e", "-p", "--print", "--eval", "-E"}',
+     '_CODE_FLAGS = set()', "guard",
+     'heredoc-keep: reader, a body in f.js run by node -p require of ./f.js, denies'),
+    # _data_positions: the value of -W or -X is no script, so the script is the word after it.
+    ("heredoc: a value flag takes no value, python3 -W ignore f reads f as data",
+     '            step += 2 if words[step] in _VALUE_FLAGS else 1',
+     '            step += 1', "guard",
+     'heredoc-keep: pin, a body in f run by python3 -W ignore f, denies'),
+    # _stage_runs: the value of -W or -X is no operand, so the `-` after it still reads stdin.
+    ("heredoc: a value flag eats the dash, python3 -W ignore - < f reads no stdin",
+     '                value = script and words[end] in _VALUE_FLAGS',
+     '                value = False', "guard",
+     'heredoc-keep: reader, a body in f run by python3 -W ignore - < f, denies'),
+    # _stage_runs: the chain may start past a launcher no runner names.
+    ("heredoc: the chain starts at the command word, uv run python - < f reads no stdin",
+     '    at = start if _reads_only(words) else next(',
+     '    at = start if True else next(', "guard",
+     'heredoc-keep: reader, a body in f run by uv run python - < f, denies'),
+    # _stdin_shell: the value of an ssh flag is no host, so `ssh -p 22 host` still reads stdin as a shell.
+    ("heredoc: an ssh value flag takes no value, cat f | ssh -p 22 host runs nothing",
+     '                at += 2 if words[at] in values else 1',
+     '                at += 1', "guard",
+     'heredoc-keep: pin, a body in f run by a pipe into ssh -p 22 host, denies'),
+    # _command_start: a leading keyword is no command word, so `if ./f` runs f.
+    ("heredoc: no leading keyword, if ./f runs nothing",
+     '_LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}',
+     '_LEADING_KEYWORDS = set()', "guard",
+     'heredoc-keep: pin, a body in f run by if ./f; then :; fi, denies'),
+    # _run_files: a stage's words run only in a pipeline that holds a runner, and never a pure reader's.
+    ("heredoc: every stage's words run without a runner, ls f | xargs wc runs f",
+     '                if holds_runner and not only:',
+     '                if not only:', "guard",
+     'heredoc-keep: retire, a gh pr create line written then run by ls f | xargs wc, allowed'),
+    ("heredoc: a pure reader's words run beside a runner, cat f | python3 check.py runs f",
+     '                if holds_runner and not only:',
+     '                if holds_runner:', "guard",
+     'heredoc-keep: pin, a body in f run by a pipe into python3 check.py, allows'),
+    # _substitution_runs: a runner's substitution runs the files of its own list piece only.
+    ("heredoc: a runner's substitution runs the whole line, a python version probe runs the notes read",
+     '    for line in _list_pieces(text):',
+     '    for line in [text]:', "guard",
+     'heredoc-keep: a body in notes.md, then cat notes.md, then a python version probe, allows'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',

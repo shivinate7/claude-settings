@@ -767,7 +767,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
     A caller that passes `kept_at` gets the line index of each kept line appended to it. `body_at` gets the
     line index of each body's header line, in the order of the bodies. A body whose header line index is in
-    `keep` stays in view, its lines and its closing delimiter line kept after its header."""
+    `keep` stays in view, its lines and its closing delimiter line kept after its header. With any `keep`, a
+    dropped body keeps its closing delimiter line, so the kept text re-walks with every heredoc closed."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -792,13 +793,15 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             if body_at is not None:
                 body_at.append(header_at)
             closed = index < len(lines)
-            if keep and header_at in keep:
-                # The closing line stays with its body, so a re-walk of the kept text closes the heredoc and
-                # reads every line after it as a command, not as body.
+            if keep:
+                # Once any body is kept, every closing line stays: a kept body with its lines, a dropped body
+                # alone. A re-walk of the kept text then closes each heredoc and reads every line after it as a
+                # command, not as body.
                 end = index + 1 if closed else index
-                kept.extend(lines[start:end])
+                first = start if header_at in keep else index
+                kept.extend(lines[first:end])
                 if kept_at is not None:
-                    kept_at.extend(range(start, end))
+                    kept_at.extend(range(first, end))
             if closed:
                 index += 1  # a dropped body drops its closing delimiter line too
             else:
@@ -838,9 +841,10 @@ _LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", 
 # Wrappers that run the command after them, and the commands that only read a file named after them.
 _WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs"}
 _READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
-# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file.
+# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file
+# (`node -p` and `--print` print what the code gives, `node --eval` and `perl -E` run it).
 _VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
-_CODE_FLAGS = {"-c", "-e"}
+_CODE_FLAGS = {"-c", "-e", "-p", "--print", "--eval", "-E"}
 # A file named for a shell (`run.sh`, `run.ksh`, a file named `sh`), which a later call may run.
 _SHELL_SCRIPT = re.compile(r"(?:^|[./])(?:" + _SHELLS + r")$").search
 _STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
@@ -886,12 +890,15 @@ def _holds_shell(line: str) -> bool:
 def _stage_runs(words):
     """(the command word of a stage, whether it reads a script on stdin). An interpreter in the chain from the
     command word (`python3`, `sudo node`, `timeout 5 perl`) reads stdin when it has no operand after its flags,
-    or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`). The caller passes
-    no line that holds a shell word."""
+    or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`), and so may the word
+    after an interpreter's value flag (`python3 -W ignore -`), but never the `-` itself. The chain may start past
+    a launcher no runner names (`uv run python -`, `stdbuf -oL python3 -`), unless the stage is a pure reader
+    (`grep python`). The caller passes no line that holds a shell word."""
     start = _command_start(words)
     ran = words[start:start + 1]
     stdin = False
-    at = start
+    at = start if _reads_only(words) else next(
+        (i for i in range(start, len(words)) if _RUNNER(_basename_word(words[i]))), len(words))
     while at < len(words):
         name = _basename_word(words[at])
         if not _RUNNER(name):
@@ -900,9 +907,15 @@ def _stage_runs(words):
         flags = []
         picked = []
         end = at
+        value = False
         for end in range(at + 1, len(words)):
+            if value and words[end] != "-":
+                value = False
+                continue   # the value of an interpreter's flag (`-W ignore`)
+            value = False
             if _is_flag(words[end]):
                 flags.append(words[end])
+                value = script and words[end] in _VALUE_FLAGS
                 continue
             picked.append(words[end])
             if script or not flags or len(picked) == 2:
@@ -995,6 +1008,47 @@ def _data_positions(words) -> set:
     return data
 
 
+def _list_pieces(line: str):
+    """The pieces of LINE between `;`, `&&`, `||` and `&` that sit outside every `$(`, `(` and backtick. A mark
+    inside one stays in its piece, so `python3 -c "$(cd d && cat f)"` is one piece. An unclosed `(` keeps the
+    rest of the line in one piece: a reader of it can only run more files, never fewer."""
+    pieces = []
+    depth = 0
+    tick = False
+    begin = 0
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if char == "`":
+            tick = not tick
+        elif char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        elif not depth and not tick and char in ";&|":
+            mark = line[index:index + 2] if line[index:index + 2] in ("&&", "||") else char
+            redirect = mark == "&" and (line[index - 1:index] in ("<", ">") or line[index + 1:index + 2] == ">")
+            if mark != "|" and not redirect:   # a pipe joins its stages, a `2>&1` or `&>` redirects
+                pieces.append(line[begin:index])
+                begin = index + len(mark)
+                index = begin
+                continue
+        index += 1
+    return pieces + [line[begin:]]
+
+
+def _substitution_runs(text: str, written) -> set:
+    """The files of WRITTEN that a runner's substitution runs: each list piece of TEXT (_list_pieces) that holds a
+    substitution and a runner runs every written file it names (`python3 -c "$(cat f)"`). A file in another piece
+    is not run, so `cat notes.md; echo "v: $(python3 --version)"` runs nothing."""
+    ran = set()
+    for line in _list_pieces(text):
+        line_words = _plain_words(_WORDS(line))
+        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
+            ran.update(written.intersection(line_words))
+    return ran
+
+
 def _run_files(text: str, written) -> set:
     """The files of WRITTEN that a command in TEXT runs. Each one a pipeline names that holds a shell word, as main
     (`bash f`, `(cat f) | sh`, `xargs -I{} sh -c {}`, `ssh host bash < f`). On any other line: the command
@@ -1005,15 +1059,13 @@ def _run_files(text: str, written) -> set:
     so `$HOME/f` matches only itself."""
     ran = set()
     for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
-        line_words = _plain_words(_WORDS(line))
         # A shell word runs the files named in its own pipeline only: `source ./env.sh && cat brief.md` runs env.sh.
         shell_words = set()
         for pipeline in re.split(r";|&&|\|\||&", line):
             if _holds_shell(pipeline):
                 shell_words.update(_plain_words(_WORDS(pipeline)))
         ran.update(written.intersection(shell_words))
-        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
-            ran.update(written.intersection(line_words))
+        ran.update(_substitution_runs(line, written))
         # A substitution is a command of its own: `cat f` inside `python3 -c "$(cat f)"` reads f, and the line above
         # decides whether the runner runs what it prints. A `)` ends no pipeline, so `(cat f) | python3 -` pipes f.
         for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", line):
