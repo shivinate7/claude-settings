@@ -9,7 +9,7 @@ import stat
 
 import guard_core
 from guard_core import (
-    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
+    CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move,
     _segment_git_c_target, dir_before_segment, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,

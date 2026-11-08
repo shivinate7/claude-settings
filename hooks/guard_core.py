@@ -1075,7 +1075,19 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     dirs = []   # the `pushd` stack: folders to `popd` back to, or None once it cannot be told
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
-        found = [(place, char) for place, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        found, opens = [], []   # opens: per open parenthesis, True when it is a `$(...)` or inside one
+        for place, char, quote in walk_quotes(segment):
+            if quote or char not in "()":
+                continue
+            # A `$(` opens a command substitution, no subshell: the shell stays where it is, so neither its
+            # `(` nor its `)` counts, and its words stay one word (`cd $(dirname $PWD)/B` names an unknown folder).
+            inside = char == "(" and (place > 0 and segment[place - 1] == "$" or any(opens))
+            if char == "(":
+                opens.append(inside)
+            elif opens:
+                inside = opens.pop()
+            if not inside:
+                found.append((place, char))
         marks = [char for _, char in found]
         for place, _ in found:   # a parenthesis the shell reads as syntax is no part of the word beside it: `(cd A)`
             segment = segment[:place] + " " + segment[place + 1:]

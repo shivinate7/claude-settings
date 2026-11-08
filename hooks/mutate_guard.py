@@ -2188,7 +2188,7 @@ MUTATIONS = [
      '    inner = inner_commands(tokens) if tokens else []',
      '    inner = []', "guard", "a push to roadmap inside bash -c is refused"),
     ("roadmap-one-writer: a wrapped push runs in the call's folder, not its segment's cd",
-     '        inner_cwd = push_target(segment, script, cwd)[0] or cwd',
+     '        inner_cwd = push_target(segment, script, cwd, number)[0] or cwd',
      '        inner_cwd = cwd', "guard", "a push inside bash -c after a cd is judged by the folder it moved to"),
     ("roadmap-one-writer: a set_session_tags call on another session voids the own proof",
      '                    if not isinstance(ids, list) or own_id in ids:',
@@ -2210,7 +2210,7 @@ MUTATIONS = [
      '        _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]',
      '        _DESTINATIONS[key] = found', "guard", "a lane's push of a ref into refs/heads/roadmap is refused"),
     ("roadmap-one-writer: git -C does not move the push to its checkout",
-     '            where, overrides = push_target(segment, script, cwd)\n            yield _command_words(args), where, overrides',
+     '            where, overrides = push_target(segment, script, cwd, number)\n            yield _command_words(args), where, overrides',
      '            where, overrides = cwd, {}\n            yield _command_words(args), where, overrides', "guard",
      "a lane's push of roadmap-fork with git -C into the fork is refused"),
     # A `)` or `&` glued to the last word ends the command (_command_words).

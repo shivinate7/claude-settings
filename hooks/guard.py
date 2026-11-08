@@ -3526,9 +3526,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
+    for number, segment in enumerate(split_segments(stripped)):
         for subcommand, args in git_calls(push_text(segment)):
-            where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
+            where, overrides = push_target(segment, stripped, cwd, number) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
             if verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")

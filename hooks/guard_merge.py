@@ -889,21 +889,31 @@ def _commit_folder(segments, number, cwd, ends):
     """Where `segments[number]` (a commit, add or other git call) acts: `(repo, files)`, the folder of the
     checkout it lands in and the folder its files are read from. Both are the folder the shell is in when it
     runs (`dir_before_segment`, after each earlier `cd`), moved by the segment's `-C`; `--work-tree` moves only
-    `files`. None when a folder cannot be read, `_SKIPPED` when the chain never runs the segment."""
+    `files`. None when a folder cannot be read: a `-C` or `--work-tree` target that holds `$` or a backtick,
+    or that is no directory. `_SKIPPED` when the chain never runs the segment."""
     where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, skipped=_SKIPPED)
     if where is _SKIPPED:
         return _SKIPPED
     target = _segment_git_c_target(segment_tokens(segments[number]) or [])
     if target is not None:
-        where = _absolute(target, where or "")
-        where = where if os.path.isabs(where) else None
+        where = None if _unread_target(target) else _absolute(target, where or "")
+        where = where if where and os.path.isabs(where) and os.path.isdir(where) else None
     if not where:
         return None
     files = where
     tree = GIT_WORK_TREE_RE.search(segments[number])
     if tree:
+        if _unread_target(tree.group(2)):
+            return None
         files = _absolute(tree.group(2), where)
+        if not (os.path.isabs(files) and os.path.isdir(files)):
+            return None
     return where, files
+
+
+def _unread_target(target):
+    """True when a `-C` or `--work-tree` target runs through the shell (`$` or a backtick): no folder to read."""
+    return "$" in target or "`" in target
 
 
 def _top_of(where):
@@ -1246,22 +1256,23 @@ def _command_words(args):
     return words
 
 
-def _push_calls(segment: str, script: str, cwd: str):
+def _push_calls(segment: str, script: str, cwd: str, number=None):
     """(arguments, directory, config overrides) of each `git push` in one segment, and in the scripts the
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
-    `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
+    `script` is the text the segment came from, which push_target reads for a leading `cd`, and `number` is
+    the segment's place in it, so two equal segments are each read in their own folder. A script
     runs in the folder its segment's own `cd` or `git -C` names."""
     for subcommand, args in git_calls(push_text(segment)):
         if subcommand == "push":
-            where, overrides = push_target(segment, script, cwd)
+            where, overrides = push_target(segment, script, cwd, number)
             yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
     if inner:
-        inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        inner_cwd = push_target(segment, script, cwd, number)[0] or cwd
         for text in inner:
-            for part in split_segments(text):
-                yield from _push_calls(part, text, inner_cwd)
+            for place, part in enumerate(split_segments(text)):
+                yield from _push_calls(part, text, inner_cwd, place)
 
 
 _TOPLEVELS = {}   # where -> the finished `git rev-parse --show-toplevel`, for the life of one hook process
@@ -1281,8 +1292,8 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
     reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
     args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
     reaches the branch."""
-    for segment in split_segments(stripped):
-        for args, where, overrides in _push_calls(segment, stripped, cwd):
+    for number, segment in enumerate(split_segments(stripped)):
+        for args, where, overrides in _push_calls(segment, stripped, cwd, number):
             if read_verb("push", args):
                 continue
             top = _toplevel(where) if where else None
