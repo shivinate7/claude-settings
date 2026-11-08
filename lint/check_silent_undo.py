@@ -622,9 +622,20 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     return {p: why for p, why in got.items() if p in paths}
 
 
+def holds_union_rule(cwd, parent):
+    """True when any .gitattributes in `parent`'s tree, the root's or a subdirectory's, has the text merge=union. A
+    superset of the files check-attr reports as union, so a False here makes check-attr unneeded. The pathspec globs are
+    live here: git() sets literal pathspecs, and `*` must reach a subdirectory."""
+    return bool(git(cwd, "--no-literal-pathspecs", "grep", "-l", "-F", "merge=union", parent, "--", ".gitattributes", "*/.gitattributes", ok=(0, 1))[1].strip())
+
+
 def union_paths(cwd, parent, paths):
     """The set of `paths` that carry merge=union as of `parent`. The paths go in on stdin, never in the command line:
-    a merge that changes hundreds of files stays under the Windows 32K command-line limit."""
+    a merge that changes hundreds of files stays under the Windows 32K command-line limit. A parent with no merge=union
+    text in any .gitattributes asks git nothing: check-attr --source needs git 2.40, and a repo with no such rule must not
+    turn UNKNOWN on an older git."""
+    if not holds_union_rule(cwd, parent):
+        return set()
     try:
         out = git(cwd, "check-attr", "-z", "--stdin", "--source=" + parent, "merge", input="".join(p + "\0" for p in paths))[1].split("\0")
     except Unknown as e:  # --source is git 2.40; the command's failure, never a version string, says it is missing
@@ -772,7 +783,7 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: redo the merge, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
     return 1 if problems else 0
 
 

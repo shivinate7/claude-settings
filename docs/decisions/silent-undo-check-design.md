@@ -20,8 +20,8 @@
   a lane cut before the rule landed has it only in the parent that is main. A line
   counts when the merge base of the two parents has it, one parent holds fewer copies, and the merge holds
   more. A lane fast-forwarded into the batch is read through the merge that follows. A row main re-added
-  after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer. On an older
-  git that read alone is UNKNOWN, printed beside any lost-line or reversal finding, never in place of one.
+  after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer only where a
+  merge=union rule exists. On an older git, in such a repo, that read alone is UNKNOWN, printed beside any lost-line or reversal finding, never in place of one.
   A finding with an UNKNOWN is a refusal, and the reason flag does not lift it. Known limits:
   - A lane rebased, cherry-picked or squashed onto main drops its deletion with no merge commit, so this
     read cannot see it.
@@ -32,7 +32,9 @@
     parent holds one copy and the merge holds two. That is a duplicate, not a loss, so there is no finding.
   - A finding stays after a fix-forward commit. Redo the merge, or add the trailer.
 
-  Cost: about 5 git calls per two-parent merge, no long-lived process, no log.
+  Cost: measured 6 git calls for a merge that touches no union file, and about 10 when it touches the notes
+  file. That includes the gate: one `git grep` per parent for merge=union in any .gitattributes. The floor is
+  git 2.40, only where a merge=union rule exists. No long-lived process, no log.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
