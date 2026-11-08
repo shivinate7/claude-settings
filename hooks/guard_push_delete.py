@@ -189,12 +189,36 @@ def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
     return target
 
 
+_DESTINATIONS = {}   # (args, cwd, overrides) -> destinations, for the life of one hook process
+
+
 def push_destinations(args, cwd: str, overrides=None):
     """The branch names a `git push` with these arguments writes, `refs/heads/` cut off, a deletion
-    included. None stands for a destination it cannot resolve."""
-    plain = _push_parse(args)[-1]
-    found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
-    return [t.removeprefix("refs/heads/") if t else t for t in found]
+    included. None stands for a destination it cannot resolve. One hook call is one process and reads
+    each push's destinations once, so the record-branch check and the conflict-markers check share the
+    reads (`git symbolic-ref`, `git config`) a HEAD or bare push needs."""
+    key = (tuple(args), cwd, tuple(sorted((overrides or {}).items())))
+    if key not in _DESTINATIONS:
+        plain = _push_parse(args)[-1]
+        found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
+        _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]
+    return _DESTINATIONS[key]
+
+
+def _colon_delete(delete, plain):
+    """True for a push that deletes: a delete flag, or a refspec with no source (`:ref`)."""
+    return delete or any(spec.startswith(":") for spec in plain)
+
+
+def push_refspecs(args):
+    """(remote, refspecs) of a push that names the refs it sends, else None: `--all`, `--branches`,
+    `--mirror`, a deletion and a tags-only push send no range this reader can name. The remote is ''
+    when none is named, and the refspecs are empty for a bare push."""
+    _force, mirror, every, _includes, _unpinned, _leased, delete, _upstream, remote, plain = _push_parse(args)
+    delete = _colon_delete(delete, plain)
+    if mirror or every or delete or (_push_tags_only(args) and not plain):
+        return None
+    return remote, plain
 
 
 def push_verdict(args, cwd: str, overrides=None) -> str:
@@ -207,7 +231,7 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     """
     force, mirror, every, includes, unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     plus = any(spec.startswith("+") for spec in plain)
-    delete = delete or any(spec.startswith(":") for spec in plain)
+    delete = _colon_delete(delete, plain)
     if not (force or leased or plus or mirror or delete):
         return ""
     if not remote:

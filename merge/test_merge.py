@@ -3002,11 +3002,18 @@ class GhLockTest(unittest.TestCase):
 #   - an argument holding a newline (`\n` or `\r`), a `-f` value included, is refused for the same reason: cmd.exe cuts the command at it. Send a multi-line value as JSON with `--input <file>`.
 #   - `--input <file>` reads a JSON object and merges its keys into the fields (gh's own body-from-file rule, so a PUT or POST sends it). `--input -` (stdin) is refused.
 #   - GraphQL (`gh pr ...`, `gh repo view`, `gh api graphql`, any other gh command) answers the HTTP 403 a Claude Code cloud session gives.
+#   - the cloud agent proxy refuses a numeric-ID path: when a case sets `proxy_refuses_paged`, a `--paginate` read of more than one page
+#     answers HTTP 403 on `repositories/<id>/...`, the path gh follows from the Link header. Off unless a case sets it.
+#   - `issues/comments` answers a case's `issue_comments` (oldest first) once the case sets them; with none set it stays a 404.
+#   - a case's `fail_page` ({"page", "text"}) answers every read of that page with the error text (rest_err), so a later page of a list read fails.
+#   - a list read under `-i` prints the header block gh prints, with a `Link` header (rel="next" and rel="last", on the numeric route) while pages
+#     follow, and none on the last page. A `--paginate` read prints no Link header: gh follows it itself.
 GH_REST_LIB = r'''
 import json, re
 
 GRAPHQL_403 = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 TEST_MERGE_SHA = "e" * 40  # REST sets merge_commit_sha on an OPEN pull request too: the sha of GitHub's test merge
+REPO_NUMERIC_ID = 424242424  # the repo's id on GitHub: the numeric path a Link header names, which the cloud agent proxy refuses
 
 class Refused(Exception):
     """An answer the fake gives as a failure: .text is what gh prints, .code its exit status."""
@@ -3082,12 +3089,15 @@ def jq_lines(expr, value):
         vals = [v.get(name) if isinstance(v, dict) else None for v in vals] if name else [x for v in vals for x in (v if isinstance(v, list) else [])]
     return [v if isinstance(v, str) else json.dumps(v, separators=(",", ":")) for v in vals]
 
-def listing(items, key, params, flags, jq, cap, top=None):
+def listing(items, key, params, flags, jq, cap, top=None, refuse=None):
     """The text gh prints for a list read. `items` is the whole list; `key` is None for a JSON array reply, else the object field that
-    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back."""
+    holds the page (check_runs, statuses), with `top` the object's other fields. Without --paginate only the page asked for comes back.
+    `refuse` names the second page's path when the proxy refuses it: a --paginate read of more than one page then answers HTTP 403."""
     size = max(1, min(int(params.get("per_page", 30)), cap))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     if "paginate" in flags:
+        if refuse and len(pages) > 1:
+            raise Refused(api_error(403, "Resource not accessible by integration: " + refuse))
         chosen = pages
     else:
         n = int(params.get("page", 1))
@@ -3182,10 +3192,10 @@ def hold(kind):  # the first such call starts a helper that keeps this process's
         open(os.path.join(d, "held"), "w").close()
         import subprocess
         subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%d)" % h["seconds"]])
-def finish(text, code, include=False):
+def finish(text, code, include=False, link=None):
     if include and not (code and not re.search(r"\(HTTP \d{3}\)\s*$", text)):  # a transport error has no HTTP reply, so no header block
         got = int(re.search(r"\(HTTP (\d{3})\)\s*$", text).group(1)) if code else 200
-        sys.stdout.buffer.write(("HTTP/2.0 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n\r\n" % (got, "Error" if code else "OK")).encode())
+        sys.stdout.buffer.write(("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nX-Ratelimit-Remaining: 4999\r\n%s\r\n" % (got, "Error" if code else "OK", "Link: %s\r\n" % link if link else "")).encode())
     print(text)
     sys.exit(code)
 def graphql():
@@ -3222,6 +3232,25 @@ try:
         raise Refused(api_error(404, "Not Found"))
     repo, rel = m.group(1), m.group(2) or ""
     cap = S.get("page_cap", 100)
+    refuse = "repositories/%d/%s?page=2" % (REPO_NUMERIC_ID, rel) if S.get("proxy_refuses_paged") else None  # the second page's numeric path, when the proxy refuses it
+    fp = S.get("fail_page")  # {"page", "text"}: every read of that page answers the error text, so a later page of a list read fails (the listing is cut there)
+    if fp and str(params.get("page", 1)) == str(fp["page"]) and method == "GET":
+        raise Refused(fp["text"])
+    def answer_list(items, key, top=None):
+        """The answer of a list read as gh api -i prints it: the page asked for, and the Link header while pages follow. The header names the numeric
+        route, which the cloud agent proxy refuses; a reader follows rel="next" on the repo route, one call per page. --paginate prints no Link header."""
+        size = max(1, min(int(params.get("per_page", 30)), cap))
+        last, n = max(1, -(-len(items) // size)), int(params.get("page", 1))
+        if fp and "paginate" in flags and last >= int(fp["page"]):  # gh --paginate fails the whole read when one of its pages fails
+            raise Refused(fp["text"])
+        text = listing(items, key, params, flags, jq, cap, top, refuse=refuse)
+        link = None
+        if include and "paginate" not in flags and n < last:
+            def url(page):
+                parts = ["%s=%s" % kv for kv in params.items() if kv[0] != "page"] + ["page=%d" % page]
+                return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_NUMERIC_ID, rel, "&".join(parts))
+            link = '%s; rel="next", %s; rel="last"' % (url(n + 1), url(last))
+        finish(text, 0, include, link)
     num = S.get("pr_number", 7)
     rows = S.get("open_prs", [])
     numbered = {(r[3] if len(r) > 3 else 101 + i): r for i, r in enumerate(rows)}
@@ -3250,7 +3279,7 @@ try:
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
         items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
-        finish(listing(items, None, params, flags, jq, cap), 0, include)
+        answer_list(items, None)
 
     elif method == "GET" and m_pr:
         n = int(m_pr.group(1))
@@ -3323,8 +3352,8 @@ try:
             other = S.get("other_rows", {}).get(sha, [("checks", "pass", "")])
             if m_run:
                 crs = [check_run(r, k) for k, r in enumerate(other)]
-                finish(listing(crs, "check_runs", params, flags, jq, cap, {"total_count": len(crs)}), 0, include)
-            finish(listing([], "statuses", params, flags, jq, cap, {"state": "pending", "sha": sha, "total_count": 0}), 0, include)
+                answer_list(crs, "check_runs", {"total_count": len(crs)})
+            answer_list([], "statuses", {"state": "pending", "sha": sha, "total_count": 0})
         if sha not in set(S.get("shown", [])) | {feat_head()}:
             raise Refused(api_error(422, "No commit found for SHA: " + sha))
         cf = S.get("checks_fail")  # {"n", "msg"}: the next n reads fail with msg, then it answers
@@ -3348,8 +3377,11 @@ try:
             cur = {"check_runs": [check_run(r, k) for k, r in enumerate(rows_now) if len(r) < 4 or r[3] != "status"],
                    "statuses": [status_entry(r, k) for k, r in enumerate(rows_now) if len(r) >= 4 and r[3] == "status"]}
         if m_run:
-            finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
-        finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+            answer_list(cur["check_runs"], "check_runs", {"total_count": len(cur["check_runs"])})
+        answer_list(cur["statuses"], "statuses", {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])})
+
+    elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
+        answer_list(S["issue_comments"], None)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -3367,7 +3399,7 @@ try:
 
     elif method == "GET" and m_jobs:
         jobs = (S.get("base_jobs") or {}).get(m_jobs.group(1), [])
-        finish(listing(jobs, "jobs", params, flags, jq, cap, {"total_count": len(jobs)}), 0, include)
+        answer_list(jobs, "jobs", {"total_count": len(jobs)})
 
     elif method == "GET" and m_req:
         af = S.get("api_fail")  # {"msg", "after_checks"}: once the checks have been read that many times, each read fails with msg
@@ -3634,7 +3666,7 @@ class GhHalf(Env):
         got = self.gh_host().open_heads()
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
-        for part in (LIST_CALL, "state=open", "per_page=100", "--paginate"):  # one page holds 100 at most, and --paginate takes the rest
+        for part in (LIST_CALL, "state=open", "per_page=100"):  # one page holds 100 at most, so the read asks for each page by number
             self.assertIn(part, calls)
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
@@ -5258,6 +5290,100 @@ class RestRoutes(Env):
     def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
         self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
         self.assertEqual(len(self.gh_host().open_heads()), 250)
+
+    # ---- the proxy refuses the numeric page gh follows from a Link header, so a list read asks for each page by number
+
+    @staticmethod
+    def open_pr_rows(n):
+        return [[f"b{i}", f"{i:040x}", "main"] for i in range(n)]
+
+    def list_reads(self):
+        return len([c for c in self.calls().splitlines() if c.startswith(LIST_CALL)])
+
+    def test_open_pull_requests_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        # Scope first: the paginated read of two pages is the one the proxy refuses, so the pass below is the reader's own paging.
+        for n in (101, 194):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                code, out = host.api("pulls", "--paginate", "--slurp", fields={"state": "open", "per_page": 100})
+                self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+                self.assertIn("repositories/", out)
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(len(got), n, "a paged read of open pull requests dropped items")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+
+    def test_open_pull_requests_of_zero_and_one_hundred_come_back_whole_and_the_read_stops(self):
+        # The control: one page is one read, and a list of exactly 100 has no next link, so it ends there.
+        for n in (0, 100):
+            with self.subTest(open_prs=n):
+                self.set(proxy_refuses_paged=True, open_prs=self.open_pr_rows(n))
+                host = self.gh_host()
+                before = self.list_reads()
+                try:
+                    got = host.pages("pulls", fields={"state": "open"})
+                except merge.Stop as e:
+                    self.fail(f"paged read of {n} open pull requests stopped: {e}")
+                self.assertEqual(sorted(d["number"] for d in got), list(range(101, 101 + n)))
+                self.assertEqual(self.list_reads() - before, 1, "one page of 100 has no next link: one call")
+
+    def test_check_runs_past_one_hundred_all_come_back_when_the_proxy_refuses_a_paginated_read(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        self.set(proxy_refuses_paged=True, checks_seq=[[(name, "pass", "") for name in names]])
+        host = self.gh_host()
+        code, out = host.api(f"commits/{self.head()}/check-runs", "--paginate", "--slurp", fields={"per_page": 100})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            got = host.checks(7, warn=False)
+        except merge.Stop as e:
+            self.fail(f"paged read of 194 check runs stopped: {e}")
+        self.assertEqual(sorted(got), sorted(names))
+
+    def test_review_comments_past_one_hundred_are_all_read_when_the_proxy_refuses_a_paginated_read(self):
+        since = "2000-01-01T00:00:00Z"
+        comments = [{"id": i, "body": REVIEW_MARKER + "\n", "issue_url": f"https://api.github.com/repos/o/r/issues/{i}", "created_at": "2026-01-01T00:00:00Z"}
+                    for i in range(1, 151)]
+        self.set(proxy_refuses_paged=True, issue_comments=comments)
+        host = self.gh_host()
+        code, out = host.api("issues/comments", "--paginate", "--slurp", fields={"per_page": 100, "sort": "created", "direction": "asc", "since": since})
+        self.assertNotEqual(code, 0, "the proxy must refuse the paginated read of two pages: " + out)
+        self.assertIn("repositories/", out)
+        try:
+            found = host.review_comments(since)
+        except merge.Stop as e:
+            self.fail(f"review record read of 150 issue comments stopped: {e}")
+        self.assertEqual(sorted(found), list(range(1, 151)), "a review record on some pull request was not read")
+
+    # A later page that fails (a 403 the proxy gives, or a 502 gh retries) must stop the read. A reader that keeps the items of the pages before it
+    # would return a short list, which reads as fewer open pull requests or check runs than there are.
+    LATER_PAGE_FAILURES = ((403, "Resource not accessible by integration"), (502, "Bad Gateway"))
+
+    def test_a_later_page_that_fails_stops_the_open_pr_read_and_returns_nothing(self):
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(open_prs=self.open_pr_rows(194), fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().pages("pulls", fields={"state": "open"})
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or [])} open pull requests instead of stopping")
+
+    def test_a_later_page_that_fails_stops_the_check_run_read_and_returns_nothing(self):
+        names = [f"run{i:03d}" for i in range(194)]
+        for code, text in self.LATER_PAGE_FAILURES:
+            with self.subTest(code=code):
+                self.set(checks_seq=[[(name, "pass", "") for name in names]], fail_page={"page": 2, "text": rest_err(code, text)})
+                got, stopped = None, False
+                try:
+                    got = self.gh_host().checks(7, warn=False)
+                except merge.Stop:
+                    stopped = True
+                self.assertTrue(stopped, f"page 2 answered {code}, and the read returned {len(got or {})} check runs instead of stopping")
 
     # ---- every conclusion and state lands in one bucket
 
@@ -10913,7 +11039,7 @@ class PullsHost(merge.Host):
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
-            return 0, self.answer(rel)
+            return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
@@ -10958,19 +11084,21 @@ class PullsHost(merge.Host):
                 return {"body": c["body"], "issue_number": number, "created_at": c["created_at"]}
         raise merge.Stop(f"comment {comment_id} is not on the repo")
 
-    def answer(self, rel):
-        """The reply of one REST route, in the shape `gh api --paginate --slurp` gives it (one page), or the --jq value of the protection."""
+    def answer(self, rel, argv):
+        """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
+        --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
+        _method, _path, params, flags, _jq = REST.parse(argv)
         m = re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel)
         if rel == "pulls":
-            return json.dumps([self.pulls])
+            return REST.listing(self.pulls, None, params, flags, None, 100)
         if rel == "issues/comments":
-            return json.dumps([self.comments])
+            return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
-            return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
+            return REST.listing(self.check_rows.get(m.group(1), []), "check_runs", params, flags, None, 100)
         if m:
-            return json.dumps([{"statuses": []}])
+            return REST.listing([], "statuses", params, flags, None, 100)
         raise AssertionError("unexpected route: " + rel)
 
     def pages(self, rel, key=None, fields=None):
@@ -12103,11 +12231,9 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
 
-    def test_round_three_is_done_on_pass_or_partial_when_guard_is_no(self):
-        for verdict in ("PASS", "PARTIAL"):
-            with self.subTest(verdict=verdict):
-                rounds = REVIEW_FAILED_THREE[:2] + (f"Round 3: reviewer, opus, {verdict}",)
-                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
+    def test_round_three_is_done_on_pass_when_guard_is_no(self):
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
 
     def test_round_three_fail_is_held_whatever_the_guard_and_the_net_value(self):
         # a FAIL in round 3 holds the change, so the finding becomes a new lane at round 1; a net value of zero or positive does not settle it
@@ -12128,13 +12254,16 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")), "held")
 
     def test_round_three_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        # "not owed" does not close a net-value test that the guard change owes. The third round is PARTIAL, which keeps the rules that predate the hold.
-        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard="yes", net="not owed")), "open")
+        # "not owed" does not close a net-value test that the guard change owes. The third round passes, so the net value rule decides.
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="not owed")), "open")
 
-    def test_round_three_partial_with_guard_yes_keeps_the_net_value_rules(self):
-        for net, want in (("zero", "done"), ("positive", "done"), ("not owed", "open"), ("negative", "held")):
-            with self.subTest(net=net):
-                self.assertEqual(record_state(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard="yes", net=net)), want)
+    def test_round_three_partial_holds_whatever_the_guard_and_net_value(self):
+        # a round-3 PARTIAL holds the change (owner page item 362 b), so no net value settles it
+        for guard in ("no", "yes"):
+            for net in ("not owed", "zero", "positive", "negative"):
+                with self.subTest(guard=guard, net=net):
+                    state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard=guard, net=net))
+                    self.assertEqual(state, "held", f"a round-3 PARTIAL with guard {guard} and net value {net} did not read held: {why!r}")
 
     def test_round_one_fail_on_a_normal_change_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), "open")
@@ -12142,12 +12271,12 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_one_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
 
-    def test_a_design_reviewer_partial_in_round_three_with_guard_no_is_done(self):
-        # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no. A PARTIAL in that round keeps the rule.
+    def test_a_design_reviewer_partial_in_round_three_with_guard_no_is_held(self):
+        # A round-3 PARTIAL holds the change whichever role gave it (owner page item 362 b), so the review cap's done rule does not reach it
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PARTIAL")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
-        self.assertEqual(state, "done", "round 3 is done with a PARTIAL design line, so the state must stay done")
-        self.assertIn("in round 3 is PARTIAL", why, f"why does not name the design reviewer's round 3 PARTIAL: {why!r}")
+        self.assertEqual(state, "held", "round 3 holds on a design-reviewer PARTIAL line, so the state must read held")
+        self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
 
     def test_a_design_reviewer_fail_in_round_three_is_held_whatever_the_guard(self):
         # a FAIL line of either role in round 3 holds the change, the design reviewer's included
@@ -12263,7 +12392,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
     def test_a_round_three_partial_holds_only_when_the_partial_switch_is_on(self):
-        # Q3, ROUND3_PARTIAL_HOLDS (default False): a round-3 PARTIAL reads done, or held when the switch is on. Both values are pinned
+        # Q3, ROUND3_PARTIAL_HOLDS (default True, owner page item 362 b): a round-3 PARTIAL holds the change. Off, it reads by the done rules. Both values are pinned
         for value, want in ((False, "done"), (True, "held")):
             with self.subTest(ROUND3_PARTIAL_HOLDS=value), switch("ROUND3_PARTIAL_HOLDS", value):
                 state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE))
@@ -12304,9 +12433,10 @@ class ReviewFixRules(unittest.TestCase):
                 self.assertEqual(state, "held", f"a failed fix check after round 3 with net value {net} must read held: {why!r}")
                 self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
 
-    def test_a_round_three_fail_is_held_whatever_the_fix_verdict(self):
-        # the round-3 hold comes before the fix check's rules, so no fix verdict reads the record open or done
-        fixes = {"PASS": REVIEW_FIX_PASS, "FAIL": REVIEW_FIX_FAIL, "WIDE": REVIEW_FIX_WIDE}
+    def test_a_round_three_fail_is_held_unless_a_fix_pass_clears_it(self):
+        # the round-3 hold comes before the fix check's rules: a FAIL or WIDE fix check reads held, whatever the guard. A PASS clears the hold
+        # under FIX_PASS_CLEARS_ROUND3_HOLD, so the next case reads it by the round-3 done rules
+        fixes = {"FAIL": REVIEW_FIX_FAIL, "WIDE": REVIEW_FIX_WIDE}
         for verdict, fix in fixes.items():
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
@@ -12415,13 +12545,14 @@ class ReviewFixRules(unittest.TestCase):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")
         self.assertEqual(state, "held", f"a negative net value must hold through the fix check: {why!r}")
 
-    def test_a_fix_pass_after_a_round_three_fail_is_held_whatever_the_guard_and_net_value(self):
-        # a fix PASS does not clear a failed round 3: the finding is a new lane at round 1
-        for guard, net in (("no", "not owed"), ("yes", "not owed"), ("yes", "zero"), ("yes", "positive")):
+    def test_a_fix_pass_after_a_round_three_fail_follows_the_round_three_done_rules(self):
+        # a fix check PASS clears the round-3 hold (owner page item 363 b), so the round-3 done rules decide: guard no is done, and a guard change needs its net value
+        cases = (("no", "not owed", "done"), ("yes", "not owed", "open"), ("yes", "zero", "done"), ("yes", "positive", "done"))
+        for guard, net, want in cases:
             with self.subTest(guard=guard, net=net):
                 state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard=guard, net=net)
-                self.assertEqual(state, "held", f"a fix check PASS after a failed round 3, guard {guard}, net {net}, must read held: {why!r}")
-                self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
+                self.assertEqual(state, want, f"a fix check PASS after a failed round 3, guard {guard}, net {net}, must read {want}: {why!r}")
+                self.assertNotEqual(why, REVIEW_HELD_WHY, f"a cleared round 3 must not carry the new-lane why: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASS, kind="delete-only", guard="no")
@@ -12429,12 +12560,12 @@ class ReviewFixRules(unittest.TestCase):
 
     def test_the_fix_line_in_the_text_reaches_the_state_rules(self):
         # end to end: the line is read from the record text, then the same rules apply
-        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "PASS", "held"),  # a round-3 FAIL holds, whatever the fix check says
+        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "PASS", "done"),  # a fix PASS clears a round-3 FAIL, and the round-3 done rules decide
                  (REVIEW_PASSED_THREE, "no", "not owed", "FAIL", "held"),  # a fix FAIL after round 3 holds
                  (REVIEW_PASSED_THREE, "no", "not owed", "PASS", "done"),
                  (REVIEW_PASSED_THREE, "yes", "zero", "PASS", "done"),
                  (REVIEW_PASSED_THREE, "yes", "negative", "PASS", "held"),
-                 (REVIEW_FAILED_THREE, "yes", "positive", "PASS", "held"),
+                 (REVIEW_FAILED_THREE, "yes", "positive", "PASS", "done"),
                  (REVIEW_PASS, "no", "not owed", "PASS", "done"),  # a fix PASS after a passing first round is done
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
@@ -12460,7 +12591,7 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
     def test_a_fix_pass_after_a_round_three_fail_clears_the_hold_only_when_the_switch_is_on(self):
-        # Q4, FIX_PASS_CLEARS_ROUND3_HOLD (default False): a fix check PASS keeps a round-3 FAIL held. On, it follows the round-3 done rules
+        # Q4, FIX_PASS_CLEARS_ROUND3_HOLD (default True, owner page item 363 b): a fix check PASS clears a round-3 FAIL, so the round-3 done rules decide. Off, the hold stays
         for guard, net in (("no", "not owed"), ("yes", "positive")):
             text = record_text(rounds=REVIEW_FAILED_THREE, guard=guard, net=net, fix=(fix_check_line(verdict="PASS"),))
             for value, want in ((False, "held"), (True, "done")):
@@ -12477,6 +12608,19 @@ class ReviewFixRules(unittest.TestCase):
                 state, why = record_verdict(self, text)
                 self.assertEqual(state, want, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: a fix FAIL after round 3 must read {want}, got {state}: {why!r}")
                 self.assertIn(why_has, why, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: the why does not name its cause: {why!r}")
+
+    def test_a_fix_pass_does_not_clear_a_round_three_design_reviewer_hold(self):
+        # G2: a fix check PASS clears a round-3 code reviewer's hold (owner page item 363 b), not a design reviewer's. A design-reviewer FAIL or PARTIAL
+        # in round 3 stays held, and its why names the design reviewer. The code reviewer's round-3 FAIL with a fix PASS still follows the done rules
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(design=verdict):
+                rounds = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS",
+                          f"Round 3: design-reviewer, opus, {verdict}")
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="no", net="not owed")
+                self.assertEqual(state, "held", f"a fix check PASS after a round-3 design-reviewer {verdict} must stay held: {why!r}")
+                self.assertIn("design reviewer", why, f"the why does not name the design reviewer: {why!r}")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no", net="not owed")
+        self.assertEqual(state, "done", f"control: a fix check PASS after a round-3 code reviewer FAIL, guard no, must read done: {why!r}")
 
 class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
@@ -12776,6 +12920,18 @@ class ReviewRecordAncestorHead(ReviewEnv):
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead", comments=(earlier,))
         self.assertEqual(rc, 0, "control: the same ancestor record without its fix check was refused:\n" + out + err)
 
+    def test_a_fail_record_on_an_ancestor_head_lists_as_stale_on_the_reviewed_listing(self):
+        # Pinned: `merge --reviewed` lists an open FAIL record on an ancestor of the live head as stale, and names the head it reviewed. No review
+        # read the live head, so the line never reads done. The compare is answered ahead, so the fixture holds the ancestry the record claims.
+        host = self.record_host(review_comment(1, 7, record_text(head=self.ANC, rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                                diffs={(self.ANC, self.LIVE): compare_of("ahead")})
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, "the listing refused the ancestor-head record:\n" + out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {self.LIVE[:9]} stale: the record is for head {self.ANC[:9]}; ",
+                         "the ancestor-head FAIL record is not listed as stale, naming its head:\n" + out)
+        self.assertNotRegex(line, r" done: ", "the ancestor-head FAIL record reads done on the reviewed listing:\n" + out)
+
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
@@ -12851,7 +13007,7 @@ class ReviewFixBase(ReviewEnv):
 
     def orders(self):
         """The two orders of a fix base beside the newest record's Head, as (label, record Head, base). The compare reads the files between the two
-        heads in both: the record Head newer than the base (the PR 1515 shape, the base an ancestor), then the record Head older."""
+        heads in both: the record Head newer than the base (a notes commit after the base, the base an ancestor), then the record Head older."""
         return (("record head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("record head older", REVIEW_OLD_HEAD, self.NOTES_HEAD))
 
     def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
@@ -12918,7 +13074,7 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_a_notes_commit_after_the_fix_base_is_allowed(self):
-        # the shape that broke PR 1515: the newest earlier record names a notes commit, and the fix check reads from the head before that commit
+        # the newest earlier record names a notes commit, and the fix check reads from the head before that commit
         newest = review_comment(1, 7, record_text(head=self.NOTES_HEAD, rounds=REVIEW_PASS))
         diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(newest, diffs=diffs))
@@ -13770,7 +13926,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_the_source_record_sets_the_round_floor(self):
-        # the source reached round 3, so this record may not end below it: a last round of 2 is refused, and a record that reaches 3 is allowed
+        # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
         host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
         low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
         rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
@@ -13946,7 +14102,9 @@ class ReviewedList(ReviewEnv):
         return host, rc, out, err
 
     def test_the_newest_record_decides_the_line(self):
-        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
+        # the newer record reaches round 2, so it clears the earlier round 1 FAIL, and the newest record decides the line
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                    review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -14050,9 +14208,10 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
-        # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
+        # The older record is open, so the newer one must be the record the list reads. The newer one reaches round 2, which clears the failed round 1.
+        # Its footer is trailing text: the line is done, not bad.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
-        newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
+        newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
@@ -14087,13 +14246,11 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: round 2 is not passed; CI "), out)
 
-    def test_a_wide_or_pass_fix_check_on_a_round_one_record_floors_nothing_above_round_one(self):
-        # control: a WIDE or PASS fix check floors a later record only at the round it reached, so a round-1 record floors nothing above round 1
-        for verdict in ("WIDE", "PASS"):
-            with self.subTest(verdict=verdict):
-                host, rc, out, err = self.floor_listing(verdict, ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS)
-                self.assertEqual(rc, 0, out + err)
-                self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 1 passed; CI "), out)
+    def test_a_pass_fix_check_on_a_round_one_record_floors_nothing_above_round_one(self):
+        # control: a PASS fix check clears the round-1 FAIL, so a later round-1 PASS reads done. A WIDE leaves round 1 uncleared, which the G1 cases cover
+        host, rc, out, err = self.floor_listing("PASS", ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 1 passed; CI "), out)
 
     def test_the_fix_floor_read_costs_the_same_five_gh_calls(self):
         # control: the floor reads the comment list the listing already holds, so two records on a pull request cost the calls one costs
@@ -14186,6 +14343,39 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS + ("Round 3: reviewer, opus, FAIL",)))
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} held: {REVIEW_HELD_WHY}; CI "), out)
+
+    def test_a_failed_round_stays_failed_until_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # G1: an earlier record whose last round N is uncleared (a FAIL or PARTIAL line, or a fix check FAIL or WIDE, and no fix check PASS) holds
+        # the newer record open until that record reaches round N+1 or carries a fix check PASS. The why names the earlier head and round N
+        failed_three = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE)
+        passed_three_fix_fail = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASSED_THREE, fix=(fix_check_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        failed_one_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:1], fix=(fix_check_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        failed_two_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:2], fix=(fix_check_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        cases = (("a round 3 FAIL, held", failed_three, REVIEW_PASSED_THREE, 3),
+                 ("a round 3 PASS with a fix check FAIL", passed_three_fix_fail, REVIEW_PASSED_THREE, 3),
+                 ("a round 1 FAIL with a fix check WIDE", failed_one_wide, REVIEW_PASS, 1),
+                 ("a round 2 FAIL with a fix check WIDE", failed_two_wide, ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), 2))
+        for label, earlier, newer_rounds, n in cases:
+            with self.subTest(earlier=label):
+                host, rc, out, err = self.pr_listing(earlier, record_text(rounds=newer_rounds))
+                self.assertEqual(rc, 0, out + err)
+                line = list_line(self, out, 7)
+                self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                                f"{label}: a newer record that neither reaches a round above {n} nor passes a fix check read as done, so round {n} was not kept:\n{out}")
+                self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"{label}: the why does not name the earlier head:\n{out}")
+                self.assertRegex(self.why_of(line), rf"\bround {n}\b", f"{label}: the why does not name the uncleared round {n}:\n{out}")
+
+    def test_a_failed_round_is_cleared_when_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # control: the normal path. A newer record that reaches the round after the failed one, or that carries a fix check PASS, reads by its own rules
+        earlier = record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        host, rc, out, err = self.pr_listing(earlier, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 2 passed; CI "), out)
+        host, rc, out, err = self.pr_listing(earlier, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_check_line(verdict="PASS"),)))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "), out)
+        self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check that cleared round 1:\n{out}")
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
