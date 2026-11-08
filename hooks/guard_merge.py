@@ -463,9 +463,19 @@ def _commit_page_id(top, working):
     return "" if not rows else (rows[0].split()[1] if len(rows) == 1 else None)
 
 
+def _merge_head_page_id(top):
+    """The page's blob id at MERGE_HEAD, the branch a merge in progress brings in. A stacked lane that
+    merges its base PR holds that PR's page, which HEAD and the base never held. None when no merge is
+    in progress, MERGE_HEAD has no page, or the read fails: the hit then stands."""
+    done = _git(top, "ls-tree", "MERGE_HEAD", "--", RECORDS_PAGE)
+    if done is None or done.returncode != 0 or not done.stdout.strip():
+        return None
+    return done.stdout.split()[2]
+
+
 def records_page_hit(stripped: str, cwd: str) -> str:
-    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
-    and origin/<base>'s, else ''. Each segment is judged from its own command word."""
+    """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
+    origin/<base>'s and, while a merge is in progress, MERGE_HEAD's, else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -502,6 +512,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
+            if page_id and page_id == _merge_head_page_id(top):
+                continue
             return "git commit " + RECORDS_PAGE
     return ""
 

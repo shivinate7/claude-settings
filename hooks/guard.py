@@ -121,7 +121,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
-  records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
+  records-page         deny. A `git commit` whose docs/records.md differs from the base's page and, in a merge, MERGE_HEAD's.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working

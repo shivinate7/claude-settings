@@ -31,11 +31,12 @@ unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1
 A lane never commits a change to `docs/records.md`, not even one made by `lint/hook_catalog.py`. PR CI
 already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR run). The guard `records-page`
 refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base. A merge of
-the base into the lane brings the base's page, so it is allowed. The guard needs no exception for the tool:
+the base into the lane brings the base's page, so it is allowed. While a merge is in progress, a commit whose page equals the page at MERGE_HEAD is allowed too, so a stacked lane can merge its base PR. The guard needs no exception for the tool:
 it judges Claude's own Bash commands, and the tool's commit runs inside the tool.
 The guard runs before the generator, so it cannot tell whether a chained `generator && git add && git commit`
 will change the page. It refuses such a chain even when the page ends unchanged. The refusal is exact for what
 it can see.
+Cost of the guard: three page reads per commit. A fourth read, of MERGE_HEAD's page, runs only when the page differs from all three. A failed read leaves the refusal.
 
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
