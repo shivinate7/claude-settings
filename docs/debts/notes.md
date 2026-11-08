@@ -55,7 +55,6 @@
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
-- frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
 - frozen-perl-switch-arg-ends-scan: `perl -I lib -pi -e ... <frozen>` and `ruby -r json -pi -e ... <frozen>` are allowed, because the in-place scan stops at the first switch argument (hooks/guard_frozen.py _perl_ruby_in_place). Main allows them too.
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
