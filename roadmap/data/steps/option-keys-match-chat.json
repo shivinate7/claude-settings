@@ -1,0 +1,11 @@
+{
+  "title": "A question sent to both chat and page keeps the same option letters and labels in each, and a stored pick carries its label",
+  "why": "Owner 12:35 CST Nov 8, in the coordinator's chat: \"just ensure that A and B mean the same on the artifact than what you send me otherwise we can reach a problem where the meaning changes from one to the other since they're static and not pointers\". Item 436 was checked: chat and page a/b match. Fix: (1) when a question goes to both chat and page, the page item's options are copied from the chat question in the same order, and the chat question names the page item id; (2) a recorded pick stores the label with its letter (for example \"b: Keep the rule; archive at merge\"), never the letter alone; (3) a check refuses a page item whose label for a key differs from the chat question that cites it. Note: an item's `pick` field is the recommended option, not the answer; the answer lives in the answers collection. Item 436's pick \"a\" was triage's recommendation; the coordinator set it to b at 12:33 CST, which overwrites the recommendation record.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 790,
+  "updatedAt": "2026-11-08T12:37:00-06:00"
+}

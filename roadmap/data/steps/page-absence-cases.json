@@ -1,11 +1,11 @@
 {
   "title": "Each \"nothing happens\" page test goes red on its mutant, then waits on a signal",
   "why": "Lane timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf), 11:36 CST Nov 8: in skills/waiting-page/tests/page.test.mjs, 5 absence checks keep a fixed sleep (lines 555, 1720, 1769, 4966, 5066 at #2179 head d5f6b33c6). A page.html mutant of each bad act stayed green even with a signal wait, so the case does not catch its act yet. Known causes: 555 needs a valid GIF in its icon list before a loosened ICON_RE goes red; 1720's clicks land after Send is disabled, so a click in the first click's task is needed. Done when each case goes red on its mutant and then converts to a signal wait. #2179 note time-pinned-sleeps-left cites it.",
-  "note": "",
+  "note": "Lane timing-tests 12:35 CST Nov 8: round 1 of #2179 restored 4 more sleeps after mutants passed the signal waits, so the step now covers 9 page windows (head 788130b99: page.test.mjs 555, 1562, 1730, 1779, 4976, 5076, 5094, 5534, 5569). Weak case: the receipt test near 4976 measures the sticky `.rail` top, which a 40 px page move at 300 ms does not change; it needs an in-flow card measured instead.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf)",
   "status": "todo",
   "order": 763,
-  "updatedAt": "2026-11-08T11:37:00-06:00"
+  "updatedAt": "2026-11-08T12:37:00-06:00"
 }

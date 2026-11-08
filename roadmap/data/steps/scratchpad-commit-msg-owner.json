@@ -1,0 +1,11 @@
+{
+  "title": "An agent does not commit with a message file, or overwrite a file, that another agent wrote in the shared scratchpad",
+  "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 12:34 CST Nov 8: a test-author ran `git commit -F probe/commit_msg.txt` from the session's shared scratchpad; another agent had written that file, so the commit carried the other agent's message. It amended before the push, so nothing wrong landed. Its Writes also overwrote probe/probe.py and probe/one_mutant.py, made by another agent. Fix: refuse `git commit -F <file>` and a Write over a file this agent did not write, or give each agent its own scratchpad folder. Sibling of scratchpad-file-ownership (#2023, which covers running such a script).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 789,
+  "updatedAt": "2026-11-08T12:37:00-06:00"
+}
