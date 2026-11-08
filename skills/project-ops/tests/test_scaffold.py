@@ -270,6 +270,10 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
+    def test_brief_runs_the_lane_lint_before_the_fix_check(self):
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("Run the lane lint before the fix check.", flat, "the brief must tell the lane to run the lane lint before the fix check")
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():

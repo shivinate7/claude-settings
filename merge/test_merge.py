@@ -13668,6 +13668,49 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+class CompareApi(merge.Host):
+    """The real Host, its `api` answering one compare reply as text. No gh runs. `routes` keeps each REST route read, in order."""
+    def __init__(self, text):
+        super().__init__(base="main", pause=lambda s: None)
+        self.text, self.routes = text, []
+
+    def api(self, rel, *extra, method="GET", fields=None, body=None):
+        self.routes.append(rel)
+        return 0, self.text
+
+class CompareReplyFiles(unittest.TestCase):
+    """Host.compare_files, the real method, over CompareApi. The files between two heads are the reply's `files` list. A reply with no `files`
+    key, or a `files` value that is not a list, names no files, so it stops the run. Read as no files, a reply that holds commits would pass as
+    a record-only diff, and fix_base_problem would then allow a fix base whose files were never read. The control is an empty list with equal heads."""
+
+    def test_a_reply_with_no_files_key_stops_whatever_the_counts(self):
+        for ahead, behind, status in ((1, 0, "ahead"), (0, 1, "behind"), (0, 0, "identical")):
+            with self.subTest(ahead=ahead, behind=behind):
+                reply = {"status": status, "ahead_by": ahead, "behind_by": behind}
+                with self.assertRaises(merge.Stop, msg="a compare reply with no files key was read without stopping"):
+                    CompareApi(json.dumps(reply)).compare_files(REVIEW_OLD_HEAD, REVIEW_HEAD)
+
+    def test_a_files_value_that_is_not_a_list_stops(self):
+        # the falsy values read as an empty list (`or []`), so they pass unless the read stops them; the truthy ones stop when iterated
+        for value in ({}, "", 0, False, None, "docs/debts/notes.md", 5, {"filename": "docs/debts/notes.md"}):
+            with self.subTest(value=value):
+                reply = {"status": "ahead", "ahead_by": 1, "behind_by": 0, "files": value}
+                with self.assertRaises(merge.Stop, msg=f"a compare reply whose files is {value!r}, not a list, was read without stopping"):
+                    CompareApi(json.dumps(reply)).compare_files(REVIEW_OLD_HEAD, REVIEW_HEAD)
+
+    def test_an_empty_files_list_with_equal_heads_reads_clean(self):
+        # control: a compare of equal heads with no files is a clean read, and must stay one
+        host = CompareApi(json.dumps({"status": "identical", "ahead_by": 0, "behind_by": 0, "files": []}))
+        found = host.compare_files(REVIEW_OLD_HEAD, REVIEW_HEAD)
+        self.assertEqual(found, {"status": "identical", "ahead_by": 0, "behind_by": 0, "files": []}, "an empty compare with equal heads did not read clean")
+        self.assertEqual(host.routes, [f"compare/{REVIEW_OLD_HEAD}...{REVIEW_HEAD}"])
+
+    def test_a_files_list_with_entries_reads_clean(self):
+        # control: a list of entries reads through unchanged, so the stop on a missing key does not reach replies that name their files
+        entry = file_entry("docs/debts/notes.md")
+        host = CompareApi(json.dumps({"status": "ahead", "ahead_by": 1, "behind_by": 0, "files": [entry]}))
+        self.assertEqual(host.compare_files(REVIEW_OLD_HEAD, REVIEW_HEAD)["files"], [entry], "a files list with an entry did not read clean")
+
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless the newest review record already on the pull request has no fix check line, or
     its fix check PASSed (ReviewFixPassChain), and either BASE is that record's Head, or the compare of BASE and that Head shows one an ancestor
