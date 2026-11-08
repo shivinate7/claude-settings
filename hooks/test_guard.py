@@ -4979,6 +4979,28 @@ sh("git-after-cd: a cd into a missing folder, then || exit 1, then ; a git push 
 # goes on, so the push after `;` still runs in the stranded folder. Only `exit` stops the shell here.
 sh("git-after-cd: a cd into a missing folder, then || return 1, then ; a git push is refused",
    "cd /tmp/w || return 1; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A subshell's exit ends only the subshell, and each part of a pipeline runs in a subshell. The shell goes on
+# after the failed cd, so the push after the group still runs in the stranded folder. Real bash runs it.
+sh("git-after-cd: a cd into a missing folder, then || (exit 1), then ; a git push is refused",
+   "cd /tmp/w || (exit 1); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || (exit 1), then a newline and a git push is refused",
+   "cd /tmp/w || (exit 1)\n%s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || exit 1 | cat, then ; a git push is refused",
+   "cd /tmp/w || exit 1 | cat; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || a braced exit 1 in a pipe, then ; a git push is refused",
+   "cd /tmp/w || { exit 1; } | cat; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: each of these holds today. The else branch runs when the test fails, so its push runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder as an if test, then the push in the else branch is refused",
+   "if cd /tmp/w; then :; else %s push; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: a read under a failed cd, joined by ;, passes. A dry run, a listing and a value read write nothing.
+sh("git-after-cd: a cd into a missing folder, then ; git add -n . is a dry run, passes",
+   "cd /tmp/w; %s add -n ." % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git tag -l is a listing, passes",
+   "cd /tmp/w; %s tag -l" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git config --get user.name is a read, passes",
+   "cd /tmp/w; %s config --get user.name" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git worktree list is a read, passes",
+   "cd /tmp/w; %s worktree list" % VCS, "allow", cwd=NOGIT)
 # A failed `if` test skips the then branch, so the push there never runs in the stranded folder.
 sh("git-after-cd: a cd into a missing folder as an if test, then a git push in the then branch passes",
    "if cd /tmp/w; then %s push; fi" % VCS, "allow", cwd=NOGIT)
@@ -11388,6 +11410,12 @@ cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo the tokenize
 # A `>` inside the echo's quotes is text, not a redirect. It must not make the commit after it blind to the triplet.
 cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo with a quoted greater-than, then add -A and commit",
            "cd " + slash(CMK_CLT) + "; echo \"a > b\"; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+# Scanner traps: an escaped quote, or a lone apostrophe, must not end the quote early and hide the redirect after it.
+# The echo then reaches the tree, so the commit after it is blind here (a push after it is refused as a chain).
+cmk_allow("a cd into a repo with a triplet tracked, then ; an echo with an escaped quote and a redirect, then add -A and commit",
+          "cd " + slash(CMK_CLT) + "; echo \"a\\\"b\" > x; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+cmk_allow("a cd into a repo with a triplet tracked, then ; an echo with a lone apostrophe and a redirect, then add -A and commit",
+          "cd " + slash(CMK_CLT) + "; echo don't > x; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
