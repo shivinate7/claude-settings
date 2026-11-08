@@ -37,6 +37,9 @@ nothing changes (a restatement of main) refuse as `question-departs`: the rule b
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter) and `rework-off-page` (an open item never says it is being reworked).
+`option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
+page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
+option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
 
 An update is judged only for the fields it carries. A closed item passes the form: it asks the owner
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
@@ -56,6 +59,7 @@ from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the 
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
+LABELS_RULE = "option-labels-match-chat"
 
 # docs/decisions/owner-judge-test.md, rule `owner-judge`, built against a named incident (incident in
 # the record): a decision about CI internals reached the owner, who had no stake in it. The Problem
@@ -307,7 +311,7 @@ def _write_data(entry, cwd=""):
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
 # (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`. In the
+# option marked `widens: true` is never the item's `recommended` (old name `pick`), a str or any key in a list. In the
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
@@ -332,20 +336,26 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+RECOMMENDED_FIELDS = ("recommended", "pick")  # the item field that holds the recommended option's key, then its old name
 WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
 
 
 def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
-    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
+    """The matched text when this write's `recommended`, or its old name `pick` (each a str, or a list of keys),
+    names an option it marks `widens: true`. An update that carries either without `options` cannot see the stored
+    options and passes."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
-    options, pick = data.get("options"), data.get("pick")
-    if isinstance(pick, str):
-        pick = [pick]
-    if not isinstance(pick, list) or not isinstance(options, list):
-        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
-    keys = {p for p in pick if isinstance(p, str)}
+    options = data.get("options")
+    if not isinstance(options, list):
+        return ""
+    keys = set()
+    for field in RECOMMENDED_FIELDS:
+        named = data.get(field)
+        if isinstance(named, str):
+            named = [named]
+        if isinstance(named, list):  # an absent or null field names nothing, so it never matches a keyless option
+            keys.update(p for p in named if isinstance(p, str))
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
            and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
@@ -1269,6 +1279,99 @@ def option_letter_hit(op: str, data) -> str:
     return key_named_hit(_item_text_fields(data))
 
 
+# ------------------------------------------------------------------ the page's option letters mean the chat's
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-labels-match-chat`, built against a named incident
+# (incident in the record): a question sent to the chat and the page is two static copies of one option list,
+# so a letter on one can name another option than the same letter on the other. A chat question cites its item
+# in a line "Page item: <id>" and writes each option as "a) <text>". A write of that item whose option label for
+# a letter differs from the chat's text for that letter is refused. Letters are positions, as in
+# option_letter_hit.
+PAGE_ITEM_CITE = re.compile(r"^[ \t>*_`-]*Page item:[ \t*_`]*([^\s*_`]+)", re.I | re.M)
+CHAT_OPTION_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[).:]\**[ \t]+(\S.*)$", re.M)
+CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
+LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
+                 "a letter means one option on both. Rewrite the page item's options to match the chat "
+                 "question (or ask the chat question again with the page's text), then write the item "
+                 "again. (decision option-keys-are-letters, a letter names the same option in the chat "
+                 "and on the page)")
+
+
+def _fold(text) -> str:
+    """Lowercase, markdown marks dropped, whitespace folded: the form two option texts are compared in."""
+    return " ".join(re.sub(r"[*_`]", "", str(text)).lower().split())
+
+
+def _cited_ids(text) -> set:
+    """The page item ids a text cites, each in a line "Page item: <id>"."""
+    return {m.group(1).rstrip(".,;:)") for m in PAGE_ITEM_CITE.finditer(text)}
+
+
+def chat_page_label_hit(item_id, options, chat_text) -> str:
+    """The refusal text when `chat_text` cites page item `item_id` ("Page item: <id>") and writes an option line
+    ("a) <text>") whose text differs from the label of the option at that letter's position in `options`, else "".
+    Texts are compared folded, and equal when either starts with the other (the chat may shorten a label).
+    A chat that cites no item or another one, an option the chat gives no line, and a label or line with no
+    text pass."""
+    if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
+        return ""
+    if item_id not in _cited_ids(chat_text):
+        return ""
+    lines = {}
+    for m in CHAT_OPTION_LINE.finditer(chat_text):
+        lines.setdefault(m.group(1).lower(), m.group(2))
+    for i, option in enumerate(options):
+        letter = _letter_of(i)
+        label = option.get("label") if isinstance(option, dict) else None
+        if letter not in lines or not isinstance(label, str):
+            continue
+        tag = LABEL_TAG.match(label)
+        page = _fold(label[tag.end():] if tag else label)
+        chat = _fold(lines[letter])
+        if page and chat and not (page.startswith(chat) or chat.startswith(page)):
+            return "option %s: the page says %r, the chat says %r" % (letter, label.strip(), lines[letter].strip())
+    return ""
+
+
+def chat_text_citing(transcript_path, item_id) -> str:
+    """The newest assistant text in the transcript's last CHAT_TAIL_BYTES that cites page item `item_id`, else "".
+    Raises OSError when the file cannot be read."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import _transcript
+    for rec in _transcript.tail_records(transcript_path, CHAT_TAIL_BYTES):
+        if rec.get("type") != "assistant" or rec.get("isSidechain"):
+            continue
+        blocks = (rec.get("message") or {}).get("content")
+        for b in blocks if isinstance(blocks, list) else []:
+            text = b.get("text") if isinstance(b, dict) and b.get("type") == "text" else None
+            if isinstance(text, str) and item_id in _cited_ids(text):
+                return text
+    return ""
+
+
+def page_label_hit(writes, transcript_path, cwd=""):
+    """(rule, matched) for the first set or update in `writes` whose open-decision options carry a label that
+    differs from the chat's text for its letter (chat_page_label_hit), else ("", ""). The transcript is read
+    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. Raises OSError when the
+    transcript cannot be read: the caller treats that as unknown."""
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return PASS
+    for op, entry in writes:
+        if op not in ("set", "update"):
+            continue
+        data = _write_data(entry, cwd)
+        options = data.get("options") if _open_decision(data) else None
+        item_id = entry.get("doc_id")
+        if not isinstance(options, list) or not isinstance(item_id, str):
+            continue
+        hit = chat_page_label_hit(item_id, options, chat_text_citing(transcript_path, item_id))
+        if hit:
+            return LABELS_RULE, hit
+    return PASS
+
+
 # ------------------------------------------------------------------ a reworked item is not answered on the page
 #
 # docs/decisions/rework-leaves-page.md, rule `rework-off-page`, built against a named incident (incident in
@@ -1415,7 +1518,8 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
-                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
+                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
+                LABELS_RULE: LABELS_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"

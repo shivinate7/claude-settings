@@ -3899,7 +3899,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
-# write to this repo's waiting page.
+# write to this repo's waiting page. `option-labels-match-chat` runs after them (data_tool_label_hit): it
+# reads the transcript, and starts that read only for a write that carries options.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
@@ -3908,6 +3909,19 @@ def data_tool_judge(tool_input, cwd=""):
     reads the writes again (page-item-design)."""
     import question_form
     return question_form.page_item_hit(tool_input, cwd)
+
+
+def data_tool_label_hit(item_writes, transcript_path, cwd=""):
+    """(rule, matched) of rule `option-labels-match-chat` for the item writes the page rules passed: a label that
+    differs from the chat question's text for its letter. It runs here, not in question_form.item_hit, because it
+    reads the transcript. An unreadable transcript is unknown: it allows and logs one `noted` line."""
+    import question_form
+    try:
+        return question_form.page_label_hit(item_writes, transcript_path, cwd)
+    except Exception as err:
+        record(DATA_TOOL, "noted", "option-labels-match-chat",
+               "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return "", ""
 
 
 def data_tool_hit(tool_input, cwd=""):
@@ -5191,6 +5205,8 @@ def judge(payload) -> None:
 
     if tool == DATA_TOOL:
         (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
+        if not rule and item_writes:
+            rule, matched = data_tool_label_hit(item_writes, payload.get("transcript_path"), cwd)
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
@@ -5220,6 +5236,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "option-labels-match-chat":
+            refuse(tool, "deny", "option-labels-match-chat", question_form.PAGE_REASONS["option-labels-match-chat"], matched)
         if item_writes:
             unhomed = mockup_home_hit(item_writes, tool_input, cwd)
             if unhomed:

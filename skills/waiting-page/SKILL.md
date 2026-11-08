@@ -40,7 +40,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     - `stands: true` puts the item in the last section, Pick stands (see "Add an item").
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
-    `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
+    `home` the ruling's record id, `recommended` (old name `pick`) the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
     The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
@@ -76,8 +76,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
     an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
-    that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
-    it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
+    that differs from a shared format changes to match it. `recommended` never names such an option, and a list `recommended` never holds its key (the old name `pick` is read the same way). The writer refuses
+    it (guard rule `uniform-pick`). An update that sets `recommended` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
     asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
     The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
@@ -86,15 +86,15 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     shows a warning. Never set it on any other question.
   - `designs` (a list of `{slug, label, file}`; the guard requires `file`) shows mockups (see "Add a design"). An option names its picture with `design` (a slug in `designs`),
     and the picture sits at the top of that option's card.
-  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
-    recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
+  - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `recommended` (the key you
+    recommend; `pick` is its old name, and a page reads `recommended` first, then `pick`, so an old item stays readable) and `why`. `pick` is never the owner's answer: his answer is `choice` in `answers/<id>`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
     One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
     Never use the key `none`. The page adds its own "None of these" option
-    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
+    with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `recommended`, labelled "Recommended", and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
       `ranked: true` also asks the owner to put the ticked options in order, best first. `ranked` implies `multi`. Never call it `rank`: `rank` is the writer's in-tier order.
-      On such an item `pick` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `pick` in option order. `why` stays one text.
-      A `pick` that does not fit the kind of item is not shown: no star. A list `pick` on a pick-one item is one such pick.
+      On such an item `recommended` is a list of option keys, in the recommended order when `ranked`. It is not empty, has no repeat, and each key is a key of `options`. The page shows and saves an unranked `recommended` in option order. `why` stays one text.
+      A `recommended` that does not fit the kind of item is not shown: no star. A list `recommended` on a pick-one item is one such value.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
     `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with
@@ -141,12 +141,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
+  a note with no `done`. A pick that stands writes `choice` equal to `recommended`, with the note
   `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
-  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
+  list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `recommended` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
   On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
+  A decision answer also carries `label`, the words of the choice as the page showed them, so a reader sees what the letter meant: "A: Red" for a pick (the letter by position, then the option's `label`), a list of those for a `multi` item, "none of these" for none. `choice` stays the key, or the list of keys, and alone decides the answer: `page_grant.py` never reads `label`. The field is new, so an older answer has none.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
   has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
@@ -231,6 +232,13 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 - The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
   asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.
   The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
+- A question sent to both the chat and the page carries the same option text in the same order: the page's
+  letters are positions, so letter a on the page must mean letter a in the chat. The chat form writes a line
+  `Page item: <id>` and one line per option, `a) <the option's label>`. The page item carries that id and those
+  labels. The writer refuses a write of that item whose label for a letter differs from the chat's text for it
+  (guard rule `option-labels-match-chat`, decision option-keys-are-letters). The chat may shorten a label to its
+  start; it may not name another option. A question asked in the chat first and written to the page later cites
+  the id the page item will get.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
@@ -420,11 +428,11 @@ live page.
      and a one-sentence `why`. Set `group` on both items.
    - Set `multi: true` whenever the options are not mutually exclusive. Set `ranked: true` when their order matters.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
-     The page stars no option when `pick` is not valid.
-   - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
-     an item in a group. The page shows it in the last section, and `pick` goes with the owner's
+     The page stars no option when `recommended` is not valid.
+   - Set `stands: true` only on a decision that changes no rule and has a `recommended`. Never set it on
+     an item in a group. The page shows it in the last section, and `recommended` goes with the owner's
      next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
+     open: choosing another option is the only way out. A `multi` item stands with its list `recommended`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
@@ -556,8 +564,8 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
    item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
-3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
-   note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+3. If the answer is `none` with no clear direction, and you write the new `options`, `recommended` and `why` from the
+   note in this same turn (a `multi` item's new `recommended` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
@@ -568,7 +576,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.
-   - A new `pick` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
+   - A new `recommended` and `why`: its own recommendation. Never keep the arbiter's pick and why as the page's
      recommendation.
    - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
