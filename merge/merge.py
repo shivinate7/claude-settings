@@ -159,10 +159,13 @@ STD_STREAMS = frozenset(("/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2",
 
 def git_env():
     """The one home of the env a git child runs in. A GIT_TRACE* variable (GIT_TRACE2* too) set to 1, 2, true, a file descriptor or a
-    standard-stream path (STD_STREAMS) writes its trace to the child's stderr or stdout, where it would become part of the text a caller
-    parses (a sha, a path, a branch). So the child keeps such a variable only when its value is an absolute path that is not a standard
-    stream, a file target."""
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or (os.path.isabs(v) and v not in STD_STREAMS)}
+    standard-stream path (STD_STREAMS) or a path git cannot write writes its trace, or a warning, to the child's stderr or stdout, where it
+    would become part of the text a caller parses (a sha, a path, a branch). So the child keeps such a variable only when its value is an
+    absolute path that is not a standard stream and whose directory exists and is writable, a file target."""
+    def file_target(v):
+        d = os.path.dirname(v)
+        return os.path.isabs(v) and v not in STD_STREAMS and os.path.isdir(d) and os.access(d, os.W_OK)
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or file_target(v)}
 
 def git(cwd, *a, input=None, timeout=None):
     """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text, in the env `git_env` builds."""
