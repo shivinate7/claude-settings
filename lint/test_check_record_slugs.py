@@ -73,6 +73,16 @@ DEBT_NO_FIX = "# New debt\n\nWhat. A gap with no fix named.\n"
 PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TODAY, so no case reads the clock
 KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
 THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
+COST_NOTE = ("- cost-note: a gap. Fix: none — rare and harmless: 8,000 characters take 1.3 s. "
+             "Until: 2026-11-20\n")  # a none reason, then a cost, and no check output
+COMMIT_NOTE = ("- commit-note: a gap. Fix: none — owner decides: the open lane y (a52e7a0fe) makes it linear. "
+               "Until: 2026-11-20\n")  # a none reason, then a commit and a complexity word
+SCOPE_NOTE = "- scope-note: a gap. Fix: none — owner decides\n"  # no Until: the Until rule refuses it today
+CHECK = "`verdict python3 x.py`"  # check output: a backticked command, then its verdict word
+SIX = "a52e7a"  # 6 hex characters: too short to name a commit
+SEVEN = "a52e7a0"  # 7: the shortest hex token that names a commit
+FORTY = "a52e7a0fe" * 4 + "a52e"  # 40: the longest hex token that names a commit
+FORTY_ONE = FORTY + "7"  # 41: too long to name a commit
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -86,10 +96,19 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
+def fail_lines(out):
+    """Each FAIL line the check printed, whole."""
+    return [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+
+
 def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
-    return [line.rsplit(" ", 1)[1] for line in out.splitlines()
-            if line.startswith("check_record_slugs: FAIL:")]
+    return [line.rsplit(" ", 1)[1] for line in fail_lines(out)]
+
+
+def none_note(slug, text):
+    """A notes line whose Fix is none, with `text` after the reason, dated inside the Until cap."""
+    return "- %s: a gap. Fix: none — %s. Until: 2026-11-20\n" % (slug, text)
 
 
 class RecordSlugsTests(unittest.TestCase):
@@ -173,12 +192,21 @@ class RecordSlugsTests(unittest.TestCase):
         """True when the output prints `total` as a number of its own."""
         return re.search(r"(?<![\w.])%d(?![\w.])" % total, out) is not None
 
-    def add_note(self, line):
-        """Commit `line` as the one new notes line of a branch, on a base with no notes."""
+    def add_notes(self, *lines):
+        """Commit `lines` as the new notes lines of a branch, on a base with no notes."""
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        self.put(DEBT_NOTES, NOTES_HEAD + line)
+        self.put(DEBT_NOTES, NOTES_HEAD + "".join(lines))
         self.commit_change()
+
+    def add_note(self, line):
+        """Commit `line` as the one new notes line of a branch, on a base with no notes."""
+        self.add_notes(line)
+
+    def assert_only_the_scope_note_fails(self, out):
+        """The scope note is refused by the Until rule, so its FAIL shows the notes were read. No other line fails."""
+        self.assertTrue(self.failed_about(out, "scope-note"), out)
+        self.assertEqual(len(fail_lines(out)), 1, out)
 
     def base_sha(self):
         return subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main"], check=True,
@@ -190,8 +218,7 @@ class RecordSlugsTests(unittest.TestCase):
 
     def failed_about(self, out, *needles):
         """True when a FAIL line of the check names one of `needles`."""
-        return any(line.startswith("check_record_slugs: FAIL:") and any(n in line for n in needles)
-                   for line in out.splitlines())
+        return any(any(n in line for n in needles) for line in fail_lines(out))
 
     # Positive controls first: a red case means nothing if the clean case fails.
 
@@ -716,6 +743,186 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main %s\n" % sha)
         self.commit_change()
         self.assert_passes()
+
+    # The cost and commit rule: a `Fix: none` note line whose text after the reason names a commit or a cost is
+    # refused, unless check output follows it. Each red case adds one note, so its only FAIL is the one it names.
+
+    def test_none_reason_naming_a_cost_is_red(self):
+        self.add_note(COST_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "cost-note", DEBT_NOTES), out)
+
+    def test_none_reason_naming_a_commit_is_red(self):
+        self.add_note(COMMIT_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "commit-note", DEBT_NOTES), out)
+
+    def test_each_cost_unit_after_a_none_reason_is_red(self):
+        notes = {
+            "unit-seconds": "rare and harmless: the call takes 1.3 s",
+            "unit-millis": "rare and harmless: the call takes 200 ms",
+            "unit-lines": "owner decides: the fix is 40 lines",
+            "unit-kilobytes": "owner decides: the file is 3 KB",
+            "unit-characters": "rare and harmless: 8,000 characters",
+        }
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in notes:
+            self.assertTrue(self.failed_about(out, slug), out)
+        self.assertEqual(len(fail_lines(out)), len(notes), out)  # one refusal per note, no other cause
+
+    def test_each_complexity_word_after_a_none_reason_is_red(self):
+        notes = {
+            "complex-linear": "owner decides: the scan is linear",
+            "complex-quadratic": "rare and harmless: the scan is quadratic",
+            "complex-big-o": "owner decides: the scan is O(n^2)",
+            "complex-n-log-n": "rare and harmless: the sort is O(n log n)",
+        }
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in notes:
+            self.assertTrue(self.failed_about(out, slug), out)
+        self.assertEqual(len(fail_lines(out)), len(notes), out)
+
+    def test_commit_of_seven_or_forty_hex_characters_after_a_none_reason_is_red(self):
+        notes = {
+            "commit-seven": "owner decides: the fix is in %s" % SEVEN,
+            "commit-forty": "owner decides: the fix is in %s" % FORTY,
+        }
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in notes:
+            self.assertTrue(self.failed_about(out, slug), out)
+        self.assertEqual(len(fail_lines(out)), len(notes), out)
+
+    def test_check_output_without_its_verdict_word_is_red(self):
+        # A backticked command alone is no check output, and a verdict word alone is none either.
+        notes = {
+            "check-no-verdict": "owner decides: 1.3 s per call, %s" % CHECK,
+            "check-plain-verdict": "owner decides: 1.3 s per call, PASS",
+        }
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()])
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in notes:
+            self.assertTrue(self.failed_about(out, slug), out)
+        self.assertEqual(len(fail_lines(out)), len(notes), out)
+
+    def test_comment_opener_in_the_reason_text_does_not_hide_a_cost(self):
+        # The "#" and "/*" are text. A checker that stops reading at a comment opener would miss the cost after them.
+        self.add_notes("- quote-cost: Don't hold the lock. Fix: none — owner decides: see #2021 and /* the old "
+                       "block */, then the call takes 1.3 s. Until: 2026-11-20\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "quote-cost", DEBT_NOTES), out)
+
+    def test_edited_old_line_that_gains_a_cost_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + none_note("old-cost", "owner decides"))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + none_note("old-cost", "owner decides: the call takes 1.3 s"))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "old-cost", DEBT_NOTES), out)
+
+    # The controls. Each one shares a diff with the scope note, which the Until rule refuses on any build, so a
+    # control is green on the old code and proves the notes were read before it claims the control passes.
+
+    def test_none_reason_with_check_output_after_the_cost_passes(self):
+        self.add_notes(
+            none_note("check-cost", "rare and harmless: 8,000 characters take 1.3 s; %s PASS" % CHECK),
+            none_note("check-commit", "owner decides: the open lane y (a52e7a0fe) makes it linear; %s green" % CHECK),
+            SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_each_verdict_word_after_a_cost_is_check_output(self):
+        notes = [none_note("verdict-%s" % word.lower(),
+                           "rare and harmless: the call takes 1.3 s; %s %s" % (CHECK, word))
+                 for word in ("PASS", "FAIL", "ok", "red", "green")]
+        self.add_notes(*notes, SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_none_reason_naming_neither_a_commit_nor_a_cost_passes(self):
+        self.add_notes(none_note("neither-note", "rare and harmless: the sort keeps equal keys in input order"),
+                       SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_line_refs_issue_numbers_and_short_keys_after_a_none_reason_pass(self):
+        self.add_notes(none_note("refs-note", "owner decides: see question_form.py:440-441, #2021, item 386, P5, "
+                                              "c188 and d4"),
+                       SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_hex_runs_that_name_no_commit_after_a_none_reason_pass(self):
+        # Six hex characters, forty-one, digits only, letters only, and hex inside a longer word: none is a commit.
+        notes = {
+            "pass-six": "rare and harmless: the id is %s" % SIX,
+            "pass-forty-one": "rare and harmless: the id is %s" % FORTY_ONE,
+            "pass-digits-only": "owner decides: ticket 1234567 is open",
+            "pass-letters-only": "owner decides: the set is defaced",
+            "pass-inside-a-word": "owner decides: the build rc2a52e7a0fe9 is open",
+        }
+        self.add_notes(*[none_note(slug, text) for slug, text in notes.items()], SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_already_fixed_sha_not_on_main_is_refused_once(self):
+        # The sha note is refused by the existing ancestry check. The cost rule must not refuse it a second time.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        real = self.base_sha()[:7]
+        self.put(DEBT_NOTES, NOTES_HEAD
+                 + "- fixed-real: a gap. Fix: already fixed on main %s\n" % real
+                 + "- fixed-made-up: a gap. Fix: already fixed on main 1a2b3c4\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "fixed-made-up", DEBT_NOTES), out)  # the scope: the sha note is read
+        self.assertFalse(self.failed_about(out, "fixed-real"), out)  # a sha on main is no refusal
+        self.assertEqual(len(fail_lines(out)), 1, out)
+
+    def test_step_fix_with_cost_text_after_it_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- step-cost: a gap. Fix: step:alpha-beta, 1.3 s per run\n" + SCOPE_NOTE)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_cost_before_the_reason_passes(self):
+        # Only the text after the reason is read. A cost in the gap description is no claim about the Fix.
+        self.add_notes("- before-cost: the call takes 1.3 s. Fix: none — owner decides. Until: 2026-11-20\n",
+                       SCOPE_NOTE)
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
+
+    def test_untouched_full_base_of_costed_lines_passes(self):
+        # A full base: 40 old lines, each with a cost and no check output. The branch adds one scope note only.
+        old = "".join(none_note("old-cost-%02d" % n, "owner decides: the call takes 1.3 s") for n in range(40))
+        self.put(DEBT_NOTES, NOTES_HEAD + old)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + old + SCOPE_NOTE)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assert_only_the_scope_note_fails(out)
 
 
 class ImportTests(unittest.TestCase):
