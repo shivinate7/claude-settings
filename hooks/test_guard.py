@@ -25532,6 +25532,49 @@ cs("coordinator_gh_pr_merge_disable_auto_allowed", "allow", tool="Bash", command
 cs("coordinator_enable_pr_auto_merge_denied", "deny", tool=CS_MCP_ENABLE_TOOL, owner="acme", repo="widgets", pullNumber=4321,
    cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
 
+# ---- the GitHub MCP file-write tools (rule coordinator-scope, decision session-tiers). A coordinator's write through
+# create_or_update_file, push_files or delete_file is judged by each repo path the call names (`path`, or each `files[].path`),
+# read against the record homes of the repo the call runs in. A product path is refused and a record home passes. Each refused
+# row has an allowed row beside it that changes one factor: the path, the role, or one entry of a push.
+CS_MCP_PRODUCT = "src/app.py"                                            # a repo path no record home holds
+CS_MCP_RECORD = cs_kind_path("decisions")                                # a record home: a file in a kind's folder
+CS_MCP_TODO = cs_kind_path("todo")                                       # a record home: a kind's own file
+CS_MCP_CLIMB = os.path.dirname(CS_MCP_RECORD) + "/../../src/app.py"     # climbs out of the record folder into product code
+CS_MCP_REPO = {"owner": "acme", "repo": "widgets", "branch": "work", "message": "x"}
+
+
+def cs_mcp(name, expected, tool, path=None, files=None, role="coordinator", lacks=()):
+    """`cs` for one GitHub MCP write: `path`, or `files` (push_files' entries, given as their paths). A refusal must not name
+    the file it refuses, so a deny row passes that file's name in `lacks`."""
+    call = dict(CS_MCP_REPO, tool=tool)
+    if files is None:
+        call["path"] = path
+    else:
+        call["files"] = [{"path": entry, "content": "x"} for entry in files]
+    cs(name, expected, role=role, lacks=lacks, **call)
+
+
+for _tool in ("mcp__github__create_or_update_file", "mcp__github__push_files", "mcp__github__delete_file"):
+    _short = _tool.replace("mcp__github__", "")
+    cs_mcp("coordinator_mcp_%s_product_denied" % _short, "deny", _tool, path=CS_MCP_PRODUCT, lacks=("app.py",))
+    cs_mcp("coordinator_mcp_%s_record_allowed" % _short, "allow", _tool, path=CS_MCP_RECORD)
+    cs_mcp("lane_mcp_%s_product_allowed" % _short, "allow", _tool, path=CS_MCP_PRODUCT, role="lane")
+    cs_mcp("coordinator_mcp_%s_climb_out_of_record_denied" % _short, "deny", _tool, path=CS_MCP_CLIMB, lacks=("app.py",))
+# push_files judges every entry: a product entry after two record entries is refused, and so is the same list with the
+# product entry swapped for a record. A `..` entry that climbs out of a record folder is refused beside record entries.
+cs_mcp("coordinator_push_files_product_entry_last_denied", "deny", "mcp__github__push_files",
+       files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_PRODUCT], lacks=("app.py",))
+cs_mcp("coordinator_push_files_records_only_allowed", "allow", "mcp__github__push_files", files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_TODO])
+cs_mcp("lane_push_files_product_entry_last_allowed", "allow", "mcp__github__push_files",
+       files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_PRODUCT], role="lane")
+cs_mcp("coordinator_push_files_climb_entry_denied", "deny", "mcp__github__push_files", files=[CS_MCP_RECORD, CS_MCP_CLIMB],
+       lacks=("app.py",))
+# The empty and full-size states: no entry names a path, so nothing is judged; 25 entries with the product one last.
+cs_mcp("coordinator_push_files_no_entry_allowed", "allow", "mcp__github__push_files", files=[])
+cs_mcp("coordinator_push_files_full_size_records_allowed", "allow", "mcp__github__push_files", files=[CS_MCP_RECORD] * 25)
+cs_mcp("coordinator_push_files_full_size_product_last_denied", "deny", "mcp__github__push_files",
+       files=[CS_MCP_RECORD] * 24 + [CS_MCP_PRODUCT], lacks=("app.py",))
+
 # ---- the tier when the role file is missing (rule coordinator-scope). The tier falls back to the session's own cs-build tag,
 # read from the newest get_session record that names the session's id, as merge-role-proof reads it. A role file that is there
 # decides alone. The fixtures are the merge-role records (role_path), and TAG_ENV is the env they name.
