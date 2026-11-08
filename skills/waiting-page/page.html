@@ -711,6 +711,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
 .rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
 .rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+/* The closed Answered head's hint sits inside the button, so the whole line is one press target. On a narrow screen it moves whole to a second row, never split. */
+.rhead .rhint { font: 400 14px/1.35 var(--body); color: var(--muted); white-space: nowrap; }
+.tier.sunk .rhead { flex-wrap: wrap; row-gap: 0; }
 .rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
 .rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
 .rsub { margin: 0; font-size: 14px; color: var(--muted); }
@@ -973,7 +976,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: false, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1178,6 +1181,8 @@ const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.i
 function freezeSunk() {
   if (state.sunk || !feed.items || !feed.answers) return;
   state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  // The Answered section opens on load only with a New reply in it, decided here once and never read live: a reply that lands later, or a Send that sinks a card, opens nothing.
+  state.answeredOpen = state.items.some((it) => isSunk(it) && newReply(it));
 }
 // A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
 function sinkSent(it) {
@@ -1928,18 +1933,21 @@ function bundleEl(slug, sunk) {
   return b;
 }
 // A section after the open tiers: a disclosure head (glyph, name, count), a line of its own, and a list. One builder for the rulings and the Answered
-// section. o: { cls, glyph, name, count, open, toggle, sub, listId, btnId, body }. Each draws only with items in it.
+// section. o: { cls, glyph, name, count, open, toggle, sub, subHidden, hint, listId, btnId, body }. Each draws only with items in it.
 const sectionEls = {};
 function sectionEl(k, o) {
   let e = sectionEls[k];
   if (!e) {
     const ct = h("span", { class: "ct" }), sub = h("p", { class: "rsub" }), list = h("div", { class: "rlist", id: o.listId });
     const head = h("button", { class: "rhead", type: "button", id: o.btnId || null, "aria-controls": o.listId, onclick: o.toggle }, h("span", { class: "chev", "aria-hidden": "true" }), glyph(o.glyph), o.name, ct);
-    e = sectionEls[k] = { ct, sub, list, head, el: h("section", { class: "tier " + o.cls, id: "tier-" + k, "aria-labelledby": "th-" + k }, h("header", {}, h("h2", { id: "th-" + k }, head), sub), list) };
+    e = sectionEls[k] = { ct, sub, list, head, hint: h("span", { class: "rhint" }), hintSr: h("span", { class: "sr" }, " answer"), el: h("section", { class: "tier " + o.cls, id: "tier-" + k, "aria-labelledby": "th-" + k }, h("header", {}, h("h2", { id: "th-" + k }, head), sub), list) };
   }
   e.ct.textContent = String(o.count);
   e.head.setAttribute("aria-expanded", String(o.open));
   e.sub.textContent = o.sub;
+  e.sub.hidden = !!o.subHidden;
+  // The hint is in the head only while it has words; the hidden word names what "one" is for a screen reader.
+  if (o.hint) { e.hint.textContent = o.hint; if (!e.hint.isConnected) e.head.append(e.hint, e.hintSr); } else { e.hint.remove(); e.hintSr.remove(); }
   e.list.hidden = !o.open;
   reconcile(e.list, o.body);
   return e.el;
@@ -1952,14 +1960,15 @@ function rulingsEl() {
     toggle: () => { state.rulingsOpen = !state.rulingsOpen; render(); },
     sub: "Each stands unless you overturn it." + (on || !ruledAt(list[0]) ? "" : " Newest " + fmt(list[0].ruled) + ".") });
 }
-// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
+// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Closed on load unless a card in it has a New reply (freezeSunk), each card folded.
 function answeredEl(items, place) {
-  const on = state.answeredOpen, stamps = items.map((i) => Date.parse(sentOf(i).at)).filter(Number.isFinite);
+  const on = state.answeredOpen;
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each leaves the page once its session closes it." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    subHidden: !on, hint: on ? "" : "Show to change one",
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + " Each leaves the page once its session closes it." });
 }
 function renderList() {
   const list = $("list"), by = sorted(), want = [];

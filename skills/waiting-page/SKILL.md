@@ -65,7 +65,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it: a receipt that arrives later moves no card until a reload. The page has one switch, `SENT_MOVE`. With "sink" (the
     default) a Send moves each sent card to this section, folded, and the next open card takes its place; Undo puts it
     back in its tier, open. A group moves whole. With "stay" a sent card keeps its place until reload. The sub-head reads
-    "Your sent answers, newest first." under "sink". The section is open on load, each card folded
+    "Your sent answers, newest first." under "sink". The section is closed on load (head, count and the hint "Show to change one") and opens on load only when a card in it carries the New reply mark; a press on the head, the rail row or a number chip opens it, and a Send that sinks a card does not. Each card is folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
     the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
