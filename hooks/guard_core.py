@@ -1034,23 +1034,35 @@ def _script_runs(text: str):
 
 
 # What a script source loads by a name the guard cannot read: `__import__(`, `importlib`, or a `require`, `load`
-# or perl `do` whose argument is not one whole quoted string (`require("./"+f)`, `do $f`, `load f`). A `.` before
-# `load` or `require` makes it a method call (`json.load`), not a loader. Perl `do` is read only before `$`, a quote
-# or `(`, since ruby's `each do |f|` is a block.
+# or `import(` or perl `do` whose argument is not one whole quoted string (`require("./"+f)`, `do $f`, `load f`).
+# A `.` before `load` or `require` makes it a method call (`json.load`), not a loader. Perl `do` is read only before
+# `$`, a quote or `(`, since ruby's `each do |f|` is a block. A quoted string holding `$`, `@` or `#{` is built at
+# run time, so it is not a literal. A `load` that a python `from x import` lists is a name, not a call.
 _LOADS_BY_NAME = re.compile(r"(__import__\s*\(|\bimportlib\b)|(?<![.\w])(?:require|load|require_relative)\b"
-                            r"|(?<![.\w])do\s*(?=[$\"'(])").finditer
-_LITERAL_ARG = re.compile(r"""\s*\(?\s*(["'])[^"'\n]*\1\s*\)?\s*(?:[;}]|$)""").match
+                            r"|(?<![.\w])import(?=\s*\()|(?<![.\w])do\s*(?=[$\"'(])").finditer
+_LITERAL_ARG = re.compile(r"""\s*\(?\s*(["'])(?:(?!#\{)[^"'\n$@])*\1\s*\)?\s*(?:[;}]|$)""").match
+_FROM_IMPORT_NAMES = re.compile(r"\s*from\s+[\w.]+\s+import\s+(?:\w+(?:\s+as\s+\w+)?\s*,\s*)*$").match
+_DIR_INDEX = frozenset({"__init__.py", "index.js", "index.mjs", "index.cjs"})   # a module a bare folder name loads
 
 
 def _source_loads_code(source: str, written) -> bool:
     """True when SOURCE may load a file a heredoc wrote, WRITTEN being their names: it imports or requires a
-    module named like the stem of one (`import helper`, `from helper import x`, `require("./helper")`), or it
-    loads by a name that is not one quoted literal (`_LOADS_BY_NAME`). `import sys` and `require("fs")` load
-    no written file, so they stay data."""
+    module named like the stem of one (`import helper`, `from helper import x`, `require("./helper")`; a
+    `<dir>/__init__.py` or `<dir>/index.js` has the stem `<dir>` too), or it loads by a name that is not one
+    quoted literal (`_LOADS_BY_NAME`). `import sys` and `require("fs")` load no written file, so they stay data."""
     for found in _LOADS_BY_NAME(source):
-        if found.group(1) or not _LITERAL_ARG(source[found.end():].split("\n", 1)[0]):
+        if found.group(1):
             return True
-    stems = {name.rsplit("/", 1)[-1].rsplit(".", 1)[0] for name in written}
+        if _FROM_IMPORT_NAMES(source[source.rfind("\n", 0, found.start()) + 1:found.start()]):
+            continue
+        if not _LITERAL_ARG(source[found.end():].split("\n", 1)[0]):
+            return True
+    stems = set()
+    for name in written:
+        folder, _, base = name.rpartition("/")
+        stems.add(base.rsplit(".", 1)[0])
+        if folder and base in _DIR_INDEX:
+            stems.add(folder.rsplit("/", 1)[-1])
     return any(re.search(r"\b(?:import|from|use|do|load|require|require_relative)\b[^\n]*\b%s\b" % re.escape(stem), source)
                for stem in stems if stem)
 
