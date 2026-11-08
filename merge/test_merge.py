@@ -14099,14 +14099,23 @@ class ReviewStampSince(unittest.TestCase):
         subprocess.run(["git", "-C", root, "update-ref", f"refs/remotes/origin/{branch}", "HEAD"], check=True, capture_output=True)
         return root
 
+    def tool_checkout(self):
+        """-> a patch that points merge.__file__ at a temp checkout of the merge tool, so tool_stamp_since reads that checkout's salt commit.
+        Its committer time is 2026-10-21T15:04:05Z. A case starts the patch with `with`."""
+        tool = self.repo(salt_at=2, branch="fixture")
+        return unittest.mock.patch.object(merge, "__file__", os.path.join(tool, "merge", "merge.py"))
+
     def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
         root = self.repo(salt_at=2)
         self.assertEqual(review_fn(self, "review_stamp_since")(root, "main"), "2026-10-21T15:04:05Z",
                          "review_stamp_since is not the committer time of the commit that adds the salt line")
 
-    def test_without_a_salt_commit_the_cutover_is_none(self):
+    def test_without_a_salt_commit_the_cutover_is_the_tool_checkouts(self):
+        # coordinator item 386: with no salt commit the merge tool's checkout gives the cutover, whatever the history touched
         root = self.repo(salt_at=None)
-        self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
+        with self.tool_checkout():
+            cutover = review_fn(self, "review_stamp_since")(root, "main")
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "a history with no salt commit gave cutover %r, not the tool checkout's" % (cutover,))
 
     def test_a_fix_check_run_asks_for_the_default_branch_once(self):
         # --fix-check runs fetch_default_branch, then review_stamp_since. Both read the default branch through default_branch_once, so
@@ -14271,7 +14280,6 @@ class ReviewStampSince(unittest.TestCase):
         # The cutover is the committer time of the salt commit in the checkout that holds merge.py: the tool's own source, found from merge.__file__
         # as merge.py finds its other paths. The caller here has no merge/merge.py, so its history holds no salt commit. The read gave None, and
         # every unstamped record then read as done, whatever its date. A record created before the cutover still reads as done.
-        tool = self.repo(salt_at=2, branch="fixture")  # its salt commit has the committer time 2026-10-21T15:04:05Z
         caller = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, caller, True)
         subprocess.run(["git", "-C", caller, "init", "-q"], check=True, capture_output=True)
@@ -14279,7 +14287,7 @@ class ReviewStampSince(unittest.TestCase):
         self.git_at(caller, "2026-10-20 10:00:00 +0000", "commit", "-q", "--allow-empty", "-m", "no merge.py here")
         subprocess.run(["git", "-C", caller, "update-ref", "refs/remotes/origin/fixture", "HEAD"], check=True, capture_output=True)
         with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
-            with unittest.mock.patch.object(merge, "__file__", os.path.join(tool, "merge", "merge.py")):
+            with self.tool_checkout():
                 try:
                     cutover = review_fn(self, "review_stamp_since")(caller, "fixture")
                 except merge.Stop as stop:
@@ -14290,6 +14298,16 @@ class ReviewStampSince(unittest.TestCase):
         after = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=cutover)
         state, why = review_fn(self, "review_state")(after, REVIEW_HEAD)
         self.assertEqual(state, "bad", "an unstamped record created after the cutover reads %s in a repo with no merge.py: %s" % (state, why))
+
+    def test_a_repo_whose_merge_py_has_no_salt_reads_an_unstamped_record_after_the_tool_cutover_as_bad(self):
+        # coordinator item 386: the caller's merge/merge.py has history and no salt, so the merge tool's checkout gives the cutover
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout():
+            cutover = review_fn(self, "review_stamp_since")(root, "fixture")
+        self.assertEqual(cutover, "2026-10-21T15:04:05Z", "a repo whose merge/merge.py has no salt gave cutover %r, not the tool checkout's" % (cutover,))
+        after = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=cutover)
+        state, why = review_fn(self, "review_state")(after, REVIEW_HEAD)
+        self.assertEqual(state, "bad", "an unstamped record created after the tool cutover reads %s: %s" % (state, why))
 
 
 if __name__ == "__main__":
