@@ -8320,39 +8320,54 @@ for (const width of [390, 1280]) test(`the Now card's count line keeps each grou
   assert.equal(ends, undefined, `at ${width} wide a line of the count line ends on a bare number: ${text}`);
 });
 
-// A paused cell narrower than 3px: its ring (a 1.5px inset --muted line) fills the whole cell, so it paints a solid --muted block beside
-// the solid --acc block of a done cell. The test samples the painted pixels of each cell (its screenshot, decoded in the page) and asks
-// WCAG 1.4.11's 3:1 between the two, with the contrast formula in CONTRAST.
-async function paintedRGB(page, locator) {
-  const png = await locator.screenshot();
-  return page.evaluate(async (b64) => {
-    const img = new Image();
-    img.src = "data:image/png;base64," + b64;
-    await img.decode();
-    const c = document.createElement("canvas");
-    c.width = img.width;
-    c.height = img.height;
-    const x = c.getContext("2d");
-    x.drawImage(img, 0, 0);
-    const d = x.getImageData(0, 0, c.width, c.height).data;
-    let r = 0, g = 0, b = 0;
-    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-    const n = d.length / 4;
-    return [r / n, g / n, b / n];
-  }, png.toString("base64"));
-}
-const paintHex = (c) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
-for (const [where, width, scope] of [["the phase head's bar", 1280, "#svPhases .ph-head .segbar"], ["the rail's cleanup bar", 390, '#svRail button[data-phase="cleanup"] .segbar']]) {
-  test(`a paused cell narrower than 3px paints apart from a done cell in ${where}, at ${width} wide`, async (t) => {
-    const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
-    await openStatus(page);
-    const paused = page.locator(`${scope} > i.pzd`), done = page.locator(`${scope} > i.done`);
-    assert.equal(await paused.count(), 1, `${where} at ${width} wide draws no paused cell (i.pzd)`);
-    assert.equal(await done.count(), 1, `${where} at ${width} wide draws no done cell (i.done)`);
-    const box = await paused.boundingBox();
-    assert.ok(box && box.width < 3, `the paused cell in ${where} at ${width} wide is ${box ? box.width.toFixed(1) : "not drawn"}px, not narrower than 3px: the case does not reach a narrow cell`);
-    const a = paintHex(await paintedRGB(page, paused)), b = paintHex(await paintedRGB(page, done));
-    const ratio = await page.evaluate(`(() => {${CONTRAST} return R(${JSON.stringify(a)}, ${JSON.stringify(b)}); })()`);
-    assert.ok(ratio >= 3, `the paused cell in ${where} at ${width} wide paints ${a} and the done cell ${b}: ${ratio.toFixed(2)}:1, under 3:1`);
-  });
-}
+// ---------------------------------------------------------------- the low cell (lane nfp-narrow-paused-cell)
+// A paused cell paints its lower half in --muted, not a ring: one gradient, at the bottom and not repeated. It is read from the
+// computed style. The colour is a probe of the page's own token, so a token change moves the test with it.
+const tokenDefined = (page, name) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() !== "", name);
+const tokenColour = (page, name, prop = "color") => page.evaluate(([n, p]) => {
+  const e = document.createElement("span");
+  e.style[p] = `var(${n})`;
+  document.body.appendChild(e);
+  const c = getComputedStyle(e)[p];
+  e.remove();
+  return c;
+}, [name, prop]);
+const lowCell = (loc) => loc.evaluate((el) => {
+  const s = getComputedStyle(el);
+  return { size: s.backgroundSize, pos: s.backgroundPosition, repeat: s.backgroundRepeat, image: s.backgroundImage, shadow: s.boxShadow };
+});
+const hexOf = (rgb) => "#" + rgb.match(/\d+/g).slice(0, 3).map((v) => Number(v).toString(16).padStart(2, "0")).join("");
+for (const [name, scope] of BARS_W) test(`the paused cell in ${name} paints its lower half in --muted, with no inset ring, in light and dark`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const paused = page.locator(`${scope} > i.pzd`);
+    assert.equal(await paused.count(), 1, `${name} draws no paused cell (i.pzd) in ${scheme}`);
+    assert.ok(await tokenDefined(page, "--muted"), `--muted is not defined on :root in ${scheme}`);
+    const muted = await tokenColour(page, "--muted");
+    const c = await lowCell(paused);
+    assert.equal(c.size, "100% 50%", `${name} in ${scheme}: the paused cell's background-size is "${c.size}", not "100% 50%"`);
+    assert.match(c.pos, /100%$/, `${name} in ${scheme}: the paused cell's background-position "${c.pos}" is not at the bottom`);
+    assert.equal(c.repeat.split(" ").pop(), "no-repeat", `${name} in ${scheme}: the paused cell repeats its paint, so it fills the top half too ("${c.repeat}")`);
+    assert.ok(c.image.includes(muted), `${name} in ${scheme}: the paused cell's background-image is not --muted (${muted}): "${c.image}"`);
+    assert.equal(c.shadow, "none", `${name} in ${scheme}: the paused cell still draws a ring: box-shadow "${c.shadow}"`);
+  }
+});
+for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read from the computed :root, each reach 3:1 against --surface in ${scheme}`, async (t) => {
+  const page = await open(t, { scheme }); if (!page) return;
+  const dark = await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  assert.equal(dark, scheme === "dark", `the page did not take the ${scheme} scheme`);
+  assert.ok(await tokenDefined(page, "--surface"), `--surface is not defined on :root in ${scheme}`);
+  const surfaceRGB = await tokenColour(page, "--surface", "backgroundColor");
+  assert.match(surfaceRGB, /^rgb\(/, `--surface does not compute to a colour in ${scheme}: "${surfaceRGB}"`);
+  const surface = hexOf(surfaceRGB);
+  for (const token of ["--muted", "--holds"]) {
+    assert.ok(await tokenDefined(page, token), `${token} is not defined on :root in ${scheme}`);
+    const c = await tokenColour(page, token);
+    assert.match(c, /^rgb\(/, `${token} does not compute to a colour in ${scheme}: "${c}"`);
+    const ratio = await page.evaluate(`(() => {${CONTRAST} return R(${JSON.stringify(hexOf(c))}, ${JSON.stringify(surface)}); })()`);
+    assert.ok(ratio >= 3, `${token} is ${ratio.toFixed(2)}:1 against --surface in ${scheme}, under 3:1`);
+  }
+});

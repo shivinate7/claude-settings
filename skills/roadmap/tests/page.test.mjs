@@ -321,6 +321,61 @@ test("control: a phase with nothing stalled or paused draws no stalled or paused
   }
 });
 
+// ---------------------------------------------------------------- the low cell (lane nfp-narrow-paused-cell)
+// A paused cell paints its lower half in --muted, not a ring: one gradient, at the bottom and not repeated. It is read from the
+// computed style. The colour is a probe of the page's own token, so a token change moves the test with it.
+const tokenDefined = (page, name) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() !== "", name);
+const tokenColour = (page, name, prop = "color") => page.evaluate(([n, p]) => {
+  const e = document.createElement("span");
+  e.style[p] = `var(${n})`;
+  document.body.appendChild(e);
+  const c = getComputedStyle(e)[p];
+  e.remove();
+  return c;
+}, [name, prop]);
+const lowCell = (loc) => loc.evaluate((el) => {
+  const s = getComputedStyle(el);
+  return { size: s.backgroundSize, pos: s.backgroundPosition, repeat: s.backgroundRepeat, image: s.backgroundImage, shadow: s.boxShadow };
+});
+for (const [name, scope] of BARS) test(`the paused cell in ${name} paints its lower half in --muted, with no inset ring, in light and dark`, async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const paused = page.locator(`${scope} > i.pzd`);
+    assert.equal(await paused.count(), 1, `${name} draws no paused cell (i.pzd) in ${scheme}`);
+    assert.ok(await tokenDefined(page, "--muted"), `--muted is not defined on :root in ${scheme}`);
+    const muted = await tokenColour(page, "--muted");
+    const c = await lowCell(paused);
+    assert.equal(c.size, "100% 50%", `${name} in ${scheme}: the paused cell's background-size is "${c.size}", not "100% 50%"`);
+    assert.match(c.pos, /100%$/, `${name} in ${scheme}: the paused cell's background-position "${c.pos}" is not at the bottom`);
+    assert.equal(c.repeat.split(" ").pop(), "no-repeat", `${name} in ${scheme}: the paused cell repeats its paint, so it fills the top half too ("${c.repeat}")`);
+    assert.ok(c.image.includes(muted), `${name} in ${scheme}: the paused cell's background-image is not --muted (${muted}): "${c.image}"`);
+    assert.equal(c.shadow, "none", `${name} in ${scheme}: the paused cell still draws a ring: box-shadow "${c.shadow}"`);
+  }
+});
+// The WCAG 2.x contrast of two rgb() colours. A copy of the waiting page test's CONTRAST, which runs in the browser: the guard does
+// not count testing/ as a test folder, so the one home cannot be a shared module.
+const linear = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+const luminance = (rgb) => { const [r, g, b] = rgb.match(/\d+/g).map(Number); return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b); };
+const contrast = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+for (const scheme of ["light", "dark"]) test(`control: --muted and --bad, read from the computed :root, each reach 3:1 against --surface in ${scheme}`, async (t) => {
+  const page = await open(t, builtPage({ steps: KIND_FIXTURE, stalled: STALLED_C1 })); if (!page) return;
+  await page.emulateMedia({ colorScheme: scheme });
+  const dark = await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  assert.equal(dark, scheme === "dark", `the page did not take the ${scheme} scheme`);
+  assert.ok(await tokenDefined(page, "--surface"), `--surface is not defined on :root in ${scheme}`);
+  const surface = await tokenColour(page, "--surface", "backgroundColor");
+  assert.match(surface, /^rgb\(/, `--surface does not compute to a colour in ${scheme}: "${surface}"`);
+  for (const token of ["--muted", "--bad"]) {
+    assert.ok(await tokenDefined(page, token), `${token} is not defined on :root in ${scheme}`);
+    const c = await tokenColour(page, token);
+    assert.match(c, /^rgb\(/, `${token} does not compute to a colour in ${scheme}: "${c}"`);
+    const ratio = contrast(c, surface);
+    assert.ok(ratio >= 3, `${token} is ${ratio.toFixed(2)}:1 against --surface in ${scheme}, under 3:1`);
+  }
+});
+
 // The blocked step: a phase bar draws it as blocked. The rail already does; it is the control.
 test("the Now card's bar and the phase head's bar draw a blocked step as blocked, not as to do", async (t) => {
   const page = await open(t, builtPage({ steps: { d1: stepOf("Step d1", "done", 1), b2: stepOf("Step b2", "blocked", 2), t3: stepOf("Step t3", "todo", 3) } })); if (!page) return;
