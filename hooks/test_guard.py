@@ -14116,6 +14116,29 @@ sh("heredoc-tail: control, a body a bash run reads, then cd into the dirty check
    "cat > run.sh <<'EOT'\necho hi\nEOT\nbash run.sh\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
 
 
+# ---- heredoc-tail, unclosed bodies. An unclosed body runs to the end of input in bash, so its lines are data and
+# no run reads them. `read_on` reads each unclosed body as commands, so a `cd` line in one moves the root. Each red
+# has a closed twin, the same text with its closer: the twin is the green control, and keeps its verdict on both.
+sh("heredoc-tail: a reset in the dirty checkout, then an unclosed data body holding cd into the clean checkout, denies",
+   HT_RESET + "\ncat > notes.md <<'EOT'\ncd " + slash(SUBJCLEAN), "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, the same reset, then a closed data body holding cd into the clean checkout, denies",
+   HT_RESET + "\ncat > notes.md <<'EOT'\ncd " + slash(SUBJCLEAN) + "\nEOT\n", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a reset in the dirty checkout, its line holding an unclosed data header, then cd into the clean checkout in the body, denies",
+   HT_RESET + " && cat > notes.md <<'EOT'\ncd " + slash(SUBJCLEAN), "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, the same header-on-reset line, closed, then cd into the clean checkout in the body, denies",
+   HT_RESET + " && cat > notes.md <<'EOT'\ncd " + slash(SUBJCLEAN) + "\nEOT\n", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("heredoc-tail: a reset in the clean checkout, then an unclosed data body holding cd into the dirty checkout, allowed",
+   VCS + " reset --hard HEAD\ncat > notes.md <<'EOT'\ncd " + slash(SUBJDIRTY), "allow", cwd=SUBJCLEAN)
+sh("heredoc-tail: control, the same clean-checkout reset, then a closed data body holding cd into the dirty checkout, allowed",
+   VCS + " reset --hard HEAD\ncat > notes.md <<'EOT'\ncd " + slash(SUBJDIRTY) + "\nEOT\n", "allow", cwd=SUBJCLEAN)
+
+
+# heredoc-tail, a stray delimiter: a bare EOT line after a closed body closes no header. Bash runs it as a command
+# that is not found, then runs the reset in the dirty checkout, so the reset must deny.
+sh("heredoc-tail: a stray EOT line after a closed data body, then cd into the dirty checkout and reset --hard, denies",
+   "cat > notes.md <<'EOT'\necho hi\nEOT\nEOT\n" + HT_RESET, "deny", "shared-tree", cwd=SUBJCLEAN)
+
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
