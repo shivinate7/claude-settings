@@ -12271,6 +12271,47 @@ sh("frozen shell: r2, a # in a quoted git argument does not hide a write run by 
    "git submodule foreach \"echo '# keep' && cat > " + CFG_SETTINGS + "\"", "deny", "frozen-path",
    cwd=NOGIT)
 
+# A sed -i or perl -i under a command no list names (a scheduler, a CPU pin, a package runner, a tracer), or behind a
+# redirect, a shell function, a pipe into sh or a glued env -S script, edits the config settings in place. A command
+# word the guard does not list proves no runner is absent, so each one denies.
+for _n, _c in (
+    ("ionice sed -i", "ionice -c3 sed -i s/a/b/ " + CFG_SETTINGS),
+    ("taskset sed -i", "taskset 1 sed -i s/a/b/ " + CFG_SETTINGS),
+    ("uv run sed -i", "uv run sed -i s/a/b/ " + CFG_SETTINGS),
+    ("npx sed -i", "npx sed -i s/a/b/ " + CFG_SETTINGS),
+    ("setsid -w sed -i", "setsid -w sed -i s/a/b/ " + CFG_SETTINGS),
+    ("strace sed -i", "strace sed -i s/a/b/ " + CFG_SETTINGS),
+    ("2>/dev/null before sed -i", "2>/dev/null sed -i s/a/b/ " + CFG_SETTINGS),
+    (">/dev/null before sed -i", ">/dev/null sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i in a shell function", "f() { sed -i s/a/b/ " + CFG_SETTINGS + "; }; f"),
+    ("sed -i piped into sh", "echo sed -i s/a/b/ " + CFG_SETTINGS + " | sh"),
+    ("sed -i in env -S, glued", "env -S\"sed -i s/a/b/ " + CFG_SETTINGS + "\""),
+    ("ionice perl -pi", "ionice -c3 perl -pi -e s/a/b/ " + CFG_SETTINGS),
+    ("uv run perl -pi", "uv run perl -pi -e s/a/b/ " + CFG_SETTINGS),
+    ("2>/dev/null before perl -pi", "2>/dev/null perl -pi -e s/a/b/ " + CFG_SETTINGS),
+):
+    sh("frozen shell: r2, " + _n + " edits the config settings in place, denies [r2 red]",
+       _c, "deny", "frozen-path", cwd=NOGIT)
+# A sed -i or perl -pi in a subshell, in a $() or backtick substitution, or in an assignment from $(), with the path
+# glued to the closing `)` or backtick, edits the config settings in place. Each denies.
+for _n, _c in (
+    ("sed -i in a bare subshell", "(sed -i s/a/b/ " + CFG_SETTINGS + ")"),
+    ("sed -i in a subshell after true", "(true; sed -i s/a/b/ " + CFG_SETTINGS + ")"),
+    ("sed -i in a $() substitution", "echo $(sed -i s/a/b/ " + CFG_SETTINGS + ")"),
+    ("sed -i in an assignment from $()", "x=$(sed -i s/a/b/ " + CFG_SETTINGS + ")"),
+    ("sed -i in a backtick substitution", "echo `sed -i s/a/b/ " + CFG_SETTINGS + "`"),
+    ("perl -pi in a bare subshell", "(perl -pi -e s/a/b/ " + CFG_SETTINGS + ")"),
+):
+    sh("frozen shell: r2, " + _n + " edits the config settings in place, denies [r2 red]",
+       _c, "deny", "frozen-path", cwd=NOGIT)
+# Pin: a sed flag spelled as the text of grep, after a pipe, allows.
+sh("frozen shell: cat | grep sed spells an in-place flag as text on the config settings, allows [r2 pin]",
+   "cat " + CFG_SETTINGS + " | grep sed", "allow", cwd=NOGIT)
+# Denied on this head, allowed on origin/main: the quoted word 'perl -i' holds a space, so it reads as a script
+# (_commands_run), and the perl -i in rg's pattern reads as an edit of the config settings. rg writes nothing.
+sh("frozen shell: r2, rg perl -i spells an in-place flag as text on the config settings, allows [r2 red]",
+   "rg 'perl -i' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+
 # Quoted text is data as the value of a named message flag,
 # and as the input of a pure printer whose output runs nowhere. Each names the frozen path and allows.
 sh("frozen data: r2, a gh pr create body naming a cat-write onto the config settings, allows [r2 pin]",
