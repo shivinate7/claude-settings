@@ -693,12 +693,12 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # one of its clauses, with at least PAIR_WORDS content words and not the `Decision:` tag, is held by the added line at
 # PAIR_HELD, the share of a clause that was reworded and not cut, with generic words (generic_words) out. A note retired in
 # an earlier commit of the branch is paired the same way with a later commit's new notes. Shared topic words, a shared
-# `Decision:` tag or a shared slug prefix never
-# pair (unrelated notes share them). A removed line with no pair is a plain retire and is no finding. The line is cut into clauses at a
-# sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
-# judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
-# content words (stopwords out, a trailing `s` off) are among the content words of the pair, and every number token of it is. A reworded clause keeps most of
-# its words (one word in five changed: 0.8). A dropped clause keeps only the words other clauses share with it (0.2 to 0.25
+# `Decision:` tag or a shared slug prefix never pair (unrelated notes share them). A removed line with no pair is a plain
+# retire and is no finding. The line is cut into clauses at a sentence end, `;`, and `and`, `but`, `which`, `though`,
+# `while`, `so`, so a clause that rides on the end of a sentence is judged on its own. A fragment of fewer than 3 content
+# words joins its neighbour. A clause is held when at least HELD of its content words (stopwords out, a trailing `s` off)
+# are among the content words of the pair, and every token of it that holds a digit (a number or an id such as `P5`) is.
+# A reworded clause keeps most of its words (one word in five changed: 0.8). A dropped clause keeps only the words other clauses share with it (0.2 to 0.25
 # in the two cases that began this check). 0.5 sits in the gap, so a clause that is reworded, split, merged or reflowed
 # passes, and one that lost its point fails. A clause that head's text for the note holds is no finding: a later commit of
 # the branch put it back.
