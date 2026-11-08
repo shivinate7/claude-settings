@@ -77,7 +77,7 @@ VALID_NONE = "Red-run: none: ok"
 PROSE_LINE = "Prose: the Red-run: none form is for re-points."
 # Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment
 # (`NAME=value`, quoted or not). A word rule must not refuse one, even when the name starts `MUTATE` or the value holds a
-# colon: main's commit 049f8d8c0 carries the quoted form. `mutant=x` is different: it stays refused (PREFIX_BYPASSES).
+# colon: the quoted form is a real command. `mutant=x` is different: it stays refused (PREFIX_BYPASSES).
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
                  "Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA",
