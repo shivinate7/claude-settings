@@ -4,7 +4,8 @@
     python3 lint/test_check_record_slugs.py
 
 A record file that a change adds must have a slug of 32 characters or fewer. The check reads
-decisions/ and debts/ from the diff, or the files it is given.
+decisions/ and debts/ from the diff, or the files it is given. A notes slug that a change writes on a second row
+fails the check; a duplicate already on main does not, and `--list` names every duplicate without failing.
 
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
@@ -71,6 +72,22 @@ NOTE_CASE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- Alpha-slug: 
 NOTE_SPACE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- alpha-slug : the same")  # a space before the colon
 FULL_UNIQUE = "# Notes\n\n" + "".join("- row-%03d-slug: finding %d.\n" % (i, i) for i in range(300))  # full size
 FULL_DUP = FULL_UNIQUE + "- row-000-slug: the first row, written again at the end.\n"
+# A slug on two rows of main is one finding recorded twice, as a union merge leaves it. A lane that adds no
+# duplicate row passes with it there. The rows carry comment openers and a lone quote, as real rows do.
+MAIN_DUP_ROWS = ("- kept-dup: first row on main.\n"
+                 "- kept-dup: second row on main, kept by a union merge.\n")
+NOTES_MAIN_DUP = ("# Notes\n\n"
+                  "- beta-slug: a row with `/*`, `//` and # in its text. Don't stop there.\n"
+                  + MAIN_DUP_ROWS
+                  + "- gamma-slug: a third finding.\n")
+NOTES_MAIN_DUP_GAMMA_EDIT = NOTES_MAIN_DUP.replace("- gamma-slug: a third finding.",
+                                                   "- gamma-slug: a third finding, reworded by the lane.")
+NOTES_MAIN_ALPHA = NOTES_MAIN_DUP + "- alpha-slug: the first row on main.\n"  # alpha is on main once
+LANE_ALPHA_ROW = "- alpha-slug: the same finding, recorded again. Comment `/*` and `//`. Don't stop.\n"
+LANE_FOLDED_ROW = "- Alpha-slug: the same finding, in another case.\n"
+LANE_SPACED_ROW = "- alpha-slug : the same finding, with a space before the colon.\n"
+# both rows of a new duplicate
+LANE_EPSILON_ROWS = "- epsilon-slug: first row. Don't stop.\n- epsilon-slug: second row.\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -84,10 +101,14 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
+def fail_lines(out):
+    """The FAIL lines the check printed, each one whole."""
+    return [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+
+
 def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
-    return [line.rsplit(" ", 1)[1] for line in out.splitlines()
-            if line.startswith("check_record_slugs: FAIL:")]
+    return [line.rsplit(" ", 1)[1] for line in fail_lines(out)]
 
 
 def load_under_test():
@@ -364,8 +385,8 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertNotEqual(rc, 0, "a duplicate notes slug exits 0 when git cannot say: " + out)
         self.assertIn("check_record_slugs: UNKNOWN", out, "git cannot say, but no UNKNOWN line: " + out)
-        named = [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
-        self.assertTrue(any("alpha-slug" in line for line in named), "no FAIL line names the duplicate: " + out)
+        self.assertTrue(any("alpha-slug" in line for line in fail_lines(out)),
+                        "no FAIL line names the duplicate: " + out)
 
     def test_debt_readme_edited_to_drop_a_feel_line_passes(self):
         self.put(DEBT_README, README_FEEL_TEXT)
@@ -426,9 +447,127 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()  # no file arguments: the diff against origin/main
         self.assertNotIn("Traceback", out)
         self.assertNotEqual(rc, 0, out)
-        named = [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+        named = fail_lines(out)
         self.assertTrue(any("alpha-slug" in line for line in named), out)
         self.assertFalse(any(other in line for line in named for other in ("beta-slug", "gamma-slug")), out)
+
+    def lane_repeats_main_slug(self, row):
+        """Main holds alpha once. The lane adds `row`, which writes alpha again in another spelling."""
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_ALPHA)
+        self.commit_base()
+        self.put(notes, NOTES_MAIN_ALPHA + row)
+        self.commit_change()
+        self.assertEqual(NOTES_MAIN_ALPHA.count("- alpha-slug:"), 1)  # scope: main holds alpha once
+        self.assertIn("alpha-slug", row.split(":", 1)[0].lower())  # scope: the lane's row names alpha
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertNotEqual(rc, 0, "the lane's repeated slug exits 0: " + out)
+        self.assertTrue(any("alpha-slug" in line.lower() for line in fail_lines(out)),
+                        "the lane's repeated slug is not named: " + out)
+        self.assertFalse(any("kept-dup" in line for line in fail_lines(out)),
+                         "a duplicate already on main is named as a failure: " + out)
+
+    def test_base_duplicate_does_not_fail_a_lane_that_touches_other_rows(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        self.put(notes, NOTES_MAIN_DUP_GAMMA_EDIT)
+        self.commit_change()
+        self.assertEqual(NOTES_MAIN_DUP.count("- kept-dup:"), 2)  # scope: main holds the duplicate
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertEqual(rc, 0, "a duplicate already on main fails a lane that adds none: " + out)
+        self.assertEqual(fail_lines(out), [], "a duplicate already on main is named as a failure: " + out)
+
+    def test_lane_row_repeating_a_slug_fails_and_names_only_that_slug(self):
+        self.lane_repeats_main_slug(LANE_ALPHA_ROW)
+
+    def test_case_folded_lane_row_counts_as_a_duplicate(self):
+        self.lane_repeats_main_slug(LANE_FOLDED_ROW)
+
+    def test_space_before_colon_lane_row_counts_as_a_duplicate(self):
+        self.lane_repeats_main_slug(LANE_SPACED_ROW)
+
+    def test_lane_adding_both_rows_of_a_new_duplicate_fails_and_names_only_that_slug(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        self.put(notes, NOTES_MAIN_DUP + LANE_EPSILON_ROWS)
+        self.commit_change()
+        self.assertEqual(LANE_EPSILON_ROWS.count("- epsilon-slug:"), 2)  # scope: the lane writes both rows
+        rc, out = self.lint()
+        self.assertNotEqual(rc, 0, "a new duplicate the lane adds exits 0: " + out)
+        self.assertTrue(any("epsilon-slug" in line for line in fail_lines(out)),
+                        "the lane's new duplicate is not named: " + out)
+        self.assertFalse(any("kept-dup" in line for line in fail_lines(out)),
+                         "a duplicate already on main is named as a failure: " + out)
+
+    def test_lane_editing_one_row_of_a_main_duplicate_passes(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        edited = NOTES_MAIN_DUP.replace("second row on main, kept by a union merge.",
+                                        "second row, reworded by the lane.")
+        self.assertEqual(edited.count("- kept-dup:"), 2)  # scope: the edit keeps the slug on both rows
+        self.put(notes, edited)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "editing one row of a duplicate already on main fails the lane: " + out)
+        self.assertEqual(fail_lines(out), [], "a duplicate already on main is named as a failure: " + out)
+
+    def test_unreadable_main_notes_say_unknown_and_are_not_read_as_clean(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        self.break_git_show(notes)  # main's notes cannot be read, so the check cannot tell main's rows from the lane's
+        self.put(notes, NOTES_MAIN_DUP_GAMMA_EDIT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("check_record_slugs: UNKNOWN", out,
+                      "an unreadable main notes file is not reported as UNKNOWN: " + out)
+        self.assertNotEqual(rc, 0, "an unknown with a duplicate in the notes exits 0, not as today: " + out)
+
+    def test_notes_file_the_lane_adds_with_a_duplicate_fails_and_names_it(self):
+        # Green control: main has no notes file, so every row in the file is the lane's.
+        notes = self.notes_path()
+        self.commit_base()
+        self.put(notes, NOTE_DUP_TEXT)
+        self.commit_change()
+        self.assertEqual(NOTE_DUP_TEXT.count("- alpha-slug:"), 2)  # scope: the lane's file holds the duplicate
+        rc, out = self.lint()
+        self.assertNotEqual(rc, 0, out)
+        self.assertTrue(any("alpha-slug" in line for line in fail_lines(out)),
+                        "the lane's duplicate is not named: " + out)
+        self.assertNotIn("UNKNOWN", out, "a notes file that main lacks reads as unknown: " + out)
+
+    def test_list_names_every_duplicate_main_and_lane_and_exits_zero(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        self.put(notes, NOTES_MAIN_DUP + LANE_EPSILON_ROWS)
+        self.commit_change()
+        self.assertEqual(NOTES_MAIN_DUP.count("- kept-dup:"), 2)  # scope: main holds kept-dup twice
+        rc, out = self.lint()  # control: the default run fails on the lane's duplicate
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any("epsilon-slug" in line for line in fail_lines(out)), out)
+        rc, out = self.lint("--list")
+        self.assertEqual(rc, 0, "--list exits %d, not 0: %s" % (rc, out))
+        self.assertNotIn("FAIL", out, "--list reports a failure: " + out)
+        for slug in ("kept-dup", "epsilon-slug"):
+            self.assertIn(slug, out, "--list does not name %s, a duplicate: %s" % (slug, out))
+
+    def test_list_on_notes_with_no_rows_and_on_full_size_notes(self):
+        notes = self.notes_path()
+        self.put(notes, "# Notes\n")  # the empty state: a header and no rows
+        self.commit_base()
+        rc, out = self.lint("--list")
+        self.assertEqual(rc, 0, "--list exits %d on notes with no rows: %s" % (rc, out))
+        self.assertNotIn("FAIL", out, "--list reports a failure on notes with no rows: " + out)
+        self.put(notes, FULL_DUP)  # full size: 300 rows, one of them written twice
+        self.commit_change()
+        self.assertEqual(FULL_DUP.count("- row-000-slug:"), 2)  # scope: the first row is written again
+        rc, out = self.lint("--list")
+        self.assertEqual(rc, 0, "--list exits %d on full-size notes: %s" % (rc, out))
+        self.assertIn("row-000-slug", out, "--list does not name the duplicate in full-size notes: " + out)
 
 
 class DuplicateNoteSlugTests(unittest.TestCase):
