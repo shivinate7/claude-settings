@@ -13310,6 +13310,12 @@ add("builder-test: a bash -eo pipefail -c run of a test folder, deleted from che
     "deny", rule=BT, tool="Edit", file_path=WF,
     old_string=LINT + '      - name: Run\n        run: bash -eo pipefail -c "pytest tests/"\n', new_string=LINT,
     carries=("test-author", "Report"), **B)
+# The end-of-options word `--` before the script of a `bash -c` run. The reader takes `--` for the script, so this
+# run's test folder is read as none, and deleting the step drops that test.
+add("builder-test: a bash -c -- run of a test folder, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=LINT + '      - name: Run\n        run: bash -c -- "pytest tests/"\n', new_string=LINT,
+    carries=("test-author", "Report"), **B)
 # A quoted space is one shell word. The reader read `" "` as a command word and raised, and a guard that
 # raises fails open, so a pytest run deleted beside a `tr " "` step was allowed.
 SPLIT_STEP = '      - name: Split\n        run: echo "$ITEMS" | tr " " "\\n"\n'
@@ -13373,9 +13379,16 @@ for _command, _want in (
         ('bash -cx "pytest tests/"', ("tests/",)),
         ('bash +e -c "pytest tests/"', ("tests/",)),
         ('bash -oe pipefail -c "pytest tests/"', ("tests/",)),
+        # The end-of-options word `--` sits between the shell's flags and its script, so the script after `-c` is read
+        # past it. Each of these is red on a6253aafe, where the reader takes `--` for the script and reads no test.
+        ('bash -c -- "pytest tests/"', ("tests/",)),
+        ('bash -e -c -- "pytest tests/"', ("tests/",)),
+        ('sh -c -- "pytest tests/"', ("tests/",)),
+        ('sh -c -- "python tests/x.py"', ("tests/x.py",)),
         # Controls, green on the head: a plain shell -c, and a shell that runs a script file rather than a -c.
         ('bash -c "pytest tests/"', ("tests/",)),
         ('bash -e tests/x.py', ("tests/x.py",)),
+        ('bash -- tests/x.sh', ("tests/x.sh",)),
         ('echo "python tests/x.py failed"', ()),
         ('echo "bash tests ok"', ()),
         ('echo "node tests/x.js ran"', ()),
