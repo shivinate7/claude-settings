@@ -1077,13 +1077,49 @@ _BRIEF_LINE = re.compile(
     re.IGNORECASE)
 ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role's session id, so the lane can reach it
 ROLE_GAP_MAX = 80  # characters that may sit between a role label and its id, on one line
+ROLE_GAP_WORDS = ("is", "id", "session")  # the only words the gap may hold outside a quoted or parenthetical span
 # A label starts and ends at a word boundary, but `_` and markdown around it do not break one (`_Triage_`).
-_ROLE_ANY = "(?<![A-Za-z0-9])(?:" + "|".join(re.escape(label) for label in ROLE_LABELS) + ")(?![A-Za-z0-9])"
-# An id holds a digit, so a placeholder such as session_TBD or session_id is no id. The gap holds no role label and no `session_`.
-_ROLE_ID_FORM = ("(?<![A-Za-z0-9])" + "{label}" + "(?![A-Za-z0-9])(?:(?!" + _ROLE_ANY + "|session_)[^\n]){{0,{gap}}}"
-                 "session_(?=[A-Za-z0-9]*\\d)[A-Za-z0-9]+")
-_ROLE_IDS = {label: re.compile(_ROLE_ID_FORM.format(label=re.escape(label), gap=ROLE_GAP_MAX), re.IGNORECASE)
-             for label in ROLE_LABELS}
+_ROLE_LABEL = {label: re.compile("(?<![A-Za-z0-9])" + re.escape(label) + "(?![A-Za-z0-9])", re.IGNORECASE)
+               for label in ROLE_LABELS}
+# An id holds a digit, so a placeholder such as session_TBD or session_id is no id.
+_ROLE_ID = re.compile("session_(?=[A-Za-z0-9]*\\d)[A-Za-z0-9]+", re.IGNORECASE)
+_SESSION_PREFIX = "session_"
+_GAP_SPAN_CLOSERS = {'"': '"', "(": ")"}  # a quote or a paren opens a span only when its closer follows in the gap
+_GAP_WORD = re.compile(r"[^\W\d_]+")  # a run of letters: digits, spaces, punctuation and markdown are no words
+
+
+def _gap_ok(gap: str) -> bool:
+    """True when a label's gap holds, outside each closed quoted or parenthetical span, no word but ROLE_GAP_WORDS.
+    An unclosed quote or paren is no span, so its text is judged as plain gap text. Linear: the caller caps the gap
+    at ROLE_GAP_MAX characters."""
+    plain = []
+    i = 0
+    while i < len(gap):
+        closer = _GAP_SPAN_CLOSERS.get(gap[i])
+        end = gap.find(closer, i + 1) if closer else -1
+        if end >= 0:
+            plain.append(" ")
+            i = end + 1
+        else:
+            plain.append(gap[i])
+            i += 1
+    return all(word.lower() in ROLE_GAP_WORDS for word in _GAP_WORD.findall("".join(plain)))
+
+
+def _names_role_id(message: str, label: str) -> bool:
+    """True when some occurrence of the role's label is followed on its line by a gap that clears _gap_ok, then an
+    id. The gap holds no `session_`, so the first `session_` after the label is the id's start, and it sits within
+    ROLE_GAP_MAX characters. Each occurrence reads at most ROLE_GAP_MAX plus the prefix length, so the scan is linear."""
+    for found in _ROLE_LABEL[label].finditer(message):
+        window = message[found.end():found.end() + ROLE_GAP_MAX + len(_SESSION_PREFIX)].split("\n", 1)[0]
+        start = window.lower().find(_SESSION_PREFIX)
+        if start < 0 or start > ROLE_GAP_MAX:
+            continue
+        if _ROLE_ID.match(message, found.end() + start) and _gap_ok(window[:start]):
+            return True
+    return False
+
+
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
@@ -1107,8 +1143,10 @@ BRIEF_STEP_REASON = (
 BRIEF_IDS_REASON = (
     "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
     "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
-    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
-    "role label and no `session_`; an id holds a digit. (decision session-tiers, a lane holds one topic)"
+    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no "
+    "`session_`. Outside a closed quoted or parenthetical span the gap holds only digits, spaces, punctuation, markdown "
+    "and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose before an id is no role id; an id holds a digit. "
+    "(decision session-tiers, a lane holds one topic)"
 )
 
 
@@ -1154,7 +1192,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
 def _brief_ids_hit(message: str):
     """A brief that cleared the topic or step check is refused when its text lacks a session id for a role in
     ROLE_LABELS. cost: message text only, no extra transcript read."""
-    missing = [label for label in ROLE_LABELS if not _ROLE_IDS[label].search(message)]
+    missing = [label for label in ROLE_LABELS if not _names_role_id(message, label)]
     if not missing:
         return None
     return ("lane brief with no " + ", ".join(missing) + " session id",
