@@ -2626,9 +2626,12 @@ test("Answered section: with the section folded by its head, a rail chip of a su
   const page = await open(t, { items: [...filler, it], answers: answerOf(it), viewport: { width: 1280, height: 400 } }); if (!page) return;
   assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
   const head = page.locator("#b-answered");
-  // Answered starts closed, so fold it only when it is open: the chip below then has a folded section to open, on either default.
-  if ((await head.getAttribute("aria-expanded")) === "true") await head.click();
-  assert.equal(await head.getAttribute("aria-expanded"), "false", "the section is open and did not fold, so the chip case cannot start");
+  // The head opens the section and folds it again: the fold is the step under test, so each state is read back, list included.
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "true", "pressing the closed Answered head did not open the section");
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "pressing the open Answered head did not fold the section");
+  assert.equal(await page.locator("#ab").isHidden(), true, "the folded Answered section still shows its list");
   await page.locator(`#c-${it.id}`).click();
   assert.equal(await head.getAttribute("aria-expanded"), "true", `the rail chip for No. ${it.n} did not open the folded Answered section`);
   // A smooth scroll takes a moment; the wait ends when the card is in view, and the check below reads where it landed.
@@ -2702,6 +2705,24 @@ test("answered-folded: a reply that lands after load does not open the closed An
   await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
   await card(page, it).locator(".newmark").waitFor({ state: "attached" });
   assert.equal(await head.getAttribute("aria-expanded"), "false", "a reply that landed after load opened the Answered section");
+  // No open card has a New reply, so the head carries the words, after its count. The mark opens nothing and stays one.
+  assert.equal(await head.locator(".ct + .newmark").count(), 1, "the closed Answered head draws no New reply mark after its count");
+  assert.equal(await head.locator(".newmark.dot").count(), 0, "the closed Answered head draws the dot, not the words");
+  assert.match(flat(await head.locator(".newmark").textContent()), /^New reply/, "the closed Answered head's mark does not say New reply");
+});
+
+// The words show once on a screen: an open card with a New reply carries them, so the closed head draws the dot instead.
+test("answered-folded: with an open card's New reply on the page, a reply on a card in the closed Answered section draws the head's dot", async (t) => {
+  const it = mk("fold-dot", 1, { added: at(5) }), open1 = mk("fold-dot-open", 3, { added: NEW_ADDED, reply: "Thanks, noted.", replied: REPLIED_AT });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", "the Answered section opens on load with no New reply in it");
+  await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
+  await card(page, it).locator(".newmark").waitFor({ state: "attached" });
+  // P7: the open card's words are read first, so the head's dot is asserted only where the open card holds the words.
+  assert.equal(await card(page, open1).locator(".newmark:not(.dot)").count(), 1, `No. ${open1.n}, an open card with a New reply, does not carry the words`);
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", "a reply on the closed section opened it");
+  assert.equal(await page.locator("#b-answered .newmark.dot").count(), 1, "the closed Answered head does not draw the dot while an open card has the words");
+  assert.equal(await page.locator("#list .newmark:not(.dot)").count(), 1, "the words show more than once on the screen");
 });
 
 // Pressing the closed head opens the section: its list and sub line show, and the hint gives way to the open head.
@@ -2738,6 +2759,42 @@ test("answered-folded: pressing the Answered number chip of a sunk card opens th
   await page.locator(`#c-${it.id}`).click();
   assert.equal(await head.getAttribute("aria-expanded"), "true", `the chip for No. ${it.n} did not open the closed Answered section`);
 });
+
+// ---------------------------------------------------------------- answered folded: a Send at the page's end
+
+// A Send of the last open card, with the page scrolled to its end, leaves no blank screen: the pad that holds the view is none, or at most a
+// third of the screen. The pad is the card's height, so the case needs the card taller than a third of the screen and starting in view under
+// the header. Below the list sit the Ask box and the bar, about 620px at 1280 and 805px at 390, so the screen is set tall enough for both.
+const PAD_SCREENS = [[390, 1800], [1280, 1400]];
+for (const [width, height] of PAD_SCREENS) {
+  test(`answered-pad: a Send of the last open card at the page's end leaves no blank screen, at ${width} wide`, async (t) => {
+    const opens = [1, 2, 3, 4].map((n) => mk("pad-open-" + n, n, { added: NEW_ADDED }));
+    const sunk = [5, 6, 7].map((n) => mk("pad-sunk-" + n, n, { added: at(n) }));
+    const last = opens[3];
+    const page = await open(t, { items: [...opens, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]), ...answerOf(sunk[2]) }, viewport: { width, height } }); if (!page) return;
+    // The pick comes first: a label click scrolls the page to its label, which would undo the scroll to the end.
+    await takePick(page, last);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    // Scope before the subject: the page is at its end, the last open card is the last one not sunk, and it starts in view under the header.
+    const scope = await page.evaluate((id) => {
+      const band = document.querySelector(".hdr").getBoundingClientRect().bottom, c = document.getElementById("item-" + id).getBoundingClientRect();
+      const open = [...document.querySelectorAll("#list article.card")].filter((x) => !x.closest("#tier-answered")).map((x) => x.id);
+      return { atEnd: scrollY + innerHeight >= document.documentElement.scrollHeight - 1, lastOpen: open[open.length - 1], top: c.top, band, height: c.height, vh: innerHeight };
+    }, last.id);
+    assert.equal(scope.atEnd, true, "the page is not scrolled to its end before the Send");
+    assert.equal(scope.lastOpen, "item-" + last.id, `the last open card is ${scope.lastOpen}, not No. ${last.n}`);
+    assert.ok(scope.top >= scope.band && scope.top < scope.vh, `No. ${last.n} does not start in view under the header: top ${Math.round(scope.top)}, band ${Math.round(scope.band)}`);
+    assert.ok(scope.height > scope.vh / 3, `No. ${last.n} is ${Math.round(scope.height)}px tall, not over a third of the ${scope.vh}px screen`);
+    await send(page);
+    await page.waitForFunction((id) => window.__answers()[id] !== undefined, last.id);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const m = await page.evaluate(() => {
+      const pad = document.getElementById("viewpad"), r = pad.getBoundingClientRect();
+      return { padH: parseFloat(pad.style.height) || 0, blank: Math.max(0, Math.min(innerHeight, r.bottom) - Math.max(0, r.top)), vh: innerHeight };
+    });
+    assert.ok(m.padH === 0 || m.blank <= m.vh / 3, `the Send leaves ${Math.round(m.blank)}px of the ${m.vh}px screen blank under the pad`);
+  });
+}
 
 // ---------------------------------------------------------------- round 2 looks
 
