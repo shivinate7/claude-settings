@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Edit or Write of prose, against speak-rewrite-superseded-in-place and
-rulings-declare-kind. One command hook replaces the two `type: prompt` hooks on Edit and Write: a
-prompt hook cannot look at the path, so it judged every file.
+rulings-declare-kind. One command hook replaces the two `type: prompt` hooks on Edit and Write. An
+`if` path glob can filter a prompt hook, but a prompt hook takes no effort and cannot read the
+override file.
 
 Only a path with a `decisions` folder segment (either slash, any case) is judged. Any other
 path exits 0 at once with no output and no model call. The model call is `decision_watch.invoke_model`,
