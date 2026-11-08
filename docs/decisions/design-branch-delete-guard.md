@@ -41,3 +41,4 @@ A remote delete of one design branch that changed a mockup, with the remote name
 - A plain name with no branch tip that is a local tag is skipped, as is a `refs/tags/` spelling. A design branch on origin that this clone never fetched, and that shares a local tag's name, is not judged.
 - A local-only design branch is refused by the only-copy rule (`shared-tree`), not by this one.
 - A tracking ref of a branch deleted on origin and not pruned still counts as a holder of the tip. So the guard allows a delete that leaves no copy on origin. The ref is read from the local clone, not from origin.
+- A narrow-fetch clone (`--depth` or single-branch) gets no tracking ref from an archive push, so the holder read misses the archive and the delete stays refused (debt `archive-remedy-narrow-clone`, the archive remedy's dead end).
