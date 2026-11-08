@@ -2054,6 +2054,10 @@ MUTATIONS = [
      '    texts = [stripped, *substitution_commands(raw, stripped)]\n',
      '    texts = [stripped]\n',
      "guard", "substitution: shared tree, an assignment from a dollar paren denies"),
+    ("substitution: a quoted heredoc body no shell reads is read for substitutions, so prose in a python body denies",
+     '    seen = without_data_bodies(stripped) if stripped == raw else stripped\n',
+     '    seen = stripped\n',
+     "guard", "ask-alone: the repro, a file written by heredoc with a prose force-push in $( ) and then run, allows"),
     # ---- ask-step-hidden (debt ask-step-hidden-in-script): the push loop reads wrapped scripts through _push_calls.
     ("ask-step-hidden: the push loop skips _push_calls, so a force push inside bash -c passes",
      '        for args, where, overrides in _push_calls(segment, stripped, cwd):\n            verdict = push_verdict(',

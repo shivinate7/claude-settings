@@ -9,7 +9,7 @@ import re
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs,
-    _without_message_values, is_powershell, norm, split_segments,
+    _without_message_values, is_powershell, norm, split_segments, without_data_bodies,
 )
 
 
@@ -307,18 +307,22 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 def substitution_commands(raw: str, stripped: str, outer: bool = False):
     """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
     and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
-    shell heredoc body runs nothing and is gone from `stripped`; an interpreter heredoc body stays in
-    `stripped` and is read as shell text, so a `$( )` in it can be a false alarm. With `outer`, the command itself is last, its substitutions read as `x`
+    heredoc body that no shell reads (an interpreter body, a file only an interpreter runs) stays in
+    `stripped` but is text: bash expands nothing in it, so it holds no substitution (without_data_bodies).
+    With `outer`, the command itself is last, its substitutions read as `x`
     (`stripped` as it stands when the nest is too deep). A nest too deep to read gives no inner text:
     the env-file rule refuses it. The one home of this cut: judge_shell and git_env_command_hit call it.
     """
-    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
+    seen = without_data_bodies(stripped) if stripped == raw else stripped
+    found, too_deep = _substitutions(seen, powershell=POWERSHELL_CALL[0])
     inner = [text for text, _in_message in found[:-1]]
     for quote, body, _ in _split_heredocs(raw)[1]:
         if not quote:
             body_found, body_deep = _substitutions(body, heredoc=True)
             too_deep = too_deep or body_deep
             inner = [text for text, _in_message in body_found[:-1]] + inner
+    if outer and not too_deep and seen != stripped:   # the command itself keeps every line
+        found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
     if too_deep:
         inner = []
     if outer:

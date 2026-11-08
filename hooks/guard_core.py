@@ -755,7 +755,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, spans: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +764,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it, and one that
+    passes `spans` gets each body's (first line, end) line range, its closer line included."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -789,6 +790,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
                 index += 1  # drop the closing delimiter line too
             else:
                 unclosed = True   # bash reads to the end of input, so a caller that judges runs reads on
+            if spans is not None:
+                spans.append((start, index))
     return kept, bodies, unclosed
 
 
@@ -811,22 +814,27 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+def _runner(names: str):
+    return re.compile(r"(?:" + names + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+                      r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+
+
+_RUNNER = _runner(_INTERPRETERS)
+_SHELL_RUNNER = _runner(_SHELLS)   # a word that may hand a file to a shell: the runners less a pure interpreter
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
+def _runs_written_file(text: str, headers, runner=_RUNNER) -> bool:
     """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
     (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
     runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words)
         if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
             return True
     return False
@@ -858,6 +866,28 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
             text, [header for _, _, header in bodies]):
         return cmd  # the body may be executed, so keep it under inspection
     return "\n".join([dropped] + runs)
+
+
+def without_data_bodies(cmd: str) -> str:
+    """`cmd` less each quoted-delimiter heredoc body that no shell reads: bash expands nothing in it, so a
+    `$( )` or backtick there is text (an interpreter body, a file only an interpreter runs, a `cat` print).
+    A body a shell reads stays: `bash <<'EOF'`, `| sh`, `eval`, or a written file a shell, a runner or `./f` runs."""
+    if "<<" not in cmd:
+        return cmd
+    spans = []
+    _, bodies, unclosed = _walk_heredocs(cmd, spans=spans)
+    if unclosed:
+        return cmd
+    text = _without_message_values(_drop_heredoc_bodies(cmd))
+    if SHELL_HEREDOC(text):
+        return cmd   # a pipe or an eval may span lines to a shell: every body may run
+    gone = set()
+    for (quote, _, header), (start, end) in zip(bodies, spans):
+        if quote and not _runs_written_file(text, [_without_message_values(header)], _SHELL_RUNNER):
+            gone.update(range(start, end))
+    if not gone:
+        return cmd
+    return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at not in gone)
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
