@@ -33,7 +33,8 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the script under test into a scratch tree; rm_tree removes the run folder
-SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
+import layout  # noqa: E402  lint/layout.py, the reader the guard calls for the decisions folder (it reads files only when called)
+SCRIPT =os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 REPO_REAL = os.path.realpath(REPO)  # the root the derivation reads paths against: __file__ resolves to this too
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
@@ -60,15 +61,27 @@ def pre_split(got):
     return {n: v for n, v in got.items() if n not in GUARD_SPLIT + MERGE_SPLIT}
 
 
-def family_files():
-    """hooks/<module>.py for each module in hooks/guard.py's _FAMILY_MODULES. The tuple is read from the file's syntax tree,
-    so guard.py is not imported (its load starts the guard's own reads)."""
+def guard_assign(name):
+    """The value node of hooks/guard.py's module-level assignment to `name`, read from the file's syntax tree, so guard.py
+    is not imported (its load starts the guard's own reads). Every case that reads a guard constant goes through here."""
     with open(os.path.join(HERE, "..", "hooks", "guard.py"), encoding="utf-8") as f:
         tree = ast.parse(f.read())
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
-            return [f"hooks/{elt.value}.py" for elt in node.value.elts]
-    raise AssertionError("hooks/guard.py has no _FAMILY_MODULES tuple")
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return node.value
+    raise AssertionError(f"hooks/guard.py has no module-level {name}")
+
+
+def family_files():
+    """hooks/<module>.py for each module in hooks/guard.py's _FAMILY_MODULES."""
+    return [f"hooks/{m}.py" for m in ast.literal_eval(guard_assign("_FAMILY_MODULES"))]
+
+
+def role_table_path():
+    """The decision record the guard reads for the role table (hooks/guard.py role_model_table): the decisions folder from
+    lint/layout.json, read by the reader the guard calls, then ROLE_TABLE_FILE from hooks/guard.py. Both come from the code."""
+    folder = layout.layout()["kinds"]["decisions"]["path"].strip("/")
+    return "/".join(folder.split("/") + [ast.literal_eval(guard_assign("ROLE_TABLE_FILE"))])
 
 
 # The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
@@ -81,10 +94,12 @@ def family_files():
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
 #   a spec_from_file_location or SourceFileLoader path: its Name read through to the path assigned to it.
-# Not followed: a product module's join with a run-time root and several literals, when its path is a repo file: it is named
-# in LOAD_EXCEPTIONS. A test module's such join is read when its root is the repo, and is not named otherwise: its root is a
-# fixture path in a temp folder. A run-time root that is not a folder of the repo is not read. A loader path with no literal
-# repo file is named. A string or a comment holds no load: the syntax tree is read.
+# Not followed: a product module's join with a run-time root and several literals, when its path is a repo file, and a
+# product module's join with a spread folder (`*folder.split("/")`, how a layout-built path is joined). Each is named in
+# LOAD_EXCEPTIONS. In a test module, a join under a run-time root is read when the root is the repo, and is not named
+# otherwise: its root is a fixture path in a temp folder. A test module's spread join is a fixture path too, and is not
+# named. A run-time root that is not a folder of the repo is not read. A loader path with no literal repo file is named.
+# A string or a comment holds no load: the syntax tree is read.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
 # The merge suite's closure has one seed, its own file. merge/test_merge.py imports decision_watch, which imports guard, so the
 # merge closure holds the guard closure's files too (closure_of reads them from the code, once per seed set).
@@ -92,11 +107,19 @@ MERGE_SEEDS = ("merge/test_merge.py",)
 # Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
 # <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
 # An entry names a load of either closure (the guard's or the merge suite's), so the check reads the union of both.
+# A rename of a name in the load's text (ROOT in lint/rule_audit.py, say) re-keys its entry: the key is updated with it.
 LOAD_EXCEPTIONS = {
     "hooks/config_watch.py:_load_guard:path": "GUARD_UNDER_TEST, a test override of guard.py's path, as decision_watch's (guard.py is in the closure by import)",
+    "hooks/config_watch.py:watched_paths:os.path.join(cwd, *name.split('/'))": "WATCHED_NAMES, the project's own .claude/settings.json and .claude/settings.local.json (shared_names.PROJECT_FROZEN_FILES), joined under the session's cwd: whichever project the session runs in, not a fixed repo file",
     "hooks/decision_watch.py:<module>:_GUARD_PATH": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
+    "hooks/decision_watch.py:changed_this_turn:os.path.join(cwd, *rel.split('/'))": "a path git status reports as changed, joined under the checkout: whichever file changed, not a fixed one",
+    "hooks/feedback_guard.py:kind_homes:os.path.join(root, *h.split('/'))": "a home folder the layout (or the repo's extras) names, tested for existence: a folder, not a fixed file",
+    "hooks/feedback_guard.py:backlog_candidates:os.path.join(root, *layout.path(root, key).split('/'))": "each task kind's home folder from the layout, read for its todo and notes text: the folders the layout names",
+    "hooks/git_reads.py:github_repo:os.path.join(root, *LAYOUT_EXTRAS)": "LAYOUT_EXTRAS, .claude/layout-extras.json: the repo's own extras file, read for its roadmap object",
+    "hooks/guard.py:role_model_table:os.path.join(pointer_root, *folder.split('/'), ROLE_TABLE_FILE)": "role_model_table: the decisions folder from lint/layout.json, then ROLE_TABLE_FILE, the role table record; GuardWindowsSplit's role-table case covers its scope",
     "hooks/guard_merge.py:merge_module:path": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py): merge/merge.py is in the closure",
     "hooks/guard_merge.py:_merge_config_at:os.path.join(root, '.github', 'stamp.json')": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
+    "hooks/override.py:_path:os.path.join(base, 'state', 'override', *folder, session_id + '.json')": "the override state file of a session id, under the Claude config folder: the installer's state, not a repo file",
     "hooks/precompact_handoff.py:prompt_path:os.path.join(config_dir(), 'hooks', 'precompact_handoff_prompt.md')": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
     "hooks/test_guard.py:_load_git_reads:os.path.join(os.path.dirname(GUARD), 'git_reads.py')": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
     "hooks/test_guard.py:rm_var_taint_reader_case:path": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
@@ -105,10 +128,27 @@ LOAD_EXCEPTIONS = {
     "hooks/test_guard.py:_hu_reread:READ_CHECK": "READ_CHECK: reread_check.py by default, which is in the closure by import",
     "hooks/test_guard.py:_shared_names_under_test:os.path.join(os.path.dirname(GUARD), 'shared_names.py')": "a sibling of GUARD: shared_names.py is in the closure by import",
     "lint/check_silent_undo.py:generated_page:os.path.join(base, 'lint', 'hook_catalog.py')": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
+    "lint/check_silent_undo.py:generated_page:os.path.join(wt, *gen.RECORDS_PAGE.split('/'))": "gen.RECORDS_PAGE (hook_catalog's records page), in the head's worktree: the page the check compares",
+    "lint/check_skill_model_rows.py:<module>:os.path.join(ROOT, *layout.path(ROOT, 'decisions').split('/'), 'agent-model-cap.md')": "the decisions folder from the layout, then agent-model-cap.md: the same role table record hooks/guard.py role_model_table reads",
+    "lint/hook_catalog.py:read:os.path.join(ROOT, *rel.split('/'))": "read(rel): a path from the catalog's own tables (the hooks and pages it checks), read by path",
+    "lint/hook_catalog.py:has_file:os.path.join(ROOT, *rel.split('/'))": "has_file(rel): the same catalog paths as read(), tested for existence",
+    "lint/hook_catalog.py:collect_records:os.path.join(ROOT, *folder.split('/'))": "listed_folders(): a folder the layout lists for a kind, read for its files",
+    "lint/hook_catalog.py:main:os.path.join(ROOT, *rel.split('/'))": "the catalog's generated pages, written at paths from its own table: the writer of the pages it then checks",
+    "lint/layout.py:_extras:os.path.join(root, *layout().get('extras', '').split('/'))": "_extras: the repo's own extras file, at the path the layout's extras key names: a repo file, not this one",
+    "lint/layout.py:shared_resources:os.path.join(root, *item['preflight'].split('/'))": "item['preflight']: a path a repo's own preflight item names, tested for existence: a repo file",
+    "lint/layout.py:mockup_homes:os.path.join(root, *path(root, 'design').split('/'))": "mockup_homes: the repo's design folder from the layout, returned as a path; no file is read here",
+    "lint/report_guard.py:rewrite_stamp_problem:os.path.join(root, *folder.split('/'), d + '.md')": "the decisions folder from the layout, then each id: the record files, tested for existence",
     "lint/rule_audit.py:<module>:os.path.join(ROOT, 'lint', 'rule_mechanisms.json')": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
     "lint/rule_audit.py:<module>:os.path.join(ROOT, '.github', 'workflows', 'checks.yml')": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "lint/rule_audit.py:emitted_rule_ids:os.path.join(root, 'hooks', 'config_watch.py')": "ROOT: hooks/config_watch.py is not in the closure",
     "merge/merge.py:hit_suites:os.path.join(root, '.github', 'workflows', 'checks.yml')": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "merge/merge.py:records_proof:os.path.join(wt, *RECORDS_PAGE.split('/'))": "RECORDS_PAGE in the merge's own worktree: the records page the merge proves fresh",
+    "merge/merge.py:hit_suites.read:os.path.join(root, *path.split('/'))": "read(path) in hit_suites: a module a checks suite imports, read from the checkout: whichever modules those suites import",
+    "merge/merge.py:hit_suites:os.path.join(root, *m.group(1).split('/'))": "the suite a checks.yml run line names, read from the checkout: whichever suite files the workflow runs",
+    "merge/merge.py:small_base_move:os.path.join(wt, *CI_SCOPE.split('/'))": "CI_SCOPE, the scope script, tested for existence in the merge's worktree: already a fail-safe path in ci-scope.sh",
+    "skills/waiting-page/export_page.py:export:os.path.join(out, *label.split('/'))": "an export label's target under the out folder: a write, not a load",
+    "skills/waiting-page/export_page.py:export:os.path.join(out, *label.split('/'))#2": "a stale export label removed under the out folder: a write, not a load",
+    "skills/waiting-page/export_page.py:export_all:os.path.join(worktree, *entry['export'].split('/'))": "entry['export'] under the worktree: the export file the page entry names",
     "skills/waiting-page/stale_pages.py:pointer_checkout:os.path.join(os.path.expanduser('~'), '.claude', 'CLAUDE.md')": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
 }
 _CLOSURE = {}  # closure_of's cache: seed tuple -> (files, unfollowed)
@@ -365,6 +405,9 @@ def _refs_of(f, tree, tracked):
                         unfollowed.append((node, f"os.path.join with a run-time root, then {c}"))
                 elif c:
                     paths.add(c)
+                elif not test and any(isinstance(a, ast.Starred) for a in node.args):
+                    # A spread folder (`*folder.split("/")`) is how a layout-built path is joined. Its file is not known here.
+                    unfollowed.append((node, "os.path.join of a spread folder: a layout-built path the closure does not follow"))
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
                 arg = node.args[1] if len(node.args) > 1 else None
                 hits, named = [], False
@@ -382,7 +425,10 @@ def _refs_of(f, tree, tracked):
             c = _repo_load(f, node, tracked, bound)
             if c:
                 paths.add(c)
-    return modules, paths, loads, _keyed(unfollowed, parents)
+    once = {}  # one entry per node: a load that is both a run-time join and a loader's path is appended by both branches
+    for node, what in unfollowed:
+        once.setdefault(node, what)
+    return modules, paths, loads, _keyed(list(once.items()), parents)
 
 
 def closure_of(seeds):
@@ -1031,6 +1077,18 @@ class GuardWindowsSplit(unittest.TestCase):
                 with self.subTest(path=p, edit=edit):
                     self.assertEqual(run([p], existing=[p] if edit else ()), want, f"{p}: its outputs differ from guard.py's")
 
+    def test_a_role_table_edit_turns_on_the_guard_and_the_full_windows_guard(self):
+        # The guard reads this record at run time (hooks/guard.py role_model_table), and the guard suite checks the real
+        # file (hooks/test_guard.py role_real_table_check). It is a .md, so only a scope arm that names it turns the guard on.
+        path = role_table_path()
+        for existing in ((), (path,)):
+            with self.subTest(path=path, edit=bool(existing)):
+                got = run([path], existing=existing)
+                self.assertEqual(got["code"], "true", f"scope: code is off for {path}")
+                self.assertEqual(got["guard"], "true", f"scope: guard is off for {path}: the guard reads its role table")
+                self.assertEqual(got.get(GUARD_FULL), "true",
+                                 f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {path}, want 'true': the guard suite checks it on the real repo")
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class GuardClosure(unittest.TestCase):
@@ -1158,8 +1216,8 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("settings.json", paths | loads)
 
-    # A test module's join under REPO with several literals is a repo load: REPO is the real checkout (hooks/test_guard.py
-    # line 57). One case per target: the waiting-page page.html is read at three lines (15632, 17400, 18361).
+    # A test module's join under REPO with several literals is a repo load: REPO is the real checkout (test_guard's REPO).
+    # One case per target: the waiting-page page.html is read by three loads, WP_SOURCE, IF_PAGE and PAGE_HTML.
     def assert_test_module_reads(self, target):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
@@ -1168,15 +1226,15 @@ class GuardClosure(unittest.TestCase):
         self.assertIn(target, paths | loads, f"the test module's join under REPO for {target} is not followed")
 
     def test_a_test_module_join_under_the_repo_reads_the_impeccable_skill(self):
-        # os.path.join(REPO, "skills", "impeccable", "SKILL.md") at hooks/test_guard.py line 15161.
+        # os.path.join(REPO, "skills", "impeccable", "SKILL.md") in test_guard's impeccable_command_verbs().
         self.assert_test_module_reads("skills/impeccable/SKILL.md")
 
     def test_a_test_module_join_under_the_repo_reads_the_waiting_page_html(self):
-        # os.path.join(REPO, "skills", "waiting-page", "page.html") at hooks/test_guard.py lines 15632, 17400, 18361.
+        # os.path.join(REPO, "skills", "waiting-page", "page.html") in test_guard's WP_SOURCE, IF_PAGE and PAGE_HTML.
         self.assert_test_module_reads("skills/waiting-page/page.html")
 
     def test_a_test_module_join_under_the_repo_reads_the_waiting_page_splice(self):
-        # os.path.join(REPO, "skills", "waiting-page", "splice.py") at hooks/test_guard.py line 15843.
+        # os.path.join(REPO, "skills", "waiting-page", "splice.py") in test_guard's page_empty_reason_names_the_page_case().
         self.assert_test_module_reads("skills/waiting-page/splice.py")
 
     def test_a_test_module_join_of_several_literals_under_a_fixture_root_is_not_a_repo_load(self):
@@ -1212,6 +1270,37 @@ class GuardClosure(unittest.TestCase):
         keys = [key for key, _ in unfollowed]
         self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
         self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+
+    def test_a_run_time_join_passed_to_a_loader_keys_once(self):
+        # A load that is both a run-time join and a loader's path is one load, so it is keyed once, with no #2. Two forms:
+        # the join written in the loader call, and the join assigned to a name the call passes.
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        key = "load:os.path.join(root, 'lint', 'rule_mechanisms.json')"
+        forms = {
+            "join in the call": ('import importlib.util\nimport os\n\ndef load(root):\n'
+                                 '    return importlib.util.spec_from_file_location(\n'
+                                 '        "x", os.path.join(root, "lint", "rule_mechanisms.json"))\n'),
+            "join assigned first": ('import importlib.util\nimport os\n\ndef load(root):\n'
+                                    '    p = os.path.join(root, "lint", "rule_mechanisms.json")\n'
+                                    '    return importlib.util.spec_from_file_location("x", p)\n'),
+        }
+        for form, src in forms.items():
+            with self.subTest(form=form):
+                _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+                keys = [k for k, _ in unfollowed]
+                self.assertEqual(keys, [key], f"the one load is keyed {len(keys)} times, not once: {keys}")
+
+    def test_two_run_time_joins_of_one_text_key_apart(self):
+        # Control, green before and after the fix: two joins are two loads, each keyed once.
+        # The dedupe is per node, not per text.
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        src = ('import os\n\ndef load(root):\n    a = os.path.join(root, "lint", "rule_mechanisms.json")\n'
+               '    b = os.path.join(root, "lint", "rule_mechanisms.json")\n    return a, b\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        key = "load:os.path.join(root, 'lint', 'rule_mechanisms.json')"
+        self.assertEqual([k for k, _ in unfollowed], [key, f"{key}#2"], "two loads of one text are not keyed apart")
 
     # A `/` chain and `.parent` are loads when the root is the repo and the path is a repo file. The chain is never named:
     # a directory and a user-config path are not repo files, and naming them would cry wolf.
@@ -1254,6 +1343,26 @@ class GuardClosure(unittest.TestCase):
                 files = _repo_files()
         self.assertIn("lint/x.py", files, "scope: the walk does not list a plain repo file")
         self.assertNotIn(".git", files, "a worktree's .git file is listed as a repo file")
+
+    def test_a_spread_path_in_a_product_module_is_named_as_a_load_the_closure_does_not_follow(self):
+        # A spread folder (`*folder.split("/")`) is how a layout-built path is joined. The closure cannot read it, so the derivation
+        # must name it among the unfollowed loads, and LOAD_EXCEPTIONS must name it too. Otherwise a new one drops out silently.
+        src = "\n".join(["import os", "", "", "def read(root, folder, name):", '    return os.path.join(root, *folder.split("/"), name)', ""])
+        _, _, _, unfollowed = _refs("hooks/spread_probe.py", ast.parse(src), set())
+        keys = [key for key, _ in unfollowed]
+        self.assertEqual(keys, ["read:os.path.join(root, *folder.split('/'), name)"], f"the spread join is not named by its key: {keys}")
+
+    def test_a_literal_join_in_a_product_module_is_not_named_as_a_spread(self):
+        # Control: a literal repo path is followed or left alone, never named as a spread.
+        src = "\n".join(["import os", "", "def read(root):", '    return os.path.join(root, "docs", "x.md")', ""])
+        _, _, _, unfollowed = _refs("hooks/literal_probe.py", ast.parse(src), set())
+        self.assertEqual(unfollowed, [], f"a literal join is named as unfollowed: {unfollowed}")
+
+    def test_a_spread_join_in_a_test_module_is_a_fixture_path_and_is_not_named(self):
+        # Control: a test module's join is a fixture path, as its joins under a run-time root already are.
+        src = "\n".join(["import os", "", "def read(root, folder):", '    return os.path.join(root, *folder.split("/"))', ""])
+        _, _, _, unfollowed = _refs("lint/test_spread_probe.py", ast.parse(src), set())
+        self.assertEqual(unfollowed, [], f"a test module's spread join is named as unfollowed: {unfollowed}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
