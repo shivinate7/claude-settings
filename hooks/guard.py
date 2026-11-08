@@ -1680,8 +1680,10 @@ def workflow_step_disables(line: str) -> bool:
     return bool(WORKFLOW_DISABLE_STEP.match(line))
 
 
-def workflow_run_is_test(value: str) -> bool:
+def workflow_run_is_test(value: str, added: bool = False) -> bool:
     """True when one single-line `run:` value is `[interpreter] <test path> [args]` and nothing else.
+    An `added` step may also be a plain mutation test with no argument: `--report` and `--changed` exit 0
+    whatever they find, so only the whole run gates. A removed step never is one.
     A tokenizer that keeps quotes whole judges it, so a `#` or `//` in quotes is an argument and an
     unquoted `&&`, `;`, `|`, redirect or `$(` is a token of its own that no test run holds."""
     value = value.strip()
@@ -1700,13 +1702,14 @@ def workflow_run_is_test(value: str) -> bool:
     if tokens and tokens[0] in WORKFLOW_INTERPRETERS:
         tokens = tokens[1:]
         script = workflow_script_index(tokens)
-    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not workflow_runs_test(tokens[script]):
+    if script is None or not tokens or ".." in norm(tokens[script]).split("/") or not (
+            is_test_rel(tokens[script]) or added and len(tokens) == script + 1 and workflow_runs_test(tokens[script])):
         return False
     rest = tokens[:script] + tokens[script + 1:]
     return not TEST_DISABLE_FLAGS.search(" ".join(rest)) and not disables_tests([value], [])
 
 
-def workflow_test_step(lines) -> bool:
+def workflow_test_step(lines, added: bool = False) -> bool:
     """True when `lines` (non-blank) are exactly one whole test-run step."""
     start = WORKFLOW_STEP_START.match(lines[0]) if lines else None
     if not start:
@@ -1721,10 +1724,10 @@ def workflow_test_step(lines) -> bool:
         if disables_tests([line], []) or workflow_step_disables(line):
             return False
     runs = [value for key, value in keys if key == "run"]
-    return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0])
+    return len(runs) == 1 and len(set(key for key, _ in keys)) == len(keys) and workflow_run_is_test(runs[0], added)
 
 
-def workflow_step_chunk(lines) -> bool:
+def workflow_step_chunk(lines, added: bool = False) -> bool:
     """True when the non-blank `lines` split into whole test-run steps, each starting at a step line."""
     lines = [line for line in lines if line.strip()]
     if not lines:
@@ -1739,7 +1742,7 @@ def workflow_step_chunk(lines) -> bool:
             steps.append([line])
         else:
             steps[-1].append(line)
-    return all(workflow_test_step(step) for step in steps)
+    return all(workflow_test_step(step, added) for step in steps)
 
 
 def workflow_changed_lines(old_text: str, new_text: str):
@@ -1751,7 +1754,7 @@ def workflow_changed_lines(old_text: str, new_text: str):
 
 def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
     """True when every added and removed non-blank line of the change forms whole test-run steps."""
-    return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
+    return all(workflow_step_chunk(removed) and workflow_step_chunk(added, True)
                for removed, added in workflow_changed_lines(old_text, new_text))
 
 
