@@ -5430,6 +5430,9 @@ sh("git-after-cd: an if ! check whose then body is echo to an fd copy && exit 1,
 sh("git-after-cd: an if ! check whose then body is echo to a closed stdout && exit 1, then ; a git push -u, is refused",
    "if ! pytest -q; then echo bad >&- && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# `2>&1` leaves stdout open, so the echo succeeds, the exit runs, and the push after the if is never reached.
+sh("git-after-cd: an if ! check whose then body is echo to an fd copy 2>&1 && exit 1, then ; a git push -u, passes",
+   "if ! pytest -q; then echo bad 2>&1 && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
