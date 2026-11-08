@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -5402,6 +5403,53 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_debt_filed_sentence_passes(self):
         self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
+
+
+def stale_shared_names():
+    """A mid-pull shared_names: the real tag, copied from the real module, and no TASK_TERMINAL_STATUSES."""
+    stale = types.ModuleType("shared_names")
+    stale.TASK_NOTIFICATION_TAG = importlib.import_module("shared_names").TASK_NOTIFICATION_TAG
+    return stale
+
+
+class StaleSharedNamesTests(unittest.TestCase):
+    """_finish_notice (report_guard.py) reads TASK_TERMINAL_STATUSES from shared_names. A stale shared_names with
+    the tag and no statuses falls back to the four statuses, so a completed notice still finishes its spawn."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Loaded in this process, as GuardLogAppendRaceTests loads guard_core, so the sys.modules patch reaches it.
+        spec = importlib.util.spec_from_file_location("report_guard_stale_probe", REPORT_GUARD)
+        cls.guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.guard)
+
+    def test_stale_shared_names_finishes_a_completed_notice(self):
+        with mock.patch.dict(sys.modules, {"shared_names": stale_shared_names()}):
+            stand_in = sys.modules["shared_names"]
+            self.assertTrue(hasattr(stand_in, "TASK_NOTIFICATION_TAG"), "scope: the stand-in lacks the tag")
+            self.assertFalse(hasattr(stand_in, "TASK_TERMINAL_STATUSES"), "scope: the stand-in has the statuses")
+            try:
+                finished = self.guard._finish_notice(
+                    finish_record("tu_stale", "queue-operation", "completed"), "tu_stale")
+            except AttributeError as err:
+                self.fail("stale shared_names without TASK_TERMINAL_STATUSES crashed the finish check: %s" % err)
+        self.assertIs(finished, True, "stale shared_names: a completed notice is not read as finished")
+
+    def test_stale_shared_names_keeps_a_running_notice_open(self):
+        # A check that finished every notice would pass the case above, so a running notice must stay open.
+        with mock.patch.dict(sys.modules, {"shared_names": stale_shared_names()}):
+            try:
+                finished = self.guard._finish_notice(
+                    finish_record("tu_stale", "queue-operation", "running"), "tu_stale")
+            except AttributeError as err:
+                self.fail("stale shared_names without TASK_TERMINAL_STATUSES crashed the finish check "
+                          "on a running notice: %s" % err)
+        self.assertIs(finished, False, "stale shared_names: a running notice is read as finished")
+
+    def test_real_shared_names_finishes_the_same_completed_notice(self):
+        # The green control: the same record finishes its spawn with the real statuses.
+        finished = self.guard._finish_notice(finish_record("tu_stale", "queue-operation", "completed"), "tu_stale")
+        self.assertIs(finished, True, "real shared_names: a completed notice is not read as finished")
 
 
 if __name__ == "__main__":
