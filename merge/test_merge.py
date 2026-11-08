@@ -13512,6 +13512,16 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
+    def test_a_newest_earlier_record_hand_edited_after_posting_refuses_the_base(self):
+        # Ruling (orchestrator, 2026-11-08 17:38 CST): the newest record decides, and a hand-edited record is not a record. The write path reads the
+        # same comments, so an edited newest record names no reviewed head for the fix diff. The older record below it has the same head and would
+        # pass, so a fallback to it is refused as well.
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, edited))
+        self.assert_refused(rc, out, err)
+        self.assertIn("hand-edited", err, "the refused fix check does not name the hand-edited record:\n" + err)
+
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
     head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
