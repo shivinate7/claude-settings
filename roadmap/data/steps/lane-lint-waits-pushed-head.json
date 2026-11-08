@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint starts at once after a push, with no wait for GitHub to show the new head",
+  "why": "Lane lint refuses for about 1 minute after a push, until GitHub shows the new head, so a lane re-runs it by hand.",
+  "note": "Sightings: 2 on Nov 8, lane session_013NEJKzXyKNARtJsbz3Q1R2, relayed by the coordinator at 17:47 CST. merge.py already waits for the pushed head in one path (progress 'GitHub to show the pushed head'); the fix may reuse it for --lane-lint. The coordinator routes it.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 849,
+  "updatedAt": "2026-11-08T17:48:00-06:00"
+}
