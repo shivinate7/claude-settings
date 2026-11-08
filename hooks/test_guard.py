@@ -13797,9 +13797,9 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --re
 # closing line in the text, so every line after it is judged as the command it is. Class 1 is the re-walk invariant,
 # class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (a harmless run of a file a
 # body writes), class 3b the reads of a data body, class 4 the true refusals that stay, class 5b the readers that
-# class 5 does not name, class 7 the pins for forms with no case. Red on main: class 3 only. Red on the held
-# fix (the closing line dropped): class 1, the detached-launch forms of class 2, class 3b, class 5b, and the class 7
-# pins whose verdict differs from main's.
+# class 5 does not name, class 7 the pins for forms with no case. Red on main: class 3, and the class 7 pins for a
+# run after `then` or `do`, and for a pipe into check.py. Red on the held fix (the closing line dropped): class 1,
+# the detached-launch forms of class 2, class 3b and class 5b.
 FAMILY = "heredoc-keep"
 HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
 HK_DATA = "cat > notes.md <<'EOF'\nhello\nEOF\n"   # a data body: no command in its call runs it
@@ -14002,14 +14002,16 @@ for _label, _form in HK_FORM_CONTROLS:
     sh("heredoc-keep: control, a plain body in %s, allowed" % _label, _form % "hello", "allow", cwd=NOGIT)
 
 
-# CLASS 7. Pins for forms that had no case. Each pins main's verdict. Main allows a run of a body after `then` or
-# `do`, and denies a body piped into check.py. Each has a plain-body control beside it (P2).
+# CLASS 7. Pins for forms that had no case. A run of a body after `then` or `do` denies, since the run executes the
+# body. Main allows that run, so those pins are red on main. Stdin piped to a named script is data, as an operand after
+# the script is, so the pipe into check.py allows. Main denies that pipe, so that pin is red on main. Each has a
+# plain-body control beside it (P2).
 HK_PIN_FORMS = (
     ("python3 -W ignore f", "f", "python3 -W ignore f", "deny"),
     ("a pipe into ssh -p 22 host", "f", "cat f | ssh -p 22 host", "deny"),
-    ("if ./f; then :; fi", "f", "if ./f; then :; fi", "allow"),
-    ("do ./f in a for loop", "f", "for i in 1; do ./f; done", "allow"),
-    ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "deny"),
+    ("if ./f; then :; fi", "f", "if ./f; then :; fi", "deny"),
+    ("do ./f in a for loop", "f", "for i in 1; do ./f; done", "deny"),
+    ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "allow"),
 )
 for _label, _file, _call, _want in HK_PIN_FORMS:
     _body = "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call)
