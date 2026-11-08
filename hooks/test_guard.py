@@ -11744,6 +11744,38 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A READ THAT NAMES A WRITE WORD IS A READ. A grep pattern, a quoted name or a heredoc print that holds
+# `install` or `tee` beside a frozen path only reads that path, so each row below expects allow.
+CFG_INSTALL_HOOK = slash(os.path.join(CFG, "hooks", "install.py"))
+CFG_STREAM_HOOK = slash(os.path.join(CFG, "hooks", "guard_stream.py"))
+sh("frozen: grep -n install of a frozen hook is a read",
+   "grep -n install " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: grep -n tee of a frozen hook is a read",
+   "grep -n tee " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: sed -n of a quoted install.py, then a frozen hook, is a read",
+   "sed -n 1p \"" + CFG_INSTALL_HOOK + "\" \"" + CFG_HOOK + "\"", "allow", cwd=NOGIT)
+sh("frozen: a python heredoc that prints a tee string and reads a frozen hook is a read",
+   "python3 - <<'EOF'\nprint('tee', open('" + CFG_STREAM_HOOK + "').read()[:9])\nEOF", "allow", cwd=NOGIT)
+sh("frozen: a python heredoc that checks a tee string beside a frozen read is a read",
+   "python3 - <<'EOF'\nprint(check_tail_hit(\"merge --lane-lint 7 | tee x\"), open('" + CFG_STREAM_HOOK
+   + "').read()[:9])\nEOF", "allow", cwd=NOGIT)
+# `touch` changes a frozen file by its own verb, so it is a write and is denied.
+sh("frozen: touch of a frozen hook is a write, and is denied", "touch " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+# REAL WRITES TO A FROZEN HOOK STAY DENIED, as frozen-path. Each names its write by its own verb.
+sh("frozen: sed -i of a frozen hook is denied", "sed -i '' s/a/b/ " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: a redirect onto a frozen hook is denied", "echo x > " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: cp onto a frozen hook is denied", "cp /tmp/x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: tee onto a frozen hook is denied", "echo x | tee " + CFG_HOOK, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: a subshell cp onto a frozen hook is denied", "(cp /tmp/x " + CFG_HOOK + ")", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a substitution sed -i onto a frozen hook is denied",
+   "echo $(sed -i '' s/a/b/ " + CFG_HOOK + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: busybox cp onto a frozen hook is denied", "busybox cp /tmp/x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
