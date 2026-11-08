@@ -8504,7 +8504,8 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read
 const RULE_PX = 30 * 5 - 2;
 // The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
 // The runs layer is 0px or the full bar. At 0px its runs get 0px, since their min-width clamps to 0 against that layer, so a run counts as
-// drawn only in a drawn layer. A run paints only inside its layer, so the bar's overflow:hidden is the only clip left.
+// drawn only in a drawn layer. The bar's overflow:hidden is the only clip left, and no narrow-rule case checks that a run stays in a 0px
+// layer: the min-width clamp is what holds it.
 // With px, the bar is set to that width in the same step as the read, so a re-render cannot undo it. A run's vis is its part inside the
 // bar, the box that clips it. cellSpan is the span the drawn cells cover, and runsW the runs layer's width.
 const barLayers = (loc, px) => loc.evaluate((bar, set) => {
