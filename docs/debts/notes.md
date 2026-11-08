@@ -60,7 +60,6 @@
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - guard-remedy-needs-bash: guard remedy names sh install.sh, which Bash cannot run while the guard is missing (guard wrappers)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
-- git-env-braced-spaced-set: `{${env:GIT_DIR} = 'x'}`, `% {${env:GIT_DIR} = 'x'}` and `$sb = {${env:GIT_DIR} = 'x'}` with a spaced `=` pass. Main refuses them. The cause is `rstrip("})")` in `_open_script_blocks` (hooks/guard_kill.py:730), which strips the `}` that closes the name. Decision: git-env-set-refused. Fix: follow-up lane notes-guard-c3
 - git-env-do-while-space: `do{1}while($x -eq 1)$env:GIT_DIR="x"` passes. A space in the condition defeats `_paren_end`. The spaced `do { 1 } while ($a) $env:GIT_DIR='x'` passes too. Main passes both. Where: hooks/guard_kill.py `_split_glued_braces`. Decision: git-env-set-refused. Fix: none — rare and harmless
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)

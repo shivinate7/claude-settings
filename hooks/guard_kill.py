@@ -712,6 +712,14 @@ def _paren_end(text, at):
     return -1
 
 
+def _strip_closers(tok):
+    """Strip the trailing `}` and `)` that close the opener, but keep a `}` that closes a
+    braced name: `${env:X}` has as many `}` as `${`."""
+    while tok.endswith((")", "}")) and (tok[-1] == ")" or tok.count("}") > tok.count("${")):
+        tok = tok[:-1]
+    return tok
+
+
 def _open_script_blocks(tokens):
     """Split each glued script block or paren group (`{$env:X=1}`, `&{...}`, `($env:X=1)`) into
     its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
@@ -727,7 +735,7 @@ def _open_script_blocks(tokens):
             continue
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
             out.append(opens.group(0)[-1])
-            tok = tok[opens.end():].rstrip("})")
+            tok = _strip_closers(tok[opens.end():])
         out += _split_glued_braces(tok)
     return out
 
