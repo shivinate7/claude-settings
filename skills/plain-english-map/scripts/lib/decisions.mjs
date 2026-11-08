@@ -93,14 +93,21 @@ export const recordId = (stem, pattern) => {
 
 /**
  * The tracked files that the records name, as a Map { file -> { decisions, debts } }: `decisions` is the id of each naming decision record (a record with no id adds none),
- * `debts` the slug of each naming debt record. A record names a file only by a backticked token that equals the file's path. A record, a docs/map/ page and map.config.json
- * are named by no file. `decisionsDir` may be unset: then only debts name. `all` is the tracked files, and `read(file)` their text.
+ * `debts` the slug of each naming debt record. A record names a file only by a backticked token that equals the file's path. A record, the README.md or notes.md beside it,
+ * a docs/map/ page and map.config.json are named by no file. `decisionsDir` may be unset: then only debts name. `all` is the tracked files, and `read(file)` their text.
  */
 export const recordNaming = ({ root, read, all, decisionsDir, idPattern }) => {
   const tracked = new Set(all);
   const debts = debtRecords(root);
   const dd = decisionsDir ? decisionsDir.replace(/\/?$/, '/') : null;
-  const skip = (f) => f === 'map.config.json' || f.startsWith('docs/map/') || (dd && f.startsWith(dd)) || (debts.dir && f.startsWith(`${debts.dir}/`));
+  // A .md file directly in the decisions or debts folder is never named: it is a record, or that folder's README.md or notes.md.
+  // Any other tracked file in that folder, or under it, can be named and needs a map line.
+  const recordIn = (dir, f) => {
+    if (!dir || !f.startsWith(dir)) return false;
+    const name = f.slice(dir.length);
+    return !name.includes('/') && (isRecordFile({ isFile: () => true, name }) || NOT_RECORDS.has(name));
+  };
+  const skip = (f) => f === 'map.config.json' || f.startsWith('docs/map/') || recordIn(dd, f) || recordIn(debts.dir && `${debts.dir}/`, f);
   const found = new Map();
   const scan = (file, kind, name) => {
     for (const [, token] of read(file).matchAll(/`([^`\n]+)`/g)) {

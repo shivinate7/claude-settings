@@ -293,11 +293,10 @@ const backticked = (s) => [...s.matchAll(/`([^`]+)`/g)].map((x) => x[1]);
 
 /**
  * The map lines of one docs/map/ page, as `entries`, each { file, line, code, ids, at, bad, tests, testsAt, testsBad }. `line` is the 1-based number of the map line.
- * A map line is a backtick list line outside a Tables or a Screens section. `code` is true when `re` accepts its path: only a code line reads decisions lines,
- * so MAP10 is the same for a file whose extension the config leaves out. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
+ * A map line is a backtick list line outside a Tables or a Screens section, or a code line in any section. `code` is true when `re` accepts its path.
+ * A non-code line's `ids` are the ids on its decisions line, and `decisionGaps` compares them with the records that name it. `slugs` are read for it alone. A tested-by line is valid only under a map line in `## Code files` (`placed`): any other place makes it an orphan.
  * `ids` are the ids on its decisions lines, `at` is the number of the first one or null, and `bad` holds each decisions line that is not in the form: a bad line adds no id.
  * `tests`, `testsAt` and `testsBad` are the same for its tested-by lines. `slugs`, `slugsAt` and `slugsBad` are the same for its debts lines, read for a non-code file only.
- * A non-code map line reads decisions lines too: a record can name any file (`recordNaming`).
  * `orphans` holds each tested-by line that sits under no `placed` map line (a table line, a screen line, a home and a line in another section included), as { line, text }.
  */
 export const subLineEntries = (text, re) => {
