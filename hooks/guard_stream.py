@@ -96,16 +96,36 @@ def narrating_stage(segment: str) -> str:
     return _roster_word(tokens, index)
 
 
+# The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
+INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+
+
+def _script_operand(tokens, index: int) -> str:
+    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
+    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    at = index + 1
+    while at < len(tokens) and tokens[at].startswith("-"):
+        flag = tokens[at]
+        if flag in ("-m", "-c"):
+            return ""
+        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+    return tokens[at] if at < len(tokens) else ""
+
+
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
     NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER): the check
-    rule needs it, so `grep -n x merge/merge.py` is no run of the script."""
+    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
+    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
+    `python3 -m pytest -k merge/merge.py` are no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
-    if interpreter_only and not SCRIPT_INTERPRETER.match(word.removesuffix(".exe")):
+    if interpreter_only:
+        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(script)
         return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
@@ -151,26 +171,54 @@ NARRATED_TAIL_REASON = (
 # twice. `ci-job` is refused in the background only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
-VERDICT_WRAPPER = "verdict"
+VERDICT_WRAPPERS = ("verdict", "verdict.cmd")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
-# `uv run` flags that take the next word as their value, so `uv run --with x python ...` skips `x`.
-UV_RUN_VALUE_FLAGS = ("--with", "--python", "-p", "--directory", "--project", "--env-file",
-                      "--group", "--extra", "--package", "--index", "--with-requirements")
+# The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
+# `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
+UV_VALUE_FLAGS = frozenset((
+    "--allow-insecure-host", "--cache-dir", "--color", "--config-file", "--config-setting",
+    "--config-settings-package", "--default-index", "--directory", "--env-file", "--exclude-newer",
+    "--exclude-newer-package", "--extra", "--extra-index-url", "--find-links", "--fork-strategy",
+    "--group", "--index", "--index-strategy", "--index-url", "--keyring-provider", "--link-mode",
+    "--no-binary-package", "--no-build-isolation-package", "--no-build-package",
+    "--no-editable-package", "--no-extra", "--no-group", "--no-sources-package", "--only-group",
+    "--package", "--prerelease", "--project", "--python", "--python-platform",
+    "--refresh-package", "--reinstall-package", "--resolution", "--upgrade-group",
+    "--upgrade-package", "--with", "--with-editable", "--with-requirements",
+    "-C", "-P", "-f", "-i", "-p", "-w",
+))
 
 
 def _skip_uv_run(tokens, index: int) -> int:
-    """The index of the command `uv run ...` starts, read through `resolve_command` again, else `index`.
-    `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that reads the command word,
-    and only the check rule needs it."""
-    while index < len(tokens) and basename(tokens[index]) == "uv" and tokens[index + 1:index + 2] == ["run"]:
-        start = index + 2
+    """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
+    again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
+    reads the command word, and only the check rule needs it."""
+    while index < len(tokens) and basename(tokens[index]) == "uv":
+        run = index + 1
+        while run < len(tokens) and tokens[run].startswith("-"):
+            run += 2 if tokens[run] in UV_VALUE_FLAGS else 1
+        if tokens[run:run + 1] != ["run"]:
+            break
+        start = run + 1
         while start < len(tokens) and tokens[start].startswith("-"):
-            start += 2 if tokens[start] in UV_RUN_VALUE_FLAGS else 1
+            start += 2 if tokens[start] in UV_VALUE_FLAGS else 1
         at = resolve_command(tokens[start:])
         if at is None:
             break
         index = start + at
     return index
+
+
+def _through_verdict(tokens) -> bool:
+    """True when a segment runs its command through `verdict`, behind any wrapper or `uv run`.
+    resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
+    `python3` without recording it, so read the words ahead of the command word, and the word itself
+    for `verdict.cmd`."""
+    index = resolve_command(tokens)
+    if index is None:
+        return False
+    index = _skip_uv_run(tokens, index)
+    return any(basename(token) in VERDICT_WRAPPERS for token in tokens[:index + 1])
 
 
 def check_stage(segment: str, background: bool) -> str:
@@ -182,16 +230,13 @@ def check_stage(segment: str, background: bool) -> str:
     index = resolve_command(tokens)
     if index is None:
         return ""
-    # resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
-    # `python3` without recording it, so read the words ahead of the command word: a check run through
-    # it, alone or as `python3 .../verdict`, keeps its full log.
-    index = _skip_uv_run(tokens, index)
-    if any(basename(token) == VERDICT_WRAPPER for token in tokens[:index]):
+    if _through_verdict(tokens):
         return ""
+    index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and any(
-            token.replace("\\", "/").endswith(CHECK_SCRIPT_TAIL) for token in tokens[index + 1:]):
+    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
+            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
@@ -240,6 +285,55 @@ CHECK_TAIL_REASON = (
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>`. It keeps the full log and "
     "prints the verdict itself."
+)
+
+
+# A VERDICT CALL PIPED ONWARD, then `&&`, `||` or `;` (decision background-check-through-verdict). A
+# pipeline's exit status is its last stage's, so `verdict <cmd> | tail -1 && git commit` runs the commit
+# after a red check: verdict's own exit status is hidden. `set -o pipefail` earlier in the same command
+# keeps it. A pipeline that ends the command is safe, since nothing reads its status, and so is a bare
+# `verdict` call.
+CONTINUING_ENDS = ("&&", "||", ";")
+PIPEFAIL_FLAGS = re.compile(r"-[A-Za-z]*o$")
+
+
+def _sets_pipefail(segment: str) -> bool:
+    """True when one segment is `set -o pipefail`, alone or in a cluster such as `set -euo pipefail`."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is None or basename(tokens[at]) != "set":
+        return False
+    rest = tokens[at + 1:]
+    return any(word == "pipefail" and PIPEFAIL_FLAGS.match(rest[i - 1])
+               for i, word in enumerate(rest) if i)
+
+
+def verdict_pipe_exit_hit(stripped: str) -> str:
+    """The matched text when a pipeline that starts with a `verdict` call has a later stage and is
+    followed by `&&`, `||` or `;` and more commands, with no `set -o pipefail` before it."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    start = 0
+    for at, end in enumerate(ends):
+        if end == "|":
+            continue
+        stages, first, start = segments[start:at + 1], start, at + 1
+        if len(stages) < 2 or end not in CONTINUING_ENDS or not any(s.strip() for s in segments[start:]):
+            continue
+        tokens = segment_tokens(stages[0])
+        if not tokens or not _through_verdict(tokens):
+            continue
+        if any(_sets_pipefail(earlier) for earlier in segments[:first]):
+            continue
+        return "verdict | " + (stages[1].split() or [""])[0] + " " + end
+    return ""
+
+
+VERDICT_PIPE_EXIT_REASON = (
+    "a pipe after verdict hides verdict's exit status, so the command after it still runs when the "
+    "check is red (decision background-check-through-verdict). "
+    "Remedy: run `verdict <cmd>` with no pipe, or set pipefail first, "
+    "as `set -o pipefail; verdict <cmd> | tail -1 && ...`."
 )
 
 
