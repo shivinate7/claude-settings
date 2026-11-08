@@ -9,12 +9,11 @@ import io
 import json
 import os
 import re
-import shlex
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_redirections,
+    is_cloud, strip_redirections, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -1030,18 +1029,17 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
-def _command_words(args, raw=None):
+def _command_words(args, glued=None):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
     sits in, and a glued `&` sends it to the background: either ends that word and the command.
-    `raw` is each word as written, quotes kept (_raw_tail): a `)` or `&` is read only from it, so a
-    quoted one is text. Without `raw` the unquoted word is read."""
+    `glued` is, per word, how many of its trailing `)` or `&` are unquoted (_glued_counts): a quoted one
+    is text. Without `glued` every trailing one counts."""
     words = []
     for index, arg in enumerate(args):
         word = arg.rstrip(")&")
-        if raw is not None:
-            glued = len(raw[index]) - len(raw[index].rstrip(")&"))
-            word = arg[:max(0, len(arg) - glued)]
+        if glued is not None:
+            word = arg[:len(arg) - glued[index]]
         if word != arg:
             if word:
                 words.append(word)
@@ -1050,24 +1048,39 @@ def _command_words(args, raw=None):
     return words
 
 
-def _raw_tail(segment: str, args):
-    """The last len(args) words of `segment` as written, quotes kept, or None when they cannot be paired with
-    the unquoted tokens (a quote opened inside a word, or an unreadable segment): `_command_words` then reads
-    the unquoted words, as it did before. `args` is a tail of the segment's tokens."""
-    try:
-        raw = shlex.split(segment, posix=False)
-    except ValueError:
-        return None
+def _glued_counts(segment: str, args):
+    """Per word of `args` (a tail of the segment's tokens), how many trailing `)` or `&` it holds outside quotes, read from the quote
+    state of walk_quotes, the one quote walk. Raises _FlagsUnreadable when the walk and the tokens do not split the segment into the same
+    words, so the caller denies and never falls back to the unquoted reading."""
+    words, current = [], []
+    for index, char, quote in walk_quotes(segment):
+        if not quote and char in " \t\r\n":
+            if current:
+                words.append(current)
+            current = []
+        else:
+            current.append((char, quote))
+    if current:
+        words.append(current)
     tokens = segment_tokens(segment)
-    if tokens is None or len(raw) != len(tokens) or len(args) > len(raw):
-        return None
-    return raw[len(raw) - len(args):]
+    if tokens is None or len(words) != len(tokens) or len(args) > len(words):
+        raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
+    counts = []
+    for word, arg in zip(words[len(words) - len(args):], args):
+        run = 0
+        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1]:
+            run += 1
+        if run > len(arg) or any(arg[len(arg) - 1 - k] != word[-1 - k][0] for k in range(run)):
+            raise _FlagsUnreadable("a trailing ) or & does not match its token")
+        counts.append(run)
+    return counts
 
 
 def _merge_words(segment: str):
-    """The merge's arguments up to the end of its command, else None when the segment runs no merge."""
+    """The merge's arguments up to the end of its command, else None when the segment runs no merge. Raises _FlagsUnreadable when
+    the closing `)` or `&` cannot be read from the quotes."""
     args = merge_tool_args(segment)
-    return None if args is None else _command_words(args, _raw_tail(segment, args))
+    return None if args is None else _command_words(args, _glued_counts(segment, args))
 
 
 def _push_calls(segment: str, script: str, cwd: str):
