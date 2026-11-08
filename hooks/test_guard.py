@@ -2766,7 +2766,8 @@ sh("worktree: a hard reset in the shared checkout denies", VCS + " reset --hard"
    "shared-tree", cwd=GITMAIN)
 sh("worktree: the same reset inside a worktree asks", VCS + " reset --hard", "ask",
    "shared-tree", cwd=GITWT)
-# other-checkout refuses a -C that names another checkout of the clone, as the cd form does.
+# other-checkout refuses a -C that names another checkout of the clone, as the cd form does (coordinator ruling,
+# valid from 2026-11-08 17:15 CST, keep deny: matches the cd form, an owner override lifts it).
 sh("worktree: -C naming the worktree is refused, from the shared checkout",
    VCS + " -C " + slash(GITWT) + " reset --hard", "deny", "other-checkout", cwd=GITMAIN)
 # A leading cd is no second command (ask-commands-run-alone). The -C reset is refused alone, as the line above.
@@ -22787,6 +22788,23 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit after an echo
                          _gcx_row("deny", "home", 'echo "# note" && git -C @PRIMARY commit -m x')))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit whose message holds a quoted apostrophe is refused",
                          _gcx_row("deny", "home", 'git -C @PRIMARY commit -m "pins, don\'t"')))
+# A walk through the agent's own red-run folder name is judged on the folder it resolves to, as a cd form is:
+# the `..` after the name climbs out of it. The name alone must not pass the walk.
+GCX_RED_WALK = "../agent-" + GCX_HOME + "-red"
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add by a relative walk through its own red-run folder "
+                         "name to the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C " + GCX_RED_WALK + "/../../.. add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit by the same walk to the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C " + GCX_RED_WALK + "/../../.. commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add by the same walk ending at a sibling agent's worktree "
+                         "is refused",
+                         _gcx_row("deny", "home", "git -C " + GCX_RED_WALK + "/../agent-" + GCX_SIB + " add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add by an absolute walk through its own red-run folder "
+                         "to the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @RED/../../.. add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's cd by the same walk into the primary checkout, then git add, is "
+                         "refused",
+                         _gcx_row("deny", "home", "cd " + GCX_RED_WALK + "/../../.. && git add f")))
 # Allowed: the agent's own checkout and red-run folder, the reads, a folder no word names, a text-only
 # git -C, a scratch clone, and a -C chain whose last folder is the agent's own.
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit in its own worktree is allowed",
@@ -22799,6 +22817,8 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C diff of the primary 
                          _gcx_row("allow", "home", "git -C @PRIMARY diff")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add in its own red-run folder is allowed",
                          _gcx_row("allow", "home", "git -C @RED add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add in a folder under its own red-run folder is allowed",
+                         _gcx_row("allow", "home", "git -C @RED/src add f")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a folder named by an unset variable is "
                          "allowed",
                          _gcx_row("allow", "home", "git -C $GCX_TARGET commit -m x")))
