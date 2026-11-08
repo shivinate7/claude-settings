@@ -121,9 +121,8 @@ Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, an
 transcript's end for each agent that is quiet, listed or not. No new process, timer or file. Case
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
-notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
-stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
-an agent resumed after it closed). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+notice (completed, failed, killed or stopped) closes an agent only until a later resume reopens it. A model
+turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 An agent whose oldest open Bash or PowerShell call is older than `OPEN_CALL_CAP`, 900 s, is listed. Its
