@@ -962,6 +962,18 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(answer.returncode, 0, "the uname probe exited %d: %r" % (answer.returncode, answer.stderr))
         return answer.stdout.strip()
 
+    def shell_tmpdir(self, uname, tmpdir):
+        """TMPDIR as the hook's shell has it after its start, with the fake uname set and TMPDIR given as `tmpdir`
+        (None unsets it). Git's sh.exe can fill in an empty TMPDIR, so the expected line depends on this value."""
+        env = dict(os.environ, FAKE_BIN=self.fake_uname(uname))
+        env.pop("TMPDIR", None)
+        if tmpdir is not None:
+            env["TMPDIR"] = tmpdir
+        answer = subprocess.run([sh_exe(), "-c", PREPEND_FAKE + 'printf %s "${TMPDIR-}"'], capture_output=True,
+                                text=True, env=env, timeout=60)
+        self.assertEqual(answer.returncode, 0, "the TMPDIR probe exited %d: %r" % (answer.returncode, answer.stderr))
+        return answer.stdout
+
     def assert_no_tmpdir_line(self, text):
         self.assertNotRegex(text, TMPDIR_ASSIGN_LINE,
                             "the env file got a TMPDIR assignment line on a Windows host, though Git Bash has /tmp: %r" % text)
@@ -982,12 +994,20 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         """Control for the Windows case: the same fake answering Linux still gets the export line."""
         self.assertEqual(self.uname_probe("Linux"), "Linux", "the shell did not run the fake uname")
         for tmpdir in (None, ""):
+            # Scope first: the value the hook's shell starts with decides which expectation holds.
+            shell_value = self.shell_tmpdir("Linux", tmpdir)
             for fixture in FIXTURES:
                 with self.subTest(tmpdir=tmpdir, fixture=fixture):
                     name = "linux-%s-%s.sh" % ("unset" if tmpdir is None else "empty", fixture)
                     text = self.read(self.env_run(name, fixture, tmpdir, uname="Linux"))
-                    self.assertRegex(text, TMPDIR_LINE,
-                                     "a Linux uname got no export TMPDIR= line, so the Windows case proves nothing: %r" % text)
+                    if shell_value == "":
+                        self.assertRegex(text, TMPDIR_LINE,
+                                         "a Linux uname got no export TMPDIR= line, so the Windows case proves nothing: %r" % text)
+                    else:
+                        # The shell starts with TMPDIR set, so the hook must keep it: no line.
+                        self.assertNotRegex(text, TMPDIR_LINE,
+                                            "the shell starts with TMPDIR=%r, yet the env file got an export TMPDIR= line: %r"
+                                            % (shell_value, text))
 
     def test_a_single_quoted_candidate_is_never_exported(self):
         quoted = os.path.join(self.root, "it's-tmp")
