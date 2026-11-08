@@ -49,7 +49,7 @@ in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 the commit, plus the branch it merged for a reversal.
 
 A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set or with
---strict (ruling: unknown in CI is red).
+--strict, and exit 1 always when the UNKNOWN carries a finding (ruling: unknown in CI is red).
 """
 import argparse
 import collections
