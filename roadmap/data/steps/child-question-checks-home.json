@@ -1,11 +1,11 @@
 {
   "title": "A question relayed for another repo is checked with that repo's own sessions before it goes on the page",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.95,
   "owner": "coordinator",
-  "lane": null,
+  "lane": "session_013NEJL3FLmYSCJLFHzCk8R9",
   "why": "At 22:06 CST Nov 7 triage put six mailaudit #144 Duo design questions on the page (items 388-393), from a coordinator relay and runner 9's README read. The owner had already handled them on his Mac. Owner, 22:24 CST: \"u randomly got some mail audit design questions that frankly have alrdy been handled on my mac idk why u needed to have me work on these here\".",
-  "note": "Guard: before triage files an owner question for another repo, it asks that repo's own triage or coordinator (or the Mac session that runs it) whether the owner already ruled, and the item cites that answer. With no answer, the item is not filed. A draft PR's README pick is no proof the owner has not ruled. Title written by triage from the owner's words. Owner ask, so the 21:42 CST hold lets it start if item 387 is a. Filed 22:25 CST Nov 7.",
-  "updatedAt": "2026-11-07T22:24:00-06:00"
+  "note": "Guard: before triage files an owner question for another repo, it asks that repo's own triage or coordinator (or the Mac session that runs it) whether the owner already ruled, and the item cites that answer. With no answer, the item is not filed. A draft PR's README pick is no proof the owner has not ruled. Title written by triage from the owner's words. Owner ask, so the 21:42 CST hold lets it start if item 387 is a. Filed 22:25 CST Nov 7. Lane session_013NEJL3FLmYSCJLFHzCk8R9 started (coordinator, 22:28 CST Nov 7).",
+  "updatedAt": "2026-11-07T22:30:00-06:00"
 }

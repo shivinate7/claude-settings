@@ -1,11 +1,11 @@
 {
   "title": "A lane's findings ride in its own PR, or one follow-up PR per topic",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.51,
   "owner": "coordinator",
-  "lane": null,
+  "lane": "session_013NEJKyuRd6zdQhuiRC27g9",
   "why": "Owner pick on item 386, a+b+c (page save, 22:25 CST Nov 7). Each finding became its own step and lane, so lanes made lanes (coordinator, 21:45 CST).",
-  "note": "A finding joins the lane's next commit, or one follow-up PR per topic. A queue-fix lane: the owner's hold lets it start. Title from item 386 option b.",
-  "updatedAt": "2026-11-07T22:27:00-06:00"
+  "note": "A finding joins the lane's next commit, or one follow-up PR per topic. A queue-fix lane: the owner's hold lets it start. Title from item 386 option b. Lane session_013NEJKyuRd6zdQhuiRC27g9 started (coordinator, 22:29 CST Nov 7).",
+  "updatedAt": "2026-11-07T22:30:00-06:00"
 }
