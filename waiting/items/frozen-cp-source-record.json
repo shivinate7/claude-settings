@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T10:00:00Z",
+  "context": "Goal: guards refuse only what can do harm, and records say what main does.\nProblem (rule): record frozen-path-resolves-shell-vars says \"A `cp` with a frozen source is refused (`MUTATING_COMMAND` over-refuses `cp` and `mv` on purpose).\" Main already allows `cp <frozen hook> /tmp/x`, and a test pins that allow. So the sentence is false on main, and changing a recorded decision needs your word.\nBased on (read): main's docs/decisions/frozen-path-resolves-shell-vars.md (the Rule 7 paragraph) and hooks/test_guard.py case \"frozen: cp FROM a frozen hook to scratch is a read\", which expects allow; triage read both at 03:58 CST.\nBased on (ruling): the same record's owner line (owner, 2026-10-07) covers env-var values only, not cp.\nDeparts from: the record says a cp from a frozen source is refused \u2014 it would say a cp from a frozen source is a read, and a frozen target is refused.\nMeanwhile: nothing waits on this. PR #1867 (lane other-checkout-cp-own) carries on.",
+  "home": "other-checkout-cp-own",
+  "id": "frozen-cp-source-record",
+  "kind": "decision",
+  "n": 408,
+  "options": [
+    {
+      "gain": "The record matches main and #1867. A copy still never overwrites a frozen file.",
+      "how": "The record says: \"A `cp` from a frozen source is a read; a frozen target is refused.\" The guard does not change.",
+      "key": "a",
+      "label": "Rewrite the sentence to match main",
+      "lose": "Nothing that main protects today."
+    },
+    {
+      "gain": "The record stays as written.",
+      "how": "A lane changes the guard to refuse any cp whose source is frozen, and drops the test that allows it.",
+      "key": "b",
+      "label": "Keep the sentence; the guard refuses such a copy again",
+      "lose": "A refusal on reads that do no harm: a false alarm you learn to skip."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "docs/decisions/frozen-path-resolves-shell-vars.md; hooks/test_guard.py case \"frozen: cp FROM a frozen hook to scratch is a read\"; PR #1867",
+  "short": "Fix a false sentence in a guard record",
+  "status": "open",
+  "title": "Should record frozen-path-resolves-shell-vars say a copy FROM a frozen file is a read, as main already does?"
+}
