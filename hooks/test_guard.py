@@ -9007,6 +9007,20 @@ sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run 
 sh("draft-pr: a perl body whose backtick span nests <( ) with gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `cat <(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A backslash at a line's end inside a backtick span joins the next line, so the span runs on to the backtick
+# that closes it. perl, ruby and node run that span as a shell, so a `$(` on the next line is a substitution
+# and its gh call runs. A body fed to the interpreter and a written file both reach it.
+sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline into $( with gh pr create, "
+   "fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo \\", "$(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline into $( with gh pr create, "
+   "run from a written file, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "print `echo \\", "$(gh pr create -t x)`;", "EOF", "perl f.pl"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
