@@ -2061,12 +2061,15 @@ MESSAGE_ANAPHORS = {"it", "that", "them"}
 MESSAGE_DETERMINERS = {"the", "this", "that", "these"}
 MESSAGE_TEST_SIDE_NOUNS = {"assert", "assertion", "case", "cases", "test", "tests", "expected value", "fixture"}
 MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}
-# `make it pass by changing ...` is an edit of the carried path, not a goal.
+# `make it pass by changing X` is an edit of X, not a goal.
 MESSAGE_EDIT_GERUNDS = {"editing", "changing", "fixing", "updating", "modifying", "replacing", "rewriting", "adding",
                         "removing", "deleting", "dropping", "re-pointing", "writing"}
 # What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
 MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
 MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
+# A word that may sit between an anaphor and its green word (`Make them all pass`). `new` takes the noun after it too
+# (`Make that new case pass`).
+MESSAGE_GOAL_FILLERS = {"all", "finally"}
 # A word with no slash is a path only with one of these extensions, so a method call (`os.path`) is none.
 MESSAGE_CODE_EXT = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "yml", "yaml", "toml", "sh", "ps1", "swift",
                     "java", "kt", "go", "rs", "rb", "c", "cc", "cpp", "h", "hpp", "cs", "css", "html", "sql", "ini",
@@ -2136,25 +2139,46 @@ def _message_goal(words, at: int) -> bool:
 
 def _anaphor_end(words, at: int):
     """(last index, side) of the anaphor that starts at `at`, else (-1, ''). `it`, `that` and `them` are anaphors of any
-    path (side 'any'). A role noun after the/this/that/these is one of its side's paths: 'test' or 'product'."""
+    path (side 'any'). A role noun after the/this/that/these is one of its side's paths, 'test' or 'product', when it
+    ends the clause, or a comma or a preposition (`to`, `with`) follows it. Another word after it makes a noun compound
+    (`the assertion error`, `the guard tests`, `that case green`): no anaphor, and `that` there is no pronoun. `so`
+    starts a new clause (MESSAGE_CLAUSE), so a role noun before it ends its clause."""
     word = words[at][0] if at < len(words) else ""
     if word in MESSAGE_DETERMINERS:
         for size in (2, 1):
             noun = " ".join(w for w, _, _ in words[at + 1:at + 1 + size])
             if len(noun.split()) == size and noun in MESSAGE_TEST_SIDE_NOUNS | MESSAGE_PRODUCT_SIDE_NOUNS:
-                return at + size, "test" if noun in MESSAGE_TEST_SIDE_NOUNS else "product"
+                end = at + size
+                if end + 1 < len(words) and not words[end][2] and words[end + 1][0] not in MESSAGE_PREPOSITIONS:
+                    return -1, ""
+                return end, "test" if noun in MESSAGE_TEST_SIDE_NOUNS else "product"
     return (at, "any") if word in MESSAGE_ANAPHORS else (-1, "")
 
 
-def _anaphor_goal(words, at: int) -> bool:
-    """True when the anaphor at `at` is followed at once by a green word, `them green` or `that case green`. A green word
-    further on describes a replacement (`Replace it with a passing assert`), and a comma ends the anaphor (`Replace it,
-    passing ...`). `make it pass by changing ...` is no goal: it edits the path."""
-    end, _ = _anaphor_end(words, at)
-    if end < 0 or words[end][2] or end + 1 >= len(words) or words[end + 1][0] not in MESSAGE_GREEN:
-        return False
-    after = [w for w, _, _ in words[end + 2:end + 4]]
-    return not (len(after) == 2 and after[0] == "by" and after[1] in MESSAGE_EDIT_GERUNDS)
+def _anaphor_carry(words, at: int) -> str:
+    """The side of the paths the anaphor at `at` carries (see _anaphor_end), else ''. An anaphor that goes green is a
+    goal and carries nothing: the green word follows it at once, with no comma between (`them green`), or after one
+    filler (`them all pass`, `that new case pass`). A green word further on describes a replacement (`Replace it with a
+    passing assert`). `make it pass by <gerund> X` edits X: a role noun X of one side (`by fixing the guard`, `by
+    changing the expected value to 3`) narrows the carry to that side, and any other X keeps the anaphor's side."""
+    end, side = _anaphor_end(words, at)
+    if end < 0 or words[end][2]:
+        return side
+    green = end + 1
+    filler = words[green][0] if green < len(words) else ""
+    if filler in MESSAGE_GOAL_FILLERS:
+        green += 1
+    elif filler == "new":
+        green += 2
+    if green >= len(words) or words[green][0] not in MESSAGE_GREEN:
+        return side
+    means = [w for w, _, _ in words[green + 1:green + 3]]
+    if not (len(means) == 2 and means[0] == "by" and means[1] in MESSAGE_EDIT_GERUNDS):
+        return ""
+    edited = _anaphor_end(words, green + 3)[1]
+    if edited in ("", "any") or edited == side:
+        return side
+    return edited if side == "any" else ""
 
 
 def _message_path_side(path: str) -> str:
@@ -2167,8 +2191,8 @@ def _message_edits(words):
     (path, test_object) per path its edit verbs govern. An edit verb governs the first path after it, and a path joined
     to that one by `and`, `or` or a comma; a later path is a spec or a target. With no edit verb's path, a path that
     leads the clause is governed. `named` is (path, kind, test_object) per path a later pathless clause may mean: kind
-    'read' carries only to an anaphor. `anaphor` is the set of sides of the anaphors an edit verb is followed by (see
-    _anaphor_end); it is empty when none is."""
+    'read' carries only to an anaphor. `anaphor` is the set of sides the anaphors after the edit verbs carry (see
+    _anaphor_carry); it is empty when none does."""
     named, governed, led = [], [], []
     edit_seen = actor_seen = False
     anaphor = set()
@@ -2182,8 +2206,8 @@ def _message_edits(words):
             kind, verb, verb_at, slot, head_open, note, test_object = act, word, at, act == "edit", True, False, False
             if act == "edit":
                 edit_seen = True
-                side = _anaphor_end(words, at + 1)[1]
-                if side and not _anaphor_goal(words, at + 1):
+                side = _anaphor_carry(words, at + 1)
+                if side:
                     anaphor.add(side)
             continue
         if word in MESSAGE_READ_VERBS:
@@ -2218,7 +2242,7 @@ def message_edit_paths(message: str):
     (_message_edits), or the verb's clause names no path at all and an earlier clause of the sentence (`Look at X, then
     fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named,
     or one that led its clause, carries only when the verb is followed by an anaphor that does not go green
-    (`Make them green`). A role noun anaphor (`Fix the tests`) carries only a path of its side. A path inside a quote
+    (`Make them green`). A role noun anaphor (`Fix the tests`) carries only a path of its side (_anaphor_carry). A path inside a quote
     is data for an order, but a read path for a carry (`Quote: "X:12 is wrong". Fix it.`). `test_object` marks a path a test noun object makes a spec
     for a test-author (`Add red cases for ... in X`)."""
     quoted = []
@@ -2247,6 +2271,7 @@ def message_edit_paths(message: str):
             words = _message_words(clause)
             governed, seen, anaphor = _message_edits(words)
             seen = seen + [(path, "read", False) for word, _, _ in words if MESSAGE_QUOTE_WORD.fullmatch(word)
+                           and int(word[len(MESSAGE_QUOTE_MASK):]) < len(quoted)
                            for path in quoted[int(word[len(MESSAGE_QUOTE_MASK):])]]
             named += seen
             if governed:
