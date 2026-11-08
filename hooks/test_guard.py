@@ -29008,21 +29008,26 @@ CTM_HAIKU, CTM_SONNET, CTM_OPUS_1M = "7c1e9a4b0d2f63e85", "2a6f0c8d1e7b94a30", "
 CTM_FABLE, CTM_LAST, CTM_UNMAPPED = "5d93b1e6a0c4f7289", "9f2a6c03e8d15b7a4", "3b8e15c7f902d4a6e"
 CTM_NOASSIST, CTM_GARBAGE, CTM_EMPTY = "c4d07a9e62b13f58d", "08f5b2d9e4a71c63b", "f61a3c8e0d9b5427c"
 CTM_DIRECTORY, CTM_MISSING = "a7e2d4c1b9f08635d", "b0c9f3a6e2d78514e"
+CTM_FALLBACK = "d6a1f3b08c5e72947"   # a turn a fallback served: message.model is Sonnet, requestedModel is Opus
 CTM_AGENTS = (CTM_HAIKU, CTM_SONNET, CTM_OPUS_1M, CTM_FABLE, CTM_LAST, CTM_UNMAPPED, CTM_NOASSIST,
-              CTM_GARBAGE, CTM_EMPTY, CTM_DIRECTORY, CTM_MISSING)
+              CTM_GARBAGE, CTM_EMPTY, CTM_DIRECTORY, CTM_MISSING, CTM_FALLBACK)
 if not all(re.fullmatch(r"[0-9a-f]{17}", agent) for agent in CTM_AGENTS):
     sys.exit("fixture setup failed: an agent id is not 17 lowercase hex characters")
 
 
-def ctm_record(agent_id, model=None):
+def ctm_record(agent_id, model=None, requested=None):
     """One record of an agent's transcript, in the shape measured on this machine. An assistant record
-    carries `message.model`, which the rule reads. Without a model it is a user record."""
+    carries `message.model`, which the rule reads. Without a model it is a user record. `requested`, when
+    given, sets the record's `requestedModel`: the model the agent asked for, which a fallback may not serve."""
     if model is None:
         return json.dumps({"type": "user", "agentId": agent_id, "isSidechain": True,
                            "message": {"role": "user", "content": "push the branch"}})
-    return json.dumps({"type": "assistant", "agentId": agent_id, "isSidechain": True,
-                       "message": {"role": "assistant", "model": model,
-                                   "content": [{"type": "text", "text": "pushed"}]}})
+    record = {"type": "assistant", "agentId": agent_id, "isSidechain": True,
+              "message": {"role": "assistant", "model": model,
+                          "content": [{"type": "text", "text": "pushed"}]}}
+    if requested is not None:
+        record["requestedModel"] = requested
+    return json.dumps(record)
 
 
 def ctm_transcript(agent_id, *lines):
@@ -29038,6 +29043,7 @@ ctm_transcript(CTM_FABLE, ctm_record(CTM_FABLE, "claude-fable-5-1"))
 # The last assistant record names the model. The earlier Opus record does not count.
 ctm_transcript(CTM_LAST, ctm_record(CTM_LAST, "claude-opus-5-5"), ctm_record(CTM_LAST, "claude-haiku-5-5"))
 ctm_transcript(CTM_UNMAPPED, ctm_record(CTM_UNMAPPED, "claude-zzz-9-9"))
+ctm_transcript(CTM_FALLBACK, ctm_record(CTM_FALLBACK, "claude-sonnet-5-5", requested="claude-opus-5-5"))
 ctm_transcript(CTM_NOASSIST, ctm_record(CTM_NOASSIST))
 ctm_transcript(CTM_GARBAGE, "not json", '{"type": ')
 ctm_transcript(CTM_EMPTY)
@@ -29138,6 +29144,15 @@ CTM_REPO_PUSHED = ctm_repo("pushed", [ctm_value("Claude Haiku 5.5")],
                            pushed=[ctm_message(ctm_trailer("Claude Opus 5.5"))],
                            local=[ctm_message(ctm_trailer("Claude Haiku 5.5"))])
 CTM_REPO_NOTHING = ctm_repo("nothing", [], pushed=[ctm_message(ctm_trailer("Claude Opus 5.5"))])
+# Round 2: the same model named in other forms. The trailer parse reads each value as written.
+CTM_REPO_IDOPUS = ctm_repo("idopus", [ctm_value("claude-opus-5-5")],
+                           local=[ctm_message(ctm_trailer("claude-opus-5-5"))])
+CTM_REPO_HYPHEN = ctm_repo("hyphen", [ctm_value("Claude-Opus-5.5")],
+                           local=[ctm_message(ctm_trailer("Claude-Opus-5.5"))])
+CTM_REPO_SPACED = ctm_repo("spaced", [ctm_value("claude opus 5.5")],
+                           local=[ctm_message(ctm_trailer("claude opus 5.5"))])
+CTM_REPO_IDHAIKU = ctm_repo("idhaiku", [ctm_value("claude-haiku-5-5")],
+                            local=[ctm_message(ctm_trailer("claude-haiku-5-5"))])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -29182,6 +29197,20 @@ ctm_case("an agent whose transcript is not JSON passes", CTM_REPO_INCIDENT, "all
 ctm_case("an agent whose transcript is empty passes", CTM_REPO_INCIDENT, "allow", CTM_EMPTY)
 ctm_case("an agent whose transcript holds no assistant record passes", CTM_REPO_INCIDENT, "allow", CTM_NOASSIST)
 ctm_case("an agent whose model id maps to no name passes", CTM_REPO_INCIDENT, "allow", CTM_UNMAPPED)
+
+# Round 2. A trailer names a model in the model id form, or with other casing and separators: each is judged
+# as the model it names. A fallback that served Sonnet for an agent that asked for Opus passes on either name.
+ctm_case("a model id trailer, claude-opus-5-5, from a Haiku agent is refused", CTM_REPO_IDOPUS, "deny", CTM_HAIKU)
+ctm_case("a hyphenated Claude-Opus-5.5 trailer from a Haiku agent is refused", CTM_REPO_HYPHEN, "deny", CTM_HAIKU)
+ctm_case("a spaced lowercase claude opus 5.5 trailer from a Haiku agent is refused", CTM_REPO_SPACED, "deny",
+         CTM_HAIKU)
+ctm_case("a model id trailer, claude-haiku-5-5, from a Haiku agent passes", CTM_REPO_IDHAIKU, "allow", CTM_HAIKU)
+ctm_case("an Opus trailer passes when a fallback served Sonnet and the agent requested Opus",
+         CTM_REPO_INCIDENT, "allow", CTM_FALLBACK)
+ctm_case("a Sonnet trailer passes when a fallback served Sonnet and the agent requested Opus",
+         CTM_REPO_SONNET, "allow", CTM_FALLBACK)
+ctm_case("a Haiku trailer is refused when a fallback served Sonnet and the agent requested Opus",
+         CTM_REPO_HAIKU, "deny", CTM_FALLBACK)
 
 
 # A case or log check with a family that FAMILIES does not name would hide from GUARD_FAMILY.
