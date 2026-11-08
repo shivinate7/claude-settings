@@ -2289,6 +2289,10 @@ MUTATIONS = [
      '    if lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
      '    if False and lane_missing:\n        refuse(tool, "deny", "lane-start-settings"',
      "guard", "lane-start-settings: lane tag with no model is denied"),
+    ("lane-start-settings: a value that is not text counts as present when its str() is not blank, so null, a number and a list are allowed",
+     'if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]',
+     'if not (k in tool_input and str(tool_input[k]).strip())]',
+     "guard", "lane-start-settings: lane tag with a non-text"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
