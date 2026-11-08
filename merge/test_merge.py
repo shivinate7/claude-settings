@@ -1297,10 +1297,12 @@ class StaleGitReads(unittest.TestCase):
         self.assertEqual((rc, out), (0, f"{sha}\t{ref}"), "merge.sh read a successful ls-remote's stderr line into its text")
 
     def test_a_fresh_load_over_the_real_git_reads_reads_ls_remote_from_stdout_alone(self):
-        self.assert_ls_remote_reads_stdout_alone(self.load_fresh(sys.modules["git_reads"]))
+        import git_reads  # hooks/git_reads.py, the module merge.py's `import git_reads` names
+        self.assert_ls_remote_reads_stdout_alone(self.load_fresh(git_reads))
 
     def test_a_fresh_load_over_a_stale_git_reads_still_loads_and_reads_stdout_alone(self):
-        real = sys.modules["git_reads"]
+        import git_reads  # hooks/git_reads.py: the real module, which the stale load must put back
+        real = git_reads
         stale = types.ModuleType("git_reads")  # an older copy: the names merge.py imports from it are absent
         self.assertFalse(hasattr(stale, "lists_refs") or hasattr(stale, "listing_text"),
                          "scope: the stand-in has the names merge.py imports, so the load proves nothing")
@@ -1310,6 +1312,20 @@ class StaleGitReads(unittest.TestCase):
             self.fail(f"merge.py did not load over a stale git_reads that lacks lists_refs: {e}")
         self.assertIs(sys.modules.get("git_reads"), real, "the stale git_reads was not put back after the load")
         self.assert_ls_remote_reads_stdout_alone(fresh)
+
+    def test_the_private_loader_raises_import_error_when_git_reads_is_missing(self):
+        """merge.py loads hooks/git_reads.py by path, beside its own folder. With that file missing, the loader raises ImportError,
+        the error an importer handles. FileNotFoundError is not one, so an importer would not handle it."""
+        import git_reads  # hooks/git_reads.py: loaded first, so the fresh load is the only one of the missing file
+        fresh = self.load_fresh(git_reads)
+        fresh.__file__ = os.path.join(HERE, "..", "no-checkout-here", "merge", "merge.py")  # a checkout with no hooks/git_reads.py
+        try:
+            fresh._load_hooks_module("git_reads")
+        except ImportError:
+            return
+        except Exception as e:
+            self.fail(f"merge.py's loader raised {type(e).__name__} for a missing hooks/git_reads.py, not ImportError: {e}")
+        self.fail("merge.py's loader loaded hooks/git_reads.py from a checkout that has none")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):

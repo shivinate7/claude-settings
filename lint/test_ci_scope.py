@@ -14,7 +14,7 @@ Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
 import os
-import re
+import posixpath
 import shutil
 import subprocess
 import tempfile
@@ -79,6 +79,11 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
 
 MERGE_PY = os.path.join(HERE, "..", "merge", "merge.py")
 LOADER = "_load_hooks_module"  # merge.py's by-path loader: _load_hooks_module("git_reads") loads hooks/git_reads.py
+# The folders whose .py files a load can name: the folders that merge.py, or a file it loads, puts on sys.path, and skills/,
+# where merge.py loads skills/roadmap/build.py by path.
+LOAD_ROOTS = ("hooks", "lint", "janitor", "merge", "actions", "skills", "testing", "bin")
+
+
 def repo_files(*dirs):
     """-> the repo-relative paths of every file under the dirs, spelled as the scope script names them."""
     root = os.path.join(HERE, "..")
@@ -90,97 +95,167 @@ def repo_files(*dirs):
     return out
 
 
-def module_loads(source, available):
-    """-> the repo-relative files a module with this `source` loads when it is imported: each import at module level
-    (inside a top-level try or if too) that names a file in `available` under hooks/ or lint/, and each module-level
-    call of the by-path loader, LOADER("<name>"), as hooks/<name>.py. An import inside a function or class is not counted."""
+def repo_py_files():
+    """-> the repo-relative paths of every .py file under LOAD_ROOTS."""
+    return {p for p in repo_files(*LOAD_ROOTS) if p.endswith(".py")}
+
+
+def read_repo(rel):
+    with open(os.path.join(HERE, "..", rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def consts(node):
+    """-> the string constants in the subtree of `node`."""
+    return [n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def file_loads(rel, source, files):
+    """-> the files in `files` that the file `rel`, with this `source`, loads when it runs. A load is: an import at any depth
+    (`import x`, `import x.y`, `from x import y`, `from . import y`) that names a file x.py in `files`; LOADER("<name>") as
+    hooks/<name>.py; `__import__("x")` and `importlib.import_module("x")` with a literal name; and `spec_from_file_location`
+    whose path names a file in `files` by a string constant in the call, or in a module-level name the call uses.
+    A name in a comment or a string is no load."""
     tree = ast.parse(source)
-    inner = set()
+    by_name = {}
+    for p in files:
+        by_name.setdefault(posixpath.basename(p)[:-3], set()).add(p)
+    module_strings = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    module_strings.setdefault(t.id, []).extend(consts(node.value))
+    here = posixpath.dirname(rel)
+    out = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            inner.update(id(n) for n in ast.walk(node))
-    names, loads = set(), set()
-    for node in ast.walk(tree):
-        if id(node) in inner:
-            continue
         if isinstance(node, ast.Import):
-            names.update(a.name.split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names.add(node.module.split(".")[0])
-        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == LOADER and node.args
-              and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
-            loads.add(f"hooks/{node.args[0].value}.py")
-    loads |= {p for n in names for p in (f"hooks/{n}.py", f"lint/{n}.py") if p in available}
-    return loads
+            for a in node.names:
+                out |= by_name.get(a.name.split(".")[0], set())
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module:
+                out |= by_name.get(node.module.split(".")[0], set())
+            elif node.level:  # a sibling of this file
+                for name in ([node.module] if node.module else [a.name for a in node.names]):
+                    out.add(posixpath.normpath(posixpath.join(here, name.replace(".", "/") + ".py")))
+        elif isinstance(node, ast.Call):
+            func = node.func
+            fn = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            first = node.args[0] if node.args else None
+            literal = first.value if isinstance(first, ast.Constant) and isinstance(first.value, str) else ""
+            if fn == LOADER and literal:
+                out.add(f"hooks/{literal}.py")
+            elif fn in ("__import__", "import_module") and literal:
+                out |= by_name.get(literal.split(".")[0], set())
+            elif fn == "spec_from_file_location":
+                strings = []
+                for arg in [*node.args, *(k.value for k in node.keywords)]:
+                    strings += consts(arg)
+                    strings += [s for n in ast.walk(arg) if isinstance(n, ast.Name) for s in module_strings.get(n.id, [])]
+                for s in strings:
+                    if s.endswith(".py"):
+                        out.add(posixpath.normpath(s))
+                        out.add(posixpath.normpath(posixpath.join(here, s)))
+    return out & files
+
+
+def closure(start, files, read):
+    """-> the files in `files` that `start` loads, directly or through the files they load, to closure. read(rel) is a file's
+    source. `start` is not in the result, even when a file loads it back."""
+    found, todo = set(), [start]
+    while todo:
+        cur = todo.pop()
+        for dep in file_loads(cur, read(cur), files) - found - {start}:
+            found.add(dep)
+            todo.append(dep)
+    return found
 
 
 def defines_function(source, name):
     return any(isinstance(n, ast.FunctionDef) and n.name == name for n in ast.parse(source).body)
 
 
-def merge_only_arms(text):
-    """-> one set per case line of the scope script that gives the merge flag and no other flag: the names on its pattern."""
-    return [set(m.split("|")) for m in re.findall(r'^\s*case "\$f" in ([^)]*)\) on="\$on \$M " ;; esac\s*$', text, re.M)]
+class FileLoads(unittest.TestCase):
+    """The reader on fixtures: each kind of load, a name in a comment or a string, a relative import, and the closure. These test
+    the reader in this file, not product code, so they are controls, not product claims."""
 
+    FILES = {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py",
+             "lint/check_silent_undo.py", "hooks/in_class.py", "hooks/deep.py", "janitor/sweep.py"}
 
-class ModuleLoads(unittest.TestCase):
-    """The import reader on fixtures: an empty module, then a module with each kind of import the merge-flag case must sort."""
-
-    AVAILABLE = {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py",
-                 "lint/check_silent_undo.py", "hooks/in_class.py"}
+    def loads(self, source, rel="merge/merge.py"):
+        return file_loads(rel, source, self.FILES)
 
     def test_empty_module_loads_nothing(self):
-        self.assertEqual(module_loads("", self.AVAILABLE), set())
+        self.assertEqual(self.loads(""), set())
 
-    def test_module_level_imports_and_the_loader_count_and_nothing_else(self):
+    def test_module_level_imports_and_the_loader_count(self):
         src = (
-            "import json\n"  # no file of that name in `available`: no load
-            "try:\n    import _nowindow\nexcept ImportError:\n    _nowindow = None\n"  # a top-level try block: counts
+            "import json\n"  # no file of that name in FILES: no load
+            "try:\n    import _nowindow\nexcept ImportError:\n    _nowindow = None\n"  # a top-level try block counts
             "from required_check import REQUIRED_CHECK\n"
             "from hook_catalog import RECORDS_PAGE\n"
             "_git_reads = _load_hooks_module(\"git_reads\")\n"
-            "def inside_a_function():\n    import check_silent_undo\n    _load_hooks_module(\"in_class\")\n"  # not counted
-            "class Holder:\n    import in_class\n"  # not counted
         )
-        self.assertEqual(module_loads(src, self.AVAILABLE),
-                         {"hooks/_nowindow.py", "hooks/required_check.py", "hooks/git_reads.py", "lint/hook_catalog.py"},
-                         "module_loads counts a file that is not a module-level import, or misses one that is")
+        self.assertEqual(self.loads(src), {"hooks/_nowindow.py", "hooks/required_check.py", "lint/hook_catalog.py", "hooks/git_reads.py"},
+                         "file_loads misses a module-level load, or counts one that is no load")
+
+    def test_function_level_and_class_level_imports_count(self):
+        src = ("def inside():\n    import check_silent_undo\n    _load_hooks_module(\"in_class\")\n"
+               "class Holder:\n    import deep\n")
+        self.assertEqual(self.loads(src), {"lint/check_silent_undo.py", "hooks/in_class.py", "hooks/deep.py"},
+                         "file_loads misses a load below module level")
+
+    def test_a_name_in_a_comment_or_a_string_is_no_load(self):
+        self.assertEqual(self.loads("# import sweep\nNOTE = \"import check_silent_undo\"\n"), set())
+
+    def test_relative_imports_name_a_sibling(self):
+        self.assertEqual(self.loads("from . import deep\nfrom .in_class import X\n", rel="hooks/guard.py"),
+                         {"hooks/deep.py", "hooks/in_class.py"})
+
+    def test_by_path_and_importlib_loads_count(self):
+        src = ("import importlib.util, pathlib\n"
+               "SWEEP = pathlib.Path(__file__).resolve().parents[1] / \"janitor/sweep.py\"\n"
+               "def load():\n"
+               "    importlib.util.spec_from_file_location(\"sweep_under_test\", SWEEP)\n"
+               "    return importlib.import_module(\"deep\")\n")
+        self.assertEqual(self.loads(src), {"janitor/sweep.py", "hooks/deep.py"})
+
+    def test_the_closure_follows_loads_to_the_end_and_stops_at_its_start(self):
+        files = {"merge/merge.py", "hooks/mid.py", "hooks/leaf.py", "hooks/unused.py"}
+        source = {"merge/merge.py": "def f():\n    import mid\n", "hooks/mid.py": "import leaf\n",
+                  "hooks/leaf.py": "import merge\n", "hooks/unused.py": "import leaf\n"}
+        self.assertEqual(closure("merge/merge.py", files, source.__getitem__), {"hooks/mid.py", "hooks/leaf.py"})
+
+
+# The files the closure must reach, one per kind of load the reader sorts: a module-level import, a by-path load, a load through a
+# module-level path, a function-level import, a transitive load, and guard.py. A reader that stops short fails the scope check first.
+REACHED = ["hooks/_nowindow.py", "hooks/git_reads.py", "skills/roadmap/build.py", "janitor/sweep.py", "hooks/shared_names.py",
+           "hooks/guard.py", "hooks/guard_core.py", "hooks/git_bash.py", "hooks/decision_watch.py", "lint/hook_catalog.py",
+           "lint/workflow_steps.py", "lint/stale_cites.py", "lint/check_debt_retire.py", "lint/check_skill_model_rows.py",
+           "actions/ci-alarm/clear_rule.py"]
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MergeFlagFiles(unittest.TestCase):
-    """The merge flag (checks_windows_merge) against the files merge/merge.py loads when it is imported."""
+    """The merge flag (checks_windows_merge) against the files merge/merge.py loads, directly or through imports, to closure."""
 
-    def merge_loads(self):
-        """-> merge.py's module-level loads. Each is a file under hooks/ or lint/."""
+    def merge_closure(self):
+        """-> the files merge.py loads, to closure, read from this checkout."""
         with open(MERGE_PY, encoding="utf-8") as f:
             src = f.read()
         self.assertTrue(defines_function(src, LOADER), f"merge.py no longer defines {LOADER}, so its by-path loads are not read")
-        candidates = repo_files("hooks", "lint")
-        loads = module_loads(src, candidates)
-        # Scope before subject: the reader found loads, and every one is a file under hooks/ or lint/.
-        self.assertTrue(loads and loads <= candidates, f"merge.py loads {sorted(loads)}: none found, or one outside hooks/ and lint/")
+        loads = closure("merge/merge.py", repo_py_files(), read_repo)
+        # Scope before subject: the reader reached each named file, so the case below tests the whole closure.
+        missing = [p for p in REACHED if p not in loads]
+        self.assertFalse(missing, f"the closure from merge.py misses {missing}: the reader does not follow those loads")
         return loads
 
-    # Named failure: the merge-flag line of the scope script and merge.py's module-level loads disagree, so a change to a
-    # file on one side only runs or skips the merge suite by mistake.
-    def test_merge_flag_files_match_merge_module_imports(self):
-        loads = self.merge_loads()
-        with open(SCRIPT, encoding="utf-8") as f:
-            arms = merge_only_arms(f.read())
-        self.assertEqual(len(arms), 1, f"ci-scope.sh has {len(arms)} case lines that give only the merge flag; expected one, "
-                                       "for merge.py's module-level imports")
-        listed = arms[0]
-        self.assertFalse(loads - listed, f"merge.py loads {sorted(loads - listed)} at module level, but the merge-flag line of "
-                                         "ci-scope.sh does not list it")
-        self.assertFalse(listed - loads, f"the merge-flag line of ci-scope.sh lists {sorted(listed - loads)}, which merge.py "
-                                         "does not load at module level")
-
-    # Named failure: a file on the merge-flag line gets no merge flag from the script, so a change to it runs no merge suite.
-    def test_each_merge_load_gets_the_merge_flag_from_the_script(self):
-        for p in sorted(self.merge_loads()):
-            with self.subTest(path=p):
-                self.assertEqual(run([p]).get("checks_windows_merge"), "true", f"ci-scope.sh gives {p} no merge flag")
+    # Named failure: a file that merge.py loads, directly or through imports, gets no merge flag from the script, so a change to
+    # it runs no merge suite. Ruling (coordinator, 2026-11-07 21:03 CST): the merge flag covers the whole closure.
+    def test_every_file_merge_py_loads_gets_the_merge_flag(self):
+        loads = self.merge_closure()
+        no_flag = sorted(p for p in loads if run([p], existing=[p]).get("checks_windows_merge") != "true")
+        self.assertFalse(no_flag, f"ci-scope.sh gives no merge flag to {len(no_flag)} of the {len(loads)} files merge.py loads: {no_flag}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -341,7 +416,7 @@ class Scope(unittest.TestCase):
     def test_guard_sibling_new_file_sets_the_same_flags_as_guard_py(self):
         want = run(["hooks/guard.py"])
         self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "pointer_windows"])
+                         want_false=["pointer_windows"])  # the merge flag is read by the closure case, not pinned here
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
                 self.assertEqual(run([p]), want)
@@ -349,7 +424,7 @@ class Scope(unittest.TestCase):
     def test_guard_sibling_edit_sets_the_same_flags_as_guard_py(self):
         want = run(["hooks/guard.py"], existing=["hooks/guard.py"])
         self.assertFlags(want, want_true=["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"],
-                         want_false=["checks_windows_merge", "shell_macos", "pointer_windows"])
+                         want_false=["shell_macos", "pointer_windows"])  # the merge flag is read by the closure case, not pinned here
         for p in self.GUARD_SIBLINGS:
             with self.subTest(path=p):
                 self.assertEqual(run([p], existing=[p]), want)
@@ -361,19 +436,20 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
-    # Ruling (coordinator, 2026-11-07 20:08 CST): the $M flag covers every file merge/merge.py imports. merge.py imports
-    # hooks/git_reads.py by name, so a change to it sets the merge flag. The guard and sweep flags stay as guard.py's:
-    # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard and sweep suites run on it.
+    # Ruling (coordinator, 2026-11-07 21:03 CST): the merge flag covers every file in the closure merge/merge.py loads.
+    # merge.py imports hooks/git_reads.py by path, so a change to it sets the merge flag. The guard and sweep flags stay as
+    # guard.py's: guard_core.py and the janitor's sweep.py import it, so the guard and sweep suites run on it.
     def test_git_reads_change_sets_the_guard_flags_and_the_merge_flag(self):
-        # Scope: guard.py alone keeps the merge flag off, so the flag this case reads is git_reads' own.
-        self.assertEqual(run(["hooks/guard.py"])["checks_windows_merge"], "false")
+        # Scope: hooks/test_guard.py is no load of merge.py, so its merge flag is off and the flag read below is git_reads' own.
+        self.assertEqual(run(["hooks/test_guard.py"])["checks_windows_merge"], "false")
         for edit in (False, True):
             with self.subTest(edit=edit):
                 got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"] if edit else ())
                 want = run(["hooks/guard.py"], existing=["hooks/guard.py"] if edit else ())
                 self.assertEqual(got["checks_windows_merge"], "true",
                                  f"git_reads sets no merge flag, though merge.py imports it: {got}")
-                self.assertEqual(dict(got, checks_windows_merge="false"), want, got)
+                # The other flags match guard.py's; the merge flag is compared in the closure case.
+                self.assertEqual(dict(got, checks_windows_merge=want["checks_windows_merge"]), want, got)
 
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
