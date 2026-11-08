@@ -24,7 +24,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": ".claude/CLAUDE.md Standing grants (2026-10-30 16:20 CDT); rule shared-trees-archive-then-delete; step push-agent-branch-asks (#1833)",
+  "reply": "Withdrawn by triage, 03:49 CST Nov 8: your standing grant already covers it. Main's .claude/CLAUDE.md Standing grants (changed by your item 219 a, Nov 4) lets a session on your computer delete a branch whose last commit is on an archive branch, when a coordinator asks. Both branches' last commits (cc60ef375, 71262843d) are on archive/shell-tests and archive/shell-tests-2 (read 03:48 CST). Triage had cited the older 'merged branches only' text. The coordinator routes the delete under the grant.",
   "short": "Delete 2 stray branches",
-  "status": "open",
+  "status": "closed",
   "title": "May a session on your computer delete the two stray agent branches shell-tests and shell-tests-2?"
 }
