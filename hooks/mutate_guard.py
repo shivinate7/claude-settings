@@ -346,8 +346,8 @@ MUTATIONS = [
      'heredoc-keep: reader, a body in f run by uv run python - < f, denies'),
     # _stdin_shell: the value of an ssh flag is no host, so `ssh -p 22 host` still reads stdin as a shell.
     ("heredoc: an ssh value flag takes no value, cat f | ssh -p 22 host runs nothing",
-     '                at += 2 if words[at] in values else 1',
-     '                at += 1', "guard",
+     '                at += 2 if words[at] in values else 1\n            elif name in _VALUE_FLAGS_OF:',
+     '                at += 1\n            elif name in _VALUE_FLAGS_OF:', "guard",
      'heredoc-keep: pin, a body in f run by a pipe into ssh -p 22 host, denies'),
     # _command_start: a leading keyword is no command word, so `if ./f` runs f.
     ("heredoc: no leading keyword, if ./f runs nothing",
