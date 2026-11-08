@@ -79,6 +79,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
+  git-after-cd         deny. A git write after a cd that `;`, a newline or `||` joins. A `&&` chain
+                       and `-C` with a full path pass. (git-after-cd-joins-with-and)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -3575,6 +3577,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
+    # 6c3. A git write after a cd that `;`, a newline or `||` joins (decision git-after-cd-joins-with-and,
+    # incident 2026-11-07): when the cd fails the write runs in the folder the shell stayed in. Placed
+    # after conflict-markers, so a refusal that names the defect in the commit itself comes first.
+    matched = "" if POWERSHELL_CALL[0] else git_after_cd_hit(stripped, cwd)
+    if matched:
+        refuse(tool, "deny", "git-after-cd", GIT_AFTER_CD_REASON, matched)
+
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -4649,6 +4658,58 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
             raise
     except Exception:
         pass  # an unwritable record means no refusal later, never a failed call
+
+
+GIT_AFTER_CD_REASON = (
+    "Rule (git-after-cd, decision git-after-cd-joins-with-and): a git write that follows a cd, "
+    "joined to it by `;`, a newline or `||`, runs in the working folder when the cd fails, "
+    "because the shell stays where it was. "
+    "Remedy: join the cd to the write with `&&`, so a failed cd stops the chain, or leave out the cd "
+    "and name the folder with `-C` and its full path."
+)
+
+
+def git_write_verb(verb: str, args) -> bool:
+    """True when a git call changes a ref, the index or the files: the verbs of SESSION_HOME_GIT_VERBS,
+    plus `push`, plus `branch` with -f or --force. A `stash list`, a `stash show` and a `clean` that
+    deletes nothing only read."""
+    if verb == "branch":
+        return any(arg in ("-f", "--force") for arg in args)
+    if verb == "stash":
+        return args[:1] not in (["list"], ["show"])
+    if verb == "clean":
+        return clean_deletes_files(args)
+    return verb == "push" or verb in SESSION_HOME_GIT_VERBS
+
+
+def git_after_cd_hit(command: str, cwd: str) -> str:
+    """The verb of a git write in COMMAND that runs in the folder the shell stayed in after a cd
+    into a folder that is not there (decision git-after-cd-joins-with-and), else ''. One read of
+    `dir_before_segment` trusts a failed cd to leave the shell in place and one does not: a
+    segment is flagged when the first gives a folder and the second none. A `&&` chain skips the
+    write when the cd fails, a `)` ends a subshell's cd, and a cd that lands leaves both reads equal.
+    `git -C <full path>` names its own folder and passes; a `-C` that holds a variable is unknown and
+    passes; a relative `-C` is joined to the stranded folder and is refused."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        # a `)` or `}` that closes a group sits on the last word, so `push)` is the verb `push`
+        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]
+        verbs = [verb for verb, args in calls if git_write_verb(verb, args)]
+        if not verbs:
+            continue
+        if dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True) is None:
+            continue
+        if dir_before_segment(segments, number, cwd, ends, failed_cd_stays=False) is not None:
+            continue
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            continue   # a segment cut inside a quote, as an interpreter's heredoc body is: its `-C` is unread
+        named = _segment_git_c_target(tokens)
+        if named is not None and (_unexpanded(named) or shell_abs(named, None)):
+            continue
+        return verbs[0]
+    return ""
 
 
 def session_home_git_hit(command: str, where: str, in_primary) -> str:
