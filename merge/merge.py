@@ -79,6 +79,16 @@ class NetStop(Stop):
 class Dropped(Stop):
     """The silent-undo check found a dropped line."""
 
+class RoundOwed(Stop):
+    """The third-round gate found a lane that owes its third round. Preview prints it as one BLOCKED line, as it does a Dropped."""
+
+class OpenHeads(dict):
+    """Host.open_heads's dict, with `oldest`: the least created_at of the open pull requests (None when none is listed), which the third-round
+    gate hands review_comments as `since`, so its one comment read reaches every lane's record."""
+    def __init__(self, oldest=None):
+        super().__init__()
+        self.oldest = oldest
+
 class Held(Stop):
     pass
 
@@ -105,6 +115,7 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
+ROUND3_CITE = "(decision hold-unsafe-after-round-3, a change to a guard or check owes its third round before it merges)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
@@ -836,7 +847,7 @@ class Host:
         its name, and every one of its rows is kept under name:index, a key no branch can have, so every base still counts, in any row order."""
         rows = self.pages("pulls", fields={"state": "open"})
         seen = [d["head"]["ref"] for d in rows]
-        heads = {}
+        heads = OpenHeads(oldest=min((d["created_at"] for d in rows if d.get("created_at")), default=None))
         for i, d in enumerate(rows):
             name, row = d["head"]["ref"], (d["head"]["sha"], d["base"]["ref"])
             if seen.count(name) > 1:
@@ -2043,13 +2054,15 @@ def lane_tips(wt, base_ref, sha):
         say(f"merge: no lane branch is deleted: the batch's merge commits could not be read ({type(e).__name__}: {e}).")
         return [], set()
 
-def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
+def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
     """A lane dropped by a revert of its merge puts a removal commit on the base. When that lane later merges the base,
     the revert silently deletes its files (batch #663: the platform-ask lane lost 11 of 13 files). Refuse it before anything
     is claimed. A read that fails refuses too, unless the run has the reason flag --undo-check-unknown-ok "<reason>", which Claude may type with a reason.
-    A lift is logged and returns its reason, for record_lift."""
+    A lift is logged and returns its reason, for record_lift. `tips_out`, a list, receives the lane tips this one read found, so the third-round gate reads no second time."""
     try:
-        _, dropped = read_lanes(wt, base_ref, sha)
+        tips, dropped = read_lanes(wt, base_ref, sha)
+        if tips_out is not None:
+            tips_out.extend(tips)
     except Exception as e:
         if unknown_ok.strip():
             say(f"merge: dropped-lane check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
@@ -2060,6 +2073,45 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok=""):
         raise Dropped("the batch drops a lane by a revert of its merge (lane tip " + ", ".join(sorted(t[:9] for t in dropped))
                       + "). Main would hold the revert, and the lane would lose its files when it merges main.\n"
                       "Instead, rebuild the integration branch from main without the lane, then run again. " + DROP_CITE)
+
+def owed_round(num, bodies, sha):
+    """-> the why when pull request `num` owes its third round for lane tip `sha`, else None. `bodies`: its record bodies, oldest first. The newest one whose Head line
+    is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha` and does not parse, or is for another PR,
+    is bad and refuses: its Guard or check value is unknown, never read as no."""
+    mine = [b for b in bodies if re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M)]
+    if not mine:
+        return None
+    rec = parse_review(mine[-1])
+    rec = rec if rec and rec["n"] == num else None
+    if rec and rec["guard"] == "no":
+        return None
+    state, why = review_state(rec, sha)
+    if rec and state == "done":
+        return None
+    return why if state == "held" else f"round {REVIEW_LAST_ROUND} is owed ({why})"
+
+def refuse_owed_round(tips, info, n, host, unknown_ok=""):
+    """The third-round gate (decision hold-unsafe-after-round-3; owner item 359 pick b). A lane is one of `tips`, the batch's lane tips, that sits at the head of an open pull request;
+    a pull request with no lane tips is its own lane. Refuse before anything is claimed when a lane's newest record for its tip has Guard or check yes and is not
+    done. Reads: the repo's comments, since the oldest open pull request (since this one opened, for a lone one), and the open pull requests when the batch has lane tips.
+    A read that fails refuses (unknown is red, READ_CITE), unless the run has the reason flag --undo-check-unknown-ok "<reason>", as refuse_dropped_lane does:
+    the same flag lifts the dropped-lane check. A lift returns its reason."""
+    epoch = "1970-01-01T00:00:00Z"  # a host that cannot date the read gets every comment, never a missed record
+    try:
+        heads = host.open_heads() if tips else {}
+        open_at = {sha for sha, _ in heads.values()}
+        records = host.review_comments(getattr(heads, "oldest", None) or (None if tips else info.get("created")) or epoch)
+    except Exception as e:
+        if unknown_ok.strip():
+            say(f"merge: round-three gate UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            return unknown_ok.strip()
+        raise Liftable(f"the round-three gate could not read the lanes or their records ({type(e).__name__}: {e}).\n"
+                       f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
+    lanes = [(info["head"], n)] if not tips else [(t, num) for t in tips if t in open_at for num in sorted(records)]
+    owed = [f"#{num} (tip {sha[:9]}) changes a guard or check and {why}." for sha, num in lanes
+            for why in [owed_round(num, records.get(num, []), sha)] if why]
+    if owed:
+        raise RoundOwed(" ".join(owed) + f"\nGet round {REVIEW_LAST_ROUND} done on each lane named, post its record, then run again. {ROUND3_CITE}")
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
     """Delete the lane branches on origin that the batch took in: the heads, read after the merge, that sit at a lane tip.
@@ -2715,11 +2767,13 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             debt_check(wt, f"origin/{base}", host, info)
-            refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
+            tips = []
+            if not refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok, tips):
+                refuse_owed_round(tips, info, n, host, unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
-        except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
+        except (Dropped, RoundOwed) as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
             raise
         if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
@@ -2861,7 +2915,11 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
         debt_check(wt, base_ref, host, info)
-        record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
+        tips = []
+        lifted = refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok, tips)
+        record_lift(lifts, UNDO_FLAG, lifted)
+        if not lifted:  # a lifted lane read left no tips to gate
+            record_lift(lifts, UNDO_FLAG, refuse_owed_round(tips, info, n, host, unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
@@ -3112,12 +3170,14 @@ def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
     passing, and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
-    Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
+    Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the final round whatever the earlier
+    verdicts and any fix check PASS say (owner item 359, pick b), and then the net-value test: Net value zero or positive is done, negative holds the change.
+    The one exception is Kind delete-only whose first round is its only round: it is done when that round passes (a fix check PASS counts), and when it fails the normal path
+    applies, so the later rounds are owed (decision hold-unsafe-after-round-3).
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS counts as the last recorded round passing, even when that round failed, and for a delete-only change with Guard or check yes
-    too, so a PASS before the final round owes no net-value test. The design-reviewer hold stays, and with no round recorded it is open. On the final
+    rounds say. A PASS counts as the last recorded round passing, even when that round failed, so a PASS before the final round owes no net-value test
+    when Guard or check is no. The design-reviewer hold stays, and with no round recorded it is open. On the final
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
@@ -3141,6 +3201,8 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round 3 is done, net value {rec['net']}" + note
         return "open", "round 3 is done on a guard or check change, and its net value is owed"
+    if rec["guard"] == "yes" and top and not (rec["kind"] == "delete-only" and top == 1):  # item 359 pick b: no verdict and no fix check skips the final round here
+        return "open", f"round {top} is not the last round, and round {REVIEW_LAST_ROUND} is owed on a guard or check change"
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
     passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
