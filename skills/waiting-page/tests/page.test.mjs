@@ -8227,3 +8227,132 @@ test("the Now card's count line names the blocked step when the Now card's bar d
   const text = (await lead.first().textContent()).replace(/\s+/g, " ");
   assert.match(text, /, 1 blocked/, "the Now card's count line does not name the blocked step: " + text);
 });
+
+// ---------------------------------------------------------------- a to-do or done step listed paused or stalled (lane nfp-stalled-kind-color)
+// The edge, as on the roadmap: a to-do step listed paused (t1) and a done step listed stalled (d1), beside to-do c1 and doing a2. Each
+// place reads the step's own status. EDGE_W_FULL is the same at full size: 30 steps, so each bar draws every cell.
+const EDGE_W = () => {
+  const s = stepsOf([["c1", "cleanup", 1, "todo"], ["t1", "cleanup", 2, "todo"], ["d1", "cleanup", 3, "done"], ["a2", "cleanup", 4, "doing"]]);
+  s.t1.paused = { why: "Waits for a month of CI numbers.", decides: "owner", at: "2026-11-05T16:20:00-06:00", by: "triage" };
+  return s;
+};
+const EDGE_W_FULL = () => ({ ...EDGE_W(), ...stepsOf(Array.from({ length: 26 }, (_, i) => ["t" + (i + 5), "cleanup", i + 5, "todo"])) });
+const EDGE_W_READ = { why: "", steps: [{ id: "d1", fix: "todo" }], paused: ["t1"], badPause: [], items: [], ...NO_ITEMS };
+const edgePage = (steps = EDGE_W()) => withStalled(phasePage(steps), EDGE_W_READ);
+test("the row labels of a to-do step listed paused and a done step listed stalled read To do and Done", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["t1", "To do"], ["d1", "Done"]]) {
+    assert.equal(await page.locator(`#s-${id}`).count(), 1, `step ${id} has no row in the Status list`);
+    const label = (await page.locator(`#s-${id} .rrow`).getAttribute("aria-label")) || "";
+    assert.ok(label.startsWith(`${id}, ${word}:`), `step ${id} is ${word} and listed, but its row label reads "${label}"`);
+    assert.equal(await page.locator(`#s-${id} .tag.stl, #s-${id} .tag.pzd`).count(), 0, `step ${id} is ${word} and listed, but its row carries a Stalled or Paused tag`);
+  }
+});
+test("the where-you-are line counts neither the to-do step listed paused nor the done step listed stalled", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  const where = await whereLine(page);
+  assert.match(where, /1 in progress/, "the where-you-are line does not count the doing step a2: " + where);
+  assert.doesNotMatch(where, /stalled/, "the where-you-are line counts a done step as stalled: " + where);
+  assert.doesNotMatch(where, /paused/, "the where-you-are line counts a to-do step as paused: " + where);
+});
+test("the bars draw a to-do step listed paused and a done step listed stalled as to-do and done cells, at full size", async (t) => {
+  const page = await open(t, { pageHtml: edgePage(EDGE_W_FULL()) }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), ["done", "act", ...Array(28).fill("")], `${name} draws a listed step as a stalled or paused cell`);
+  }
+});
+const feedRowMark = (page, id) => page.locator("#svSide ul.feed li", { has: page.locator(`button[data-go="${id}"]`) }).locator('[role="img"]');
+const logRowMark = (page, id) => page.locator("#svDays .ev", { has: page.locator(`button[data-go="${id}"]`) }).locator('[role="img"]');
+test("Latest changes and the Changes log read the to-do step listed paused and the done step listed stalled as their own status", async (t) => {
+  const page = await open(t, { pageHtml: edgePage() }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["t1", "To do"], ["d1", "Done"]]) {
+    for (const [where, mark] of [["Latest changes", feedRowMark(page, id)], ["the Changes log", logRowMark(page, id)]]) {
+      assert.equal(await mark.count(), 1, `step ${id} has no state mark in ${where}`);
+      const label = await mark.getAttribute("aria-label");
+      assert.equal(label, word, `step ${id} is ${word} and listed, but its row in ${where} reads ${label}`);
+    }
+  }
+});
+
+// The Now card's count line: a group (", 1 stalled") is never split across lines. Lines are read from the word boxes: a line that starts
+// with a group word or a separator, or ends on a bare number, has broken a group. The helper is a copy of the roadmap test's
+// (skills/roadmap/tests/page.test.mjs): the two pages' test files keep their own helpers.
+const GROUP_WORDS_W = new Set(["in", "progress", "done", "stalled", "paused", "blocked"]);
+const bareOf = (w) => w.replace(/[.,·]/g, "");
+async function countLinesW(page, sel) {
+  return page.evaluate((s) => {
+    const root = document.querySelector(s);
+    if (!root) return null;
+    const words = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const re = /\S+/g;
+      for (let m = re.exec(node.data); m; m = re.exec(node.data)) {
+        const range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        const r = range.getClientRects()[0];
+        if (r) words.push({ w: m[0], y: (r.top + r.bottom) / 2 });
+      }
+    }
+    const lines = [];
+    for (const { w, y } of words) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - y) < 4) last.words.push(w); else lines.push({ y, words: [w] });
+    }
+    return lines.map((l) => l.words);
+  }, sel);
+}
+for (const width of [390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+  await openStatus(page);
+  const lines = await countLinesW(page, "#svNow > div:first-child > .lead");
+  assert.ok(lines && lines.length, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = lines.map((l) => l.join(" ")).join(" | ");
+  const starts = lines.find((l) => bareOf(l[0]) === "" || GROUP_WORDS_W.has(bareOf(l[0])));
+  assert.equal(starts, undefined, `at ${width} wide a line of the count line starts inside a group: ${text}`);
+  const ends = lines.find((l) => /^\d+$/.test(bareOf(l[l.length - 1])));
+  assert.equal(ends, undefined, `at ${width} wide a line of the count line ends on a bare number: ${text}`);
+});
+
+// A paused cell narrower than 3px: its ring (a 1.5px inset --muted line) fills the whole cell, so it paints a solid --muted block beside
+// the solid --acc block of a done cell. The test samples the painted pixels of each cell (its screenshot, decoded in the page) and asks
+// WCAG 1.4.11's 3:1 between the two, with the contrast formula in CONTRAST.
+async function paintedRGB(page, locator) {
+  const png = await locator.screenshot();
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+    const n = d.length / 4;
+    return [r / n, g / n, b / n];
+  }, png.toString("base64"));
+}
+const paintHex = (c) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+for (const [where, width, scope] of [["the phase head's bar", 1280, "#svPhases .ph-head .segbar"], ["the rail's cleanup bar", 390, '#svRail button[data-phase="cleanup"] .segbar']]) {
+  test(`a paused cell narrower than 3px paints apart from a done cell in ${where}, at ${width} wide`, async (t) => {
+    const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+    await openStatus(page);
+    const paused = page.locator(`${scope} > i.pzd`), done = page.locator(`${scope} > i.done`);
+    assert.equal(await paused.count(), 1, `${where} at ${width} wide draws no paused cell (i.pzd)`);
+    assert.equal(await done.count(), 1, `${where} at ${width} wide draws no done cell (i.done)`);
+    const box = await paused.boundingBox();
+    assert.ok(box && box.width < 3, `the paused cell in ${where} at ${width} wide is ${box ? box.width.toFixed(1) : "not drawn"}px, not narrower than 3px: the case does not reach a narrow cell`);
+    const a = paintHex(await paintedRGB(page, paused)), b = paintHex(await paintedRGB(page, done));
+    const ratio = await page.evaluate(`(() => {${CONTRAST} return R(${JSON.stringify(a)}, ${JSON.stringify(b)}); })()`);
+    assert.ok(ratio >= 3, `the paused cell in ${where} at ${width} wide paints ${a} and the done cell ${b}: ${ratio.toFixed(2)}:1, under 3:1`);
+  });
+}

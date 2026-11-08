@@ -40,10 +40,10 @@ function builtPage({ steps = {}, live, stalled } = {}) {
 const stepOf = (title, status, order) => ({ title, status, phase: "cleanup", order, note: "n", updatedAt: "2026-10-26T00:00:00Z" });
 const NO_ITEMS = { itemsWhy: "" };
 
-async function open(t, html) {
+async function open(t, html, width = 1280) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
   // The page is served from a stand-in origin; every other request (the fonts) is refused.
@@ -391,4 +391,108 @@ test("control: the phase head's bar of a phase with steps is labelled with its w
   const bar = page.locator("#phases .ph-head .prog .bar");
   assert.equal(await bar.count(), 1, "the Plan page draws no phase head bar (#phases .ph-head .prog .bar)");
   assert.equal(await bar.getAttribute("aria-label"), "1 to do", "the phase head's bar is not labelled with its words");
+});
+
+// ---------------------------------------------------------------- a to-do or done step listed stalled or paused (lane nfp-stalled-kind-color)
+// The build lists a stalled or paused step by its id. A to-do or done step keeps its own status: it carries no Stalled or Paused tag,
+// and each place that names it says that status. Only a doing step with that listing reads Stalled or Paused.
+const OWN = { todo: ["to-do", "To do"], done: ["done", "Done"] };
+const listing = (kind, ids) => kind === "stalled"
+  ? { why: "", steps: ids.map((id) => ({ id, fix: "todo" })), paused: [], badPause: [], items: [], ...NO_ITEMS }
+  : { why: "", steps: [], paused: ids, badPause: [], items: [], ...NO_ITEMS };
+for (const kind of ["stalled", "paused"]) for (const status of ["todo", "done"]) {
+  test(`a ${OWN[status][0]} step listed ${kind} carries no Stalled or Paused tag, and its row label reads ${OWN[status][1]}`, async (t) => {
+    const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1), x: stepOf("Step x", status, 2) }, stalled: listing(kind, ["x"]) })); if (!page) return;
+    assert.equal(await page.locator("#s-x").count(), 1, `step x has no row in the plan list`);
+    assert.equal(await page.locator("#s-x .tag.stl").count(), 0, `step x is ${OWN[status][1]} and listed ${kind}, but its row carries a Stalled tag`);
+    assert.equal(await page.locator("#s-x .tag.pzd").count(), 0, `step x is ${OWN[status][1]} and listed ${kind}, but its row carries a Paused tag`);
+    assert.match(await statusLabel(page, "x"), new RegExp(`status: ${OWN[status][1]}\\.`), `step x is ${OWN[status][1]} and listed ${kind}, but its row label does not read ${OWN[status][1]}`);
+  });
+}
+for (const [kind, word, tag] of [["stalled", "Stalled", "stl"], ["paused", "Paused", "pzd"]]) {
+  test(`control: a doing step listed ${kind} keeps its ${word} tag and reads ${word}`, async (t) => {
+    const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1), x: stepOf("Step x", "doing", 2) }, stalled: listing(kind, ["x"]) })); if (!page) return;
+    assert.equal(await page.locator(`#s-x .tag.${tag}`).count(), 1, `step x is doing and listed ${kind}, but its row carries no ${word} tag`);
+    assert.match(await statusLabel(page, "x"), new RegExp(`status: ${word}\\.`), `step x is doing and listed ${kind}, but its row label does not read ${word}`);
+  });
+}
+
+// The edge: a to-do step listed paused (t1) and a done step listed stalled (d1), beside to-do c1 and doing a2. Each place reads
+// the step's own status. EDGE_FULL is the same at full size: 30 steps, so each bar draws every cell.
+const EDGE_READ = { why: "", steps: [{ id: "d1", fix: "todo" }], paused: ["t1"], badPause: [], items: [], ...NO_ITEMS };
+const EDGE = () => ({ c1: stepOf("Step c1", "todo", 1), t1: stepOf("Step t1", "todo", 2), d1: stepOf("Step d1", "done", 3), a2: stepOf("Step a2", "doing", 4) });
+const EDGE_FULL = () => ({ ...EDGE(), ...Object.fromEntries(Array.from({ length: 26 }, (_, i) => ["t" + (i + 5), stepOf("Step t" + (i + 5), "todo", i + 5)])) });
+test("the row labels of a to-do step listed paused and a done step listed stalled read To do and Done", async (t) => {
+  const page = await open(t, builtPage({ steps: EDGE(), stalled: EDGE_READ })); if (!page) return;
+  assert.match(await statusLabel(page, "t1"), /status: To do\./, "step t1 is to do and listed paused, but its row label does not read To do");
+  assert.match(await statusLabel(page, "d1"), /status: Done\./, "step d1 is done and listed stalled, but its row label does not read Done");
+});
+test("the where-you-are line counts neither the to-do step listed paused nor the done step listed stalled", async (t) => {
+  const page = await open(t, builtPage({ steps: EDGE(), stalled: EDGE_READ })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the doing step a2: " + sub);
+  assert.doesNotMatch(sub, /stalled/, "the where-you-are line counts a done step as stalled: " + sub);
+  assert.doesNotMatch(sub, /paused/, "the where-you-are line counts a to-do step as paused: " + sub);
+});
+test("the bars draw a to-do step listed paused and a done step listed stalled as to-do and done cells, at full size", async (t) => {
+  const page = await open(t, builtPage({ steps: EDGE_FULL(), stalled: EDGE_READ })); if (!page) return;
+  for (const [name, scope] of BARS) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await cellKinds(page, scope), ["done", "act", ...Array(28).fill("")], `${name} draws a listed to-do or done step as a stalled or paused cell`);
+  }
+});
+// The kinds read in Latest changes and the Changes log, each after its row is found: a missing row is a named failure, not a timeout.
+async function kindsOf(page, id) {
+  for (const [where, loc] of [["Latest changes", feedKind(page, id)], ["the Changes log", logKind(page, id)]]) assert.equal(await loc.count(), 1, `step ${id} has no row in ${where}`);
+  return { feed: (await feedKind(page, id).textContent()).trim(), log: (await logKind(page, id).textContent()).trim() };
+}
+test("Latest changes and the Changes log read the to-do step listed paused and the done step listed stalled as they read unlisted", async (t) => {
+  const page = await open(t, builtPage({ steps: EDGE(), stalled: EDGE_READ })); if (!page) return;
+  const plain = await open(t, builtPage({ steps: EDGE() })); if (!plain) return;
+  for (const id of ["t1", "d1"]) {
+    const got = await kindsOf(page, id), want = await kindsOf(plain, id);
+    assert.equal(got.feed, want.feed, `step ${id} reads ${got.feed} in Latest changes, not ${want.feed}, its unlisted kind`);
+    assert.equal(got.log, want.log, `step ${id} reads ${got.log} in the Changes log, not ${want.log}, its unlisted kind`);
+  }
+});
+
+// The Now card's count line: a group ("· 1 stalled") is never split across lines. Lines are read from the word boxes: a line that
+// starts with a group word or a separator, or ends on a bare number, has broken a group. Each helper here is a copy of the one in
+// skills/waiting-page/tests/page.test.mjs: the two pages' test files keep their own helpers.
+const GROUP_WORDS = new Set(["in", "progress", "done", "stalled", "paused", "blocked"]);
+const bare = (w) => w.replace(/[.,·]/g, "");
+async function countLines(page, sel) {
+  return page.evaluate((s) => {
+    const root = document.querySelector(s);
+    if (!root) return null;
+    const words = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const re = /\S+/g;
+      for (let m = re.exec(node.data); m; m = re.exec(node.data)) {
+        const range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        const r = range.getClientRects()[0];
+        if (r) words.push({ w: m[0], y: (r.top + r.bottom) / 2 });
+      }
+    }
+    const lines = [];
+    for (const { w, y } of words) {
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - y) < 4) last.words.push(w); else lines.push({ y, words: [w] });
+    }
+    return lines.map((l) => l.words);
+  }, sel);
+}
+for (const width of [390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 }), width); if (!page) return;
+  const lines = await countLines(page, "#now > div:first-child > .sub");
+  assert.ok(lines && lines.length, "the Plan page has no where-you-are count line (#now > div:first-child > .sub)");
+  const text = lines.map((l) => l.join(" ")).join(" | ");
+  const starts = lines.find((l) => bare(l[0]) === "" || GROUP_WORDS.has(bare(l[0])));
+  assert.equal(starts, undefined, `at ${width} wide a line of the count line starts inside a group: ${text}`);
+  const ends = lines.find((l) => /^\d+$/.test(bare(l[l.length - 1])));
+  assert.equal(ends, undefined, `at ${width} wide a line of the count line ends on a bare number: ${text}`);
 });
