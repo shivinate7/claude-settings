@@ -3300,17 +3300,19 @@ class ParallelPreviewTests(unittest.TestCase):
     def _peak_concurrency(self, name, run):
         """Highest number of calls to `sweep.<name>` in flight at once during `run()`, in a
         preview."""
-        real, lock, state = getattr(sweep, name), threading.Lock(), {"now": 0, "peak": 0}
+        real, cond, state = getattr(sweep, name), threading.Condition(), {"now": 0, "peak": 0}
 
         def wrapped(*a, **k):
-            with lock:
+            with cond:
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
-            time.sleep(0.2)
+                cond.notify_all()
+                # Hold this call until a second one is in flight, or 0.2 s pass: a serial run never gets one.
+                cond.wait_for(lambda: state["now"] >= 2, timeout=0.2)
             try:
                 return real(*a, **k)
             finally:
-                with lock:
+                with cond:
                     state["now"] -= 1
         undo = sweep._begin_preview_cache()
         try:
@@ -5469,15 +5471,17 @@ class BuildDirReapTests(unittest.TestCase):
         self.fill(tree)
         _age_admin_files(tree, 31 * 60)
         real = sweep.decide_agent_end_worktree
+        skew, real_monotonic = [0.0], time.monotonic
 
         def slow(*args, **kwargs):
             # The tree's decision ends past the stage deadline, so its build pass is not reached.
             decision = real(*args, **kwargs)
-            time.sleep(1.2)
+            skew[0] += 1.2  # the 1.2 s is added to the clock the stage reads, not waited for
             return decision
 
         with mock.patch.object(self.reap, "WORKTREE_SECONDS", 1), \
-                mock.patch.object(sweep, "decide_agent_end_worktree", new=slow):
+                mock.patch.object(sweep, "decide_agent_end_worktree", new=slow), \
+                mock.patch.object(time, "monotonic", new=lambda: real_monotonic() + skew[0]):
             record = self.run_in_process(ender)
         self.assert_all_kept(tree, "a tree past the stage deadline lost its build folders")
         self.assertEqual(self.tree_row(record, tree).get("buildDirsKept"), "budget")
