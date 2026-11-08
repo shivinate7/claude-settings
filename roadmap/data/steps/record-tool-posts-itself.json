@@ -1,0 +1,11 @@
+{
+  "title": "`merge --review-record` posts the review record itself, so no lane posts it by hand",
+  "why": "Coordinator 13:12 CST Nov 8: `merge --review-record` prints the record and a lane posts it by hand. Lane session_013NEJKzXyKNARtJsbz3Q1R2 added prose after the CI line on three posts (#1755, #2032), which parse_review rejects at batch time. Fix the cause: the tool posts the comment itself, so no hand step is left. This covers the lane's proposed record-post-shape-check; review-record-parse-warn and review-record-post-check stay as the read-side checks.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 802,
+  "updatedAt": "2026-11-08T13:12:00-06:00"
+}
