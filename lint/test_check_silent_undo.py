@@ -2399,5 +2399,135 @@ class RetireCite(unittest.TestCase):
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
+class NotesUnionRevival(unittest.TestCase):
+    """The debt notes file merges by union (decision notes-merge-union, .gitattributes merge=union). The batch runner merges
+    each lane into the integration branch with a local `git merge --no-ff`, so union keeps a row that one lane deleted
+    whenever another lane's side still holds it: the deletion is undone with no conflict marker. The read is narrow: a line
+    of a union-merged file, in the merge base with upstream, absent from a lane head that upstream does not hold, and
+    present in the final head, is a finding naming path and line. A file without merge=union is not read, and neither is
+    a merge whose second parent upstream holds."""
+
+    PATH = "docs/debts/notes.md"
+    ALPHA = "- note alpha: pin the tag"
+    BETA = "- note beta: retry the push"
+    GAMMA = "- note gamma: drop the cache"
+    NEW = "- note delta: add the probe"
+    BETA_NEW = "- note beta: retry the push, with backoff"
+    ROWS = [ALPHA, BETA, GAMMA]
+    ORDERS = (("A", "B"), ("B", "A"))
+
+    @staticmethod
+    def text(rows):
+        return "".join(row + "\n" for row in rows)
+
+    def rows_at(self, r, rev, path):
+        return r.sh("show", "%s:%s" % (rev, path)).splitlines()
+
+    def base(self, path, union):
+        """origin/main holds ROWS at `path`; with union, main's .gitattributes gives `path` merge=union."""
+        r = Repo()
+        if union:
+            r.put(".gitattributes", "%s merge=union\n" % path)
+        r.put(path, self.text(self.ROWS))
+        r.commit("base")
+        r.push()
+        return r
+
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None):
+        """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
+        commit each, in `order`. A conflict in a file without merge=union is resolved by hand to `keep`. -> (repo, integ head)."""
+        r = self.base(path, union)
+        for lane, rows in (("A", a_rows), ("B", b_rows)):
+            r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
+            r.put(path, self.text(rows))
+            r.commit("lane " + lane)
+        r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        for lane in order:
+            msg = b_msg if lane == "B" else "Merge lane A"
+            r.sh("merge", "--no-ff", "--no-edit", "-m", msg, "lane" + lane, ok=False)
+            if r.sh("diff", "--name-only", "--diff-filter=U"):
+                self.assertIsNotNone(keep, "premise: a union-merged file does not conflict")
+                r.put(path, keep)
+                r.sh("add", "-A")
+                r.sh("commit", "-q", "-m", msg)
+        return r, r.sh("rev-parse", "HEAD")
+
+    def test_a_row_deleted_by_one_lane_and_appended_after_by_the_other_is_a_finding(self):
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], order)
+                self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                problems, _ = C.check(r.dir, "origin/main", head)
+                self.assertTrue(any(self.PATH in p and "note gamma" in p for p in problems), "the revived row is not a finding: %s" % problems)
+                rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+                self.assertEqual(rc, 1, "a revived row does not exit 1")
+                self.assertIn("FAIL", text, "the revived row prints no FAIL line")
+                self.assertIn(self.PATH, text, "the FAIL line does not name the path")
+                self.assertIn("note gamma", text, "the FAIL line does not name the row")
+
+    def test_a_row_both_lanes_delete_is_not_a_finding(self):
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS[:2] + [self.NEW], order)
+                self.assertNotIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the final head lost the row")
+                problems, _ = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "a row both lanes deleted is read as revived")
+
+    def test_a_row_appended_away_from_the_deleted_one_leaves_the_deletion_standing(self):
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, self.ROWS[:2], [self.NEW] + self.ROWS, order)
+                self.assertNotIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the final head lost the deleted row")
+                problems, _ = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "a row appended away from the deleted one is read as a revival")
+
+    def test_a_file_without_merge_union_is_not_read(self):
+        path = "docs/other-notes.md"
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(path, self.ROWS[:2], self.ROWS + [self.NEW], order, union=False, keep=self.text(self.ROWS + [self.NEW]))
+                self.assertIn("unspecified", r.sh("check-attr", "merge", "--", path), "premise: the file has no merge=union")
+                self.assertIn(self.GAMMA, self.rows_at(r, head, path), "premise: the hand merge kept the deleted row")
+                problems, _ = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "a file without merge=union is read as a union revival")
+
+    def test_a_drops_lines_trailer_on_an_integ_merge_excuses_the_revival(self):
+        reason = "the revived row is kept on purpose"
+        msg = "Merge lane B\n\nDrops-lines: %s -- %s" % (self.PATH, reason)
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], order, b_msg=msg)
+                self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                problems, notes = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "the trailer did not excuse the revival: %s" % problems)
+                self.assertTrue(any(n.startswith("ALLOWED %s:" % self.PATH) and reason in n for n in notes), "no ALLOWED note for the excused path: %s" % notes)
+
+    def test_a_plain_pr_branch_that_merged_main_in_is_not_read(self):
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "feat", "origin/main")
+        r.put(self.PATH, self.text([self.NEW] + self.ROWS))
+        r.commit("feat adds a row at the top")
+        r.sh("checkout", "-q", "main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("main deletes the last row")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge main into feat", "origin/main")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertNotIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the merge of main leaves out the row main deleted")
+        problems, _ = C.check(r.dir, "origin/main", head)
+        self.assertEqual(problems, [], "a merge of main, which upstream holds, is read as a revival")
+
+    def test_a_row_rewritten_by_one_lane_while_the_other_appends_is_not_a_finding(self):
+        for order in self.ORDERS:
+            with self.subTest(order=order):
+                r, head = self.build(self.PATH, [self.ALPHA, self.BETA_NEW, self.GAMMA], self.ROWS + [self.NEW], order)
+                rows = self.rows_at(r, head, self.PATH)
+                self.assertIn(self.BETA_NEW, rows, "premise: the rewrite is in the final head")
+                self.assertNotIn(self.BETA, rows, "premise: the rewritten row is gone from the final head")
+                problems, _ = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "the rewritten row is read as a revival")
+
+
 if __name__ == "__main__":
     unittest.main()
