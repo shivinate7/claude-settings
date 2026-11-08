@@ -1885,19 +1885,21 @@ class CheckBudget(Copied):
         def time(self):
             return self.now
 
-    def slow_runs(self, clock, calls, tick=SLOW_RUN):
+    def slow_runs(self, clock, calls, tick=SLOW_RUN, held=()):
         """A stubbed run that takes `tick` on the fake clock and passes, so an item the budget leaves unchecked is the only
-        unknown a case can see. A tick of 0 is the fast run."""
+        unknown a case can see. A tick of 0 is the fast run. An item whose id is in `held` fails with the page's sentence."""
         def run(page_file, item, *args, **kwargs):
             calls.append(item["id"])
             clock.now += tick
+            if item["id"] in held:
+                return 1, HELD_SENTENCE
             return 0, ""
         return run
 
-    def patched(self, clock, calls, tick=SLOW_RUN):
+    def patched(self, clock, calls, tick=SLOW_RUN, held=()):
         """The per-run seam and the clock, stubbed in both modules that read the budget: `with self.patched(clock, calls):`."""
         stack = contextlib.ExitStack()
-        stack.enter_context(mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls, tick)))
+        stack.enter_context(mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls, tick, held)))
         for module in (page_check, export_page):
             stack.enter_context(mock.patch.object(module, "time", clock, create=True))
         return stack
@@ -1925,6 +1927,22 @@ class CheckBudget(Copied):
         self.assertIn(self.UNKNOWN, lines, "--check did not name the unchecked items. Output:\n" + printed.getvalue())
         self.assertNotIn("checks pass", lines, "--check read the unchecked items as a pass. Output:\n" + printed.getvalue())
         self.assertEqual(code, 3, "--check with the budget spent must exit 3, unknown. Output:\n" + printed.getvalue())
+
+    def test_check_mode_held_item_beside_a_spent_budget_exits_4(self):
+        """The first item is held and spends the budget, so two are unchecked. The held line prints, the unknown line prints,
+        and the exit is 4: a held item outranks the unknown 3."""
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured())
+        page = write_text(os.path.join(self.tmp.name, "page-budget-held.html"), page_with_mockups(MOCKS_292))
+        printed = io.StringIO()
+        with self.patched(clock, calls, held=("budget-1",)), contextlib.redirect_stdout(printed):
+            code = export_page.check_only(fetched, page)
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        self.assertEqual(calls, ["budget-1"], "scope: the held item did not run alone before the budget was spent: %r" % (calls,))
+        self.assertIn("held item 301: " + HELD_SENTENCE, lines,
+                      "--check did not print the held item's line. Output:\n" + printed.getvalue())
+        self.assertIn(self.UNKNOWN, lines, "--check did not print the unchecked items' line. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 4, "--check with a held item and the budget spent must exit 4, not 3. Output:\n" + printed.getvalue())
 
     def test_export_keeps_its_copy_and_its_exit_when_the_budget_is_spent(self):
         clock, calls = self.Clock(), []
