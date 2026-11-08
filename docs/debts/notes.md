@@ -1528,4 +1528,8 @@
 - brief-discard-heading-prior-sentence: a heading line with an earlier negated sentence ("Do not run tests. Run these steps:") covers a list that orders a discard (hooks/guard.py `_brief_heading`). Decision: brief-destructive-git.
 - brief-discard-gerund-false-alarm: "avoid running", "without running", "instead of", "rather than", "will not", bare "not", and a `$ ` line under "Never run:" before a discard span are denied (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
 - brief-discard-reason-no-marker: the brief-destructive-git refusal does not name the `Must deny:` and `Add a case:` markers, so a test-author brief that quotes a case gets no hint (hooks/guard.py `BRIEF_DESTRUCTIVE_REASON`). Decision: brief-destructive-git.
-- brief-discard-workflow-unread: a Workflow `agent()` prompt held in a variable is not read, so its discard order passes silently (hooks/guard.py `brief_destructive_hit`). Decision: brief-destructive-git.
+- brief-discard-workflow-unread: a Workflow `agent()` prompt held in a variable is not read, so its discard order passes silently (hooks/guard.py `_brief_spawns`). Decision: brief-destructive-git.
+- brief-discard-list-aside: a prohibition list with an aside between spans ("Never run `a` (it hides work), `b`.") or a dash join is denied at the later span; only a bare comma joins spans (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
+- brief-discard-colon-window: the 4-word prohibition window crosses a colon, so "If there are no conflicts: run `<discard>`" passes (hooks/guard.py `_brief_prohibits`). Decision: brief-destructive-git.
+- brief-discard-tilde-fence: a `~~~` fence is not read, so a discard in it passes (hooks/guard.py `_brief_commands`). Decision: brief-destructive-git.
+- brief-discard-marker-whole-line: a `Must deny:` or `Add a case:` marker exempts every later span on its line, an order too (hooks/guard.py `brief_destructive_hit`). Decision: brief-destructive-git.
