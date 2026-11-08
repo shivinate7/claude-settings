@@ -197,12 +197,19 @@ def candidates(root, name):
 
 
 def named_candidates(name, kind):
-    """Every path a call that names the repo `name` (`owner/name`, any case; None names none) may treat as kind `kind`:
-    that repo's legacy-repos path, the layout's legacy spelling, then the layout path. It reads the layout file only,
-    never a checkout's extras file, and an extras file can only narrow these (see `kinds`). Duplicates are dropped."""
+    """Every path a call that names the repo `name` (`owner/name`, any case; None names none) may treat as kind `kind`.
+    A repo that legacy-repos lists gets its own path, then the layout's legacy spelling, then the layout path. A repo it does
+    not list gets the layout path only: a call from another checkout cannot read that repo's rollout, so no legacy spelling is
+    a home for it. A call that names no repo gets the legacy spelling and the layout path. It reads the layout file only, never
+    a checkout's extras file, and an extras file can only narrow these (see `kinds`). Duplicates are dropped."""
+    listed = legacy_repos().get(name.lower()) if name else None
+    spellings = (None, None)
+    if name is None:
+        spellings = (None, legacy(kind))
+    elif listed is not None:
+        spellings = (listed.get(kind), legacy(kind))
     found = []
-    kept = legacy_repos().get(name.lower(), {}).get(kind) if name else None
-    for where in (kept, legacy(kind), layout()["kinds"][kind]["path"]):
+    for where in (*spellings, layout()["kinds"][kind]["path"]):
         if where and where.strip("/") not in found:
             found.append(where.strip("/"))
     return tuple(found)

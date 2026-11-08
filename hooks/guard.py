@@ -4760,9 +4760,9 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
 # checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it). A GitHub MCP write is judged
-# by the repo the call names, not the checkout it runs in: `named_candidates` (that repo's legacy-repos path, the
-# layout's legacy spelling, the layout path) unless the checkout's origin is that repo (`coordinator_mcp_root`),
-# then the checkout's own `candidates`.
+# by the repo the call names, not the checkout it runs in: `named_candidates` (for a repo that legacy-repos lists, its
+# legacy-repos path, the layout's legacy spelling and the layout path; for an unlisted repo, the layout path only)
+# unless the checkout's origin is that repo (`coordinator_mcp_root`), then the checkout's own `candidates`.
 # The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose merge role
 # is `coordinator`: read_merge_role matches the role file to the environment's session id, never to the
 # payload's. An owner override lifts the rule: it is not in never_lifted.
@@ -4876,8 +4876,9 @@ def coordinator_paths(root: str):
 
 def coordinator_named_paths(name):
     """[(path, is_file)] of the record homes of the repo `name` (`owner/name`, lower case; None names none), from
-    `layout.named_candidates`: that repo's legacy-repos paths, the layout's legacy spellings and the layout path. It reads the
-    layout file only, never a checkout. [] when no layout is readable: then no path passes."""
+    `layout.named_candidates`: for a repo that legacy-repos lists, its legacy-repos paths, the layout's legacy spellings and
+    the layout path; for an unlisted repo, the layout path only. It reads the layout file only, never a checkout. [] when no
+    layout is readable: then no path passes."""
     if name in _COORDINATOR_NAMED_PATHS:
         return _COORDINATOR_NAMED_PATHS[name]
     found = []
