@@ -821,6 +821,7 @@ BRACED_NAME = re.compile(r"\$\{(\w+)\}")
 BODY_OPENERS = ("do", "then", "{", "(", "!")
 BRANCH_ENDS = ("else", "elif", "fi")
 LOOP_WORDS = ("for", "while", "until")
+LINE_OPENERS = ("then", "do", "else", "{", "(")
 FUNCTION_OPEN = re.compile(r"\s*(?:function\s+[\w.-]+(?:\s*\(\s*\))?|[\w.-]+\s*\(\s*\))\s*\{")
 ZSH_MODIFIER = re.compile(r"\$(?:[A-Za-z_]\w*|\d):[A-Za-z]")
 SINGLE_QUOTED = re.compile(r"'[^']*'")
@@ -854,10 +855,14 @@ def _push_events(segment: str):
     return events
 
 
+def _words(segment: str):
+    words = segment_tokens(segment)
+    return list(words) if words else segment.split()
+
+
 def _body_words(segment: str):
     """The segment's words after the shell keywords that open a body (`do`, `then`, `{`)."""
-    words = segment_tokens(segment)
-    words = list(words) if words else segment.split()
+    words = _words(segment)
     while words and words[0] in BODY_OPENERS:
         words.pop(0)
     return words
@@ -941,19 +946,78 @@ def _group_end(segments, opening: int):
     return None
 
 
+def _if_branches(segments, first: int):
+    """For the `if` in segment `first`: (else segment, elif segment, fi segment), each None when absent.
+    A nested `if` counts toward the matching `fi`."""
+    depth, marks = 1, {"else": None, "elif": None, "fi": None}
+    for number in range(first + 1, len(segments)):
+        words = _body_words(segments[number])
+        if words[:1] in (["else"], ["elif"]) and depth == 1 and marks[words[0]] is None:
+            marks[words[0]] = number
+        if words[:1] in (["else"], ["elif"]):
+            words = words[1:]
+        if words[:1] == ["if"]:
+            depth += 1
+        elif words[:1] == ["fi"]:
+            depth -= 1
+            if not depth:
+                marks["fi"] = number
+                break
+    return marks["else"], marks["elif"], marks["fi"]
+
+
+def _branch_stops(segments, ends, blocks, start: int, stop: int, first: int, last: int) -> bool:
+    """True when a stop word in the branch body segments[start:stop] runs whenever the branch runs: not
+    after a `&&` or `||`, not in a pipe or a subshell, and not in a brace group that runs on a condition.
+    A nested `if`, `case` or loop before the stop gives False: its body is not read."""
+    guarded = []   # per open brace group: True when it runs only on a condition
+    for number in range(start, stop):
+        words = _words(segments[number])
+        if words[:1] in (["then"], ["else"]):
+            words = words[1:]
+        conditional = number > start and ends[number - 1] not in (";", "\n")
+        while words[:1] == ["}"]:
+            words = words[1:]
+            if guarded:
+                guarded.pop()
+        if words[:1] == ["{"]:
+            words = words[1:]
+            guarded.append(conditional or any(guarded))
+        if not words:
+            continue
+        if words[0] in ("if", "case") or words[0] in LOOP_WORDS:
+            return False
+        if (words[0] in STOP_WORDS and not conditional and not any(guarded) and ends[number] != "|"
+                and _stops(words[0], blocks, first, last)):
+            return True
+    return False
+
+
 def _if_stops(segments, ends, blocks, first: int, last: int) -> bool:
-    """True for `if <archive push>; then ... <delete>`, where the delete is in the then branch, and for
-    `if ! <archive push>; then <stop word>; fi; <delete>`. Either way the delete runs only after a
-    successful push."""
+    """True when the archive push is the condition of the `if` in segment `first` and the delete runs only
+    after it succeeded. Either the delete is in the branch that runs on success (the then branch of
+    `if push`, the else branch of `if ! push`), or it follows the `fi` and the branch that runs on failure
+    stops the chain. With an `elif`, failure of `if push` is not followed: refused."""
     words = _body_words(segments[first])
     if not words or words[0] != "if" or ends[first] not in (";", "\n"):
         return False
-    if not segments[first + 1].lstrip().startswith("then"):
+    if first + 1 >= len(segments) or not segments[first + 1].lstrip().startswith("then"):
         return False
-    if words[1:2] == ["!"]:
-        return (first + 2 < last and ends[first + 1] in (";", "\n") and _first_word(segments[first + 2]) == "fi"
-                and _stops(_first_word(segments[first + 1]), blocks, first, last))
-    return not any(_first_word(text) in BRANCH_ENDS for text in segments[first + 2:last + 1])
+    negated = words[1:2] == ["!"]
+    else_at, elif_at, fi_at = _if_branches(segments, first)
+    fi_at = len(segments) if fi_at is None else fi_at
+    then_end = min(at for at in (else_at, elif_at, fi_at) if at is not None)
+    if negated:
+        success = (else_at, fi_at) if else_at is not None and elif_at is None else None
+        failure = (first + 1, then_end)
+    else:
+        success = (first + 1, then_end)
+        failure = (else_at, fi_at) if else_at is not None and elif_at is None else None
+    if success and success[0] <= last < success[1]:
+        return True
+    if fi_at >= last or ends[fi_at] == "|" or not failure:
+        return False
+    return _branch_stops(segments, ends, blocks, failure[0], failure[1], first, last)
 
 
 def _push_failure_stops(segments, ends, blocks, first: int, last: int) -> bool:
@@ -984,6 +1048,29 @@ def _push_failure_stops(segments, ends, blocks, first: int, last: int) -> bool:
     return _if_stops(segments, ends, blocks, first, last)
 
 
+def _joined(segments, ends):
+    """The segments and ends of one reading, with each line break that ends no command taken out. A blank
+    segment goes, and the end before it stays: `push &&\n delete` reads as `push && delete`. A segment of
+    opener words alone (`then`, `do`, `else`, `{`, `(`) that a line break ends joins the next segment, as
+    in the one-line form `then exit 1`."""
+    joined, closes = [], []
+    pending = ""
+    for segment, end in zip(segments, ends):
+        words = segment.split()
+        if not words:
+            continue
+        if end == "\n" and all(word in LINE_OPENERS for word in words):
+            pending += segment + " "
+            continue
+        joined.append(pending + segment)
+        closes.append(end)
+        pending = ""
+    if pending:
+        joined.append(pending)
+        closes.append(ends[-1])
+    return joined, closes
+
+
 def archive_delete_hits(segments, ends):
     """The deletes that follow an archive push of their branch with nothing to stop the chain, each as
     `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
@@ -994,7 +1081,7 @@ def archive_delete_hits(segments, ends):
     hits = []
     start = 0
     for stop in [number + 1 for number, end in enumerate(ends) if end == ""]:
-        reading, closes = segments[start:stop], ends[start:stop]
+        reading, closes = _joined(segments[start:stop], ends[start:stop])
         start = stop
         blocks = _blocks(reading)
         archives = []   # (segment number, names), in order
