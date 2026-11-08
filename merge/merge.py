@@ -3453,7 +3453,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files; with no earlier record on the pull request, the --round lines stand in for it and HEAD must be an ancestor of the live head; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
     p.add_argument("--fix-base-record", type=fix_base_record_arg, metavar="URL", help="with --review-record and --fix-check, for a pull request with no review record of its own: the link to an earlier review record on another pull request of this repo (https://github.com/OWNER/REPO/pull/N#issuecomment-ID), which stands in for the newest earlier record: its Head is the fix base, and its last round sets the round floor")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
@@ -3540,11 +3540,16 @@ def main(argv, host=None, lock=None):
                     last, problem = source_record_problem(h, root, a, recs)
                     if not problem:
                         problem = round_floor([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
+                elif not recs and a.round:  # reviews that ran before the pull request opened, or before a main merge moved its head: the rounds stand in as the earlier record, so the base must be an ancestor of the live head
+                    last = None
+                    found = h.compare_files(a.fix_check[0], info["head"])
+                    if found["behind_by"] or not found["ahead_by"]:
+                        problem = f"with no earlier review record, the fix base {a.fix_check[0][:9]} must be an ancestor of the live head {info['head'][:9]}, but their compare is {found['status']}"
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     if not last or last["fix"]:
                         problem = "the newest earlier review record on this pull request must exist and have no Fix check line"
-                if not problem and last["head"] != a.fix_check[0]:
+                if not problem and last and last["head"] != a.fix_check[0]:
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
