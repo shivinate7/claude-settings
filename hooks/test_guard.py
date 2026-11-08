@@ -10424,28 +10424,31 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
 # The cases mirror the incident in decision local-time-central: `added` 20:16Z written to items at a clock of 20:14Z,
 # and a roadmap step `updatedAt` ahead of the clock, in the shape 2026-11-07T14:15:00-06:00.
 MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
-MTC_WRITE_CARRIES = ("14:14 CST", ("2026-11-07T14:14", "2026-11-07T20:14"))  # the reason prints the real time, both ways
+MTC_WRITE_CARRIES = ("14:14 CST", "2026-11-07T14:14-06:00", "2026-11-07T20:14Z")  # the real time, with its offset, both ways
+MTC_CDT_CLOCK = "2026-07-08T09:26:00-05:00"  # 09:26 CDT, which is 14:26Z: a clock in the other daylight season
+MTC_CDT_CARRIES = ("09:26 CDT", "2026-07-08T09:26-05:00", "2026-07-08T14:26Z")  # the real time, with its -05:00 offset
 MTC_ITEM_URL = "https://claude.ai/artifact/mtcwrites"  # the page whose items the ArtifactData cases write
 MTC_STEP = os.path.join(NOGIT, "roadmap", "data", "steps", "silent-undo-edit-pass.json")  # a roadmap step file
 MTC_NOT_STEP = os.path.join(NOGIT, "docs", "silent-undo-edit-pass.json")  # a path that is not a step file
 MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\n'  # 16 minutes ahead
 
 
-def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, **tool_input):
-    """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK)."""
+def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=(), **tool_input):
+    """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK).
+    A deny must print each of `carries` and none of `lacks`."""
     if expected == "deny":
         add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
-            env=mtc_env(clock), carries=MTC_WRITE_CARRIES, **tool_input)
+            env=mtc_env(clock), carries=carries, lacks=lacks, **tool_input)
     else:
         add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
             env=mtc_env(clock), **tool_input)
 
 
 def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass",
-            clock=MTC_WRITE_CLOCK):
+            clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=()):
     """An ArtifactData write of one document: `data` to `collection`, on the page the cases name, at `clock`."""
-    mtc_write(name, expected, "ArtifactData", clock=clock, url=MTC_ITEM_URL, action=action, collection=collection,
-              doc_id=doc_id, data=data)
+    mtc_write(name, expected, "ArtifactData", clock=clock, carries=carries, lacks=lacks, url=MTC_ITEM_URL,
+              action=action, collection=collection, doc_id=doc_id, data=data)
 
 
 def mtc_batch(name, expected, writes):
@@ -10647,6 +10650,59 @@ mtc_write("a str_replace that moves added in items to 10 minutes ahead is refuse
 mtc_write("a str_replace that moves added in items to exactly 20:14Z is allowed", "allow", "ArtifactData",
           url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
           field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:14:00Z")
+
+# ---- written forms the check misses: a value with no updatedAt key, a date-less fragment, and a shell assignment
+# that is not a double-quoted JSON pair. The check judges the value a write lands, not the key beside it.
+# Refused: an Edit of a step file that writes 14:30 at -06:00 over an older instant. Its new_string has no key.
+mtc_write("a roadmap step Edit that writes 14:30 at -06:00 over an older instant, with no updatedAt key, is refused",
+          "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:30:00-06:00")
+# Refused: the same write as one entry of a MultiEdit. The entry's new_string has no updatedAt key.
+mtc_write("a roadmap step MultiEdit entry that writes 14:30 at -06:00 over an older instant, with no key, is refused",
+          "deny", "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": "2026-11-07T13:00:00-06:00", "new_string": "2026-11-07T14:30:00-06:00"}])
+# Refused: the same entry with its updatedAt key, the form the check already reads. A control for the case above.
+mtc_write("a roadmap step MultiEdit entry whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny",
+          "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": '"updatedAt": "2026-11-07T13:00:00-06:00"',
+                  "new_string": '"updatedAt": "2026-11-07T14:30:00-06:00"'}])
+# Passes: the keyless Edit at a value 10 minutes behind the clock, and at the clock itself.
+mtc_write("a roadmap step Edit that writes 14:04 at -06:00 over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:04:00-06:00")
+mtc_write("a roadmap step Edit that writes exactly 20:14Z over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T20:14:00Z")
+# Refused: a str_replace that sets added to the fragment T20:24:00Z. A fragment has no full instant to read.
+mtc_write("a str_replace that sets added in items to the fragment T20:24:00Z is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="T20:04:00Z", new_str="T20:24:00Z")
+# Passes: a str_replace that sets added to a full instant 10 minutes behind the clock.
+mtc_write("a str_replace that moves added in items to 10 minutes behind is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:02:00Z", new_str="2026-11-07T20:04:00Z")
+# Refused: a python3 -c dict assignment with a double-quoted key. A `]` sits between the key and the `=`.
+mtc_bash("a Bash python3 -c dict assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""python3 -c 'd["updatedAt"] = "2026-11-07T14:30:00-06:00"'""")
+# Refused: the same with a single-quoted key, d['updatedAt']=, and the value double-quoted.
+mtc_bash("a Bash python3 -c assignment with a single-quoted updatedAt key, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d['updatedAt']=\"2026-11-07T14:30:00-06:00\""''')
+# Refused: a jq |= assignment of updatedAt 14:30 at -06:00. The `|` sits between the key and the value.
+mtc_bash("a Bash jq |= assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""jq '.updatedAt |= "2026-11-07T14:30:00-06:00"' roadmap/data/steps/silent-undo-edit-pass.json""")
+# Passes: // and /* inside quoted strings, beside an updatedAt 20 minutes behind. The scan must not crash or refuse.
+mtc_bash("a Bash command with // and /* inside quoted strings, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "see http://claude.ai/x /* note */" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: a JSX-like text, <p>Don't</p>, beside a behind updatedAt. A lone apostrophe must not stop the scan.
+mtc_bash("a Bash command with <p>Don't</p> text, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "<p>Don't</p>" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: an instant 16 minutes ahead in prose, beside a behind updatedAt. Only a literal updatedAt value is judged.
+mtc_bash("a Bash command with an instant 16 minutes ahead in prose, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "due 2026-11-07T14:30:00-06:00 for the step" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Refused at a CDT clock: the reason prints the clock with its -05:00 offset, and no CST offset.
+mtc_set("an added 14 minutes ahead in items, at a CDT clock of 09:26, is refused: the reason prints -05:00", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-07-08T14:40:00Z"},
+        clock=MTC_CDT_CLOCK, carries=MTC_CDT_CARRIES, lacks=("-06:00",))
 
 
 # =========================================================================== 5d. cite by id
