@@ -29085,11 +29085,12 @@ def ctm_commit(where, index, message):
         sys.exit("fixture setup failed: commit %d in %r: %s" % (index, where, done.stderr.strip()))
 
 
-def ctm_repo(name, expect, pushed=(), local=()):
+def ctm_repo(name, expect, pushed=(), local=(), branch=None):
     """A checkout on `ctm-topic`, cut from origin/main, beside a bare origin. Each message in `pushed` is
     committed and pushed to origin's `ctm-topic`; each in `local` is committed after them and never pushed.
-    Built on first use. Before any case runs, the read back holds: the commits no remote ref holds are
-    `local`, and the Co-Authored-By values git's trailer parsing reads from them are `expect`."""
+    `branch`, when given, is a second local branch at the same commit, for a push that names it. Built on first
+    use. Before any case runs, the read back holds: the commits no remote ref holds are `local`, and the
+    Co-Authored-By values git's trailer parsing reads from them are `expect`."""
     where = os.path.join(CTM_ROOT, name, "repo")
     origin = os.path.join(CTM_ROOT, name, "origin.git")
 
@@ -29105,6 +29106,10 @@ def ctm_repo(name, expect, pushed=(), local=()):
                 sent = run_vcs(where, "push", "-q", "origin", "HEAD:" + CTM_BRANCH)
                 if sent.returncode != 0:
                     sys.exit("fixture setup failed: push in %r: %s" % (where, sent.stderr.strip()))
+        if branch:
+            made = run_vcs(where, "branch", branch)
+            if made.returncode != 0:
+                sys.exit("fixture setup failed: branch %s in %r: %s" % (branch, where, made.stderr.strip()))
         unsent = run_vcs(where, "rev-list", "--count", "HEAD", "--not", "--remotes")
         # HEAD is named: a log with only `--not` and no positive revision walks nothing.
         values = run_vcs(where, "log", "--format=%(trailers:key=Co-Authored-By,valueonly)", "HEAD", "--not",
@@ -29153,6 +29158,20 @@ CTM_REPO_SPACED = ctm_repo("spaced", [ctm_value("claude opus 5.5")],
                            local=[ctm_message(ctm_trailer("claude opus 5.5"))])
 CTM_REPO_IDHAIKU = ctm_repo("idhaiku", [ctm_value("claude-haiku-5-5")],
                             local=[ctm_message(ctm_trailer("claude-haiku-5-5"))])
+# Push forms: the commit is an Opus trailer, and a local branch `x` names the same commit, so `origin x` has a source.
+CTM_REPO_XBRANCH = ctm_repo("xbranch", [ctm_value("Claude Opus 5.5")], local=[CTM_INCIDENT], branch="x")
+# Trailers that name no model family the rule knows, or name one with a suffix, a separator or no space.
+CTM_REPO_CLAUDE55 = ctm_repo("claude55", [ctm_value("Claude 5.5")], local=[ctm_message(ctm_trailer("Claude 5.5"))])
+CTM_REPO_CLAUDECODE = ctm_repo("claudecode", [ctm_value("Claude Code 2.1")],
+                               local=[ctm_message(ctm_trailer("Claude Code 2.1"))])
+CTM_REPO_GPT4 = ctm_repo("gpt4", [ctm_value("GPT-4")], local=[ctm_message(ctm_trailer("GPT-4"))])
+CTM_REPO_OPUS1M = ctm_repo("opus1m", [ctm_value("claude-opus-5-5[1m]")],
+                           local=[ctm_message(ctm_trailer("claude-opus-5-5[1m]"))])
+CTM_REPO_UNDERSCORE = ctm_repo("underscore", [ctm_value("Claude_Opus_5.5")],
+                               local=[ctm_message(ctm_trailer("Claude_Opus_5.5"))])
+CTM_REPO_OPUS4 = ctm_repo("opus4", [ctm_value("Claude Opus4.5")], local=[ctm_message(ctm_trailer("Claude Opus4.5"))])
+CTM_REPO_HAIKU1M = ctm_repo("haiku1m", [ctm_value("claude-haiku-5-5[1m]")],
+                            local=[ctm_message(ctm_trailer("claude-haiku-5-5[1m]"))])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -29211,6 +29230,34 @@ ctm_case("a Sonnet trailer passes when a fallback served Sonnet and the agent re
          CTM_REPO_SONNET, "allow", CTM_FALLBACK)
 ctm_case("a Haiku trailer is refused when a fallback served Sonnet and the agent requested Opus",
          CTM_REPO_HAIKU, "deny", CTM_FALLBACK)
+
+# Note trailer-check-top-level-push-only: a push wrapped in a shell is judged as the push it runs.
+ctm_case("a bash -c wrapped push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
+         "deny", CTM_HAIKU, command="bash -c 'git push origin HEAD:x'")
+ctm_case("a sh -lc wrapped push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
+         "deny", CTM_HAIKU, command='sh -lc "git push origin HEAD:x"')
+
+# Note trailer-check-push-forms-untested: the push forms that name a branch, or none. Pinned at the current
+# behaviour, which refuses each of them.
+ctm_case("a push -u origin x of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_XBRANCH,
+         "deny", CTM_HAIKU, command=VCS + " push -u origin x")
+ctm_case("a push origin x of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_XBRANCH,
+         "deny", CTM_HAIKU, command=VCS + " push origin x")
+ctm_case("a bare git push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_XBRANCH,
+         "deny", CTM_HAIKU, command=VCS + " push")
+ctm_case("a git push origin with no refspec of an Opus-trailer commit from a Haiku agent is refused",
+         CTM_REPO_XBRANCH, "deny", CTM_HAIKU, command=VCS + " push origin")
+
+# Note trailer-check-unknown-family-refused: a name that is no model family the rule knows passes.
+ctm_case("a Claude 5.5 trailer from a Haiku agent passes", CTM_REPO_CLAUDE55, "allow", CTM_HAIKU)
+ctm_case("a Claude Code 2.1 trailer from a Haiku agent passes", CTM_REPO_CLAUDECODE, "allow", CTM_HAIKU)
+ctm_case("a GPT-4 trailer from a Haiku agent passes", CTM_REPO_GPT4, "allow", CTM_HAIKU)
+
+# Note trailer-check-suffix-passes: an Opus name with a suffix, a separator or no space is still Opus.
+ctm_case("a claude-opus-5-5[1m] trailer from a Haiku agent is refused", CTM_REPO_OPUS1M, "deny", CTM_HAIKU)
+ctm_case("a Claude_Opus_5.5 trailer from a Haiku agent is refused", CTM_REPO_UNDERSCORE, "deny", CTM_HAIKU)
+ctm_case("a Claude Opus4.5 trailer from a Haiku agent is refused", CTM_REPO_OPUS4, "deny", CTM_HAIKU)
+ctm_case("a claude-haiku-5-5[1m] trailer from a Haiku agent passes", CTM_REPO_HAIKU1M, "allow", CTM_HAIKU)
 
 
 # A case or log check with a family that FAMILIES does not name would hide from GUARD_FAMILY.
