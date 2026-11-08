@@ -14980,18 +14980,52 @@ class ProseJudgePrompt(unittest.TestCase):
         self.assertIn(103, numbers, "the excerpt of %s shows rows %s, not row 103, the row of the title the line quotes" % (self.MJS_PATH, numbers))
         self.assertIn(104, numbers, "the excerpt of %s shows rows %s, not row 104, the first row of the title's test body" % (self.MJS_PATH, numbers))
 
-    def test_a_quoted_title_the_file_never_names_gets_no_excerpt_row_with_that_title(self):
-        # A line quotes a title that the file does not hold. No row of the named file's excerpt may carry that title.
-        absent = "every table whose cells render Dollars has exactly one money head"
+    @staticmethod
+    def numbers_in(rows):
+        return [int(r.split(":", 1)[0]) for r in rows if re.match(r"\d+: ", r)]
+
+    def excerpt_numbers(self, text, path):
+        return self.numbers_in(excerpt_rows(text, path))
+
+    def test_a_named_path_whose_line_quotes_a_title_is_read_and_shows_the_title_row(self):
+        # The rule: a named path is read when its line quotes a title, even when the line gives no other code-span name.
         raw = self.mjs_text()
-        self.assertNotIn(absent, raw, "scope: the absent title is in the fixture, so the case does not probe absence")
-        line = "- `FoundLines.tsx`, `LinesCard.tsx` and `ScopeSheetRows.tsx`: the table test in `%s`, \"%s\". It parses every `.tsx` file in `src/components`." % (self.MJS_PATH, absent)
+        line = "- the table test in `%s`, \"%s\"." % (self.MJS_PATH, self.TITLE)
         text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: raw})
         self.assertIn("Line 68: " + line, text, "scope: the prompt does not carry the judged line")
-        shown = excerpt_rows(text, self.MJS_PATH)
-        self.assertTrue(shown, "scope: no excerpt of %s, so the absent title is not tested against any row" % self.MJS_PATH)
-        claims = [r for r in shown if absent in r]
-        self.assertEqual(claims, [], "an excerpt row of %s carries the absent title, so the line gets false backing: %r" % (self.MJS_PATH, claims))
+        self.assertIn((self.WT, self.MJS_PATH), reads, "the named path %s is never read, so no excerpt of it can show the quoted title" % self.MJS_PATH)
+        numbers = self.excerpt_numbers(text, self.MJS_PATH)
+        self.assertIn(103, numbers, "the excerpt of %s shows rows %s, not row 103, the row of the quoted title" % (self.MJS_PATH, numbers))
+        self.assertIn(104, numbers, "the excerpt of %s shows rows %s, not row 104, the first row of the quoted title's test body" % (self.MJS_PATH, numbers))
+
+    def test_a_quoted_phrase_leaves_the_first_twenty_name_rows_in_the_excerpt(self):
+        # The rule: when a named path has rows that hold a name the line gives, at least 20 of the 40 excerpt rows stay for those rows, in
+        # the order a name-only excerpt gives. A quoted phrase takes only the rest of the cap. A quoted title keeps its own row too.
+        import stale_cites
+        raw = self.mjs_text()
+        self.assertIn("money head", raw, "scope: the fixture does not hold the quoted phrase, so the case probes nothing")
+        base = self.numbers_in(stale_cites.named_excerpt([".tsx"], raw).split("\n"))
+        self.assertEqual(len(base[:20]), 20, "scope: the name-only excerpt of %s has fewer than 20 rows" % self.MJS_PATH)
+        line = "- `.tsx` files hold the \"money head\" unit, in `%s`." % self.MJS_PATH
+        text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: raw})
+        shown = self.excerpt_numbers(text, self.MJS_PATH)
+        missing = [n for n in base[:20] if n not in shown]
+        self.assertEqual(missing, [], "the quoted phrase takes the cap: name-hit rows %s of %s are cut, want the first 20 kept" % (missing, self.MJS_PATH))
+        title = "- `.tsx` files hold the \"%s\" unit, in `%s`." % (self.TITLE, self.MJS_PATH)
+        text, reads = self.prompt({68: (title, [])}, {self.MJS_PATH: raw})
+        self.assertIn(103, self.excerpt_numbers(text, self.MJS_PATH), "the quoted title's row 103 is not shown in the excerpt of %s" % self.MJS_PATH)
+
+    def test_a_strict_prefix_of_a_row_does_not_outrank_the_rows_that_hold_the_phrase_whole(self):
+        # The rule: a quoted phrase ranks first only in the rows that hold it as a whole string literal, a quote on both sides. A row that
+        # only contains it, such as a row that starts with it, ranks below them, so the cap drops it first.
+        phrase = "every table whose cells render Thousands"
+        rows = [phrase + " has exactly one money head that carries the unit."]
+        rows += ["  test('%s', () => {});" % phrase for _ in range(45)]
+        line = "- `.tsx` files: the table test in `%s`, \"%s\"." % (self.MJS_PATH, phrase)
+        text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: "\n".join(rows) + "\n"})
+        shown = self.excerpt_numbers(text, self.MJS_PATH)
+        self.assertIn(2, shown, "scope: the rows that hold the phrase whole are not shown, so the cap is not tested: %s" % shown)
+        self.assertNotIn(1, shown, "row 1 holds the phrase only as a prefix and is shown ahead of the rows that hold it whole: %s" % shown)
 
 
 class OrderLock(merge.GitLock):

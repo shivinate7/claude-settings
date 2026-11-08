@@ -2915,6 +2915,37 @@ def value_file(name, literal):
     return "%s = %s\n\n\ndef keep():\n    return 1\n" % (name, literal)
 
 
+class NamedExcerptPhraseTests(unittest.TestCase):
+    """named_excerpt with quoted phrases: a phrase is found at word boundaries only, and the rows that hold it whole rank first."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    @staticmethod
+    def numbers_in(excerpt):
+        return [int(r.split(":", 1)[0]) for r in (excerpt or "").split("\n") if re.match(r"\d+: ", r)]
+
+    def test_a_mid_word_fragment_of_a_quoted_phrase_finds_no_row(self):
+        # The rule: a phrase is found only when a non-word character or the row edge is on both sides of it. "ble whose cells render"
+        # sits inside "table whose cells render", so it finds no row.
+        text = "alpha\nthe table whose cells render Thousands here\nomega\n"
+        whole = self.stale.named_excerpt((), text, phrases=("table whose cells render",))
+        self.assertIsNotNone(whole, "scope: the whole phrase finds no row, so the fragment case probes nothing")
+        fragment = self.stale.named_excerpt((), text, phrases=("ble whose cells render",))
+        self.assertIsNone(fragment, "a mid-word fragment of a quoted phrase shows rows: %r" % fragment)
+
+    def test_a_row_holding_the_phrase_whole_ranks_above_a_row_that_only_contains_it_under_the_cap(self):
+        # The rule: a row that holds the phrase as a whole string literal, a quote on both sides, ranks above a row that only contains
+        # it, so the cap drops the containing row first.
+        phrase = "every table whose cells render Thousands"
+        rows = ["note: %s is one table" % phrase]
+        rows += ["  test('%s', () => {});" % phrase for _ in range(41)]
+        shown = self.numbers_in(self.stale.named_excerpt((), "\n".join(rows) + "\n", phrases=(phrase,)))
+        self.assertIn(2, shown, "scope: the rows that hold the phrase whole are not shown, so the cap is not tested: %s" % shown)
+        self.assertNotIn(1, shown, "the row that only contains the phrase is shown ahead of the rows that hold it whole: %s" % shown)
+
+
 class ValueCiteTests(StaleCase):
     """STALE008 (decision stale-cites-at-merge): a Python value cite `file.py: NAME = literal` in backticks quotes the
     value the range changed or removed, or a line the range adds does not match the value at head. A JavaScript cite
