@@ -19798,6 +19798,11 @@ add("brief-destructive-git: Workflow builder agent whose model is held in a vari
 add("brief-destructive-git: builder brief whose comma list of prohibitions names `git stash`, `git reset --hard` and "
     "`git clean -fd` is allowed", "allow", tool="Agent",
     prompt="Never run `git stash`, `git reset --hard`, or `git clean -fd`.", subagent_type="builder", model="sonnet")
+# Control, green on the old code: a comma before an order is a clause break too, so the order is still denied. A
+# builder that drops the comma from the clause split would let this through.
+add("brief-destructive-git: control, a comma before the order keeps it an order and is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="Don't skip tests, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
 # Controls: a clause break before an order keeps it an order, a negation covers a span after an earlier span, and a
 # builder's refusal text still orders a reset.
 add("brief-destructive-git: control, a semicolon before the order keeps it an order and is denied", "deny",
