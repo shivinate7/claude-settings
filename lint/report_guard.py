@@ -25,8 +25,9 @@ holds the report until it names it (decision push-report-names-ci, a report afte
 A read that failed or ran out of budget: `CI unknown on <sha7>`. Green, a draft PR and a branch with no PR need no
 line. Only the newest head of each branch counts. Cost: only on a Stop after a push that is not a stop_hook_active
 Stop, at most 2 gh processes per head (the branch's open PR, then the head's runs), a 3rd when the run list is empty
-(the workflow list, so a repo with no workflows reads none), plus up to 2 local processes for a head the push output
-does not give (a bare `git push origin HEAD`: the branch, then its remote ref) or 1 for a short head on main. Every
+(the workflow list, so a repo with no workflows reads none), plus up to 3 git processes per name for a head the push
+output does not give, 1 more to read the branch of a bare or HEAD push, and 1 for a short head on main (the decision
+push-report-names-ci holds the exact count). Every
 read is inside one 20 s budget, 8 s at most each, under the Stop timeout in settings.json (the seam is
 ci_wake.Budget, passed to push_ci_states); a budget spent before a head is named reads unknown, and the line names
 the branch. No timer, no new long-lived process. The
