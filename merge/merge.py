@@ -3184,7 +3184,7 @@ REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 
 def grant_valid(text):
-    """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets 2026-99-99 25:99 through."""
+    """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
     if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
         return False
     try:
