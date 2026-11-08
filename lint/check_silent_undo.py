@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,6 +20,12 @@ Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
+  revived     A batch's integration branch holds, per lane, a local merge of that lane's head. A
+              union merge (.gitattributes merge=union) keeps a line one side deleted when the
+              other side adds next to it, with no conflict. So for each such merge (a second
+              parent that upstream does not hold), each file with merge=union at head is read: a
+              line in the merge base with upstream, gone from that lane head, and back in head is
+              a finding.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -612,6 +618,40 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     return {p: why for p, why in got.items() if p in paths}
 
 
+def revived_lines(cwd, upstream, head, m):
+    """[(path, lane head, [line])] for merge commit m of upstream..head (first-parent line). Only a two-parent merge
+    whose second parent, the lane head, upstream does not hold. Only a file with merge=union at head, read through
+    check-attr (the one home of that rule, no path list here): its lines in the base of upstream and the lane head,
+    absent from the lane head, and present in head. The lane deleted them; the union merge put them back."""
+    parents = git(cwd, "rev-list", "--parents", "-n", "1", m)[1].split()[1:]
+    if len(parents) != 2 or git(cwd, "merge-base", "--is-ancestor", parents[1], upstream, ok=(0, 1))[0] == 0:
+        return []  # a 3+ parent merge is Unknown in lost_lines
+    lane = parents[1]
+    rc, base = git(cwd, "merge-base", upstream, lane, ok=(0, 1))
+    base = base.strip()
+    if rc != 0 or not base:
+        return []
+    paths = [p for p, (old, new) in raw_files(cwd, base, lane).items() if old != new]
+    if not paths:
+        return []
+    out = git(cwd, "check-attr", "-z", "--source=" + head, "merge", "--", *paths)[1].split("\0")
+    found = []
+    for i in range(0, len(out) - 2, 3):
+        if out[i + 2] != "union":
+            continue
+        path = out[i]
+        in_lane, in_head = counts(blob(cwd, lane, path)), counts(blob(cwd, head, path))
+        back = [l for l in counts(blob(cwd, base, path)) if l not in in_lane and l in in_head]
+        if back:
+            found.append((path, lane, back))
+    return found
+
+
+def fmt_revived(m, path, lane, back):
+    shown = "".join("\n      - " + l for l in back)
+    return "%s: merge %s revives %d line(s) that lane %s deleted (merge=union keeps them)%s" % (path, m[:9], len(back), lane[:9], shown)
+
+
 def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=None, retire_head=None):
     """(problem lines, ALLOWED notes); no problems is green. Raises Unknown. Reads only the commits
     upstream gained after the branch was cut: from where the branch's own first-parent line left
@@ -628,6 +668,8 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     items = []
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+    for m in git(cwd, "rev-list", "--merges", "--first-parent", "%s..%s" % (upstream, h))[1].split():
+        items += [(x[0], fmt_revived(m, *x)) for x in revived_lines(cwd, upstream, h, m)]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]

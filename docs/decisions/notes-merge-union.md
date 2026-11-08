@@ -13,9 +13,10 @@ sections. Union would leave duplicate or stale rows silently. The merge tool reg
 The rule takes effect only once it is on main. A lane branched before it merges needs main merged in.
 
 Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
-versions stay. A note that one lane deletes or reverts can come back when another lane appends. No
-incident yet, so no check (rule building-guard-needs-incident). `lint/test_notes_union_merge.py` pins
-the rewrite case.
+versions stay. A note that one lane deletes or reverts can come back when another lane appends. The
+integration-branch read of `lint/check_silent_undo.py` (the "revived" read) catches the revival: a line
+in the merge base, gone from a lane head, and back in the integration head fails, and a Drops-lines
+trailer excuses it. `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
