@@ -1508,18 +1508,16 @@ def _sed_script_targets(script):
 
 
 def _sed_command_words(command):
-    """The words of a sed `e` command that count as written: each word of a command in it that is no
-    printer (`_PRINTERS`), so `e cat tests/x` reads and `e touch tests/x` writes. A command with text the
-    segment split cannot see (`_SCRIPT_RUNS_HIDDEN`) counts every word. Its redirects are read apart, by
-    the shell scan of the whole command (`_shell_write_scan`)."""
-    if _SCRIPT_RUNS_HIDDEN.search(command):
-        return command.split()
-    written = []
-    for segment in split_segments(command):
-        words = [_unquoted(word) for word in _quoted_words(segment, True)]
-        if words and _segment_command(words)[0] not in _PRINTERS:
-            written.extend(words)
-    return written
+    """The words of a sed `e` command that count as written: none when each command in it is a printer
+    (`_PRINTERS`), else every word, since a printer can feed a writer (`e echo tests/x | xargs rm`). So
+    `e cat tests/x` reads and `e touch tests/x` writes. A command with text the segment split cannot see
+    (`_SCRIPT_RUNS_HIDDEN`) counts every word. Its redirects are read apart, by the shell scan of the
+    whole command (`_shell_write_scan`)."""
+    if not _SCRIPT_RUNS_HIDDEN.search(command):
+        commands = [[_unquoted(word) for word in _quoted_words(segment, True)] for segment in split_segments(command)]
+        if all(_segment_command(words)[0] in _PRINTERS for words in commands if words):
+            return []
+    return command.split()
 
 
 def _sed_script_words(raw):
