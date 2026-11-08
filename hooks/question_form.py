@@ -437,8 +437,8 @@ SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "
                             "gcloud", "bq", "winget", "gsutil", "kubectl", "terraform", "yarn", "pnpm", "aws",
                             "az", "helm"))
 # A span whose command word is any lowercase word and whose second word is a flag (`grep -r x`, `chmod +x
-# f`) is a shell line too, as is one whose program is listed. A word with a path (`scripts/run.py --x`) is
-# a file in a quoted line, not a flagged command.
+# f`) is a shell line too, as is one whose program is listed. A command word with a path is read by its
+# basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
 SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
