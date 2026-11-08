@@ -287,7 +287,7 @@ one short read-only git process, with no fetch, and one gh call per open item wi
 A page that is lost or moved to another org takes its items with it. Once, 80 items were rebuilt from old
 transcripts because no repo held them. So the writer keeps a copy of the page's data in the repo (decision
 `waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
-request. The record branch (`roadmap` by default, `layout.py` `record_branch()`) takes a direct push.
+request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
 
 The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
 never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
@@ -542,7 +542,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
    direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
-   `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
+   `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
@@ -571,7 +571,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
-This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
+A re-read of `answers/park.<id>` saves nothing to the inbox, because the hook skips a document with `parked: true`. An item's park answer has no `parked` key, so the hook saves its note when it has one. Then the writer finds the entry in `meta/page.parked` by `id`.
 A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 A Copy word `<n> park (<note>)` parks the open item numbered `<n>`, with that note, by the park answer branch below.
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
@@ -736,7 +736,7 @@ Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
 batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `lint/layout.py`.
+`live_pages()` in `~/.claude/lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
