@@ -1503,10 +1503,24 @@ def loads_source(*lines):
     return SPEC_HEADER + "\n" + "\n".join(lines) + "\n"
 
 
+def kwargs_copy_source(local):
+    """A `**kwargs` loader that copies the keyword `path` into the local `local`, then loads the local. The call passes
+    `path=` by keyword, so only the local's name decides whether the loader follows the copy."""
+    return loads_source(
+        "def load(**kwargs):",
+        '    %s = kwargs["path"]' % local,
+        '    return importlib.util.spec_from_file_location(kwargs["name"], %s)' % local,
+        "",
+        "",
+        'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
+    )
+
+
 FOLLOWED_FORMS = (
     ("a positional argument", TESTS_FOR_LOADS["tests/test_form_wrapper_second.py"]),
     ("a keyword argument", TESTS_FOR_LOADS["tests/test_form_wrapper_keyword.py"]),
     ("a bound name", TESTS_FOR_LOADS["tests/test_form_spec_named.py"]),
+    ("a **kwargs loader that copies the keyword into a local of the same name", kwargs_copy_source("path")),
 )
 UNFOLLOWED_FORMS = (
     ("an imported loader", loads_source(
@@ -1578,6 +1592,7 @@ UNFOLLOWED_FORMS = (
         "",
         'MODULE = load(name="x_under_test", path=os.path.join(HERE, "widget.py"))',
     )),
+    ("a **kwargs loader that copies the keyword into a differently named local", kwargs_copy_source("p")),
     ("a call that spreads the path in, *names", loads_source(
         "def load(name, path):",
         "    return importlib.util.spec_from_file_location(name, path)",
@@ -1596,6 +1611,12 @@ UNFOLLOWED_FORMS = (
     ("a for target", loads_source(
         'for path in [os.path.join(HERE, "widget.py")]:',
         '    MODULE = importlib.util.spec_from_file_location("x_under_test", path)',
+    )),
+    ("a comprehension target", loads_source(
+        "MODULES = [",
+        '    importlib.util.spec_from_file_location("x_under_test", path)',
+        '    for path in [os.path.join(HERE, "widget.py")]',
+        "]",
     )),
     ("a tuple unpacking", loads_source(
         'PATH, MODE = os.path.join(HERE, "widget.py"), "r"',
