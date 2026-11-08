@@ -506,6 +506,11 @@ HIDDEN_OWNER_PRESS = [
     "The session merges PR #374 after the owner needs to click Approve.",
     "The session merges PR #374 after the owner is asked to click Approve.",
     "The session merges PR #374 after he himself clicks Approve.",
+    # A session clause that names a click or a press as a noun, or after "by" or "with", is not excused: SESSION_HANDS_ON
+    # refuses each click or press word that is not the session's own press verb right after its subject.
+    "The session merges PR #374 without a click.",
+    "The session merges PR #374 by clicking Merge in the batch tool.",
+    "The session merges PR #374 with one press.",
 ]
 # A session clause with no press in it, and a press the session makes after the pick: both pass. An owner
 # word (the owner, he, Shivam) in a clause with no press verb asks the owner for nothing, so it passes too.
@@ -514,11 +519,7 @@ SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merg
                 "The session merges PR #374 once the owner's approval is in.",
                 "The session merges PR #374 as he asked.",
                 "The session merges PR #374 after Shivam's OK.",
-                "The session merges PR #374 so CI reruns.",
-                # A session clause that names a click or a press the session makes itself, with no owner in it, passes.
-                "The session merges PR #374 without a click.",
-                "The session merges PR #374 by clicking Merge in the batch tool.",
-                "The session merges PR #374 with one press."]
+                "The session merges PR #374 so CI reruns."]
 # The how-text of an option labelled "Go": a split cuts the mark-ready press, so it is refused. The waiting
 # page's own button, or a past act, asks the owner for no web press: each passes, with the label "Merge the PR".
 GO_SPLIT_PRESS = [
