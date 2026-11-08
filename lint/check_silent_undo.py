@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -35,6 +35,11 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               `git log` of upstream..head over the file. When that log names a commit, one `git cat-file --batch`
               process more (class Blobs) reads each commit's file and its parent's, one commit at a time, so at most
               two texts are held; each side whose tree lacks the file adds one `git ls-tree`. No process stays running.
+
+  lost sentence  A non-merge commit that rewrites or folds a note drops a clause of the old text that the new text no longer
+              holds (measure and threshold: HELD, in the lost-sentence section). A Drops-lines trailer for the notes path
+              excuses it only when its reason names the slug as `- <slug>`. A plain retire is no finding. It adds no git
+              read: it takes the texts the revived check already reads (revived_notes, its `each` hook).
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -600,7 +605,7 @@ class Revived(str):
     (problems, notes) and the merge tool's memo of that answer unchanged."""
 
 
-def revived_notes(cwd, upstream, head, named=None, kept=None):
+def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
     """[(notes path, Revived problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
     counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
     state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
@@ -610,7 +615,9 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
     note with no `- <slug>:` form has no slug, so the check does not see it. The texts are read one commit at a time, so
     at most two are held at once. `named` is {notes path: slugs its Drops-lines trailers name as `- <slug>`}: a revived slug in
     it is left out, because the trailer excuses that note. The path's other revivals stay. `kept`, a list when given, gets
-    (path, slug) for each revival a trailer excused, so the caller can print its ALLOWED line."""
+    (path, slug) for each revival a trailer excused, so the caller can print its ALLOWED line. `each`, when given, is called
+    as each(path, sha, before, after, now) for every replayed commit with the texts this replay already read (the file
+    at the commit's parent, at the commit, and at head), so the lost-sentence check adds no git read."""
     named = named or {}
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
@@ -620,7 +627,8 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
         raise Unknown("the notes file is not known: %s" % e)
     found = []
     for path in paths:
-        present = note_counts(blob(cwd, head, path))
+        now = blob(cwd, head, path)
+        present = note_counts(now)
         if not present:
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
@@ -633,8 +641,11 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
         blobs = Blobs(cwd)
         try:
             for sha, *parents in commits:
-                before = note_counts(blobs.get(sha + "^", path)) if parents else collections.Counter()  # a root commit has no parent
-                after = note_counts(blobs.get(sha, path))
+                before_text = blobs.get(sha + "^", path) if parents else ""  # a root commit has no parent
+                after_text = blobs.get(sha, path)
+                before, after = note_counts(before_text), note_counts(after_text)
+                if each:
+                    each(path, sha, before_text, after_text, now)
                 for slug in present:
                     if after[slug] < before[slug]:
                         last[slug] = (sha, after[slug])
@@ -655,6 +666,93 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
                               % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
                                  "line" if present[slug] - left == 1 else "lines", left, TRAILER, path, slug))))
     return found
+
+
+# --------------------------------------------------------------------- lost sentence
+
+# Not a revival (a slug's count is the same) and not a lost line (no merge is involved): a non-merge commit rewrites a
+# note line, and a clause the old line said is gone from the new one. It reads the texts revived_notes already reads,
+# through its `each` hook, so it adds no git read: per run and per notes path, the revived check's own reads and no more.
+#
+# A removed note line is paired with the added line of its own slug. With none, a fold target is the added line that holds
+# the most of its clauses, and at least 2. A removed line with no pair is a plain retire and is no finding. The line is cut into clauses at a
+# sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
+# judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
+# content words (stopwords out, a trailing `s` off) are among the content words of the pair. A reworded clause keeps most of
+# its words (one word in five changed: 0.8). A dropped clause keeps only the words other clauses share with it (0.2 to 0.25
+# in the two cases that began this check). 0.5 sits in the gap, so a clause that is reworded, split, merged or reflowed
+# passes, and one that lost its point fails. A clause that head's text for the note holds is no finding: a later commit of
+# the branch put it back.
+HELD = 0.5
+CLAUSE_END = re.compile(r"(?<=[.!?])\s+|;\s*|,?\s+(?:and|but|though|although|which|while|so)\s+", re.I)
+STOPWORDS = frozenset("a an the and or of to in on for is are was were be been it its this that these those with as at by from "
+                      "which who also then so if but though although while when each every any".split())
+NOTE_LINE = re.compile(r"^- ([^\s:]+):\s*(.*)$")
+
+
+def content_words(text):
+    """The set of a text's words, lower case, without stopwords and without a trailing `s` on a word of 4 or more letters."""
+    words = (w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
+    return {w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words if w not in STOPWORDS}
+
+
+def clauses(body):
+    """The clauses of a note's text, each a string with at least 3 content words (a shorter fragment joins its neighbour)."""
+    out, lead = [], ""
+    for frag in (f.strip(" ,;") for f in CLAUSE_END.split(body)):
+        if not frag:
+            continue
+        if len(content_words(frag)) < 3:
+            if out:
+                out[-1] += " " + frag
+            else:
+                lead = (lead + " " + frag).strip()
+        else:
+            out.append((lead + " " + frag).strip())
+            lead = ""
+    return out or ([lead] if lead else [])
+
+
+def held(clause, words):
+    mine = content_words(clause)
+    return not mine or len(mine & words) >= HELD * len(mine)
+
+
+def note_bodies(counter):
+    """[(slug, text after the slug)] for the note lines of a Counter of normalized lines."""
+    return [(m.group(1), m.group(2)) for m in map(NOTE_LINE.match, counter.elements()) if m]
+
+
+def dropped_clauses(before, after, now):
+    """[(slug, [fold slugs], clause)] for one commit's file texts (the parent's, the commit's, and head's): each clause of a
+    removed note line that the commit's added lines for that note (or its fold target) no longer hold, and that head's text
+    for the same notes does not hold either. See HELD above."""
+    gone = note_bodies(counts(before) - counts(after))
+    if not gone:
+        return []
+    added = note_bodies(counts(after) - counts(before))
+    found = []
+    for slug, body in gone:
+        mine = clauses(body)
+        pair = [x for x in added if x[0] == slug]
+        if not pair:  # a fold: the added line that holds the most of the clauses
+            top = max(added, key=lambda x: sum(held(c, content_words(x[1])) for c in mine), default=None)
+            pair = [top] if top and sum(held(c, content_words(top[1])) for c in mine) >= 2 else []
+        if not pair:
+            continue  # a plain retire
+        slugs = {x[0] for x in pair}
+        at_head = [t for s, t in note_bodies(counts(now)) if s in slugs | {slug}]
+        if not at_head:
+            continue  # a later commit retired the note
+        new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
+        found += [(slug, sorted(slugs - {slug}), c) for c in mine if not held(c, new_words) and not held(c, head_words)]
+    return found
+
+
+def lost_sentence_problem(path, slug, folded, clause):
+    return ("%s: note `%s` loses this when a commit rewrites it%s: \"%s\". Put it back. To drop it on purpose, name the note in a %s "
+            "trailer for %s: put `- %s` in the trailer's reason."
+            % (path, slug, " (folded into `%s`)" % "`, `".join(folded) if folded else "", clause, TRAILER, path, slug))
 
 
 # ----------------------------------------------------------------------- modes
@@ -735,8 +833,9 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     # A trailer excuses a notes path's revival only for the slugs it names, so a revival on a trailer's path skips the path judge.
-    kept = []
-    revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()}, kept)
+    kept, lost = [], {}
+    revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()}, kept,
+                            lambda path, sha, before, after, now: [lost.setdefault((path, s, c), f) for s, f, c in dropped_clauses(before, after, now)])
     items += [x for x in revived if x[0] not in ok]
     forced = [x[1] for x in revived if x[0] in ok]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
@@ -761,6 +860,12 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     bad = forced + bad
+    for (path, slug, clause), folded in lost.items():  # only a trailer that names the slug excuses a dropped clause, not the path alone
+        if slug in named_slugs(reasons.get(path, ())):
+            why = next(r for r in reversed(reasons[path]) if slug in named_slugs([r]))
+            notes.append("ALLOWED %s: %s (keeps the dropped clause of `%s`)" % (path, why, slug))
+        else:
+            bad.append(lost_sentence_problem(path, slug, folded, clause))
     for path, slug in kept:  # a named revival is an excuse too: one ALLOWED line, with the reason that names the slug
         why = next(r for r in reversed(reasons[path]) if slug in named_slugs([r]))
         notes.append("ALLOWED %s: %s (keeps the revived note `%s`)" % (path, why, slug))
