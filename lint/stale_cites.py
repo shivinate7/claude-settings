@@ -1022,7 +1022,8 @@ def named_excerpt(names, text, around=3, limit=40, phrases=()):
     them) with a non-word character or the row edge on both sides, so a mid-word fragment finds no line. Each such line is shown with the
     `around` lines on both sides. Words of a phrase may be separated by any run of white space.
     When the `limit` drops rows, the phrase rows win, in this order: a row that holds a phrase as a whole string literal (a quote
-    character on both sides), a row that only contains one, the window rows around either; then the window rows of a name. The first
+    character on both sides), the window rows around such a row, a row that only contains a phrase, the window rows around that row; then
+    the window rows of a name. So the body of a whole-literal title row stays whole before any containing row's window takes a slot. The first
     `limit // 2` window rows of the names, in line order, are kept before any phrase row is ranked, so a phrase never takes them.
     A row cut at NAMED_ROW_CHARS that holds a phrase beyond that column is shown from just before the phrase instead of from its start.
     When rows are dropped at the `limit`, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
@@ -1036,7 +1037,7 @@ def named_excerpt(names, text, around=3, limit=40, phrases=()):
     bodies = [r"\s+".join(re.escape(w) for w in p.split()) for p in phrases if p.split()]
     contains = [re.compile(r"(?<!\w)%s(?!\w)" % body) for body in bodies]
     whole = [re.compile("""(?P<q>['"`])%s(?P=q)""" % body) for body in bodies]
-    named, rank = set(), {}  # rank: line number -> 0 a whole-literal phrase row, 1 a row that contains a phrase, 2 within `around` of one
+    named, rank = set(), {}  # rank: line number -> 0 a whole-literal phrase row, 1 within `around` of one, 2 a row that only contains a phrase, 3 within `around` of one
     at = {}  # line number -> the match of the phrase that ranks the row, to cut a long row around it
 
     def spread(n):
@@ -1046,11 +1047,11 @@ def named_excerpt(names, text, around=3, limit=40, phrases=()):
         level = 0
         if found is None:
             found = next((m for c in contains for m in [c.search(row)] if m), None)
-            level = 1
+            level = 2
         if found is not None:
             at[n] = found
             for m in spread(n):
-                rank[m] = min(rank.get(m, 2), 2)
+                rank[m] = min(rank.get(m, level + 1), level + 1)
             rank[n] = min(rank.get(n, level), level)
         if any(h.search(row) for h in hits):
             named.update(spread(n))
@@ -1058,7 +1059,7 @@ def named_excerpt(names, text, around=3, limit=40, phrases=()):
     ordered = sorted(set(rank) | named)
     if not ordered:
         return None
-    rest = sorted((m for m in ordered if m not in reserved), key=lambda m: (rank.get(m, 3), m))
+    rest = sorted((m for m in ordered if m not in reserved), key=lambda m: (rank.get(m, 4), m))
     shown = sorted(reserved + rest[:limit - len(reserved)])
     out, last = [], None
     for n in shown:
