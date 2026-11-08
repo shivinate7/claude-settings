@@ -7186,6 +7186,9 @@ UNB_BRIEF_OLD = "Write the shell tests for the stop hook. Push to shell-tests-2.
 UNB_BRIEF_SUB = "Write the shell tests for the stop hook. Push to shell-tests-2/sub and report back."
 UNB_BRIEF_XSHELL = "Write the shell tests for the stop hook. Push to xshell-tests-2 and report back."
 UNB_BRIEF_AT_SHELL = "Write the shell tests for the stop hook. Push to a/shell-tests-2 and report back."
+UNB_BRIEF_REFS = "Write the shell tests for the stop hook. Push to refs/heads/shell-tests-2 and report back."
+UNB_BRIEF_ORIGIN = "Write the shell tests for the stop hook. Push to origin/shell-tests-2 and report back."
+UNB_BRIEF_UPSTREAM = "Write the shell tests for the stop hook. Push to upstream/shell-tests-2 and report back."
 
 
 def unb_id(n):
@@ -7224,6 +7227,9 @@ UNB_AGENTS = {
     unb_id(20): [unb_record(UNB_BRIEF_SUB)],
     unb_id(21): [unb_record(UNB_BRIEF_XSHELL)],
     unb_id(22): [unb_record(UNB_BRIEF_AT_SHELL)],
+    unb_id(23): [unb_record(UNB_BRIEF_REFS)],
+    unb_id(24): [unb_record(UNB_BRIEF_ORIGIN)],
+    unb_id(25): [unb_record(UNB_BRIEF_UPSTREAM)],
 }
 
 
@@ -7285,6 +7291,8 @@ unb_ask("brief names only xshell-tests-2, push -u origin HEAD on shell-tests-2 a
         VCS + " push -u origin HEAD", unb_id(21), "test-author")
 unb_ask("brief names only a/shell-tests-2, push -u origin HEAD asks (a slash before the name)",
         VCS + " push -u origin HEAD", unb_id(22), "test-author")
+unb_ask("brief names only upstream/shell-tests-2, no remote of this fixture, push -u origin HEAD asks",
+        VCS + " push -u origin HEAD", unb_id(25), "test-author")
 
 # SILENT allow: the brief names the branch, or the push is not this rule's push.
 unb_allow("brief names shell-tests-2, push origin HEAD:shell-tests-2 is silent",
@@ -7313,6 +7321,10 @@ unb_allow("brief file missing, push -u origin HEAD is silent",
           VCS + " push -u origin HEAD", unb_id(13), "test-author")
 unb_allow("a test-author Bash call that is not a push, with a missing transcript, is silent",
           VCS + " status", unb_id(15), "test-author", transcript=UNB_MISSING_TRANSCRIPT)
+unb_allow("brief names only refs/heads/shell-tests-2, push -u origin HEAD is silent (a ref prefix counts)",
+          VCS + " push -u origin HEAD", unb_id(23), "test-author")
+unb_allow("brief names only origin/shell-tests-2, push -u origin HEAD is silent (a remote prefix counts)",
+          VCS + " push -u origin HEAD", unb_id(24), "test-author")
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
