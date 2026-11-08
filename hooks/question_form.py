@@ -353,6 +353,7 @@ def widens_pick_hit(data) -> str:
     return ""
 
 
+LABEL_WIDENS_HIT = "recommended option widens"
 ONLY_WIDENS_HIT = "the only option besides the recommended one widens a shared tool"
 
 
@@ -381,7 +382,7 @@ def widens_only_alternative_hit(data) -> str:
         return ""
     options = [o for o in options if isinstance(o, dict)]
     if any(o.get(WIDENS_KEY) is True and RECOMMENDED.search(_option_text(o, "label")) for o in options):
-        return "recommended option widens"
+        return LABEL_WIDENS_HIT
     pick = data.get("pick")
     keys = {p for p in ([pick] if isinstance(pick, str) else pick if isinstance(pick, list) else [])
             if isinstance(p, str)}
@@ -1395,6 +1396,8 @@ def page_reason(rule, matched) -> str:
     """The page reason for a hit. Rule uniform-pick has two reasons: the pick's, and the only-alternative hit's."""
     if rule == "uniform-pick" and matched == ONLY_WIDENS_HIT:
         return ONLY_WIDENS_REASON
+    if rule == "uniform-pick" and matched == LABEL_WIDENS_HIT:
+        return CHAT_WIDENS_REASON  # the same words as the box's Recommended-widens hit
     return PAGE_REASONS[rule]
 
 

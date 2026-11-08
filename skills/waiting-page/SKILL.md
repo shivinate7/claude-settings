@@ -78,6 +78,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
+    The writer also refuses an open decision whose only option besides the recommended one widens: the ruling already answers it, so drop the question and do the recommended option.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
     asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
     The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
