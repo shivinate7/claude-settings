@@ -1015,9 +1015,10 @@ HANDOFF_SECTIONS_REASON = (
 def handoff_sections_result(tool, tool_input, target, cwd):
     """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
     text the file holds now (None for a Write, which is judged on its own text). None when the target
-    is not a session handoff (a `.md` file in <config dir>/handoffs/) or the result cannot be worked out
-    (an edit whose old text is absent, an unreadable file): the tool fails on its own then, and the rule
-    allows. Reads the target only for an Edit or MultiEdit, once."""
+    is not a session handoff (`<config dir>/handoffs/<session id>.md`, the path
+    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not) or the
+    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
+    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
     if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
         return None
     path = os.path.expanduser(target)
@@ -1027,6 +1028,9 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     same = (os.path.normcase(os.path.normpath(here)) == os.path.normcase(os.path.normpath(folder))
             or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder)))
     if not same:
+        return None
+    stem = os.path.basename(path)[:-3]
+    if not stem or "." in stem:
         return None
     if tool == "Write":
         content = tool_input.get("content")
@@ -1052,18 +1056,20 @@ def handoff_sections_hit(tool, tool_input, target, cwd):
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
     prompt or marker gives none. A Write is refused for any name its text lacks. An Edit or MultiEdit is
     refused only for a name the result lacks and the file holds now: it drops nothing from a handoff that
-    already lacked the name. A failed import allows."""
+    already lacked the name. The prompt is read once per call, and both texts are judged against that read.
+    A failed import allows."""
     result = handoff_sections_result(tool, tool_input, target, cwd)
     if result is None:
         return ""
     try:
-        from precompact_handoff import missing_sections
+        from precompact_handoff import missing_sections, required_sections
+        names = required_sections()
     except Exception:
         return ""
     before, after = result
-    gone = missing_sections(after)
+    gone = missing_sections(after, names)
     if before is not None:
-        already = set(missing_sections(before))
+        already = set(missing_sections(before, names))
         gone = [name for name in gone if name not in already]
     return ", ".join(gone)
 

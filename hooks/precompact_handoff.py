@@ -137,7 +137,7 @@ SECTIONS_MARKER = re.compile(r"<!--[ \t]*handoff-sections:[ \t]*(.*?)[ \t]*-->")
 def section_heading(name_rx):
     """The one heading matcher: a `#` or `##` heading line that starts with the name, which may carry the
     prompt's step number first (`## 2. `) and may be followed by text. `N)` is no step number."""
-    return re.compile(r"^#{1,2}[ \t]+(?:\d+\.[ \t]+)?(?:%s)\b" % name_rx, re.I | re.M)
+    return re.compile(r"^#{1,2}[ \t]+(?:\d+\.[ \t]+)?(?:%s)(?!\w)" % name_rx, re.I | re.M)
 
 
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
@@ -211,12 +211,13 @@ def _premises_head():
     return section_heading(re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises")
 
 
-def missing_sections(text):
+def missing_sections(text, names=None):
     """The required sections that `text` lacks, in the marker's order. A section is present when a
-    `#` or `##` heading line starts with its name (any case, text may follow). [] when the marker
-    cannot be read. Never raises."""
+    `#` or `##` heading line starts with its name (any case, text may follow). `names` is the list
+    from `required_sections()`, passed by a caller that judges two texts so the prompt is read once.
+    [] when the marker cannot be read. Never raises."""
     try:
-        names = required_sections()
+        names = required_sections() if names is None else names
         if not names:
             return []
         text = text if isinstance(text, str) else ""
