@@ -16,15 +16,24 @@ records that run as a trailer on the commit that adds the test:
 A message passes only when it has at least one Red-run line and every Red-run line is valid: one malformed line fails the
 commit, even beside a valid one. A line counts as a Red-run line when its key reads `red-run` followed by optional spaces and a colon at line
 start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exactly `Red-run:` is malformed. Prose that
-mentions red-run mid-line is not judged. The failed form judges the first word of its command in two layers, so a
-typo is not read as a failed form. First, it refuses a word that starts with `mutant` or `mutation` (`mutants:`,
-`mutant(A)`, `mutant-A`, `mutant=x`, a no-colon `mutant A (...)`), or is exactly `none` or `non` once a trailing
-colon is dropped. Second, unless the word is an environment assignment (`NAME=value`, quoted or not, such as
-`MUTATE_ONLY=x` or main commit 049f8d8c0's `MUTATE_ONLY="worktree-home: ..."`), it refuses a word that starts with
-`mutat` or `mutan` (`mutate`, `mutated`, `mutan:`), or that ends in a colon (`runner:`, `nonee:`). The valid `mutant:` and `none:`
-forms are routed to their own patterns before the failed form, so neither layer reads them. Real commands pass
-(`mutmut run`, `./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`). Three main commits
-(408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form.
+mentions red-run mid-line is not judged. The failed form judges the lead word of its command in two layers, so a
+typo is not read as a failed form. The lead word is the text after `Red-run:` with leading wrappers dropped (an
+open bracket, a quote, a backtick, `*`, `-` and spaces: `(mutant A)`, `"mutant A"`, `- mutant:`), then its first word.
+This reads the label region of the line, not every word: a scan of the whole line flips 26 accepted main commits, such as
+457071b62 with `(mutant: code_check.py:266 returns [])`. A mutant mention after a real first word still passes. The
+normalized word is the lead word without its trailing closers and colons, in lower case. First, it refuses a
+normalized word that starts with `mutant` or `mutation` (`mutants:`, `mutant(A)`, `mutant-A`, `mutant=x`, a no-colon
+`mutant A (...)`, `(mutant A)`), or is exactly `none` or `non` (`(none)`). Second, unless the lead word is an upper-case
+environment assignment (`NAME=value`, quoted or not, such as `MUTATE_ONLY=x` or main commit 049f8d8c0's
+`MUTATE_ONLY="worktree-home: ..."`), it refuses a normalized word that starts with `mutat` or `mutan` (`mutate`,
+`mutate=x`, `mutan:`), or whose leading letters are one edit or one adjacent swap from `mutant` or `mutation` (`mutnat`,
+`mtuant`, `mutnt`, `mutaiton`). Any `NAME=` word, lower case too, stays exempt from the colon refusal: a lead word that
+ends in a colon (`runner:`, `nonee:`) is refused otherwise. The valid `mutant:` and `none:` forms are routed to their
+own patterns before the failed form, so neither layer reads them. Real commands pass (`mutmut run`,
+`./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`, `(cd lint && python3 ...)`). Three
+main commits (408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form. Limits: a typo two edits away
+(`mtunat`), a mutant label after an env or assignment prefix, a mutant mention after a real first word and prose first
+words pass.
 
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
@@ -63,9 +72,14 @@ RED_KEY = re.compile(r"^red-run\s*:", re.IGNORECASE)  # a Red-run line in any ca
 # First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
 # keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
 REFUSED_NONE_WORDS = frozenset(("none", "non"))
-# An environment assignment as the first word (`MUTATE_ONLY=x`, `MUTATE_ONLY="a: b"`). It is a real command's prefix, so
-# the second layer of the word rule (`mutant_like`, `refused_word`) does not read it.
+# An upper-case environment assignment as the lead word (`MUTATE_ONLY=x`, `MUTATE_ONLY="a: b"`). It is a real command's
+# prefix, so the second layer of the word rule (`mutant_like`) does not read it.
+UPPER_ENV_WORD = re.compile(r"^[A-Z_][A-Z0-9_]*=")
+# Any assignment as the lead word. It is exempt from the colon refusal only (`lint_mode=on:`).
 ENV_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+LEAD_WRAPPERS = "([{<\"'`*- \t"
+TRAILING_CLOSERS = ")]}>\"'`,:"
+MUTANT_WORDS = ("mutant", "mutation")
 FIELD = "\x1f"
 MAX_PATHS = 5
 
@@ -81,15 +95,31 @@ def git(root, *args):
     return r.stdout
 
 
-def first_word(line):
-    """The first word of a failed-form line's command, as written."""
-    words = line[len("Red-run:"):].split()
+def lead_word(line):
+    """The first word of a failed-form line's command as written, with leading wrappers dropped. The one home of what
+    the word rule reads. Pure."""
+    words = line[len("Red-run:"):].lstrip(LEAD_WRAPPERS).split()
     return words[0] if words else ""
 
 
-def command_of(line):
-    """The first word of a failed-form line's command, lower case, with trailing colons dropped."""
-    return first_word(line).rstrip(":").lower()
+def normalized(word):
+    """A lead word without its trailing closers and colons, in lower case."""
+    return word.rstrip(TRAILING_CLOSERS).lower()
+
+
+def within_one_edit(a, b):
+    """True when a and b differ by one insert, delete, substitution or adjacent swap. Pure."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        if len(diff) == 1:
+            return True
+        return len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]]
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 
 def valid_line(line):
@@ -105,24 +135,31 @@ def valid_line(line):
 
 
 def mutant_like(line):
-    """True when the failed-form command starts like the mutant keyword: it starts with `mutant` or `mutation` (an
-    environment assignment too, so `mutant=x` stays refused), or, unless it is an environment assignment
-    (`MUTATE_ONLY=x`), with `mutat` or `mutan`. The one home of the mutant-like refusal and of the hint that names the
-    mutant form. Pure."""
-    word = command_of(line)
-    if word.startswith(("mutant", "mutation")):
+    """True when the failed-form lead word reads like the mutant keyword. Layer 1: its normalized form starts with
+    `mutant` or `mutation` (an assignment too, so `mutant=x` stays refused). Layer 2, unless the lead word is an
+    upper-case environment assignment (`MUTATE_ONLY=x`): it starts with `mutat` or `mutan`, or its leading letters are
+    one edit or adjacent swap from `mutant` or `mutation`. The one home of the mutant-like refusal and of the hint that
+    names the mutant form. Pure."""
+    raw = lead_word(line)
+    word = normalized(raw)
+    if word.startswith(MUTANT_WORDS):
         return True
-    return not ENV_WORD.match(word) and word.startswith(("mutat", "mutan"))
+    if UPPER_ENV_WORD.match(raw):
+        return False
+    if word.startswith(("mutat", "mutan")):
+        return True
+    letters = re.match(r"[a-z]+", word)
+    return bool(letters) and any(within_one_edit(letters.group(), m) for m in MUTANT_WORDS)
 
 
 def refused_word(line):
-    """True when the failed-form command's first word is a none typo (`none`, `non`), or, unless it is an environment
-    assignment, ends in a colon: a keyword typo such as `runner:` or `nonee:`. The valid `mutant:` and `none:` lines are
-    routed to their own forms before this is read. Pure."""
-    word = first_word(line)
-    if command_of(line) in REFUSED_NONE_WORDS:
+    """True when the failed-form lead word is a none typo (`none`, `non`), or, unless it is an environment assignment,
+    ends in a colon: a keyword typo such as `runner:` or `nonee:`. The valid `mutant:` and `none:` lines are routed to
+    their own forms before this is read. Pure."""
+    raw = lead_word(line)
+    if normalized(raw) in REFUSED_NONE_WORDS:
         return True
-    return not ENV_WORD.match(word) and word.endswith(":")
+    return not ENV_WORD.match(raw) and raw.endswith(":")
 
 
 def has_valid_trailer(message):
