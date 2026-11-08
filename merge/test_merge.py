@@ -14959,19 +14959,21 @@ class ProseJudgePrompt(unittest.TestCase):
     MJS_PATH = "harness/tests/thousands-marker.test.mjs"
     MJS_FIXTURE = os.path.join(HERE, "fixtures", "q_max", "harness", "tests", "thousands-marker.test.mjs.txt")
     TITLE = "every table whose cells render Thousands has exactly one money head that carries the unit"
+    # Line 68 of the q_max decision record for the thousands rule, verbatim (q_max e62f52b4). It names the test file in backticks and quotes the title.
+    RECORD_LINE_68 = r'''- `FoundLines.tsx`, `LinesCard.tsx` and `ScopeSheetRows.tsx`. The unit mark of the Jobs found lines: held by `CONTENT-UNIT`. The unit marks of `LinesCard.tsx` and `ScopeSheetRows.tsx`: held by the table test in `harness/tests/thousands-marker.test.mjs`, "every table whose cells render Thousands has exactly one money head that carries the unit". It parses every `.tsx` file in `src/components`, so it reads both tables. Figures: owed, "Give each In thousands screen a figure reader" (an open item).'''
 
     def mjs_text(self):
         with open(self.MJS_FIXTURE, encoding="utf-8") as f:
             return f.read()
 
     def test_a_quoted_test_title_gets_its_test_row_in_the_named_excerpt(self):
-        # A line names the test file in backticks and quotes the test's title in double quotes. The title is row 103 of the fixture, and
-        # its body follows it at 104. The excerpt of the named file must hold both, or the judge cannot back the line.
+        # The judged line is line 68 of the q_max decision record. It quotes the title, the title is row 103 of the fixture, and its body
+        # starts at row 104. The excerpt of the named file must hold both, or the judge cannot back the line.
         raw = self.mjs_text()
         self.assertTrue(raw.split("\n")[102].startswith("test('" + self.TITLE + "'"), "scope: row 103 of the fixture is not the title's test")
-        line = "- `FoundLines.tsx`, `LinesCard.tsx` and `ScopeSheetRows.tsx`: the table test in `%s`, \"%s\". It parses every `.tsx` file in `src/components`." % (self.MJS_PATH, self.TITLE)
-        text, reads = self.prompt({68: (line, [])}, {self.MJS_PATH: raw})
-        self.assertIn("Line 68: " + line, text, "scope: the prompt does not carry the judged line")
+        self.assertIn(self.TITLE, self.RECORD_LINE_68, "scope: the judged line does not quote the title")
+        text, reads = self.prompt({68: (self.RECORD_LINE_68, [])}, {self.MJS_PATH: raw})
+        self.assertIn("Line 68: " + self.RECORD_LINE_68, text, "scope: the prompt does not carry the judged line")
         shown = excerpt_rows(text, self.MJS_PATH)
         self.assertTrue(shown, "scope: no excerpt of %s, so the title row cannot be shown" % self.MJS_PATH)
         numbers = [int(r.split(":", 1)[0]) for r in shown if re.match(r"\d+: ", r)]
