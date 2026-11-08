@@ -3973,6 +3973,12 @@ hm_deny("a scratch path set with && in the same command, added from the non-temp
         "S=" + HMSCRATCH + " && " + HMADD + '"$S"')
 hm_deny("a scratch path set on its own line in the same command, added from the non-temp primary as $S, is refused",
         "S=" + HMSCRATCH + "\n" + HMADD + '"$S"')
+# A -C VARIABLE READ FROM THE SAME COMMAND. The -C value is resolved from an earlier assignment, so a tree
+# under the primary's home folder passes, and a throwaway repo passes whatever its target is.
+hm_allow("a -C variable set in the same command to the primary, with a home-folder target and no agent, passes",
+         "R=" + HMIN + "; " + VCS + ' -C "$R" worktree add .claude/worktrees/lane2', cwd=NOGIT)
+hm_allow("a -C variable set in the same command to a throwaway repo, with an unset target, passes",
+         "R=" + slash(HMTMPREPO) + "; " + VCS + ' -C "$R" worktree add "$S/lane"', cwd=NOGIT)
 
 TEMP_DIR = None   # back to the system temp for the sections below
 
