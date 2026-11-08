@@ -13608,14 +13608,15 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
 class ReviewFixKeepsRounds(ReviewChainFixture):
-    """A fix check record keeps every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
-    newest earlier record on the pull request, or the source record a --fix-base-record names. A lane that copies its rounds and drops one reads as
-    done where the dropped line kept the earlier record open, so the fix check is refused: exit 2, no record printed. A line is the same when its
-    round number, role, model and verdict match, so a copied line that changes one of them counts as dropped. Extra lines are not refused by this
-    rule. Each refusal sits beside a control that keeps every line, which the old code already writes."""
+    """A fix check record copies every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
+    newest earlier record on the pull request, or the source record a --fix-base-record names. A copy that drops a line is refused: exit 2, no record
+    printed. Dropping a design-reviewer line can flip the state, since a design FAIL that held the earlier record open is lost. Dropping a lower
+    reviewer line may leave the state as it reads, and the refusal still holds, because the record must copy every line. A line is the same when its
+    round number, role, model and verdict match, and the copy keeps the order of lines that share a round, so a swap is refused too. Extra lines are
+    not refused by this rule. Each refusal sits beside a control that keeps every line in order, which the old code already writes."""
 
     DESIGN_FAIL = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")  # a design FAIL keeps the record it sits in open
-    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # a passing top line makes a copy that loses the FAIL read done
+    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # dropping its reviewer FAIL leaves the state as it reads, so only the copy rule refuses it
     SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and comment of the source record in the --fix-base-record cases
     SOURCE_URL = f"https://github.com/o/r/pull/{SOURCE_PR}#issuecomment-{SOURCE_ID}"
 
@@ -13648,12 +13649,31 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
     def test_a_fix_check_that_drops_a_reviewer_line_of_a_lower_round_is_refused_while_the_top_round_is_kept(self):
         comments = self.newest(self.LOWER_REVIEWER)
         kept = round_args(self.LOWER_REVIEWER)
+        # scope: dropping the lower reviewer FAIL leaves the state as the earlier record reads it, so the copy rule alone must refuse the copy
+        copy_state = record_state(self, record_text(head=self.LIVE, rounds=self.LOWER_REVIEWER[1:]), self.LIVE)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), copy_state, "scope: dropping the lower reviewer FAIL changes the state")
         # control, green on the old code: every line, the top round included, is written
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept)
         self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept[1:])  # only the lower reviewer FAIL goes, so the refusal must name that line
         self.assert_refused(rc, out, err)
         self.assert_names(err, "Round 1", "reviewer, sonnet, FAIL")
+
+    def test_a_fix_check_that_swaps_two_design_lines_of_one_round_is_refused(self):
+        # the last design line of the earlier record is a FAIL, which holds it open. A copy that keeps both lines in the other order reads done, so
+        # the copy keeps their order too
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS", "Round 1: design-reviewer, opus, FAIL")
+        comments = self.newest(lines)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with a FAIL as its last design line does not read open")
+        swapped = (*lines[:1], lines[2], lines[1])
+        self.assertEqual(record_state(self, record_text(head=self.LIVE, rounds=swapped, fix=(fix_check_line(verdict="PASS", head=self.NEWEST),)), self.LIVE),
+                         "done", "scope: the swapped copy does not read done on its own rules")
+        # control, green on the old code: the same lines in their own order are written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line in order was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(swapped))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
 
     def test_a_fix_check_that_keeps_every_round_line_is_written(self):
         comments = self.newest(self.DESIGN_FAIL)
