@@ -31,7 +31,7 @@ CONDITIONALS = ("if", "unless", "whether", "would")
 REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
 JOINERS = ("and", "but", "or", "so", "yet", "then")
-SUBORDINATORS = ("since", "as", "while", "when", "although", "though")  # open a clause whose subject follows
+SUBORDINATORS = ("since", "as", "while", "although", "though")  # open a clause whose subject follows
 PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against", "at", "by", "per")
 _BE_NT_FORMS = ("isn't", "aren't", "wasn't", "weren't")  # every be-form with n't
 VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot") + _BE_NT_FORMS + (
@@ -168,13 +168,13 @@ def sentences(text, mask):
 _ADV = ADVERB_PATTERN
 _COND_RE = re.compile(r"\b(?:%s)\b" % "|".join(CONDITIONALS), re.I)
 _NEGATOR_RE = re.compile(r"\b(?:%s)\b|n['’]t\b" % "|".join(w for w in NEGATORS if w.isalpha()), re.I)
-# The writer: the one home of its lead-ins and subject words. A joiner, because or a subordinator may open the clause before
-# its subject. I and we are the writer wherever they sit just before a phrase; the cloud and this session only as the
+# The writer: the one home of its lead-ins and subject words. A joiner or because may open the clause before its subject, and
+# so may a subordinator when own_subject reads it. I and we are the writer wherever they sit just before a phrase; the cloud and this session only as the
 # subject, which starts the clause: "The builder in this session is unable to push." is the builder's line, not the writer's.
 _WRITER = r"(?:I|we)"
 _PLACE = r"(?:the\s+cloud(?:\s+session)?|this\s+session)"
-_LEAD = "|".join(JOINERS + REASON_LINKS + SUBORDINATORS)
-_LEAD_RE = re.compile(r"^\W*(?:(?:%s)\b\W*)?" % _LEAD, re.I)
+_LEAD = "|".join(JOINERS + REASON_LINKS)
+_LEAD_RE = re.compile(r"^\W*(?:(?:%s|%s)\b\W*)?" % (_LEAD, "|".join(SUBORDINATORS)), re.I)
 _WRITER_START = re.compile(r"^\W*(?:(?:%s)\b\W*)?%s\b" % (_LEAD, _WRITER), re.I)
 WRITER_BEFORE_RE = re.compile(r"\b%s(?:\s+%s)*\s+$" % (_WRITER, _ADV), re.I)  # the text ends in the writer: "I just "
 FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|%s)\b" % _PLACE, re.I)
