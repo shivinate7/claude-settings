@@ -14225,6 +14225,18 @@ rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane 
            others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_newer_repo, "HEAD~1"))],
            comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_newer_repo, "HEAD~1"), fix=RPUSH_FIX))])
 
+# A commit chained before the push. The guard judges the push before the chain runs, so local HEAD still equals the
+# pull request's live head. The push sends the commit the chain makes, so it asks. The bare push names its lane through
+# the branch's upstream, so it asks on an origin lane too.
+rpush_case("reviewed-head-push: a commit chained before an explicit push to the lane asks, after both reads",
+           "ask", RPUSH_BOTH, repo=rpush_up_to_date_repo, command=VCS + " commit -am x && " + RPUSH_PUSH,
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_up_to_date_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_up_to_date_repo), fix=RPUSH_FIX))])
+rpush_case("reviewed-head-push: a commit chained before a bare push on an origin lane asks, after both reads",
+           "ask", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " commit -am x && " + VCS + " push",
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_origin_branch_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_origin_branch_repo), fix=RPUSH_FIX))])
+
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
 # where None is no record. The guard's archive and brief reads both go through this reader.
