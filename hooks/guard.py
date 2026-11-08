@@ -4150,7 +4150,8 @@ def page_design_hit(writes, tool_input, cwd):
 # the hand-off could go missing. Whether it would deliver is unmeasured.
 SENDMESSAGE_REASON = ("A session_ id is not an agent name, so this SendMessage may never be delivered. Send it with "
                       "mcp__claude-code-remote__send_message, passing the id as session_id, the sure route. "
-                      "Rule sendmessage-session-id.")
+                      "Rule sendmessage-session-id "
+                      "(decision sendmessage-session-id-refused, a SendMessage names an agent, not a cloud session).")
 
 
 # ------------------------------------------------------------------ impeccable is review-only
