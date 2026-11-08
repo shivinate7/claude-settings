@@ -25,8 +25,7 @@ list is empty. A bare-name push with no ref line starts at most 1 git process wh
 head, else 3 per name (the tag, the local branch and the remote-tracking ref). A HEAD refspec or a push with no refspec
 starts 1 more for the checked-out branch. A git stand-in's call log counts them.
 
-A red case fails on an assertion on the old code, where the guard blocks nothing. A control passes on
-the old code and on the new.
+Each case asserts the guard's verdict on the turn it builds.
 
 Run it from the repository root:
 
@@ -279,7 +278,7 @@ class PushCheckTests(unittest.TestCase):
             self.fail("the Stop hook printed text that is not JSON: %r" % text[:300])
         return out.get("decision"), out.get("systemMessage") or ""
 
-    # Red: each case fails on an assertion on the old code.
+    # The CI line a push turn owes: which pushes owe one, the run state it names, and what holds it.
 
     def test_no_workflows_repo_needs_no_ci_line_for_a_ready_pr_push(self):
         steps = push(push_out(HEAD7))
@@ -521,9 +520,8 @@ class PushCheckTests(unittest.TestCase):
                           "%s" % (TAG, reason))
 
     def test_branch_head_is_kept_when_a_tag_of_its_name_is_pushed_too(self):
-        # `git push origin feat --tags` prints the branch's ref line and a [new tag] line of one name. The branch is
-        # checked, and its head is the ref line's new sha. The check drops the name for the tag (`branch in new_tags`),
-        # so the turn passes with no CI line. Red on the current code.
+        # `git push origin feat --tags` prints the branch's ref line and a [new tag] line of one name. The ref line
+        # makes the name a branch, so the branch is checked at the ref line's new sha, and the tag does not drop it.
         output = push_out(HEAD7, old=OLD7, dst=FEAT) + " * [new tag]         %s -> %s\n" % (FEAT, FEAT)
         steps = push(output, command="git push origin %s --tags" % FEAT)
         fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
@@ -537,10 +535,8 @@ class PushCheckTests(unittest.TestCase):
 
     def test_new_branch_is_kept_when_a_tag_of_its_name_is_pushed_too(self):
         # `git push origin feat --tags` prints a [new branch] line, which gives no sha, and a [new tag] line of one name.
-        # The head of a new branch is read from the remote-tracking ref the push sets, so the branch is checked and its
-        # head is that commit. The check drops the name for the tag (`sha is None and branch in new_tags`), so the turn
-        # passes with no CI line. The tag sits on an older commit, which the head read must not take. Red on the
-        # current code. The base (no filter) keeps the branch.
+        # The head of a new branch is read from the remote-tracking ref the push sets, so the branch is checked at that
+        # commit. The tag sits on an older commit, which the head read must not take.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)  # the tag, on an older commit
         head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)  # the new branch's head
@@ -559,8 +555,7 @@ class PushCheckTests(unittest.TestCase):
 
     def test_colon_form_tag_only_push_needs_no_ci_line(self):
         # `git push origin v1.0:v1.0` names a tag in the colon form, with a [new tag] line and no ref line. The local
-        # tag exists, as git needs for a push of it, so the name reads as a tag and no CI line is due. Green on the old
-        # code.
+        # tag exists, as git needs for a push of it, so the name reads as a tag and no CI line is due.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=TAG)
         steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG),
@@ -572,11 +567,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "a colon-form push of tag %s was blocked for CI, though the name is a tag: %s"
                           % (TAG, reason))
 
-    # Green controls: each passes on the old code and on the new.
-
-    # Coverage of the branch read of a push with no ref line (report_guard._heads_of_git_push). Each passes on the
-    # old code. Each kills one mutant of that read: a read that gives [] on a failed read, and a read that names one
-    # constant branch whatever is checked out.
+    # The branch read of a push with no ref line (report_guard._heads_of_git_push). The cases kill two mutants of that
+    # read: one that gives [] on a failed read, and one that names one constant branch whatever is checked out.
 
     def test_bare_push_names_the_checked_out_branch_head(self):
         for command in ("git push", "git push origin HEAD"):
@@ -617,9 +609,9 @@ class PushCheckTests(unittest.TestCase):
                 self.assertIsNone(decision, "a report that holds the unknown line on HEAD was blocked")
 
     def test_push_to_a_url_remote_reads_unknown_on_the_branch_and_blocks_once(self):
-        # A URL remote updates no remote-tracking ref, so the head is not named. Pins the intended behaviour: the
-        # branch reads unknown, the turn blocks once, and the rewrite that holds the unknown line passes. Green on
-        # the old code (coverage of report_guard._heads_of_git_push's URL branch).
+        # A URL remote updates no remote-tracking ref, so the head is not named. The branch reads unknown, the turn
+        # blocks once, and the rewrite that holds the unknown line passes. Covers the URL branch of
+        # report_guard._heads_of_git_push.
         outputs = (("no ref line", REMOTE_LINE), ("a [new branch] line",
                                                    REMOTE_LINE + " * [new branch]      %s -> %s\n" % (BRANCH, BRANCH)))
         for label, output in outputs:
@@ -642,7 +634,7 @@ class PushCheckTests(unittest.TestCase):
     # case builds its refs in a real repo and runs the Stop hook, as the cases above do.
 
     def test_bare_name_with_a_local_branch_and_its_remote_ref_names_the_head(self):
-        # Green on the old code. The remote-tracking ref names the head, so the name is a branch and no tag read runs.
+        # The remote-tracking ref names the head, so the name is a branch and no tag read runs.
         folder = self.case_folder()
         head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
@@ -656,8 +648,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
 
     def test_bare_name_with_only_a_remote_tracking_ref_reads_as_a_branch(self):
-        # Green on the old code. The local branch is gone: only origin/feat names a commit, so the name is a branch and
-        # its head is read from that ref.
+        # The local branch is gone: only origin/feat names a commit, so the name is a branch and its head is read from
+        # that ref.
         folder = self.case_folder()
         head = git_commit(folder, remote_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
@@ -671,9 +663,9 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's head is not named running")
 
     def test_bare_name_with_a_tag_and_a_local_branch_reads_the_branch_unknown(self):
-        # Green on the old code. The tag sits on an older commit. The branch has no remote-tracking ref, so its head is
-        # unnamed and the name reads unknown: the branch is checked, never dropped for the tag. The mutant that reads a
-        # bare name as a tag whenever a tag has it drops this push, so it goes red here.
+        # The tag sits on an older commit. The branch has no remote-tracking ref, so its head is unnamed and the name
+        # reads unknown: the branch is checked, never dropped for the tag. This case kills the mutant that reads a bare
+        # name as a tag whenever a tag has it, since that mutant drops the push.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         git_commit(folder, remote_branch=None, on_branch=FEAT)
@@ -691,8 +683,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "a report that holds the unknown line on %s was blocked" % FEAT)
 
     def test_bare_name_with_a_tag_and_a_branch_with_its_remote_ref_names_the_branch_head(self):
-        # Green on the old code. The tag sits on an older commit than the branch's head, so the head named must be the
-        # branch's own. The remote-tracking ref is read first, so the tag is never read as the name.
+        # The tag sits on an older commit than the branch's head, so the head named must be the branch's own. The
+        # remote-tracking ref is read first, so the tag is never read as the name.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
@@ -707,9 +699,9 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
 
     def test_bare_name_with_only_a_local_tag_reads_as_a_tag(self):
-        # Green on the old code. With no branch of the name, a local tag makes the name a tag, so it names no head and
-        # no CI line is due. A mutant that never reads a name as a tag goes red here; `bare or has_tag` does not, since
-        # the bare name is a tag either way.
+        # With no branch of the name, a local tag makes the name a tag, so it names no head and no CI line is due. This
+        # case kills the mutant that never reads a name as a tag. The mutant `bare or has_tag` gives the same answer
+        # here, since the bare name is a tag either way, so this case does not kill it.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         steps = push(REMOTE_LINE, command="git push origin %s" % FEAT)
@@ -849,8 +841,8 @@ class PushCheckTests(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "the git stand-in is a POSIX launcher; no Windows run is made here")
     def test_bare_name_push_reads_git_within_the_cost_bound(self):
         # The cost line (decision push-report-names-ci): one git process when the remote-tracking ref names the head,
-        # and at most 3 per name otherwise (the tag, the local branch, the remote-tracking ref). The first row is red on
-        # the old code, which reads 3. The other two rows are its green control: they read 3 and pass.
+        # and at most 3 per name otherwise (the tag, the local branch, the remote-tracking ref). The first row pins the
+        # one-process path. The other two rows pin the three-process bound.
         cases = (
             ("the remote-tracking ref names the head", 1, lambda folder: git_commit(folder, remote_branch=FEAT),
              lambda head: [head[:7]]),
@@ -875,7 +867,7 @@ class PushCheckTests(unittest.TestCase):
     def test_head_refspec_and_bare_push_start_one_git_process_for_the_branch_and_one_for_the_ref(self):
         # The record's Cost line: a `HEAD` refspec or a push with no refspec reads the checked-out branch, one git
         # process more, then its remote-tracking ref names the head, one more: 2 in all. A `HEAD:name` push names its
-        # branch, so it starts only the ref read: 1. Green on the old code, which the record describes.
+        # branch, so it starts only the ref read: 1.
         cases = (("git push origin HEAD", 2), ("git push", 2), ("git push origin HEAD:%s" % BRANCH, 1))
         for command, count in cases:
             with self.subTest(command=command):
