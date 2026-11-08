@@ -5281,6 +5281,12 @@ sh("git-after-cd: a check and a push inside a subshell, joined by ;, is refused"
 sh("git-after-cd: a cd into a missing folder, then && braces holding a check and a push joined by ;, is refused",
    "cd x && { pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# A DATA HEREDOC BEFORE THE CHECK. The quoted body is data and ends at its closer, so the check and the push after it
+# are shell lines. The `;` lets the push run whatever the check did, so git-after-cd refuses it, and that refusal wins
+# over the push-main ask the same push to main would raise.
+sh("git-after-cd: a data heredoc, then a check joined by ; to a git push to main, is refused",
+   "cat <<'EOF'\nn\nEOF\npytest -q; %s push origin main" % VCS, "deny", "git-after-cd", cwd=PUSHMAIN,
+   carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
