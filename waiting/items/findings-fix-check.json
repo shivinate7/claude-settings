@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T04:35:00Z",
+  "context": "Goal: a lane's review findings ride in its own PR, as you picked on item 386 b, not in a stream of follow-up PRs.\nProblem (rule): filing a finding after the last review round moves the PR's head, so its review record goes stale. Today no push is allowed after a done record.\nBased on (ruling): your item 386 b, 22:25 CST Nov 7.\nBased on (read): decision hold-unsafe-after-round-3: a fix check covers only a fix to a round's defect.\nDeparts from: decision hold-unsafe-after-round-3, where a fix check covers only a round's defect fix \u2014 it also covers a diff that only adds the round's findings to the debt store or the notes file.\nMeanwhile: lane findings-ride-in-lane builds the parts both options share; the fix-check part waits.",
+  "home": "findings-ride-in-lane",
+  "id": "findings-fix-check",
+  "kind": "decision",
+  "n": 394,
+  "options": [
+    {
+      "gain": "Findings ride in the lane's own PR, as you picked, with no second PR.",
+      "how": "A short fix check passes a push whose diff only adds the round's findings to the debt store or the notes file.",
+      "key": "a",
+      "label": "Allow it (recommended)",
+      "lose": "One more fix check per lane."
+    },
+    {
+      "gain": "No change to the decision.",
+      "how": "The lane's PR keeps its reviewed head. Its findings go in one docs PR per topic.",
+      "key": "b",
+      "label": "Findings go only to one follow-up docs PR per topic",
+      "lose": "Every lane opens a second PR, the shape your 386 b meant to cut."
+    }
+  ],
+  "owner": "lane findings-ride-in-lane (session_013NEJKyuRd6zdQhuiRC27g9), via the coordinator",
+  "pick": "a",
+  "ref": "item 386 b; decision hold-unsafe-after-round-3",
+  "short": "Findings in the lane's PR after review",
+  "status": "open",
+  "title": "May a short fix check pass a push that only files the review's findings in the lane's own PR?",
+  "why": "The coordinator recommends a: it is what your 386 b asked for, and the fix check still reads the diff."
+}
