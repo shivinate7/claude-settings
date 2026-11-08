@@ -8792,6 +8792,62 @@ sh("env: a < redirect with a script word is input to the script, node app.js < i
 sh("env: --input-type takes a value and app.mjs is the script, not inline code",
    "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
 
+# A runner handed the file may run a child command that prints the variables: a program that prints
+# its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
+# script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
+# -c) is denied when its first word is env or printenv, or when it holds a $ expansion, and is
+# allowed otherwise. Each deny form is refused with env-file. The reason is not pinned here, so the
+# builder chooses it. The allow controls are the ordinary uses of the same runners.
+for _child in (
+    "uv run --env-file " + ENV + " env",
+    "uv run --env-file=" + ENV + " printenv",
+    "uv run --env-file " + ENV + " env | grep FOO",
+    "uv run --env-file " + ENV + " printenv FOO",
+    "uv run --env-file " + ENV + " python -c \"import os; print(os.environ)\"",
+    "uv run --env-file " + ENV + " sh -c 'echo $FOO'",
+    "docker run --env-file " + ENV + " alpine env",
+    "docker run --rm --env-file " + ENV + " alpine printenv",
+    "docker run --env-file " + ENV + " -e X=1 --name t alpine env",
+    "docker compose --env-file " + ENV + " run web env",
+    "podman run --env-file " + ENV + " alpine env",
+    "npm --env-file=" + ENV + " exec -c env",
+    "npx --env-file=" + ENV + " -c printenv",
+    "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c env",
+    "npm --env-file=" + ENV + " exec -c \"env\"",
+    "npx --env-file=" + ENV + " -c \"printenv\"",
+    "docker run --env-file " + ENV + " alpine \"env\"",
+    "docker run --env-file " + ENV + " --entrypoint printenv alpine DB_URL",
+    "docker run --env-file " + ENV + " --entrypoint=env alpine",
+    "npm --env-file=" + ENV + " exec -c 'echo $DB_URL'",
+    "docker run -i --env-file " + ENV + " alpine sh < s.sh",
+    "docker run --platform linux/amd64 --env-file " + ENV + " alpine env",
+    "docker run -m 512m --env-file " + ENV + " alpine env",
+    "uv run --env-file " + ENV + " -v env",
+    "echo \"import os\" | uv run --env-file " + ENV + " python",
+):
+    sh("env-child: deny, a runner given the file must not print it through a child, " + _child[:60],
+       _child, "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, node runs npm-cli.js exec -c with a shell string that expands a variable",
+   "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c 'echo $DB_URL'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs a python script fed by a heredoc that prints os.environ",
+   "uv run --env-file " + ENV + " python <<'EOF'\nimport os; print(os.environ)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+for _child_ok in (
+    "uv run --env-file " + ENV + " python app.py",
+    "uv run --env-file " + ENV + " pytest",
+    "docker run --env-file " + ENV + " myimage",
+    "docker run --env-file " + ENV + " myimage npm start",
+    "docker run --env-file " + ENV + " -e MODE=env myimage",
+    "npm --env-file=" + ENV + " run build",
+    "npm --env-file=" + ENV + " exec -c \"node app.js\"",
+    "docker run --env-file " + ENV + " alpine sh -c \"npm start\"",
+    "uv run --env-file " + ENV + " python app.py < input.txt",
+    "docker run --env-file " + ENV + " --entrypoint node myimage app.js",
+):
+    sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
+       _child_ok, "allow", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
