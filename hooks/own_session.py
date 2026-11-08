@@ -52,7 +52,18 @@ def own_session_read(transcript, own_id, created=False):
     result. With `created`, a create_session call whose result names own_id is a record too: its tags
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
     record of either kind decides. Without it, only get_session counts."""
-    uses, newest, parent, tagged_after = set(), None, None, False
+    return _scan(transcript, own_id, created)[:3]
+
+
+def own_session_ccr(transcript, own_id):
+    """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
+    branch and source fields of the record are read from it (lane-closes-after-records)."""
+    return _scan(transcript, own_id, False)[3]
+
+
+def _scan(transcript, own_id, created):
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+    uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -84,16 +95,16 @@ def own_session_read(transcript, own_id, created=False):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
-                            (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
+                            (newest, parent), tagged_after, newest_ccr = creates[block.get("tool_use_id")], False, None
                         continue
                     if not isinstance(body, str):
                         continue
                     try:
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
+                            newest, tagged_after, newest_ccr = ccr["tags"], False, ccr
                             found = ccr.get("parent_session_id")
                             parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest, tagged_after, parent
+    return newest, tagged_after, parent, newest_ccr
