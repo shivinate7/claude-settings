@@ -1604,33 +1604,43 @@ def _build_pointer():
 
     make_blind_git(GITBLIND)
 
-def _build_conflict():
-    """CONFLICT: a real checkout with one unresolved merge conflict."""
+def _conflict_repo(where, path, base, feature, main, resolved=None):
+    """A real checkout with one unresolved merge conflict in `path`. `feature` and `main` each change the
+    file from `base`, and `feature` is merged into `main`. `resolved`, when given, replaces the conflicted
+    file and is staged, so a case reads a resolution that is ready to commit."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
     # mocked. Two branches each change the same file, and merging one into the other leaves
     # MERGE_HEAD set and the file in the conflicted "AA" state, which git will not let a commit
     # leave silently.
-    os.makedirs(CONFLICT, exist_ok=True)
-    run_vcs(CONFLICT, "init", "-q", "-b", "main", ".")
+    os.makedirs(where, exist_ok=True)
+    run_vcs(where, "init", "-q", "-b", "main", ".")
     ident = ["-c", "user.email=cases@example.invalid", "-c", "user.name=cases"]
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "base\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "base")
-    run_vcs(CONFLICT, "checkout", "-q", "-b", "feature")
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "feature change\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "feature change")
-    run_vcs(CONFLICT, "checkout", "-q", "main")
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "main change\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "main change")
+    write(os.path.join(where, path), base)
+    run_vcs(where, "add", path)
+    run_vcs(where, *ident, "commit", "-q", "-m", "base")
+    run_vcs(where, "checkout", "-q", "-b", "feature")
+    write(os.path.join(where, path), feature)
+    run_vcs(where, "add", path)
+    run_vcs(where, *ident, "commit", "-q", "-m", "feature change")
+    run_vcs(where, "checkout", "-q", "main")
+    write(os.path.join(where, path), main)
+    run_vcs(where, "add", path)
+    run_vcs(where, *ident, "commit", "-q", "-m", "main change")
     # MEASURED on CI (run 35182973995): this call ran with no `ident`, so on a runner with no
     # global git identity the merge refused before it ever touched the tree ("Committer identity
     # unknown", exit 128), MERGE_HEAD was never set, and the conflict-resolve fixtures below were
     # silently testing a CLEAN tree. It passed here only because this machine's own ~/.gitconfig
     # supplied an identity the fixture never asked for.
-    run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
-    _require_conflict(CONFLICT, "docs/DEBTS.md")
+    run_vcs(where, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
+    _require_conflict(where, path)
+    if resolved is not None:
+        write(os.path.join(where, path), resolved)
+        run_vcs(where, "add", path)
+
+
+def _build_conflict():
+    """CONFLICT: a real checkout with one unresolved merge conflict in docs/DEBTS.md."""
+    _conflict_repo(CONFLICT, "docs/DEBTS.md", "base\n", "feature change\n", "main change\n")
 
 def _build_branch():
     """The branch-delete repos: a bare remote, the base fallbacks and the unmerged branches."""
@@ -13811,9 +13821,9 @@ add("builder-test: Edit of a package.json script that adds a disabling flag is r
     tool="Edit", file_path="package.json", old_string='"ci": "npm run build"',
     new_string='"ci": "npm run build && jest --testPathIgnorePatterns=e2e"', **dict(B, cwd=_disable))
 
-# ---- owned parts read from a fragment and from a header (round 3). A body-only fragment of a CRLF file is
-# not found on disk, and a header with a trailing comment is no header to the ini reader: both still name an
-# owned part. A BOM and a malformed manifest are read the same way: the BOM is no content, malformed is refused.
+# ---- owned parts of a manifest and an ini file. The guard reads a file with universal newlines, so a
+# CRLF body-only fragment is found on disk and judged as the LF edit it is. A header with a trailing
+# comment still names its section. A BOM is no content of a manifest; a malformed manifest stays refused.
 def _crlf_on_disk(w):
     """A scope check, before the guard decides: the base files hold CRLF bytes on disk. Were the bytes
     folded to LF, the fragment would be found and the case would test an LF edit, not the CRLF one."""
@@ -13853,6 +13863,48 @@ add("builder-test: Edit of docs/jest.config.md is allowed", "allow", tool="Edit"
     file_path="docs/jest.config.md", new_string="Run jest with its config.\n", **B)
 add("builder-test: Edit of jest.config.ts is refused", "deny", rule=BT, tool="Edit",
     file_path="jest.config.ts", new_string="export default {}\n", **B)
+
+# ---- a merge conflict in package.json, built with git (see _conflict_repo). A conflict in `version` alone is
+# not owned, so a builder may resolve it, write the resolved file and commit the merge. A conflict in the
+# `jest` key is owned, so the same resolutions are refused.
+def _manifest(version="1.0.0", env="node"):
+    return ('{\n  "name": "x",\n  "version": "%s",\n  "scripts": {\n    "test": "jest"\n  },\n'
+            '  "jest": {\n    "testEnvironment": "%s"\n  }\n}\n' % (version, env))
+
+
+MCONF_VER = os.path.join(ROOT, "mconflict-version")  # package.json conflicts in `version` only
+MCONF_VER_STAGED = os.path.join(ROOT, "mconflict-version-staged")  # the same, resolved and staged
+MCONF_JEST = os.path.join(ROOT, "mconflict-jest")  # package.json conflicts in the `jest` key
+MCONF_JEST_STAGED = os.path.join(ROOT, "mconflict-jest-staged")  # the same, resolved and staged
+lazy_fixture([MCONF_VER], lambda: _conflict_repo(
+    MCONF_VER, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1")))
+lazy_fixture([MCONF_VER_STAGED], lambda: _conflict_repo(
+    MCONF_VER_STAGED, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1"),
+    resolved=_manifest("1.2.0")))
+lazy_fixture([MCONF_JEST], lambda: _conflict_repo(
+    MCONF_JEST, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom")))
+lazy_fixture([MCONF_JEST_STAGED], lambda: _conflict_repo(
+    MCONF_JEST_STAGED, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom"),
+    resolved=_manifest(env="jsdom")))
+add("builder-test: Edit that resolves a version-only merge conflict in package.json is allowed", "allow",
+    tool="Edit", file_path="package.json",
+    old_string='<<<<<<< HEAD\n  "version": "1.0.1",\n=======\n  "version": "1.1.0",\n>>>>>>> feature',
+    new_string='  "version": "1.2.0",', **dict(B, cwd=MCONF_VER))
+add("builder-test: Write of a version-only merge resolution to package.json is allowed", "allow",
+    tool="Write", file_path="package.json", content=_manifest("1.2.0"), **dict(B, cwd=MCONF_VER))
+add("builder-test: Write of a malformed merge resolution to package.json is refused", "deny", rule=BT,
+    tool="Write", file_path="package.json", content=_manifest("1.2.0").rstrip()[:-1], **dict(B, cwd=MCONF_VER))
+sh("builder-test: git commit of a merge that resolves only the package.json version is allowed",
+   "git commit -q -m merge", "allow", **dict(B, cwd=MCONF_VER_STAGED))
+add("builder-test: Edit that resolves a conflict in the package.json jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json",
+    old_string='<<<<<<< HEAD\n    "testEnvironment": "happy-dom"\n=======\n    "testEnvironment": "jsdom"\n>>>>>>> feature',
+    new_string='    "testEnvironment": "jsdom"', **dict(B, cwd=MCONF_JEST))
+sh("builder-test: git commit of a merge that resolves the package.json jest key is refused",
+   "git commit -q -m merge", "deny", rule=BDIFF, **dict(B, cwd=MCONF_JEST_STAGED))
+add("builder-test: Write of docs/jest.config.md that names testPathIgnorePatterns is allowed", "allow",
+    tool="Write", file_path="docs/jest.config.md",
+    content="Set testPathIgnorePatterns in the jest key of package.json.\n", **B)
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))
