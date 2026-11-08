@@ -13600,7 +13600,8 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
     def test_unreviewed_head_lane_tip_done_record_guard_no_passes(self):  # case 4, green control for cases 1 to 3
-        tips = lane_batch(self, "agent/lane1")
+        # the integration head holds only the lane's merge, so the done tip is the only record the check reads
+        tips = lane_batch(self, "agent/lane1", from_main=True)
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         host.records_default = False  # the tip's record is the one scripted here
         self.scope(tips, host)
