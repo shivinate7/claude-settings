@@ -621,7 +621,7 @@ def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
 def retire_excuses(cwd, upstream, head, pr_body, run_state, paths, head_run=None):
     """{debt path: reason} for deleted debts among `paths` whose `Retire-run` cite the debt-close check accepts (decision
     debt-close-runs-retire). Fails closed: no run reader, an unreadable debt read, or a missing check excuses nothing.
-    head_run is the merge tool's read of the head's own checks run. With it a cite on a lane tip the head contains is held on that run.
+    head_run is the merge tool's read of the head's own checks run. With it a cite on a commit in base..head (a lane commit of the batch) is held on that run.
     Without it (CI) such a cite is deferred to merge and excuses, with a note."""
     if run_state is None:
         return {}

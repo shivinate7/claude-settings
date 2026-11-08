@@ -283,7 +283,7 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     A finding refuses. An unreadable history refuses too, unless the run has the reason flag
     --undo-check-unknown-ok "<reason>", which Claude may type with a reason: that is the way out when the check cannot run (octopus merge,
     git older than 2.38, shallow clone). A lift is logged and returns its reason, for record_lift; it does not excuse a finding. Any other pass returns None.
-    head_run(sha) reads the head's own checks run: a Retire-run cite on a lane tip the head contains is held on it. It defaults to the
+    head_run(sha) reads the head's own checks run: a Retire-run cite on a commit in base..head (a lane commit of the batch) is held on it. It defaults to the
     run_state reader's own head_run (CiteReader); with neither, the head has no run, so such a cite is refused, never deferred."""
     head_run = head_run or getattr(run_state, "head_run", None) or (lambda sha: None)
     kw = {"head_run": head_run} if run_state is not None else {}  # with no run reader no cite is read, and no mode is needed

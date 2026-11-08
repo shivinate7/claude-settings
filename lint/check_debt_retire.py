@@ -11,8 +11,8 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
             A missing interpreter, a failed start, or a timeout is unknown.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it. A run on a commit the head contains (a lane tip of a batch) is
-            deferred to merge when it is in base..head: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
+            green and on the PR head or a commit above it. A run on a commit in base..head (a lane commit of the batch) is
+            deferred to merge: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
@@ -134,7 +134,7 @@ def line_key(line):
 
 
 class Deferred:
-    """A cite held for the merge: the run is green on `sha`, a strict ancestor of the head. Neither a Finding nor a pass."""
+    """A cite held for the merge: the run is green on `sha`, in base..head (a lane commit of the batch). Neither a Finding nor a pass."""
 
     def __init__(self, sha):
         self.sha = str(sha)
@@ -156,18 +156,18 @@ def judge_head_run(head, url, head_run):
     return None
 
 
-def in_branch(wt, sha, head, base):
-    """True when `sha` is in base..head: an ancestor of the head and, when a base is known, not an ancestor of the base. A cite on a commit
-    the base holds, its tip included, is a main run, never a lane tip, so it is not deferred."""
-    def ancestor(a, b):
-        return _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode == 0
-    return ancestor(sha, head) and not (base is not None and ancestor(sha, base))
+def ancestry(wt, a, b):
+    """True when commit `a` is an ancestor of `b` (or equal), False when it is not, None when git could not tell."""
+    rc = _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode
+    return True if rc == 0 else False if rc == 1 else None
 
 
-def judge_run(wt, head, url, run_state, head_run=None, defer=False, base=None):
+def judge_run(wt, head, url, run_state, base, head_run=None, defer=False):
     """(kind, text) for a cited run, None when it is green on the head or a commit above it, or a Deferred when it is green on a
-    strict ancestor of the head, in base..head, and the mode defers. Merge mode (head_run given) holds that cite on the head's own checks run: None when
-    it ended success, else (kind, text) that names the run. CI mode (defer, no head_run) returns the Deferred. With neither, it is red."""
+    commit in base..head (a lane commit of the batch) and the mode defers. `base` is the base the PR is judged against; it is required,
+    so no call falls back to deferring any ancestor. Merge mode (head_run given) holds that cite on the head's own checks run: None when
+    it ended success, else (kind, text) that names the run. CI mode (defer, no head_run) returns the Deferred. With neither, it is red.
+    A commit the base already holds is a main run: red. A failed ancestor read is unknown, never "not an ancestor"."""
     if run_state is None:
         return "unknown", "no reader for the cited run %s" % url
     try:
@@ -176,14 +176,25 @@ def judge_run(wt, head, url, run_state, head_run=None, defer=False, base=None):
         return "unknown", "the cited run %s could not be read: %s" % (url, " ".join(str(e).split()))
     if conclusion != "success":
         return "red", "the cited run %s ended %s, not success" % (url, conclusion)
-    rc = _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", head, str(sha)], capture_output=True).returncode
-    if rc == 0:
+    sha = str(sha)
+    unknown = "unknown", "the cited run %s is on %s, which this checkout does not hold, or git could not place it against the head %s and the base" % (url, sha[:9], head[:9])
+    above = ancestry(wt, head, sha)
+    if above:
         return None
-    if rc == 1:
-        if (head_run is not None or defer) and in_branch(wt, str(sha), head, base):
+    if above is None:
+        return unknown
+    below = ancestry(wt, sha, head)
+    if below is None:
+        return unknown
+    if below:
+        on_base = ancestry(wt, sha, base)
+        if on_base is None:
+            return unknown
+        if on_base:
+            return "red", "the cited run %s is on %s, a commit main already holds below the PR head %s: a main run, not on the PR head or a commit above it" % (url, sha[:9], head[:9])
+        if head_run is not None or defer:
             return judge_head_run(head, url, head_run) if head_run is not None else Deferred(sha)
-        return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, str(sha)[:9], head[:9])
-    return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
+    return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, sha[:9], head[:9])
 
 
 SKIP = object()  # a rename inside the debts folder with its Retire unchanged: not a close
@@ -227,14 +238,14 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
                 break
             got = got or one  # an unknown sticks: only a red outranks it, whatever the order
         if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
-            cite = judge_run(wt, head, cited[slug], run_state, head_run, defer, base_ref)
+            cite = judge_run(wt, head, cited[slug], run_state, base_ref, head_run, defer)
             if cite is None or isinstance(cite, Deferred):
                 return cite
             got = cite
         if got:
             return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
         return None
-    got = judge_run(wt, head, cited[slug], run_state, head_run, defer, base_ref) if slug in cited else ("prose", None)
+    got = judge_run(wt, head, cited[slug], run_state, base_ref, head_run, defer) if slug in cited else ("prose", None)
     if got is None or isinstance(got, Deferred):
         return got
     if got[0] == "prose":
@@ -249,8 +260,8 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
 def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False, head_run=None, defer=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
-    head_run(sha) -> (conclusion, run URL) of the head's own checks run, None when it has none, or raises: merge mode. A cite on a strict
-    ancestor of the head holds only when that run ended success. defer: CI mode. With no head_run, that cite is deferred to merge and is no finding.
+    head_run(sha) -> (conclusion, run URL) of the head's own checks run, None when it has none, or raises: merge mode. A cite on a commit
+    in base..head (a lane commit of the batch) holds only when that run ended success. defer: CI mode. With no head_run, that cite is deferred to merge and is no finding.
     With neither, it is red (a deferral is never assumed).
     isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt`;
     off, a test runs in `wt` itself."""
@@ -286,7 +297,7 @@ def retired(wt, base_ref, head="HEAD", pr_body="", run_state=None, isolate=False
         if one is None:
             res[old] = "%s: %s -- %s, the debt-close check holds" % (CITE, slug, cited[slug])
         elif isinstance(one, Deferred):
-            res[old] = "%s: %s -- %s, deferred to merge: the run is on %s, which the PR head contains" % (CITE, slug, cited[slug], one.sha[:9])
+            res[old] = "%s: %s -- %s, deferred to merge: the run is on %s, a lane commit in base..head" % (CITE, slug, cited[slug], one.sha[:9])
     return res
 
 
