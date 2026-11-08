@@ -14638,6 +14638,34 @@ def _own_then_clean_merge(w):
     write(os.path.join(w, "src/app.py"), "x = 4\n")
 
 
+def _author_merge_checkout(w):
+    """Cut at main. In the main checkout, the test-author merges a feature branch into mergeA. Main has
+    moved on, so the merge conflicts in the test file and the product file, and the test-author resolves
+    both by hand and commits the merge there (reflog `commit (merge)` in its own checkout). The builder's
+    worktree is fresh: it checks that merge commit out onto a new branch, then edits product code only."""
+    main = w + "-main"
+    _must(main, "checkout", "-q", "-b", "feature")
+    write(os.path.join(main, TEST_A), LANE_TEXT)
+    write(os.path.join(main, "src/app.py"), "x = 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "feature")
+    _must(main, "checkout", "-q", "main")
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
+    write(os.path.join(main, "src/app.py"), "x = 3\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _must(main, "checkout", "-q", "-b", "mergeA")
+    merged = run_vcs(main, *IDENT, "merge", "--no-edit", "feature")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % main)
+    write(os.path.join(main, TEST_A), LANE_TEXT)
+    write(os.path.join(main, "src/app.py"), "x = 4\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "--no-edit")
+    _must(w, "checkout", "-q", "-B", "merged", "mergeA")
+    write(os.path.join(w, "src/app.py"), "x = 5\n")
+
+
 def _launder(w):
     """Cut at main. The builder commits a test edit, makes a product commit on a side branch from it,
     returns to its own branch and resets to the side commit, which contains its own test edit."""
@@ -15048,6 +15076,18 @@ sh("builder-refuse: a builder's merge of main that conflicts in a test file, res
    COMMIT, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder's merge of main that conflicts in a test file, resolved to its own side, is denied at push",
    PUSH, "deny", rule=BDIFF, cwd=_bd_f2, agent_id="bld1", agent_type="builder")
+
+# A builder's fresh worktree checks out a test-author's merge commit (a resolved test file and a resolved
+# product file). Checkout hands that merge over, so the builder's product edit is judged on the builder's
+# own commits only, and is allowed at commit, push and stop. The commit case is the one the role-diff
+# mutant in mutate_guard.py names.
+_bd_author_merge = diff_repo("bd-author-merge-checkout", _author_merge_checkout)
+sh("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at commit",
+   COMMIT, "allow", cwd=_bd_author_merge, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at push",
+   PUSH, "allow", cwd=_bd_author_merge, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at stop",
+    "allow", event="SubagentStop", cwd=_bd_author_merge, agent_id="bld1", agent_type="builder")
 
 # Case 8: a test-author's product edit is still allowed at commit. Its log line is pinned by
 # diff_refusal_case (the a-product-edit row: author-diff at commit, push and stop).
