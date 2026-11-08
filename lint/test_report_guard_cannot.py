@@ -1434,6 +1434,28 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)], guard=self.installed_guard())
         self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_a_recovered_merge_of_another_pr_does_not_cancel_a_failed_merge(self):
+        # Catches: a later merge that recovered on PR 12 read as cancelling the failure of PR 13, so the claim about PR 13
+        # passed. A later success cancels a failure only for the same target.
+        line = "I could not merge PR 13."
+        out = self.stop([trg.human("merge PR 13"), *failed_bash("merge 12", "tu_1"), *ok_bash("merge 12", "tu_2"),
+                         *failed_bash("merge 13", "tu_3"), landed_reply(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_green_a_recovered_make_push_still_blocks_a_push_claim(self):
+        # Control: a make push that recovered is another call from ./push.sh, so the claim that names no check still blocks.
+        line = "I could not push the branch."
+        out = self.stop([trg.human("push the branch"), *failed_bash("./push.sh", "tu_1"), *ok_bash("make push", "tu_2"),
+                         landed_reply(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_green_a_recovered_open_pr_script_for_another_branch_still_blocks(self):
+        # Control: a recovered open-pr.sh for feature is another target from other, so the claim about other still blocks.
+        line = "I could not open the PR for other."
+        out = self.stop([trg.human("open the PR for other"), *failed_bash("./open-pr.sh other", "tu_1"),
+                         *ok_bash("./open-pr.sh feature", "tu_2"), landed_reply(line)])
+        self.assert_blocks(out, line)
+
 
 if __name__ == "__main__":
     unittest.main()
