@@ -1,0 +1,11 @@
+{
+  "title": "The guard resolves a `git -C <path>` target the way it resolves a cd, so an agent's commit into the primary checkout is refused",
+  "why": "Coordinator 13:27 CST Nov 8: an agent's `git -C <primary checkout> commit/add` is allowed by the guard, while `cd <primary> && git commit` is refused (other_checkout_hit). It is the same mistake class as the cd form.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 808,
+  "updatedAt": "2026-11-08T13:27:00-06:00"
+}
