@@ -109,7 +109,8 @@ def changed_names(before, after):
 
 
 def scrubbed_env(config_dir):
-    env = {k: v for k, v in os.environ.items() if k not in SESSION_VARS}
+    # The probe must set PYTHONDONTWRITEBYTECODE itself, so an outer setting must not hide a bytecode write.
+    env = {k: v for k, v in os.environ.items() if k not in SESSION_VARS + ("PYTHONDONTWRITEBYTECODE",)}
     env["CLAUDE_CONFIG_DIR"] = config_dir
     return env
 
@@ -395,6 +396,88 @@ def guard_failure_is_never_allow():
         problems += ["%s: %s" % (label, p) for p in bad_input_problems(rc, out, err)]
         problems += ["%s: %s" % (label, p) for p in expect("guard" in err, "stderr does not name the guard")]
     return problems
+
+
+JUDGE_RAISES = "def _raise(payload):\n    raise RuntimeError('judge raised')\nguard.judge = _raise"
+
+
+def guard_stub(judge_body):
+    """A stub guard.py that runs the real guard's main, with its judge replaced by judge_body."""
+    return (
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('guard_under_test', %r)\n"
+        "guard = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(guard)\n"
+        "%s\n"
+        "guard.main()\n" % (GUARD, judge_body)
+    )
+
+
+@case
+def judge_crash_is_never_allow():
+    """Probe: a guard whose judge raises gives `probe: guard crashed (...), verdict unknown`, nonzero, never allow."""
+    folder = new_dir()
+    # probe.py finds guard.py beside itself, so the stub guard needs a copy of the probe beside it.
+    probe_copy = os.path.join(folder, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    guard_copy = os.path.join(folder, "guard.py")
+    # Scope first: the same stub with the real judge prints exactly `allow` for a harmless command.
+    write(guard_copy, guard_stub("pass").encode("utf-8"))
+    rc, out, err = probe(flags(HARMLESS), script=probe_copy)
+    bad = scope(rc, out, err)
+    if bad or out != "allow\n":
+        return ["control, the real judge: " + (bad[0] if bad else "printed %r, want 'allow'" % out[:60])]
+    write(guard_copy, guard_stub(JUDGE_RAISES).encode("utf-8"))
+    rc, out, err = probe(flags(HARMLESS), script=probe_copy)
+    problems = bad_input_problems(rc, out, err)
+    problems += expect("probe: guard crashed (" in err, "stderr does not say the guard crashed")
+    problems += expect("verdict unknown" in err, "stderr does not say the verdict is unknown")
+    return problems
+
+
+@case
+def session_fields_stay_out_of_the_guard():
+    """Probe: a stdin payload's session_id and agent_id never reach the guard."""
+    folder = new_dir()
+    probe_copy = os.path.join(folder, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    received = os.path.join(folder, "received.json")
+    write(os.path.join(folder, "guard.py"), (
+        "import json, sys\n"
+        "with open(%r, 'w', encoding='utf-8') as handle:\n"
+        "    json.dump(json.load(sys.stdin), handle)\n" % received).encode("utf-8"))
+    stdin = json.dumps({"tool_name": "Bash", "tool_input": {"command": HARMLESS}, "cwd": NOGIT,
+                        "session_id": "probe-session-1", "agent_id": "probe-agent-1"})
+    rc, out, err = probe([], stdin=stdin, script=probe_copy)
+    bad = scope(rc, out, err)
+    if bad:
+        return bad
+    if not os.path.exists(received):
+        return ["the stub guard received no payload"]
+    with open(received, encoding="utf-8") as handle:
+        got = json.load(handle)
+    # Scope first: the stub got the call itself, so an absent field means the probe dropped it.
+    if got.get("tool_name") != "Bash" or got.get("tool_input", {}).get("command") != HARMLESS:
+        return ["the stub guard did not get the call: %r" % got]
+    problems = expect("session_id" not in got, "the guard received session_id")
+    problems += expect("agent_id" not in got, "the guard received agent_id")
+    return problems
+
+
+@case
+def probe_writes_no_bytecode():
+    """Probe: a probe run in a copy of hooks/ leaves no __pycache__ folder behind."""
+    copy = os.path.join(new_dir(), "hooks")
+    shutil.copytree(HERE, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    rc, out, err = probe(flags(HARMLESS), script=os.path.join(copy, "probe.py"))
+    bad = scope(rc, out, err)
+    if bad:
+        return bad
+    found = []
+    for folder, dirs, _files in os.walk(copy):
+        if "__pycache__" in dirs:
+            found.append(os.path.relpath(os.path.join(folder, "__pycache__"), copy))
+    return expect(not found, "the probe wrote bytecode folders: %s" % sorted(found)[:3])
 
 
 if __name__ == "__main__":
