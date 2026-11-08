@@ -1550,18 +1550,15 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
-# A failed or failing word followed by to, with, a colon or a paren names an outage ("failed to fetch", "failed: connection
-# refused"), not a red check.
+# A failing word followed by to, with, a colon or a paren names an outage ("failing to start"), not a red check.
 _FAIL_END = r"(?!\s+(?:to|with)\b|\s*[:(])"
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|running|pending|in\s+progress|failing%s)" % _FAIL_END
-    + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed"
-    r"|(?:ha(?:s|ve)\s+)?fail(?:ed|s)" + _FAIL_END)
+    + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!connection )(?<!network )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
-     % _BLOCKER_TAIL),
+    (("pr-merge",), r"(?<![\w.])(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)" % _BLOCKER_TAIL),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
     (("push", "pr-merge"), r"(?<![\w.])main\s+is\s+protected"),
@@ -1574,18 +1571,16 @@ _BLOCKER_RES = {}
 
 def _blocker_res(act):
     """The compiled blocker readers for a claim of `act`, cached: (state, reason word then state, a state that ends just
-    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses, a state that and
-    the subject of the claim follow). All read the states in _BLOCKER_STATES that gate `act`."""
+    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses). All read the
+    states in _BLOCKER_STATES that gate `act`."""
     if act not in _BLOCKER_RES:
         state = "|".join(pattern for acts, pattern in _BLOCKER_STATES if acts is None or act in acts)
         _BLOCKER_RES[act] = (
             re.compile(r"(?:%s)\b" % state, re.I),
-            re.compile(r"\b(?:because|while|since|as\s+long\s+as|as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
+            re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
             re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % state, re.I),
             re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % state, re.I),
-            re.compile(r"\(\s*(?:%s)\b" % state, re.I),
-            re.compile(r"(?:%s)\b\s+and\s+\S+(?:\s+(?:am|are|was|were|have|has|had|still|also|just|really|now))*\s*$" % state,
-                       re.I))
+            re.compile(r"\(\s*(?:%s)\b" % state, re.I))
     return _BLOCKER_RES[act]
 
 
@@ -1610,12 +1605,7 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    # After open, an and or or before the PR ends the object: "open the CI logs and PR" opens the logs. After the other
-    # verbs, the PR is made with the rest: "create the branch and PR" claims.
-    ("pr-open", re.compile(
-        r"^open\b(?:\s+(?!(?:%s)(?![\w-])|(?:and|or)\s+%s\b)\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR, _PR), re.I)),
-    ("pr-open", re.compile(
-        r"^(?:create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -1756,13 +1746,12 @@ def _joined_blocker(act, lead, before, after, tail):
     """True when a bare blocker state of `act` is joined to the claim clause. `lead` is the sentence up to the clause start,
     `before` the words from there to the phrase, `after` the clause after it, and `tail` the sentence from the clause
     break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
-    colon or dash, then the state, or the state in parentheses in the clause. In the clause before the phrase: the state, and,
-    then the subject ("CI is red and I can't merge PR 12.")."""
-    _, _, before_re, after_re, paren_re, and_re = _blocker_res(act)
+    colon or dash, then the state, or the state in parentheses in the clause."""
+    _, _, before_re, after_re, paren_re = _blocker_res(act)
     hit = before_re.search(lead)
     if hit and (hit.group(1) != "," or CANNOT_SO_RE.match(before)):
         return True
-    return bool(after_re.match(tail) or paren_re.search(after) or and_re.search(before))
+    return bool(after_re.match(tail) or paren_re.search(after))
 
 
 _RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug that follows a claim
