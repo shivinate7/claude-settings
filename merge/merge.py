@@ -112,7 +112,11 @@ FIX_HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier revi
 FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
 FIX_FROZEN_REMEDY = "Pass the old values."
 FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base the fix check on a head that sits inside the live head's history."
-FIX_LAYOUT_REMEDY = "Fix or restore lint/layout.json so the record folders can be read."
+FIX_LAYOUT_EXTRAS_REMEDY = "Fix the file the error names, then run the fix check again."
+FIX_PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
+FIX_OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
+FIX_CAP_REMEDY = "Start a fresh chain at round 1: post the review records again from round 1, with no Fix check line."
+FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change starts a fresh chain at round 1
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_FINAL_FAIL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
@@ -3375,7 +3379,7 @@ def fix_base_problem(host, root, base, last_head):
         import layout
         folders, files = layout.record_places(layout.layout(), root)
     except Exception as e:  # LayoutError, or a module that will not load: the record places are unknown
-        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_REMEDY
+        return f"the record paths cannot be read from the layout, so the files between the heads cannot be told from code ({type(e).__name__}: {e})", FIX_LAYOUT_EXTRAS_REMEDY
     files = files | {RECORDS_PAGE}
     found = host.compare_files(last_head, base)
     if found["ahead_by"] and found["behind_by"]:
@@ -3410,7 +3414,7 @@ def source_record_problem(h, root, a, own_records):
     line. A failed read raises Stop."""
     repo, cid = a.fix_base_record
     if own_records:
-        return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete", ""
+        return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete", FIX_OWN_RECORD_REMEDY
     try:
         import layout
         mine = (h.repo or layout.repo_name(root) or "").lower()
@@ -3630,7 +3634,9 @@ def main(argv, host=None, lock=None):
                         problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 else:
                     last = parse_review(recs[-1]) if recs else None
-                    if not last:
+                    if recs and not last:  # a posted record that does not parse is not a missing one
+                        problem, remedy = "the newest review record on this pull request does not parse", FIX_PROSE_REMEDY
+                    elif not last:
                         problem, remedy = "the newest earlier review record on this pull request must exist", FIX_MISSING_REMEDY
                     elif last["fix"] and last["fix"][3] != "PASS":  # a FAIL is the next round and a WIDE is a new lane; only a passed fix check chains
                         problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
@@ -3643,7 +3649,15 @@ def main(argv, host=None, lock=None):
                             remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
-                        problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                        chain = 0  # the records at the end that each carry a passed fix check, back to the last record with none
+                        for r in reversed(earlier):
+                            if not (r["fix"] and r["fix"][3] == "PASS"):
+                                break
+                            chain += 1
+                        if chain >= FIX_CHAIN_CAP:
+                            problem, remedy = f"the chain on this pull request already holds {chain} fix checks", FIX_CAP_REMEDY
+                        else:
+                            problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 held = next((r for r in reversed([r for r in map(parse_review, recs) if r and r["n"] == a.pr]) if r["fix"] and r["fix"][3] != "PASS" and max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # a plain record posted after a held record copies its rounds without the fix line, so the newest record alone does not show the hold
                 if not problem and held:
                     problem = f"the review record on head {held['head'][:9]} has a Fix check {held['fix'][3]} after round {REVIEW_LAST_ROUND}, so a new fix check may not follow it"
