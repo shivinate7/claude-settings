@@ -7,3 +7,5 @@
 **Decision.** none
 
 **Retire.** The noun forms above fail with no cite, and the history nouns stay clean ("files an owner ruling", "arbiter ruling card", "the owner ruling's cite"). Cases in `lint/test_check_red_run.py` show both.
+
+Fix: none — refusing the bare noun gave 5 false alarms in 9 history hits; the claim forms the incident used are refused. Until: 2026-11-21
