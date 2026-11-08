@@ -10641,14 +10641,61 @@ old_mcp("review-record: a withdrawal note over a stamped record is refused, MCP 
 
 # A VARIABLE ID OR NUMBER. A comment id or an issue number held in a shell variable is still a comment or an issue, so the edit and
 # the post routes judge it. A hand-typed record under a number the guard cannot read is refused: its pull request cannot be checked.
-for _label, _command in (
-        ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
-        ("gh api -X PATCH, ${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=%s'" % review_record()),
-        ("gh api -X PATCH, quoted \"$ID\"", "gh api -X PATCH \"repos/y/x/issues/comments/$ID\" -f 'body=%s'" % review_record()),
-        ("gh api --method PATCH, $ID", "gh api --method PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
-        ("gh api post, issues/$N/comments", "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record())):
+# The same holds for a route with a command substitution, an arithmetic or default expansion, or a variable repo. The inner call of
+# a substitution names pull request 12's comments, a literal route the guard would read as a post to 12 with the live head, so the
+# form must be judged as a variable, not as that post.
+VARIABLE_EDIT_ROUTES = (
+    ("command substitution", "repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments --jq '.[-1].id')"),
+    ("command substitution in double quotes", "\"repos/y/x/issues/comments/$(gh api repos/y/x/issues/12/comments --jq '.[-1].id')\""),
+    ("arithmetic", "repos/y/x/issues/comments/$((ID+1))"),
+    ("default expansion", "repos/y/x/issues/comments/${ID:-4417}"),
+    ("variable repo", "repos/$REPO/issues/comments/77"),
+    ("braced variable repo", "repos/${REPO}/issues/comments/77"),
+)
+VARIABLE_POST_ROUTES = (
+    ("command substitution", "repos/y/x/issues/$(gh pr view --json number --jq .number)/comments"),
+    ("command substitution in double quotes", "\"repos/y/x/issues/$(gh pr view --json number --jq .number)/comments\""),
+    ("arithmetic", "repos/y/x/issues/$((N+1))/comments"),
+    ("default expansion", "repos/y/x/issues/${N:-12}/comments"),
+    ("variable repo and number", "repos/$REPO/issues/$N/comments"),
+    ("braced variable repo", "repos/${REPO}/issues/12/comments"),
+)
+VARIABLE_FORMS = (
+    ("gh api -X PATCH, $ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+    ("gh api -X PATCH, ${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=%s'" % review_record()),
+    ("gh api -X PATCH, quoted \"$ID\"", "gh api -X PATCH \"repos/y/x/issues/comments/$ID\" -f 'body=%s'" % review_record()),
+    ("gh api --method PATCH, $ID", "gh api --method PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % review_record()),
+    ("gh api post, issues/$N/comments", "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % review_record()),
+)
+VARIABLE_FORMS += tuple(("gh api -X PATCH, " + label, "gh api -X PATCH %s -f 'body=%s'" % (route, review_record()))
+                        for label, route in VARIABLE_EDIT_ROUTES)
+VARIABLE_FORMS += tuple(("gh api post, " + label, "gh api %s -f 'body=%s'" % (route, review_record()))
+                        for label, route in VARIABLE_POST_ROUTES)
+for _label, _command in VARIABLE_FORMS:
     bash_post("review-record: a hand-typed record under a variable id or number is refused, %s" % _label, _command, "deny",
               rule=REVIEW_RULE)
+# An unmarked edit under a variable route makes its one read of the old body, which the guard cannot name: refused as a read that
+# could not run. A marked edit or a marked post under a variable route is refused with no gh read.
+for _label, _route in VARIABLE_EDIT_ROUTES:
+    bash_post("review-record: an unmarked edit under a variable route is refused as a read that could not run, %s" % _label,
+              "gh api -X PATCH %s -f 'body=%s'" % (_route, UNMARKED_BODY), "deny", rule=REVIEW_RULE, carries=("could not run",))
+for _label, _route in VARIABLE_EDIT_ROUTES:
+    REVIEW_LOG_CHECKS.append(("review-record:a marked edit under a variable route is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api -X PATCH %s -f 'body=%s'" % (_route, review_record())}, "deny", 0)))
+for _label, _route in VARIABLE_POST_ROUTES:
+    REVIEW_LOG_CHECKS.append(("review-record:a marked post under a variable route is refused with no gh read, %s" % _label,
+                             review_reads("Bash", {"command": "gh api %s -f 'body=%s'" % (_route, review_record())}, "deny", 0)))
+# Allow controls, pinning today's behaviour: an unmarked body in a variable issue-number post is not judged, and a literal route
+# whose unmarked body holds $(date) and ${N:-12} as text is not judged either.
+bash_post("review-record: an unmarked body in a variable issue-number post is allowed, gh api post, issues/$N/comments",
+          "gh api repos/y/x/issues/$N/comments -f 'body=%s'" % UNMARKED_BODY, "allow")
+REVIEW_LOG_CHECKS.append(("review-record:an unmarked post on a literal issue number is allowed with no gh read, its body holds $(date) and ${N:-12} as text",
+                         review_reads("Bash", {"command": "%s -f 'body=Round 1 ran. $(date) ${N:-12}'" % API_CMD}, "allow", 0)))
+# An unmarked body in a PATCH of a variable comment id is refused as a read that could not run: the old body is read by comment id,
+# and a variable id cannot be read. Pins today's refusal, not an allow.
+bash_post("review-record: an unmarked body in a variable comment id edit is refused as a read that could not run, gh api -X PATCH, $ID",
+          "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=%s'" % UNMARKED_BODY, "deny", rule=REVIEW_RULE,
+          carries=("could not run",))
 
 # `-e` is gh's --editor, not --edit-last. A post with -e is a post: judged on its pull request, with one head read, and allowed.
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh pr comment -e --body",
