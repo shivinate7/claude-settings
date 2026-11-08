@@ -8337,6 +8337,46 @@ sh("env: interpreter code follow-ups: allow, python3 -c, a read under a not-star
    "python3 -c \"import sys\nf=sys.argv[1]\nif not f.startswith('" + ENV + "'): print(open(f).read())\"",
    "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, fourth set: a name found in a loop and read
+# after it, a listing bound to a name and opened in a loop, a continue on a name test, and the node filter and
+# loop forms that open each name. Each deny reads a name the guard must judge. The allows are false alarms:
+# a comparison of the name with a text, a read of a path's content for a compare, and a readdirSync loop that
+# skips the name with a comment, a quoted string or a replace in its body. A listing with no open stays allowed.
+sh("env: interpreter code follow-ups: deny, python heredoc, a name found in a loop, carried out, then opened",
+   "python3 <<'PY'\nimport os\nfor f in os.listdir('.'):\n    if f.startswith('" + ENV + "'):\n"
+   "        found = f\n        break\nprint(open(found).read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a listing bound to a name, each opened in a loop",
+   "python3 -c \"import os\nenvs = [f for f in os.listdir('.') if f.startswith('" + ENV + "')]\n"
+   "for e in envs: print(open(e).read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a continue on a name test, then an open of the name",
+   "python3 -c \"import os\nfor f in os.listdir('.'):\n    if not f.startswith('" + ENV + "'): continue\n"
+   "    print(open(f).read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a filter by startsWith, then a read of each name",
+   "node -e \"const fs=require('fs'); fs.readdirSync('.').filter(f => f.startsWith('" + ENV + "'))"
+   ".forEach(f => console.log(fs.readFileSync(f,'utf8')))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a loop that continues on a not-startsWith test, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) { if (!f.startsWith('" + ENV + "')) "
+   "continue; console.log(fs.readFileSync(f,'utf8')) }\"", "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, python heredoc, a compare of a README line with the name, no open of it",
+   "python3 <<'PY'\nhits = []\nfor line in open('README.md'):\n    if '" + ENV + "' in line: hits.append(line)\n"
+   "print(hits)\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a text read of a path then a name test on its content",
+   "python3 -c \"import sys\np=sys.argv[1]\nt = open(p).read()\nif '" + ENV + "' in t: print(p, len(t))\"",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a readdirSync loop that skips the name past a line comment",
+   "node -e \"const fs=require('fs');\nfor (const f of fs.readdirSync('.')) {\n  if (f === '" + ENV + "') { // it's private\n"
+   "  continue;\n}\nconsole.log(fs.readFileSync(f,'utf8'))\n}\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a readdirSync loop that skips the name past a block comment",
+   "node -e \"const fs=require('fs');\nfor (const f of fs.readdirSync('.')) {\n  if (f === '" + ENV + "') { /* don't */\n"
+   "  continue;\n}\nconsole.log(fs.readFileSync(f,'utf8'))\n}\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a readdirSync loop that skips the name, a replace of quotes in the read",
+   "node -e \"const fs=require('fs');\nfor (const f of fs.readdirSync('.')) {\n  if (f === '" + ENV + "') {\n"
+   "  continue;\n}\nconsole.log(fs.readFileSync(f.replace(/'/g,''),'utf8'))\n}\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a listing of names that start with the name, no open",
+   "python3 -c \"import os; print([f for f in os.listdir('.') if f.startswith('" + ENV + "')])\"",
+   "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
