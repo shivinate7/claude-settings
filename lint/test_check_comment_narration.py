@@ -909,6 +909,17 @@ class ShellScan(Case):
         self.change(files)
         return self.lint()
 
+    def assertReadsClean(self, src):
+        """The construct reads with no Unread, so the file exits 0."""
+        rc, out = self.scan({"x.sh": src})
+        self.assertEqual(rc, 0, out)
+
+    def assertLaterCommentFlagged(self, src):
+        """The construct reads, and a comment on the line after it is still flagged."""
+        rc, out = self.scan({"x.sh": src + "# fixed in round 2\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "x.sh", src.count("\n") + 1)
+
     def test_full_line_comment_is_flagged(self):
         rc, out = self.scan({"x.sh": "# fixed in round 2\necho hi\n"})
         self.assertHit(out, "x.sh", 1)
@@ -1161,6 +1172,75 @@ class ShellScan(Case):
         rc, out = self.scan({"x.sh": 'x="$(case $k in\na) echo ;;\nb) echo "x" # fixed in round 2\nesac)"\n'})
         self.assertHit(out, "x.sh", 3)
         self.assertEqual(rc, 1, out)
+
+    def test_case_inside_backticks_reads_clean(self):
+        self.assertReadsClean("x=`case $x in a) echo 1;; esac`\n")
+
+    def test_case_inside_double_quoted_backticks_reads_clean(self):
+        self.assertReadsClean('x="`case $x in a) echo 1;; esac`"\n')
+
+    def test_case_as_array_element_reads_clean(self):
+        self.assertReadsClean("kw=(case esac)\n")
+
+    def test_case_as_appended_array_element_reads_clean(self):
+        self.assertReadsClean("arr+=(case)\n")
+
+    def test_case_as_first_element_of_multi_line_array_reads_clean(self):
+        self.assertReadsClean("arr=(\n  case\n  b\n)\n")
+
+    def test_case_in_regex_alternation_reads_clean(self):
+        self.assertReadsClean("[[ $w =~ ^(if|case|esac)$ ]]\n")
+
+    def test_case_in_extglob_pattern_reads_clean(self):
+        self.assertReadsClean("[[ $w == @(case|esac) ]]\n")
+
+    def test_one_line_function_with_case_reads_clean(self):
+        self.assertReadsClean("function f { case $1 in a) :;; esac; }\n")
+
+    def test_case_word_in_echo_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo case\n")
+
+    def test_case_word_in_assignment_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("x=case\n")
+
+    def test_case_word_as_option_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("cmd --case\n")
+
+    def test_esac_as_argument_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("echo esac\n")
+
+    def test_nested_case_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) case $y in\n    b) echo ;;\n  esac ;;\nesac\n")
+
+    def test_paren_led_pattern_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  (a|b) echo 1 ;;\nesac\n")
+
+    def test_fallthrough_and_continue_terminators_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) echo 1 ;&\n  b) echo 2 ;;&\n  c) echo 3 ;;\nesac\n")
+
+    def test_heredoc_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) cat <<EOF\nhello\nEOF\n;;\nesac\n")
+
+    def test_subshell_inside_arm_later_comment_is_flagged(self):
+        self.assertLaterCommentFlagged("case $x in\n  a) (cd /tmp; ls) ;;\nesac\n")
+
+    def test_case_with_no_esac_at_end_of_input_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "case $x in\n  a) echo 1 ;;\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("case never ends with esac", out)
+
+    def test_esac_with_no_case_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "echo x\nesac\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("esac with no case", out)
+
+    def test_unclosed_backtick_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "x=`echo a\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+        self.assertIn("command substitution never closes", out)
 
 
 class Degraded(Case):
