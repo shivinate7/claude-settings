@@ -22097,10 +22097,13 @@ RELESC_CACHE = {}
 
 def _relesc_fixture():
     """Built once per run. The recorded home of RELESC_AGENT, with a `sub` folder, a file `t.py` and the
-    agent's red-run folder beside it. A primary checkout of RELESC_FREE, which has no record. A folder in
-    no checkout. Returns (folders, problems)."""
+    agent's red-run folder beside it. The recorded home of RELESC_TREE_AGENT, which holds the script files
+    of the script rows (`_relesc_tree_files`). A primary checkout of RELESC_FREE, which has no record. A folder
+    in no checkout. Returns (folders, problems)."""
     if "folders" not in RELESC_CACHE:
         primary, home, problems = _home_fixture(RELESC_AGENT)
+        tree_primary, tree_home, tree_problems = _home_fixture(RELESC_TREE_AGENT)
+        problems = problems + tree_problems
         if not problems:
             os.makedirs(os.path.join(home, "sub"), exist_ok=True)
             write(os.path.join(home, "t.py"), "print(1)\n")
@@ -22108,26 +22111,33 @@ def _relesc_fixture():
             # in a shell. Each sits in its own folder, so no row's judge.py collides with another row's.
             write(os.path.join(home, "judges", "read", "judge.py"), RELESC_JUDGE_READ)
             write(os.path.join(home, "judges", "run", "judge.py"), RELESC_JUDGE_RUN)
+            for rel, text in _relesc_tree_files().items():
+                write(os.path.join(tree_home, rel), text)
+            write(RELESC_PROBE_PATH, RELESC_OPEN_PROBE)
             sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
         free = os.path.join(ROOT, "wthomew_free_primary")
         make_repo(free, {"src/app.py": "print(1)\n"})
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
+        tree = {"tree": tree_home, "tree_primary": tree_primary}
+        tree.update({"tree_" + name: os.path.join(tree_home, name) for name in RELESC_TREE_DIRS})
         RELESC_CACHE["folders"] = {
             "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
             "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit,
             "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
+            **tree,
         }
         RELESC_CACHE["problems"] = problems
     return RELESC_CACHE["folders"], RELESC_CACHE["problems"]
 
 
 def _relesc_scope(agent, folders):
-    """The scope a row judges within (assert the scope before the subject, P7): RELESC_AGENT has its home
-    record, and RELESC_FREE has none. Returns the problem, or ''."""
-    if agent == RELESC_AGENT:
-        record = os.path.join(folders["primary"], ".git", "agent-homes", agent)
+    """The scope a row judges within (assert the scope before the subject, P7): RELESC_AGENT and
+    RELESC_TREE_AGENT have their home records, and RELESC_FREE has none. Returns the problem, or ''."""
+    if agent in (RELESC_AGENT, RELESC_TREE_AGENT):
+        primary = folders["primary"] if agent == RELESC_AGENT else folders["tree_primary"]
+        record = os.path.join(primary, ".git", "agent-homes", agent)
         return "" if os.path.isfile(record) else "scope: no home record for the agent at %r" % record
     if agent == RELESC_FREE:
         record = os.path.join(folders["free"], ".git", "agent-homes", agent)
@@ -22135,16 +22145,22 @@ def _relesc_scope(agent, folders):
     return ""
 
 
+def _relesc_ready(agent):
+    """The fixture, then the scope a row asserts before its subject (P7). Returns (folders, problem), where
+    problem is '' when the row may run."""
+    folders, problems = _relesc_fixture()
+    if problems:
+        return folders, "fixture: " + "; ".join(problems)
+    return folders, _relesc_scope(agent, folders)
+
+
 def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash"):
     """Register one row: `command` as a call of `tool` from folders[cwd_key], as `agent`, judged `expect`.
     `command` takes the folder paths as %(name)s keys. The row asserts its scope first."""
     def check():
-        folders, problems = _relesc_fixture()
-        if problems:
-            return False, "fixture: " + "; ".join(problems)
-        scope = _relesc_scope(agent, folders)
-        if scope:
-            return False, scope
+        folders, problem = _relesc_ready(agent)
+        if problem:
+            return False, problem
         shell = {key: slash(value) for key, value in folders.items()}
         found = []
         _expect_call(found, label, expect, tool, folders[cwd_key], agent, command % shell, rule=rule,
@@ -22155,15 +22171,57 @@ def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, 
     LOG_CHECKS_EXTRA.append((label, check))
 
 
+def _tree_add(label, expect, command, cwd_key, rule=None, any_of=(), tool="Bash"):
+    """`_relesc_add` for a row that runs from the script tree: its agent is RELESC_TREE_AGENT, whose home holds
+    those folders."""
+    _relesc_add(label, expect, command, cwd_key, agent=RELESC_TREE_AGENT, rule=rule, any_of=any_of, tool=tool)
+
+
+def _relesc_count_add(label, expect, max_opens, command, cwd_key, script):
+    """Register one count row: `command` as a call from folders[cwd_key] by the tree's agent, judged `expect`,
+    with the guard opening `script` (a file in that folder) at most `max_opens` times. RELESC_PROBE_PATH counts
+    the guard's own opens, so the row reads the cost the guard pays, and no other figure. The row asserts its
+    scope first."""
+    def check():
+        folders, problem = _relesc_ready(RELESC_TREE_AGENT)
+        if problem:
+            return False, problem
+        target = os.path.join(folders[cwd_key], script)
+        if not os.path.isfile(target):
+            return False, "fixture: no %s in %s" % (script, folders[cwd_key])
+        log = os.path.join(ROOT, "relesc_opens.txt")
+        if os.path.exists(log):
+            os.remove(log)
+        shell = {key: slash(value) for key, value in folders.items()}
+        got, reason = decide({
+            "raw": None, "tool": "Bash", "cwd": folders[cwd_key], "session": None, "env_path": None,
+            "config": None, "agent_id": RELESC_TREE_AGENT, "process_cwd": None, "temp": RELESC_TMP,
+            "tool_input": {"command": command % shell}, "guard": RELESC_PROBE_PATH,
+            "env": {"RELESC_GUARD": GUARD, "RELESC_TARGET": target, "RELESC_LOG": log},
+        })
+        if got != expect:
+            return False, "expected %s, got %s (%s)" % (expect, got, reason[:120])
+        counted = open(log, encoding="utf-8").read().strip() if os.path.exists(log) else ""
+        if not counted.isdigit():
+            return False, "the open probe wrote no count"
+        if int(counted) > max_opens:
+            return False, "the guard opened %s %s time(s), want at most %d" % (script, counted, max_opens)
+        return True, "%s, and the guard opened %s %s time(s)" % (expect, script, counted)
+
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
 # Replays of three calls the live guard refused with other-checkout (guard log, 2026-11-08 12:25:41,
 # 12:26:07 and 12:26:18 UTC, this session). Each is the command as it was typed, judged for this
-# fixture's agent from its home. The second holds `cd ..` and `> ../f` as quoted arguments after a heredoc,
-# and expects allow. The first writes a python script with a heredoc and runs it as the script, so python
-# executes the body and main's scan of it holds: it expects deny. The third writes a file that python
-# reads as a data argument (judge.py's listing), not as its script, and expects allow. The controls isolate
-# the trigger: a heredoc with no file redirect before its marker, and the same file-redirected heredoc with its
-# target outside the clone. The second call's quoted arguments with no heredoc before them, and no script on
-# disk, are refused: a script with no visible source keeps main's verdict (ruling of 08:43 CST).
+# fixture's agent from its home. All three expect deny. The first writes a python script with a heredoc and
+# runs it as the script, so python executes the body and main's scan of it holds. The second holds `cd ..` and
+# `> ../f` as quoted arguments after a heredoc: its visible judge.py names `subprocess`, so its arguments are
+# not data and main's verdict holds (ruling of 2026-11-08 08:43 CST). The third passes a listing to a judge.py
+# that names `subprocess` too, so the same holds. The controls isolate the trigger: a heredoc with no file
+# redirect before its marker, and the same file-redirected heredoc with its target outside the clone. The
+# second call's quoted arguments with no heredoc before them, and no script on disk, are refused: a script
+# with no visible source keeps main's verdict (ruling of 08:43 CST).
 RELESC_REPLAY_1 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && rm -rf "$SP/probe" && mkdir -p "$SP/probe/P" && cd "$SP/probe/P" && git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m init && git worktree add -q "$SP/probe/P/.claude/worktrees/agent-zz" -b wt-zz && cat > "$SP/probe/run.py" <<'EOF'
 import json, subprocess, sys
 sp, guard = sys.argv[1], sys.argv[2]
@@ -22211,7 +22269,8 @@ python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-
 _relesc_add("other-checkout: heredoc replay: the first refused call, a python script that a heredoc writes and "
             "python runs as its script, holds cd .. and > ../f, is refused",
             "deny", RELESC_REPLAY_1, "home", rule="other-checkout")
-# Ruling of 08:43 CST: a heredoc judge.py with no visible source keeps main's verdict, so these two replays are refused.
+# Replays 2 and 3 deny because their visible judge.py names `subprocess`, so its arguments are not data (ruling of
+# 2026-11-08 08:43 CST).
 _relesc_add("other-checkout: heredoc replay: the second refused call, its quoted arguments after a heredoc, are refused",
             "deny", RELESC_REPLAY_2, "home")
 _relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is refused",
@@ -22406,6 +22465,155 @@ _relesc_add("other-checkout: heredoc replay cfg: python3 -m json.tool on a hered
 _relesc_add("other-checkout: heredoc replay missing: python3 missing_judge.py with a quoted echo x > ../other/f, "
             "a script that is neither on disk nor written here, is refused",
             "deny", 'python3 missing_judge.py "echo x > ../other/f"', "home", rule="other-checkout")
+
+
+# ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
+# (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
+# argument. The cd rows and the frozen row run from the root, and the mirror swaps the two. Each other folder holds
+# one group of rows, and the arguments reach `../../other/f`, which leaves the home from a folder one level down.
+RELESC_TREE_AGENT = "wthomew3"   # the agent whose home holds the script files
+RELESC_TREE_DIRS = ("mirror", "cost", "cap_over", "cap_under", "pipes", "rewrite", "lang")
+RELESC_PROBE_PATH = os.path.join(ROOT, "relesc_open_probe.py")
+# The probe the count rows run the guard under. It counts each open of the file named by RELESC_TARGET, which the
+# audit hook sees for builtins.open and io.open alike, then runs the guard as its __main__ and writes the count to
+# RELESC_LOG. The guard's own decision goes to stdout as it always does.
+RELESC_OPEN_PROBE = r"""
+import os, runpy, sys
+target = os.path.realpath(os.environ["RELESC_TARGET"])
+log = os.environ["RELESC_LOG"]
+opened = [0]
+
+
+def on_event(event, args):
+    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        if os.path.realpath(os.fsdecode(args[0])) == target:
+            opened[0] += 1
+
+
+sys.addaudithook(on_event)
+try:
+    runpy.run_path(os.environ["RELESC_GUARD"], run_name="__main__")
+except SystemExit:
+    pass
+finally:
+    with open(log, "w", encoding="utf-8") as handle:
+        handle.write(str(opened[0]))
+"""
+
+
+def _relesc_padded(text, size):
+    """`text`, then a comment line of `#` that makes the file exactly `size` bytes. A comment names nothing the
+    guard reads, so the padded file judges as its text does."""
+    return text + "#" * (size - len(text) - 1) + "\n"
+
+
+def _relesc_tree_files():
+    """{path in the tree: text} for each on-disk script the script rows run. The two cap files are one byte under and
+    one byte over guard_core's SCRIPT_READ_CAP, which is read from that module, never copied here."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_core_for_script_rows", os.path.join(HERE, "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    cap = core.SCRIPT_READ_CAP
+    return {
+        "judge.py": RELESC_JUDGE_READ,
+        "sub/judge.py": RELESC_JUDGE_RUN,
+        "mirror/judge.py": RELESC_JUDGE_RUN,
+        "mirror/sub/judge.py": RELESC_JUDGE_READ,
+        "cost/judge.py": RELESC_JUDGE_READ,
+        "cap_over/judge.py": _relesc_padded(RELESC_JUDGE_READ, cap + 1),
+        "cap_under/judge.py": _relesc_padded(RELESC_JUDGE_READ, cap - 1),
+        "pipes/judge_open3.rb": "require 'open3'\nOpen3.capture2e(ARGV[0])\n",
+        "pipes/judge_pipe.rb": 'open("|" + ARGV[0]) { |p| print p.read }\n',
+        "pipes/judge_my.pl": 'open(my $p, "-|", $ARGV[0]) or die "open: $!";\nprint <$p>;\n',
+        "pipes/judge_fh.pl": 'open(FH, "$ARGV[0] |") or die "open: $!";\nprint <FH>;\n',
+        "rewrite/judge.py": RELESC_JUDGE_READ,
+        "rewrite/sub/judge.py": RELESC_JUDGE_RUN,
+        "lang/judge_node_ok.js": 'console.log("judge read:", process.argv.slice(2));\n',
+        "lang/judge_node_run.js": "require('child_process').execSync(process.argv[2]);\n",
+        "lang/judge_perl_ok.pl": 'print "judge read: @ARGV\\n";\n',
+        "lang/judge_perl_run.pl": "system($ARGV[0]);\n",
+        "lang/judge_ruby_ok.rb": 'puts "judge read: #{ARGV}"\n',
+        "lang/judge_ruby_run.rb": "exec(ARGV[0])\n",
+    }
+
+
+# Cost, in the spawn and read-count style: the guard opens a script file only when a quoted argument needs it.
+# The control names no script, so the probe must count zero opens of judge.py, or the counts below mean nothing.
+_relesc_count_add("other-checkout: heredoc replay cost: a command that names no script opens none (the probe's control)",
+                  "allow", 0, "echo hi", "tree_cost", "judge.py")
+_relesc_count_add("other-checkout: heredoc replay cost: a quoted argument with no write-looking token opens no "
+                  "script file", "allow", 0, 'python3 judge.py "hello"', "tree_cost", "judge.py")
+_relesc_count_add("other-checkout: heredoc replay cost: a quoted echo x > ../../other/f argument opens its script "
+                  "file at most once", "allow", 1, 'python3 judge.py "echo x > ../../other/f"', "tree_cost",
+                  "judge.py")
+
+# Node, perl and ruby: an on-disk script that only prints keeps its quoted argument data, and one that calls a shell
+# does not. Each interpreter has an allow row and a deny row.
+_tree_add("other-checkout: heredoc replay lang: node runs an on-disk script that only prints, given a quoted "
+          "echo x > ../../other/f, is allowed",
+          "allow", 'node judge_node_ok.js "echo x > ../../other/f"', "tree_lang")
+_tree_add("other-checkout: heredoc replay lang: node runs an on-disk script that calls child_process, given a "
+          "quoted echo x > ../../other/f, is refused",
+          "deny", 'node judge_node_run.js "echo x > ../../other/f"', "tree_lang", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay lang: perl runs an on-disk script that only prints, given a quoted "
+          "echo x > ../../other/f, is allowed",
+          "allow", 'perl judge_perl_ok.pl "echo x > ../../other/f"', "tree_lang")
+_tree_add("other-checkout: heredoc replay lang: perl runs an on-disk script that calls system, given a quoted "
+          "echo x > ../../other/f, is refused",
+          "deny", 'perl judge_perl_run.pl "echo x > ../../other/f"', "tree_lang", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay lang: ruby runs an on-disk script that only prints, given a quoted "
+          "echo x > ../../other/f, is allowed",
+          "allow", 'ruby judge_ruby_ok.rb "echo x > ../../other/f"', "tree_lang")
+_tree_add("other-checkout: heredoc replay lang: ruby runs an on-disk script that calls exec, given a quoted "
+          "echo x > ../../other/f, is refused",
+          "deny", 'ruby judge_ruby_run.rb "echo x > ../../other/f"', "tree_lang", rule="other-checkout")
+
+# The folder a script runs in is the folder after the cd. The root's judge.py only prints, and sub/judge.py runs its
+# argument, so a row that reads the root's file for sub's call is wrong. The mirror swaps the two.
+_tree_add("other-checkout: heredoc replay folder: cd sub, then python3 judge.py whose judge runs its argument, "
+          "given a quoted echo x > ../../other/f, is refused",
+          "deny", 'cd sub && python3 judge.py "echo x > ../../other/f"', "tree", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay folder: the mirror, cd sub, then python3 judge.py whose judge only prints, "
+          "given the same argument, is allowed",
+          "allow", 'cd sub && python3 judge.py "echo x > ../../other/f"', "tree_mirror")
+
+# The size cap: a script source over SCRIPT_READ_CAP is not visible, so main's verdict holds; one under it is read.
+_tree_add("other-checkout: heredoc replay cap: a read-only judge.py one byte over the script read cap is not visible, "
+          "so a quoted echo x > ../../other/f argument is refused",
+          "deny", 'python3 judge.py "echo x > ../../other/f"', "tree_cap_over", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay cap: a read-only judge.py one byte under the script read cap is visible, "
+          "so a quoted echo x > ../../other/f argument is allowed",
+          "allow", 'python3 judge.py "echo x > ../../other/f"', "tree_cap_under")
+
+# Pipe-opens: a script that hands its argument to a pipe-open runs a shell, so its quoted argument is not data.
+_tree_add("other-checkout: heredoc replay pipe: ruby Open3.capture2e on the argument of an on-disk script, given a "
+          "quoted echo x > ../../other/f, is refused",
+          "deny", 'ruby judge_open3.rb "echo x > ../../other/f"', "tree_pipes", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay pipe: ruby open of a leading pipe bar joined to the argument, given a quoted "
+          "echo x > ../../other/f, is refused",
+          "deny", 'ruby judge_pipe.rb "echo x > ../../other/f"', "tree_pipes", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay pipe: perl open to a pipe from a mode argument, given a quoted "
+          "echo x > ../../other/f, is refused",
+          "deny", 'perl judge_my.pl "echo x > ../../other/f"', "tree_pipes", rule="other-checkout")
+_tree_add("other-checkout: heredoc replay pipe: perl two-argument open of the argument with a trailing pipe bar, "
+          "given a quoted echo x > ../../other/f, is refused",
+          "deny", 'perl judge_fh.pl "echo x > ../../other/f"', "tree_pipes", rule="other-checkout")
+
+# Same-command rewrites: the script that runs is the one this command writes, not the one on disk.
+_tree_add("other-checkout: heredoc replay rewrite: cp of a script that runs its argument over a read-only judge.py, "
+          "then python3 judge.py with a quoted echo x > ../../other/f, is refused",
+          "deny", 'cp sub/judge.py judge.py && python3 judge.py "echo x > ../../other/f"', "tree_rewrite",
+          rule="other-checkout")
+_tree_add("other-checkout: heredoc replay rewrite: printf of an os.system body over a read-only judge.py, then python3 "
+          "judge.py with a quoted echo x > ../../other/f, is refused",
+          "deny", r'''printf 'import os,sys\nos.system(sys.argv[1])\n' > judge.py && python3 judge.py "echo x > ../../other/f"''',
+          "tree_rewrite", rule="other-checkout")
+
+# A frozen path named in the quoted argument of a script that runs its argument: the cd's folder decides the script.
+_tree_add("other-checkout: heredoc replay frozen: cd sub, then python3 judge.py whose judge runs its argument, given a "
+          "quoted write to a frozen path, is refused as frozen-path",
+          "deny", 'cd sub && python3 judge.py "echo x > ' + CFG_SETTINGS + '"', "tree", rule="frozen-path")
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
