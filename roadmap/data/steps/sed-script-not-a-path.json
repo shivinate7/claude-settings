@@ -1,0 +1,11 @@
+{
+  "title": "The guard does not read a sed script as a path",
+  "why": "A guard reads the script argument of a sed command as a file path, so a harmless edit is judged as a write to a path it names (coordinator, 02:47 CST Nov 8; lane test-dirs-include-testing, 03:22 CST Nov 8).",
+  "note": "Fix: the guard skips a sed script argument (the first non-option word, or each -e value) when it collects paths, and still reads each file operand. Red case first: a sed command whose script text looks like a path is refused or asked today; control: a sed -i on a guarded file still refuses. In build in lane session_013NEJKyqF79t9UigCgm3qjb; its PR carries Merge after: #1858. Queue fix (owner 13:20 CST Nov 7). Filed 03:23 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 582,
+  "owner": "triage",
+  "lane": "session_013NEJKyqF79t9UigCgm3qjb",
+  "updatedAt": "2026-11-08T03:22:00-06:00"
+}
