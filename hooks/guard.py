@@ -317,6 +317,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import posixpath
 import re
 import shlex
 import sys
@@ -2345,17 +2346,20 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
 # read are logged and allowed.
 SCOPE_ROLES = (BUILDER_ROLE, AUTHOR_ROLE, WRITER_ROLE)
 SCOPE_RULE = "brief-scope-diff"
+# The step for a refused change that an own commit already holds: a restore of the tree cannot undo it.
+OWN_COMMIT_REMEDY = "if a commit of yours holds the change, stop and report it"
 BRIEF_SCOPE_REASON = (
     "Rule (Agents): this change modifies or deletes an existing file your brief does not name. The guard "
-    "refuses it at commit, push and stop. Remedy: restore it to its text at HEAD; if the task needs it, "
-    "report it to the orchestrator. This refusal is final: never write the file another way. "
-    "(decision agent-commit-file-scope)"
+    "refuses it at commit, push and stop. Remedy: restore it to its text at HEAD; " + OWN_COMMIT_REMEDY +
+    "; if the task needs it, report it to the orchestrator. This refusal is final: never write the file "
+    "another way. (decision agent-commit-file-scope)"
 )
 BRIEF_LINES = 50   # the lines of a transcript read to find its first user message
-# A path-shaped run: the characters of a path and of a glob, with the brackets, parens and plus a framework
-# route uses (`app/[id]/page.tsx`). Any other character ends a run, so a lone apostrophe or a colon in the
-# prose cannot hide a name or break the read. `clean_run` strips the prose's own brackets and parens.
-BRIEF_RUN = re.compile(r"[\w.\-/*?@\\\[\]()+]+")
+# A path-shaped run: the characters of a path and of a glob, with the brackets, parens, plus and dollar a
+# framework route uses (`app/[id]/page.tsx`, `routes/posts.$id.tsx`). Any other character ends a run, so a
+# lone apostrophe or a colon in the prose cannot hide a name or break the read. `clean_run` strips the
+# prose's own brackets and parens.
+BRIEF_RUN = re.compile(r"[\w.\-/*?@\\\[\]()+$]+")
 BRIEF_LINK = re.compile(r"\]\(")   # a markdown link `[text](path)`: the path is its own run
 BRIEF_POINTER_BYTES = 64 * 1024   # the largest brief file a pointer is read from
 BRIEF_POINTER_EXT = (".md", ".txt")
@@ -2489,8 +2493,7 @@ def pointer_read(token: str, top: str):
     """The text of the brief file a pointer token names, or None. A pointer is a path whose file name holds
     `brief` and ends `.md` or `.txt`; it is read only from the checkout or the temp folder (where a
     session's scratchpad is), as a plain file of at most BRIEF_POINTER_BYTES."""
-    name = basename(token)
-    if "brief" not in name or not name.endswith(BRIEF_POINTER_EXT):
+    if not is_pointer(token):
         return None
     try:
         path = token if os.path.isabs(token) else os.path.join(top, token)
@@ -2506,44 +2509,84 @@ def pointer_read(token: str, top: str):
         return None
 
 
+def is_pointer(token: str) -> bool:
+    """True when a path-shaped run points at a brief file: its file name holds `brief` and ends `.md` or `.txt`."""
+    name = basename(token).lower()
+    return "brief" in name and name.endswith(BRIEF_POINTER_EXT)
+
+
 def brief_pointer(text: str, top: str):
-    """`(pointed text, pointer tokens)` for a brief that points at a file that holds the brief. The first
-    pointer that reads gives its text, and the chain stops there: that text is never searched for a
-    pointer. With none that reads, the text is None and the tokens are the pointers that did not."""
-    missed = []
+    """`(pointed texts, pointers, missed)` for the pointers a message cites. Each pointer is read
+    (`pointer_read`); the texts it gives are read beside the message, never searched for a pointer
+    themselves. `pointers` holds every pointer token, lower case, and `missed` those that did not read."""
+    texts, pointers, missed = [], set(), []
     for token in brief_runs(text):
-        if "brief" not in basename(token) or not token.lower().endswith(BRIEF_POINTER_EXT):
+        if not is_pointer(token):
             continue
+        pointers.add(token.lower())
         found = pointer_read(token, top)
-        if found is not None:
-            return found, []
-        missed.append(token.lower())
-    return None, missed
+        if found is None:
+            missed.append(token.lower())
+        else:
+            texts.append(found)
+    return texts, pointers, missed
+
+
+def checkout_roots(top: str):
+    """The roots an absolute path in a brief may name a repo path under, lower case, longest first: the
+    agent's checkout, then the primary checkout when the agent's sits under its `.claude/worktrees`."""
+    top = norm(top).rstrip("/")
+    roots = [top.lower()] if top else []
+    parent = posixpath.dirname(top)
+    if posixpath.basename(parent) == "worktrees" and posixpath.basename(posixpath.dirname(parent)) == ".claude":
+        roots.append(posixpath.dirname(posixpath.dirname(parent)).lower())
+    return [root for root in roots if root]
+
+
+def top_folders(top: str):
+    """The lower-case names of the folders at the checkout's top, or None when it cannot be listed."""
+    try:
+        return {entry.name.lower() for entry in os.scandir(top) if entry.is_dir()}
+    except OSError:
+        return None
 
 
 class BriefScope:
     """The paths a brief names, lower case. A path is named by an equal path, a folder it sits under (whole
     segments), a glob, a bare file name, or the prefix of its file name (only when the brief backticks it).
-    `skip` lists tokens that name nothing: a pointer that could not be read."""
+    `skip` lists tokens that name nothing: the pointers the message cites. A run with a `/` names a path only
+    when it ends in an extension or `/`, or its first segment is a folder at the checkout's top, so a slash
+    word in prose (`and/or`, `I/O`) names nothing."""
 
     def __init__(self, text: str, top: str, skip=()):
         self.exact, self.dirs, self.bare, self.globs, self.prefixes = set(), set(), set(), [], set()
         for found in BRIEF_PREFIX.finditer(text):
             self.prefixes.add(norm(found.group(1)).lower())
-        top = norm(top).lower().rstrip("/")
+        self.roots, self.top, self.folders = checkout_roots(top), top, False
         for token in brief_runs(text):
             if token.lower() not in skip:
-                self.add(token.lower(), top)
+                self.add(token.lower())
 
-    def add(self, token: str, top: str) -> None:
+    def slash_path(self, token: str) -> bool:
+        """True when a run with a `/` names a path, not a slash word in prose."""
+        if token.endswith("/") or BRIEF_EXT.search(token):
+            return True
+        if self.folders is False:
+            self.folders = top_folders(self.top)
+        return self.folders is None or token.split("/", 1)[0] in self.folders
+
+    def add(self, token: str) -> None:
         if not re.search(r"[a-z0-9]", token):
             return
         if token.startswith("/"):
-            # An absolute path names a repo path only inside this checkout. One outside it (a pointer to a
-            # brief file in a scratchpad) can equal no path of the repo, so it names none.
-            if not (top and token.startswith(top + "/")):
+            # An absolute path names a repo path only inside the checkout (`checkout_roots`). One outside it
+            # (a pointer to a brief file in a scratchpad) can equal no path of the repo, so it names none.
+            root = next((r for r in self.roots if token.startswith(r + "/")), None)
+            if root is None:
                 return
-            token = token[len(top) + 1:]
+            token = token[len(root) + 1:]
+        if "/" in token and not self.slash_path(token):
+            return
         if "*" in token or "?" in token:
             if "/" in token or BRIEF_EXT.search(token):
                 self.globs.append((glob_segments(token), "/" not in token))
@@ -2602,19 +2645,21 @@ def brief_scope_hit(root: str, top: str, brief: str, changes):
     """Judge the agent's own change (`changes`, from `own_changes`) against its brief. Returns
     `(offence, facts)`: the first modified or deleted existing file the brief does not name ('' when none),
     and the log lines `(kind, matched)` (see `note_scope`) for a new unnamed file ("new"), a brief that
-    names no path ("unnamed"), and a brief or page list that could not be read ("unread"). Only OWN
-    entries count, as for a builder's test change. A brief that points at a brief file is judged by that
-    file's text (`brief_pointer`). A file is new when the agent's base (`agent_base`) does not hold it.
+    names no path ("unnamed"), and a brief, pointer or page list that could not be read ("unread"). Only OWN
+    entries count, as for a builder's test change. The names of each brief file the message points at
+    (`brief_pointer`) are added to the message's own. A file is new when the agent's base (`agent_base`) does not hold it.
     Nothing is read when the change holds no path."""
     if not any(kind == OWN and paths for _old, _new, paths, kind in changes):
         return "", []
     text = brief_text(brief) if brief else None
     if text is None:
         return "", [("unread", brief or "no transcript path")]
-    pointed, missed = brief_pointer(text, top)
-    scope = BriefScope(text if pointed is None else pointed, top, skip=missed)
+    pointed, pointers, missed = brief_pointer(text, top)
+    if missed:
+        return "", [("unread", missed[0])]
+    scope = BriefScope("\n".join([text] + pointed), top, skip=pointers)
     if scope.empty():
-        return "", [("unread" if missed else "unnamed", missed[0] if missed else brief)]
+        return "", [("unnamed", brief)]
     implied, fresh, base = None, "", None
     for old, _new, paths, kind in changes:
         if kind != OWN:
@@ -2684,7 +2729,7 @@ def builder_diff_reason() -> str:
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. "
+        "you added; " + OWN_COMMIT_REMEDY + ". "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
         "and report the conflict to the orchestrator; a test-author resolves it. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
