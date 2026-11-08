@@ -1,0 +1,11 @@
+{
+  "title": "A check refuses a duplicate slug in docs/debts/notes.md, and the nine pairs on main are merged",
+  "why": "docs/debts/notes.md on main e2703c611 has 9 slugs that each appear twice with different text: command-in-item-str-replace, handoff-unread, lane-force-push-refused, mistake-check-plain-fault-words, opus-plain-ask, ps1-copy-skill-prune-no-backup, rm-shim-bypass-forms, rm-shim-glob-passes and sweep-fetch-fail-wrong-cause. The #1449 main merge made 4 of them, and only a fix check caught those; no lint refuses a duplicate slug (lane notes-fix-guard-1, 04:33 CST Nov 8).",
+  "note": "Fix: a notes lint refuses a slug that appears twice, red case first on two lines with one slug; then merge each of the nine pairs' text into one line. Queue fix (owner 13:20 CST Nov 7: a found gap gets a fix). Filed 04:35 CST Nov 8; no lane yet, the coordinator assigns one.",
+  "phase": "now",
+  "status": "todo",
+  "order": 602,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T04:34:00-06:00"
+}

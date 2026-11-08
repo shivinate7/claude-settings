@@ -1,11 +1,11 @@
 {
   "title": "A quiet lane-lint run does not trip the stall watch at 300 s",
   "why": "The stall watcher cuts a quiet lane-lint wrapper at 300 s (lane batch63-lint-b, coordinator 00:29 CST Nov 8). Same class as done step ci-job-stall-strands, which fixed it for ci-job.",
-  "note": "Fix: the lane-lint wrapper prints a heartbeat line, or the stall watch reads it as a known long command, in the same home that ci-job-stall-strands used; red case first on a quiet lane lint past 300 s. Queue fix (owner 13:20 CST Nov 7: a found gap gets a fix). Slug from the coordinator. Filed 00:31 CST Nov 8. Lane session_013NEJL2LYXQpmabnoQqYgNv started (coordinator, 00:31 CST Nov 8). Owner question filed as page item 405 (stall-log-kept): keep a stalled job's log for 7 days, recorded line in decision stall-watch has no owner ruling behind it. The lane waits on that part only, and ships the beat-file fix on its own (coordinator, 00:56 CST Nov 8). Built as PR #1823, head 5ce07906f, with runner 8 (lane, 01:47 CST Nov 8). Parked: branch stall-watch-keep-log (red case 1bdbd6ea8) waits on page item 405. Round-3 notes, not fixed: the hard-coded \"about 78 steps\" in docs/decisions/stall-watch.md will drift; debt note lane-lint-worktree-add-no-beat does not name the unshallow fetch window.",
+  "note": "Fix: the lane-lint wrapper prints a heartbeat line, or the stall watch reads it as a known long command, in the same home that ci-job-stall-strands used; red case first on a quiet lane lint past 300 s. Queue fix (owner 13:20 CST Nov 7: a found gap gets a fix). Slug from the coordinator. Filed 00:31 CST Nov 8. Lane session_013NEJL2LYXQpmabnoQqYgNv started (coordinator, 00:31 CST Nov 8). Owner question filed as page item 405 (stall-log-kept): keep a stalled job's log for 7 days, recorded line in decision stall-watch has no owner ruling behind it. The lane waits on that part only, and ships the beat-file fix on its own (coordinator, 00:56 CST Nov 8). Built as PR #1823, head 5ce07906f, with runner 8 (lane, 01:47 CST Nov 8). Parked: branch stall-watch-keep-log (red case 1bdbd6ea8) waits on page item 405. Round-3 notes, not fixed: the hard-coded \"about 78 steps\" in docs/decisions/stall-watch.md will drift; debt note lane-lint-worktree-add-no-beat does not name the unshallow fetch window. Also covers coordinator item 386 (step lane-lint-redirect-stall, folded here): a background `merge --lane-lint` redirected to a `$D/...` path read as stalled at 300 s on 04:06 CST Nov 8; #1823's beat covers it (lane notes-fix-report, 04:33 CST).",
   "phase": "now",
   "status": "ready",
   "order": 550,
   "owner": "triage",
   "lane": "session_013NEJL2LYXQpmabnoQqYgNv",
-  "updatedAt": "2026-11-08T01:47:00-06:00"
+  "updatedAt": "2026-11-08T04:34:00-06:00"
 }
