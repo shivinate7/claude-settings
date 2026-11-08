@@ -38,7 +38,7 @@ Each Mac boots simulators through `bin/sim-test`, under one lock. Ruling 5 route
     - Test: `GUARD_FAMILY=simulator python3 hooks/test_guard.py`, the `drive:` cases (refused with no lease, under another session's lease, a dead, queued or expired lease, or a lease for another device) and the `lease allow:` and `control:` cases (the reads, the holder, a shut-down device, a quoted text, no simctl). `hooks/mutate_guard.py` holds one mutant per arm.
     - Not built, and a Mac step: the real simulator MCP action names. The read and drive sets use the names in the cases (`screenshot`, `describe`, `list`, `tap`, `swipe`, `launch`); an action the tool does not spell that way is judged a drive, except the three read names. Read the tool's schema on the Mac and fix the sets.
 
-Test: a second run waits and takes the lock when the holder ends. A second duo run beside a leased Duo boots the other slot's Duo (cases 98 to 100 of `lint/test_sim_test.sh`). At the wait limit it exits 1, naming the pid, with no boot. A raw `simctl boot` is refused.
+Test: a second run waits and takes the lock when the holder ends. A second duo run beside a leased Duo boots the other slot's Duo (cases 98 to 100 of `lint/test_sim_test.sh`). A renew that finds its lease gone is named once, and a run queued behind two leased Duos boots a shut-down Duo only under the load bars (cases 106 to 108). At the wait limit it exits 1, naming the pid, with no boot. A raw `simctl boot` is refused.
 
 Incidents:
 
