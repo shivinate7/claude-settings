@@ -15,25 +15,33 @@ attribute (`question_form.page_item_hit`, for one). A call that resolves to no h
 the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
 Each check gets COUNT seeded random command strings per env shape (one stream per check and shape, seed
-SEED), built from shell and PowerShell characters, digits and fragments (the config dir's settings path among
-them), plus fixed edge inputs. A share of the inputs holds a well-formed decision item, or a Write or Edit that
-adds a workflow step, in place of random text. Each input carries one tool:
-two of every three are Bash or PowerShell, the others go round the rest. A payload carries the keys
-of every tool's shape, filled with random strings, with typed values where a string reaches
+SEED), built from shell and PowerShell characters, digits and fragments, plus fixed edge inputs. Fragments hold
+CONFIG_TOKEN where the config dir's settings path goes, and run_checks swaps in the run folder when it hands an
+input to a check, so the drawn text is the same on every run. A share of the inputs opens with a kill of one
+pid (`kill <digits>` or `kill -9 <digits>`), the act that reaches pid_is_owned. A share of the payloads holds a
+well-formed decision item in `data`, and another share holds a workflow step (continue-on-error) ahead of the text
+in the content, old and new string keys: the step rides on every tool, not only a Write or an Edit. Each input
+carries one tool: two of every three are Bash or PowerShell, the others go round the rest. A payload carries the
+keys of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
 permissionDecision on stdout. Any other exit, and any raise, is a failure.
 
 Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the
 real config. PATH is an empty folder, so git, gh and ps are absent and every read fails as on a machine
-without them. CLAUDE_GUARD_ROOT_PID pins the session root, so a kill reaches its pid read.
+without them. CLAUDE_GUARD_ROOT_PID pins the session root, so a kill reaches its pid read. The checks that
+reach the session root (session_root_pid) run a second pass with the pin unset: the walk finds no root, so
+foreign_pid_kill takes its no-root return.
 
 Not fuzzed: the parsers of git, gh and ps output. The parent walk of pid_is_owned past its first read
-(ps never answers, so it returns at once). The git-backed commit reads: own_changes returns None
-without git, so diff_violation stops before role_offences, and no input here reaches role_offences.
+(ps never answers, so it returns at once). The parent walk of session_root_pid past its first read (ps never
+answers, so the walk returns 0 at once and its loop over each parent's name never runs). The git-backed commit
+reads: own_changes returns None without git, so diff_violation stops before role_offences, and no input here
+reaches role_offences.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
 remote_session_id, and the trust-card check under a session id) run only under the shape that reaches them.
+Each shape also runs the session-root checks once more with the root pin unset.
 
 Fixtures: CHECKOUT is a plain folder. PAGE_CHECKOUT is a repository root (a .git folder) whose extras file
 names a waiting page, so the item checks and the workflow check run on a real path. CONFIG is also the
@@ -96,6 +104,8 @@ WORKFLOW_STEP = ("      - name: test\n"          # a step that runs a test and p
                  "        continue-on-error: true\n")
 REMOTE_ID = "cse_fuzz01"   # the lane id a cloud session names in CLAUDE_CODE_REMOTE_SESSION_ID (override.LANE_ENV)
 ROOT_PID = "9999"          # the session root the kill checks read (guard_kill.session_root_pid, the test hook)
+ROOT_ENV = "CLAUDE_GUARD_ROOT_PID"   # the env var that pins that root
+ROOT_READER = ("guard_kill", "session_root_pid")   # the one read of the root; checks that reach it also run unpinned
 TRANSCRIPT = os.path.join(RUN, "transcript.jsonl")
 EMPTY_TRANSCRIPT = os.path.join(RUN, "empty.jsonl")
 MISSING_TRANSCRIPT = os.path.join(RUN, "missing.jsonl")
@@ -112,7 +122,7 @@ with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
 os.environ["CLAUDE_CONFIG_DIR"] = CONFIG
 os.environ["PATH"] = NO_TOOLS
-os.environ["CLAUDE_GUARD_ROOT_PID"] = ROOT_PID
+os.environ[ROOT_ENV] = ROOT_PID
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
@@ -140,13 +150,16 @@ with open(os.path.join(CONFIG, "agents", "builder.md"), "w", encoding="utf-8") a
 HOOK_MODULES = frozenset(os.path.splitext(name)[0] for name in os.listdir(HERE) if name.endswith(".py"))
 
 CHARS = "${}()[]=;'\"`|&<> \n$-*?0123456789"
+CONFIG_TOKEN = "{config}"   # where the config dir's path goes in a drawn fragment; run_checks swaps in CONFIG
+SETTINGS_FRAGMENT = CONFIG_TOKEN + os.sep + "settings.json"   # SETTINGS_PATH with the run folder held back
+KILL_SHARE = 0.25   # the share of inputs that open with a kill of one pid: the act that reaches pid_is_owned
 FRAGMENTS = (
     "git ", "env:GIT_DIR", "rm -rf", "wsl -e", "pwsh -Command", "sh -c", "<<EOF", "$(", "${",
     "${X:?", "git push --force", "git stash", "git worktree remove", "xargs kill", "pgrep x | ",
     "lsof -t", "gh pr merge", "cd ", "&& ", "| ", "'", '"', "`", "\\", "\n", "-Command ",
     "Remove-Item ", "$env:", "kill -9 ", "git -C ", "--force-with-lease", "node -e ",
     "git reset --hard", "git clean -fd", "git checkout -- x", "git restore", "git switch", WORKFLOW_TARGET,
-    SETTINGS_PATH, "> " + SETTINGS_PATH,
+    SETTINGS_FRAGMENT, "> " + SETTINGS_FRAGMENT,
 )
 WEIGHTED = ("${", "$(", "'", '"', "<<EOF", "${X", "`")   # the incident class, drawn more often
 LONG = "sh -c \"git stash ${X:-$(pwd)} | rm -rf '\" <<EOF\n" * 80   # several KB, unclosed quotes and expansions
@@ -183,10 +196,19 @@ CALLABLES = {"record_branch_of": guard.record_branch_of, "read_verb": guard.read
              "predicate": _predicate}
 
 
+def kill_fragment(rng):
+    """`kill <digits>` or `kill -9 <digits>` with a random pid: a kill of one pid, which foreign_pid_kill judges
+    with pid_is_owned once the session root is read. The digits come from rng, so the draw is the same on every run."""
+    return rng.choice(("kill ", "kill -9 ")) + str(rng.randint(2, 99999)) + rng.choice((" ", "; "))
+
+
 def draw_text(rng):
-    """A random command string: mostly short, sometimes several hundred characters."""
+    """A random command string: mostly short, sometimes several hundred characters. A share opens with a kill of one pid."""
     limit = rng.randint(0, 400) if rng.random() < 0.1 else rng.randint(0, 60)
     parts, size = [], 0
+    if rng.random() < KILL_SHARE:
+        parts.append(kill_fragment(rng))
+        size = len(parts[0])
     while size < limit:
         roll = rng.random()
         if roll < 0.35:
@@ -400,7 +422,8 @@ def run_checks(checks, count, tools, shape=""):
         rng = random.Random("%s:%s:%s" % (SEED, shape, label))
         inputs = EDGE + [draw_text(rng) for _ in range(count)]
         bad = []
-        for index, text in enumerate(inputs):
+        for index, drawn in enumerate(inputs):
+            text = drawn.replace(CONFIG_TOKEN, CONFIG)   # the run folder enters here only, so the draws match on every run
             tool = tool_for(index, shells, others)
             env = Env(rng, tool)
             guard_core.POWERSHELL_CALL[0] = tool == "PowerShell"
@@ -411,7 +434,7 @@ def run_checks(checks, count, tools, shape=""):
                 else:
                     call = (fn, (), build_kwargs(fn, rng, text, env))
             except Exception as exc:  # a harness defect, reported as such: never a silent pass
-                bad.append((text, tool, "input builder raised " + describe(exc)))
+                bad.append((drawn, tool, "input builder raised " + describe(exc)))
                 continue
             out = io.StringIO()
             try:
@@ -419,9 +442,9 @@ def run_checks(checks, count, tools, shape=""):
                     call[0](*call[1], **call[2])
             except SystemExit as exc:
                 if not refusal_printed(out.getvalue()):
-                    bad.append((text, tool, "exit %r with no refusal on stdout" % (exc.code,)))
+                    bad.append((drawn, tool, "exit %r with no refusal on stdout" % (exc.code,)))
             except Exception as exc:
-                bad.append((text, tool, describe(exc)))
+                bad.append((drawn, tool, describe(exc)))
         if bad:
             failures.append((label, len(bad), len(inputs), sorted({row[1] for row in bad}), bad[0]))
     return failures
@@ -505,6 +528,17 @@ def pinned_env(values):
                 os.environ[name] = value
 
 
+@contextlib.contextmanager
+def root_unpinned():
+    """Unset ROOT_ENV, so session_root_pid walks the process tree. With ps absent the walk finds no root and reads 0."""
+    before = os.environ.pop(ROOT_ENV, None)
+    try:
+        yield
+    finally:
+        if before is not None:
+            os.environ[ROOT_ENV] = before
+
+
 def _probe(problems, cause, probe):
     """Run one reach probe. A False result or a raise is a problem named by `cause`: a raise is the check failing, so
     it is reported here and the fuzz still runs."""
@@ -538,6 +572,13 @@ def fixture_proof():
                guard_core.is_cloud)
     _probe(problems, "CLAUDE_GUARD_ROOT_PID is pinned, yet session_root_pid() reads no root (the root hook moved)",
            lambda: guard_kill.session_root_pid() == int(ROOT_PID))
+    with root_unpinned():
+        _probe(problems, "CLAUDE_GUARD_ROOT_PID is unset, yet session_root_pid() reads a root with ps absent (the walk "
+                         "moved): the no-root return of foreign_pid_kill is not reached",
+               lambda: guard_kill.session_root_pid() == 0)
+    _probe(problems, "a drawn fragment holds the run folder's name, so the drawn inputs differ on each run "
+                     "(CONFIG_TOKEN moved, or a fragment takes RUN)",
+           lambda: not any(os.path.basename(RUN) in piece for piece in [*FRAGMENTS, *CHARS, *WEIGHTED, *EDGE]))
     _probe(problems, "CONFIG's CLAUDE.md names no pointer checkout (POINTER_LINE or the config dir moved)",
            lambda: guard.pointer_checkout() == os.path.normcase(os.path.realpath(CONFIG)))
     _probe(problems, "CONFIG's decisions folder holds no builder row (the layout decisions path or ROLE_TABLE_FILE moved)",
@@ -694,6 +735,19 @@ def dispatch():
     return set(direct), reads, missing, outside
 
 
+def reaches(key, target):
+    """True when the hook function `key` calls `target`, directly or through the hook functions it calls."""
+    queue, seen = [key], set()
+    while queue:
+        node = queue.pop()
+        if node == target:
+            return True
+        if node not in seen:
+            seen.add(node)
+            queue.extend(_edges(node[0], _function_node(*node))[0])
+    return False
+
+
 def _callable(key):
     module, name = key
     return getattr(importlib.import_module(module), name)
@@ -776,18 +830,29 @@ def main():
             if required not in tools:
                 print("FAIL tool %s is not among the discovered tools: the branch reading is broken" % required)
                 return 1
-        checks = [("%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
-        checks.append(("judge (end to end)", guard.judge, "judge"))
+        keyed = [(key, "%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
+        keyed.append(((GUARD, "judge"), "judge (end to end)", guard.judge, "judge"))
+        checks = [check[1:] for check in keyed]
+        root_checks = [check[1:] for check in keyed if reaches(check[0], ROOT_READER)]
+        if not root_checks:
+            print("FAIL no check reaches %s.%s: the root reading is broken" % ROOT_READER)
+            return 1
         failing = 0
         for shape, values in SHAPES:
             with pinned_env(values):
                 failures = run_checks(checks, COUNT, tools, shape)
-            report(failures, shape)
-            failing += len(failures)
+                report(failures, shape)
+                failing += len(failures)
+                with root_unpinned():
+                    unpinned = shape + ", root unpinned"
+                    failures = run_checks(root_checks, COUNT, tools, unpinned)
+                report(failures, unpinned)
+                failing += len(failures)
         elapsed = time.monotonic() - started
-        print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d inputs each per shape "
-              "(%d random + %d edge), %d failing rows, %.1f s"
-              % (len(direct), len(tools), len(SHAPES), COUNT + len(EDGE), COUNT, len(EDGE), failing, elapsed))
+        print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d root-reading checks also run "
+              "with the root unpinned, %d inputs each per pass (%d random + %d edge), %d failing rows, %.1f s"
+              % (len(direct), len(tools), len(SHAPES), len(root_checks), COUNT + len(EDGE), COUNT, len(EDGE),
+                 failing, elapsed))
         print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
                                                   for key, why in sorted(outside.items())))
         return 1 if failing or problems else 0
