@@ -90,7 +90,7 @@ DATA_TOOL = "ArtifactData"
 # The tool that publishes a page (hooks/guard.py).
 PAGE_TOOL = "Artifact"
 
-# The Mac names of the same tools (owner item 440, 2026-11-08 12:28 CST, from Home transcripts). A Mac call has its own
+# The Mac names of the same tools (owner item 440, from Home transcripts). A Mac call has its own
 # input shape; cloud_twin turns it into the cloud call it stands for, so every guard judges one shape.
 MAC_PREFIX = "mcp__claude-artifacts__"
 MAC_DATA_TOOLS = frozenset(MAC_PREFIX + name for name in ("db_write", "db_str_replace", "db_get", "db_list", "db_query"))

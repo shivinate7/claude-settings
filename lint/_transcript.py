@@ -10,6 +10,12 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import sys
+
+_HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+if _HOOKS not in sys.path:
+    sys.path.append(_HOOKS)  # appended, so a hooks module never shadows a lint one
+from shared_names import cloud_twin  # noqa: E402  stdlib only: the one home of the Mac names' cloud twin
 
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
@@ -95,6 +101,12 @@ def tool_uses(rec):
     for b in content:
         if isinstance(b, dict) and b.get("type") == "tool_use":
             yield b
+
+
+def cloud_use(use):
+    """(name, input) of a transcript tool_use, a Mac artifact call (mcp__claude-artifacts__*) read as the cloud call it
+    stands for. The one call every artifact reader makes before its name and input checks."""
+    return cloud_twin(use.get("name"), use.get("input"))
 
 
 def tool_results(rec):
@@ -376,8 +388,8 @@ def page_writer_id(records):
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
-            inp = use.get("input")
-            if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
+            name, inp = cloud_use(use)
+            if (str(name or "").startswith(ARTIFACT_DATA) and isinstance(inp, dict)
                     and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):

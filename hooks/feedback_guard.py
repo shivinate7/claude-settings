@@ -635,7 +635,7 @@ class Pages:
             return set()
         results = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
                    for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
-        return {use["input"].get("url") for use in self._uses_after(start)
+        return {_transcript.cloud_use(use)[1].get("url") for use in self._uses_after(start)
                 if _reads_items(use) and _returns_n(results.get(use.get("id")), n)}
 
     def sent(self, text, k, proof, stamp, label="page"):
@@ -651,7 +651,8 @@ def norm(text):
 def _proves(use, n):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
     ArtifactData write with key n == n under collection `items`."""
-    name, tool_input = use.get("name") or "", use.get("input")
+    name, tool_input = _transcript.cloud_use(use)
+    name = name or ""
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
@@ -663,7 +664,8 @@ def _proves(use, n):
 def _reads_items(use):
     """True for an ArtifactData get, list or query of collection `items` that names a page url and no out_dir.
     A read with out_dir returns file paths, not the documents, so its result cannot show item n."""
-    name, inp = use.get("name") or "", use.get("input")
+    name, inp = _transcript.cloud_use(use)
+    name = name or ""
     return (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and inp.get("action") in READ_VERBS
             and inp.get("collection") == "items" and isinstance(inp.get("url"), str) and not inp.get("out_dir"))
 
@@ -1138,7 +1140,8 @@ def _scan_transcript(records, collections):
             continue
         when = _ts(rec)
         for use in _transcript.tool_uses(rec):
-            inp, name = use.get("input"), str(use.get("name", ""))
+            name, inp = _transcript.cloud_use(use)
+            name = str(name or "")
             if not isinstance(inp, dict) or when is None:
                 continue
             if name.startswith(ARTIFACT_DATA):
