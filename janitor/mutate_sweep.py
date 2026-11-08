@@ -45,6 +45,7 @@ Run:
 Only some mutants (label fragments, comma-separated; every anchor is still checked):
     MUTATE_ONLY="deadline,oldest first" python3 janitor/mutate_sweep.py
 """
+import ast
 import os
 import re
 import shutil
@@ -1468,7 +1469,16 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
-    shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
+    # Each lint/ module the real test_sweep.py imports (an ast read of its plain `import X` lines, so
+    # a new import needs no edit here); a missing one kills the suite on import. Never mutated.
+    with open(SUITE, encoding="utf-8") as handle:
+        suite_tree = ast.parse(handle.read(), filename=SUITE)
+    for node in ast.walk(suite_tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module = os.path.join(REPO_ROOT, "lint", alias.name.split(".")[0] + ".py")
+                if os.path.isfile(module):
+                    shutil.copy(module, lint_dir)
     # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
     # lazily is not covered. The loop
     # below replaces the guard family and git_reads.py with the target's text (mutated or real).
