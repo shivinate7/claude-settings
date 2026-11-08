@@ -461,33 +461,79 @@ def sh_heredoc_bodies(src, i, pending):
     return i
 
 
+SH_BOUNDARY = r"(?![^\s;&|()<>])"
+SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" + SH_BOUNDARY + r"|[!{](?=\s)")
+SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
+SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
+
+
 def sh_code_end(src, i, spans, pending, close=None):
     """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
     the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
-    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment."""
-    depth, ws = 0, True
+    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. `cmd` is
+    True where a command may start, the only place `case` and `esac` are reserved words. Each open `case` is one
+    entry in `cases`, [state, paren depth in a pattern]: word0 and word1 before `in`, pat for the arm patterns, body
+    for an arm's commands. A pattern's `)` ends the pattern, never the substitution."""
+    depth, ws, cmd, cases = 0, True, True, []
     while i < len(src):
         c = src[i]
+        st = cases[-1] if cases else None
+        if st and st[0] == "word1" and ws and c not in " \t\n\\#":
+            m = SH_IN_WORD.match(src, i)
+            if not m:
+                raise Unread("case word is not followed by in")
+            st[0] = "pat"
+            i, ws, cmd = m.end(), True, False
+            continue
+        if st and st[0] == "word0" and ws and c not in " \t\n\\#":
+            st[0] = "word1"
+        if st and st[0] == "pat" and ws and not st[1]:
+            if c == "(":
+                i += 1  # a bare ( before a pattern
+                continue
+            if SH_ESAC_WORD.match(src, i):  # like POSIX, esac first in a pattern list ends the case
+                cases.pop()
+                i, ws, cmd = i + 4, False, False
+                continue
+        if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
+            word = m.group(0)
+            if word == "case":
+                cases.append(["word0", 0])
+                i, ws, cmd = m.end(), True, False
+            elif word == "esac":
+                if not st:
+                    raise Unread("esac with no case")
+                cases.pop()
+                i, ws, cmd = m.end(), False, False
+            else:
+                i, ws = m.end(), False
+            continue
+        if st and st[0] == "body" and c == ";" and src[i + 1:i + 2] in (";", "&"):
+            i += 3 if src.startswith(";;&", i) else 2
+            st[0], ws, cmd = "pat", True, False
+            continue
         if c == "\\":
             if src.startswith("\n", i + 1):
                 i += 2  # a line break the shell removes: the next word starts where this one would have
             else:
                 i += 2
-                ws = False
+                ws = cmd = False
         elif c == "'":
             i = sh_quote_end(src, i + 1)
-            ws = False
+            ws = cmd = False
         elif c == '"':
             i = sh_dquote_end(src, i + 1, spans, pending)
-            ws = False
+            ws = cmd = False
         elif c == "`":
             if close == "`":
+                if cases:
+                    raise Unread("case never ends with esac")
                 return i + 1
             i = sh_code_end(src, i + 1, spans, pending, "`")
-            ws = False
+            ws = cmd = False
         elif c == "$":
             i = sh_dollar_end(src, i, spans, pending)
-            ws = False
+            ws = cmd = False
         elif c == "#" and ws:
             end = sh_comment_end(src, i, close == "`")
             spans.append((i, end))
@@ -496,7 +542,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws = True
+            ws = cmd = True
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
             ws = True
@@ -506,22 +552,41 @@ def sh_code_end(src, i, spans, pending, close=None):
             ws = False
         elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
             i = j
-            ws = False
+            ws = cmd = False
         elif c == "(":
-            depth += 1
             i += 1
-            ws = True
+            if st and st[0] == "pat":
+                st[1] += 1  # an extglob group in a pattern
+                ws = False
+            else:
+                depth += 1
+                ws = cmd = True
         elif c == ")":
-            if close == ")" and depth == 0:
-                return i + 1
-            depth -= 1
             i += 1
-            ws = True
+            if st and st[0] == "pat":
+                if st[1]:
+                    st[1] -= 1
+                    ws = False
+                else:
+                    st[0], ws, cmd = "body", True, True
+            elif depth == 0 and (cases or close == ")"):
+                if cases:
+                    raise Unread("case arm ends with a lone )")
+                return i
+            else:
+                depth -= 1
+                ws = cmd = True
         else:
             i += 1
             ws = c in " \t;&|<>"
+            if c in ";&|":
+                cmd = True
+            elif c not in " \t":
+                cmd = False
     if close:
         raise Unread("command substitution never closes")
+    if cases:
+        raise Unread("case never ends with esac")
     return i
 
 
