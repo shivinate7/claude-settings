@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool splits a red batch, and builds the next batch while one runs",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.505,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "Owner pick on item 386 a (page save, 22:25 CST Nov 7) includes these two parts of the batch builder. Lane merge-builds-batches split them into their own step (coordinator, 22:33 CST).",
+  "note": "The batch builder drops the failing lane and rebuilds, per rule git-integration-branch-merge, and builds batch N+1 on N's head while N's CI runs. Starts once merge-builds-batches merges. An owner-pick lane, so the hold lets it start. Slug from the coordinator; title from item 386 option a. Related: step overlapping-batches (done) lets a batch run CI on top of the one ahead; this step makes the tool build it by itself.",
+  "updatedAt": "2026-11-07T22:32:00-06:00"
+}

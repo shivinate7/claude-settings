@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL39DAqcWWfdNFXmxnC",
   "why": "Owner pick on item 386, a+b+c (page save, 22:25 CST Nov 7). PRs are made about 7 times faster than they merge, and the batch runner builds each batch by hand from messages (coordinator count, 21:45 CST).",
-  "note": "The tool takes every PR with a done review record on its live head and a lane lint pass, splits a red batch itself, and builds the next batch while one runs, on top of #1561's ledger. A queue-fix lane: the owner's hold lets it start. Title from item 386 option a. Lane session_013NEJL39DAqcWWfdNFXmxnC started (coordinator, 22:29 CST Nov 7).",
-  "updatedAt": "2026-11-07T22:30:00-06:00"
+  "note": "The tool takes every PR with a done review record on its live head and a lane lint pass, splits a red batch itself, and builds the next batch while one runs, on top of #1561's ledger. A queue-fix lane: the owner's hold lets it start. Title from item 386 option a. Lane session_013NEJL39DAqcWWfdNFXmxnC started (coordinator, 22:29 CST Nov 7). The red-batch split and the next-batch build moved to step merge-batch-split-and-pipeline (coordinator, 22:33 CST).",
+  "updatedAt": "2026-11-07T22:32:00-06:00"
 }
