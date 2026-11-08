@@ -1826,6 +1826,36 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
         self.assert_passes(out, "a refused merge whose status 403 is sent back")
 
+    # ---- a local merge is no pr-merge try, and a status in an ok result is no failure
+
+    def test_cc_red_a_failed_local_merge_is_no_try_of_a_pr_merge(self):
+        # Catches: a failed `git merge origin/main` read as a try of merging the PR, so the line that says the PR cannot be
+        # merged passed. A local merge is no pr-merge route, so the turn holds no try of that act: the no-try variant fires.
+        line = "I cannot merge PR 12: `git merge origin/main` conflicted."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("git merge origin/main", "tu_g"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_an_ok_result_quoting_http_500_is_no_failed_try(self):
+        # Catches: an HTTP 500 quoted in the output of an ok `gh pr list` read as a failure, so the line that says GitHub
+        # cannot be reached passed. A status counts as a failure only in an error result: the error flag or a non-zero exit.
+        line = "I cannot reach GitHub: `gh pr list` returned nothing."
+        out = self.stop([trg.human("reach GitHub"), use("Bash", {"command": "gh pr list"}, "tu_l"),
+                         done("tu_l", "HTTP 500 quoted in the log; no PRs listed."), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_failed_gh_pr_merge_still_backs_the_merge_claim(self):
+        # Control: a failed `gh pr merge 12` is a pr-merge try, so the merge claim that names it passes.
+        line = "I cannot merge PR 12: `gh pr merge 12` failed."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed gh pr merge 12 backs the merge claim")
+
+    def test_cc_green_an_error_result_with_http_500_still_backs_the_reach_claim(self):
+        # Control: an error result that carries HTTP 500 is a failed try of GitHub reach, so the reach claim passes.
+        line = "I cannot reach GitHub: `gh pr list` returned nothing."
+        out = self.stop([trg.human("reach GitHub"), use("Bash", {"command": "gh pr list"}, "tu_l"),
+                         done("tu_l", "HTTP 500 Internal Server Error", error=True), landed_reply(line)])
+        self.assert_passes(out, "an error result with HTTP 500 backs the reach claim")
+
 
 if __name__ == "__main__":
     unittest.main()
