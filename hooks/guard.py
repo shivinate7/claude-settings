@@ -3939,6 +3939,16 @@ def impeccable_shell_hit(segment: str) -> str:
 
 # A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
+# What runs a here-string, by the command word around it. Before it: `iex` or `Invoke-Expression` takes it as
+# its argument (a `(` may open it), or `[scriptblock]::Create(` builds a block from it. After it, the closing
+# parens of such a call, then a pipe into iex, Invoke-Expression, or pwsh or powershell that reads stdin (only
+# switch words and a lone `-`, so `-File x` is no run). A here-string held in a variable or fed to
+# Set-Content is data and matches neither.
+_HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
+                              r"|\[scriptblock\]::Create\()[ \t]*\Z", re.I).search
+_HERE_RUN_AFTER = re.compile(r"[ \t)]*\|[ \t]*(?:(?:iex|Invoke-Expression)\b"
+                             r"|(?:[^\s|;&]*[/\\])?(?:pwsh|powershell)(?:\.exe)?(?:[ \t]+-[\w-]+)*(?:[ \t]+-)?"
+                             r"[ \t]*(?:$|[;&|)]))", re.I | re.M).match
 
 
 # A local copy of `_substitutions`' backtick-span rule (guard_env.py), which is a scan loop with no regex to
@@ -3952,10 +3962,14 @@ def shell_run_texts(raw: str) -> list:
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
     backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
     ruby and node run those as a shell; a body that only python runs adds nothing, since a python span is no
-    shell. The limits: such a body is not read as shell lines, and a here-string body is allowed."""
+    shell. A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_HERE_RUN_BEFORE`,
+    `_HERE_RUN_AFTER`) joins as its lines. The limits: a quoted body that no shell runs is not read as shell
+    lines, and a here-string held as data is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
+            if _HERE_RUN_BEFORE(found.string[:found.start()]) or _HERE_RUN_AFTER(found.string, found.end()):
+                texts.extend(found.group(2).split("\n"))   # a shell runs it: each line is a shell line
             if found.group(1) == '"':
                 texts.extend(t for t, _ in _substitutions(found.group(2), powershell=True,
                                                           heredoc=True)[0][:-1])

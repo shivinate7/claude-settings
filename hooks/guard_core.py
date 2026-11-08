@@ -821,9 +821,10 @@ _SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + _RUNNER_TAIL).fullmatch
 
 # The runners a body of python, or of anything else, can have: python alone, and the rest.
 _PYTHON_HEADER = _interpreter_header("python[\\d.]*")
-_OTHER_HEADER = _interpreter_header(_SHELLS + "|perl|ruby|node")
+_OTHER_INTERPRETERS = "|".join(word for word in _INTERPRETERS.split("|") if not word.startswith("python"))
+_OTHER_HEADER = _interpreter_header(_OTHER_INTERPRETERS)
 _PYTHON_RUNNER = re.compile(r"python[\d.]*(?:\.exe|\.cmd)?").fullmatch
-_OTHER_RUNNER = re.compile(r"(?:" + _SHELLS + "|perl|ruby|node" + _RUNNER_TAIL).fullmatch
+_OTHER_RUNNER = re.compile(r"(?:" + _OTHER_INTERPRETERS + _RUNNER_TAIL).fullmatch
 
 
 def _plain_words(words):
