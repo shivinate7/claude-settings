@@ -145,7 +145,7 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
                         Posts nothing: the lane posts it as a PR comment.
                         --findings V: none, "<n>, this PR" or "<n>, follow-up #<pr>[, ...]". Required.
 merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, batch, batch run, lane round n, lane: <cause>, waits on <id>,
-                        blocked on #N, or NO NEXT ACT) and its age in hours, read from GitHub alone. `lane lint red` comes before `batch`: a
+                        findings unknown: <why>, blocked on #N, or NO NEXT ACT) and its age in hours, read from GitHub alone. `lane lint red` comes before `batch`: a
                         `Lint: red <live head> <steps>` comment, posted by `merge --build-batch`, names the live head. A draft with no record reads `lane round 1`; a PR
                         with the `batch` label reads `batch run`. When main's latest run is red, each batch line adds `held by main red <age>`.
                         A done record whose Findings are not filed reads `lane: <cause>`, where the cause is `findings not filed: this PR`,
