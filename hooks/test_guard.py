@@ -20541,6 +20541,31 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def _read_row(what, expect, template, rule=None):
+    """One row of the read-into-another-checkout block, as its own case, so a failure names one cause.
+    `template` is the shell command, with %s where the other checkout's path goes. The session stands in
+    the primary checkout, as in the incident. The red rows fail on one cause: a sed, which is not a
+    printer, reads a quoted path whose file name holds a MUTATING_COMMAND word (install, copy, move).
+    `_words_of` repeats the quoted word in the text the write scan reads, so `writes_to`, in its
+    command-less MUTATING_COMMAND search, finds that word right before a copy of the path. Not the cause:
+    a `W=` variable or a `| head`. The sed read unquoted passes, and so does grep or cat on the quoted
+    path, since those are printers whose quoted words are data. Rule: other-checkout (hooks/guard.py,
+    OTHER_CHECKOUT_REASON). Causes: hooks/guard_frozen.py, writes_to and _words_of."""
+    def case():
+        primary, _lane_a, lane_b, _ = _cross_checkout_fixture("xcoread")
+        write(os.path.join(lane_b, "install.sh"), "echo 1\n")
+        write(os.path.join(lane_b, "docs", "copy.md"), "line 1\n")
+        write(os.path.join(lane_b, "docs", "decisions", "x.md"), "line 1\n")
+        write(os.path.join(lane_b, "hooks", "guard_kill.py"), "_nowindow = 1\n")
+        write(os.path.join(lane_b, "hooks", "git_reads.py"), "_nowindow = 2\n")
+        problems = []
+        _expect_call(problems, what, expect, "Bash", primary, None, template % slash(lane_b), rule=rule)
+        if problems:
+            return False, problems[0]
+        return True, what
+    return case
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -21989,6 +22014,44 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: the incident's reads through a $W variable reach another checkout and pass",
+     _read_row("the incident's reads through a $W variable into another checkout", "allow",
+               'W=%s; sed -n 28p "$W/docs/decisions/x.md"; grep -n "_nowindow" "$W/hooks/guard_kill.py" '
+               '"$W/hooks/git_reads.py" | head; sed -n 710,716p "$W/install.sh"')),
+    ("worktree-home: a quoted sed read of install.sh in another checkout passes",
+     _read_row("a quoted sed read of install.sh in another checkout", "allow",
+               'sed -n 710,716p "%s/install.sh"')),
+    ("worktree-home: a quoted sed read of docs/copy.md in another checkout passes",
+     _read_row("a quoted sed read of docs/copy.md in another checkout", "allow",
+               'sed -n 28p "%s/docs/copy.md"')),
+    ("worktree-home: a plain cat of a file in another checkout passes",
+     _read_row("a plain cat of a file in another checkout", "allow", "cat %s/src/app.py")),
+    ("worktree-home: a quoted cat of install.sh in another checkout passes",
+     _read_row("a quoted cat of install.sh in another checkout", "allow", 'cat "%s/install.sh"')),
+    ("worktree-home: a quoted grep of install.sh in another checkout passes",
+     _read_row("a quoted grep of install.sh in another checkout", "allow",
+               'grep -n _nowindow "%s/install.sh"')),
+    ("worktree-home: an unquoted sed read of install.sh in another checkout passes",
+     _read_row("an unquoted sed read of install.sh in another checkout", "allow",
+               "sed -n 710,716p %s/install.sh")),
+    ("worktree-home: a variable read, unquoted, of install.sh in another checkout passes",
+     _read_row("a variable read, unquoted, of install.sh in another checkout", "allow",
+               "W=%s; sed -n 710,716p $W/install.sh")),
+    ("worktree-home: a quoted sed read of a name with no write word in another checkout passes",
+     _read_row("a quoted sed read of a name with no write word in another checkout", "allow",
+               'sed -n 28p "%s/docs/decisions/x.md"')),
+    ("worktree-home: a sed -i into a file in another checkout is refused",
+     _read_row("a sed -i into a file in another checkout", "deny",
+               "sed -i 's/line/LINE/' %s/docs/decisions/x.md", rule="other-checkout")),
+    ("worktree-home: a quoted sed -i of install.sh in another checkout is refused",
+     _read_row("a quoted sed -i of install.sh in another checkout", "deny",
+               'sed -i "s/echo/ECHO/" "%s/install.sh"', rule="other-checkout")),
+    ("worktree-home: an echo redirect into another checkout is refused",
+     _read_row("an echo redirect into another checkout", "deny",
+               "echo x > %s/docs/decisions/x.md", rule="other-checkout")),
+    ("worktree-home: a cp into another checkout is refused",
+     _read_row("a cp into another checkout", "deny", "cp src/app.py %s/src/b.py",
+               rule="other-checkout")),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
@@ -29039,6 +29102,19 @@ LOG_RULE_FAMILY = (
     ("liveness: session_is_live says True for a repeated-hour start (01:30 CST)", "branch-worktree"),
     ("worktree-home: orchestrator", "worktree-home"),
     ("worktree-home: any session's write into another checkout of its clone", "worktree-home"),
+    ("worktree-home: the incident's reads through a $W variable", "worktree-home"),
+    ("worktree-home: a quoted sed read of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: a quoted sed read of docs/copy.md in another checkout", "worktree-home"),
+    ("worktree-home: a plain cat of a file in another checkout", "worktree-home"),
+    ("worktree-home: a quoted cat of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: a quoted grep of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: an unquoted sed read of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: a variable read, unquoted, of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: a quoted sed read of a name with no write word in another checkout", "worktree-home"),
+    ("worktree-home: a sed -i into a file in another checkout", "worktree-home"),
+    ("worktree-home: a quoted sed -i of install.sh in another checkout", "worktree-home"),
+    ("worktree-home: an echo redirect into another checkout", "worktree-home"),
+    ("worktree-home: a cp into another checkout", "worktree-home"),
     ("worktree-home: any session's write into another checkout is refused after a cd", "worktree-home"),
     ("worktree-home: an absolute cd into another checkout is refused after an untracked move", "worktree-home"),
     ("worktree-home: pushd into another checkout", "worktree-home"),
