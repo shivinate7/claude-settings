@@ -766,7 +766,10 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
    block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
    lacks either block, when the live page has no `designData` block, or when either file has a
-   broken or doubled block. Republish `<new page>` to the same URL
+   broken or doubled block. Before the republish, check the pictures of the open items against `<new page>`, never the live page:
+   `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <new page>` (`<folder>` is the
+   fetch of "Keep a copy in the repo", step 2). It writes nothing. Hold the republish on any exit but 0, as in the other two
+   republish routes (exit 4 a held item, exit 3 `checks unknown`, exit 2 no page file). Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
    `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it

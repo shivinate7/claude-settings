@@ -6,13 +6,15 @@ the sentence a miss quotes is the page's. hooks/guard.py (the write of an item) 
 both call it here. `check_items` picks the fetched items that carry a picture and that are not closed or rulings, and runs the
 check on each, with the fetched answers: the page's own `isAnswered` skips an answered item, so no copy of it lives here.
 
-Cost: one node and one Chromium start per pictured open item. No git, no network, no timer.
+Cost: one node and one Chromium start per pictured open item, until the run's time budget (CHECK_BUDGET) is spent. Then no
+new start: each item left is counted as unchecked. No git, no network, no timer; the clock is read once per item.
 """
 import json
 import os
 import shutil
 import subprocess  # TimeoutExpired only; the child starts through _nowindow
 import sys
+import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(HERE, "..", "..", "hooks"))
@@ -20,6 +22,7 @@ sys.path.append(os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
 
 CHECK_DESIGNS = "check_designs.mjs"
 CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
+CHECK_BUDGET = 60  # seconds for the whole run of one export or --check: no run starts after it; the last one started keeps its cap
 
 
 def run_check_designs(page_file, item, cap=CHECK_DESIGNS_CAP, answers=None):
@@ -78,14 +81,20 @@ def pictured_items(items):
     return pictured, None
 
 
-def check_items(page_file, items, answers):
+def check_items(page_file, items, answers, budget=CHECK_BUDGET):
     """([(n, sentence)], why) for the fetched `items` and `answers` ({doc id: doc}) against `page_file`. Each pictured item
     (pictured_items) is run, with `answers`: the checker skips an item the page draws as answered, by the page's own
-    `isAnswered`. `why` is the first reason a run was unknown, else None. One item's unknown never hides another's hold.
-    No time budget spans the items: no hook timeout applies, and each run has its own cap."""
+    `isAnswered`. `why` is the first reason a run was unknown, else None; `time budget spent, <k> item(s) not checked` is
+    added when `budget` seconds (CHECK_BUDGET, set under the Bash default of 120 s) ran out before the last item. The first
+    item always runs, and a run that began is never cut short. One item's unknown never hides another's hold."""
     pictured, why = pictured_items(items)
     held = []
-    for item in pictured:
+    start = time.monotonic()
+    for index, item in enumerate(pictured):
+        if time.monotonic() - start >= budget:
+            left = "time budget spent, %d item(s) not checked" % (len(pictured) - index)
+            why = why + "; " + left if why else left
+            break
         try:
             code, text = run_check_designs(page_file, item, CHECK_DESIGNS_CAP, answers)
         except Exception as err:
