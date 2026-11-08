@@ -96,10 +96,13 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
         return cmd
 try:
     # the one home of the notice tag and the statuses that close a task
-    from shared_names import TASK_NOTIFICATION_TAG, TASK_TERMINAL_STATUSES
+    from shared_names import TASK_NOTIFICATION_TAG
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
-    TASK_TERMINAL_STATUSES = ()
+try:
+    from shared_names import TASK_TERMINAL_STATUSES
+except ImportError:  # a stale shared_names (mid-pull) must not cost the tag; recovery default, same four as shared_names
+    TASK_TERMINAL_STATUSES = ("completed", "failed", "killed", "stopped")
 # The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
 NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 

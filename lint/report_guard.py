@@ -646,9 +646,11 @@ def _finish_notice(rec, use_id):
         import shared_names
     except ImportError:
         return False
+    # a stale shared_names (mid-pull) may lack the statuses: recovery default, same four as shared_names
+    terminal = getattr(shared_names, "TASK_TERMINAL_STATUSES", ("completed", "failed", "killed", "stopped"))
     for part in text.split(shared_names.TASK_NOTIFICATION_TAG):
         status = re.search(r"<status>(.*?)</status>", part)
-        if tag in part and status and status.group(1).strip().lower() in shared_names.TASK_TERMINAL_STATUSES:
+        if tag in part and status and status.group(1).strip().lower() in terminal:
             return True
     return False
 
