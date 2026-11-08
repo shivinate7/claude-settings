@@ -108,8 +108,10 @@ def uses_fresh_dir():
 '''
 
 QUOTED = '''# quoted_case is listed in NOTICE_ROWS once the table exists
+# NOTICE_ROWS = (quoted_case,)
 HINT = "quoted_case, Don't wait for it"
 OPENER = "# quoted_case"
+SNIPPET = "@case\\ndef quoted_case():"
 BLOCK = """
 quoted_case
 """
