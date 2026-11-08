@@ -55,26 +55,20 @@ class ReviewRound:
     A round number with the same N passes only in a gloss, and only when the id names a decision file. That file is
     in a decisions folder that the layout gives for the checked repo, or in the one of the claude-settings copy that
     holds this check, so a pinning repo can cite a claude-settings decision. A folder that cannot be read holds nothing.
-    The gloss is one of three forms. The parentheses open with the id, as in "(decision <id>, ...)",
-    "(see decision <id>, ...)", "(decision <id>: ...)" or "(`<id>`, ...)". Or the parentheses come right after the id,
-    as in "Decision <id> (...)". Or a round number comes right before parentheses that open with a marked id, as in
-    "after round N (decision <id>)". A word between the round and the parentheses keeps it flagged, and so does a
-    past-tense word within three words before the round. The "review" form takes the first two forms only.
+    The gloss is one of two forms. The parentheses open with the id and a comma, as in "(decision <id>, ...)",
+    "(see decision <id>, ...)" or "(`<id>`, ...)". Or the parentheses come right after the id, as in
+    "Decision <id> (...)". The "review" form passes inside either one.
     Anything else stays flagged: the same words outside the gloss, an id with no decision file, an id holding
-    another number, a bare id with no marker, and parentheses that hold the id later on."""
+    another number, a bare id with no marker, a colon after the id, a round number right before parentheses that
+    hold the id, and parentheses that hold the id later on."""
     ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
                        r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
                        r"|\breview\s+(?:round|finding|points?)\b", re.I)
     ID = r"(?P<id>[a-z0-9][a-z0-9-]*)"
-    # Form (i) needs a marker: "decision" with optional backticks, or backticks alone. A colon closes only "decision".
-    OPENS = re.compile(r"\s*(?:(?:see\s+)?(?P<dec>decision)\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*(?(dec)[,:]|,)", re.I)
+    # The opening form needs a marker: "decision" with optional backticks, or backticks alone.
+    OPENS = re.compile(r"\s*(?:(?:see\s+)?decision\s+(?P<q>`?)|`)" + ID + r"(?(q)(?P=q)|`)\s*,", re.I)
     BEFORE = re.compile(r"(?<![\w`-])(`?)" + ID + r"\1\s*$", re.I)
-    # Form (iii): the parentheses straight after a round number, opening with a marked id.
-    AFTER = re.compile(r"\s*\(\s*(?:see\s+)?decision\s+(?P<q>`?)" + ID + r"(?P=q)\s*[,:)]", re.I)
     NUMBER_AFTER = re.compile(r"\s*(\d+)")
-    # A past-tense word before the round makes the sentence tell what happened. The irregular verbs are listed.
-    PAST = re.compile(r"^(?:\w{2,}ed|gave|made|ran|took|kept|went|got|came|began|did|found|built|wrote|broke|left|held)$", re.I)
-    REACH = 3
 
     def __init__(self):
         self.top, self.known = None, {}
@@ -101,18 +95,6 @@ class ReviewRound:
                        for folder in layout.candidates(root, "decisions"))
         except (layout.LayoutError, KeyError, OSError):
             return False
-
-    def told_before(self, text, start):
-        """True when a past-tense word stands in the few words before start, in the same sentence."""
-        words = re.findall(r"[\w'-]+", re.split(r"[.;:!?]", text[:start])[-1])
-        return any(self.PAST.match(w) for w in words[-self.REACH:])
-
-    def directly_glossed(self, text, m, n):
-        """True when m is a round number with parentheses right after it that open with a real marked id."""
-        if m.group(0).lower().startswith("review") or self.told_before(text, m.start()):
-            return False
-        g = self.AFTER.match(text, m.end())
-        return bool(g) and self.real(g.group("id"), n)
 
     def number(self, text, m):
         """The round number a match names: its own digits, or the digits after the "review" form. None for the rest."""
@@ -141,9 +123,8 @@ class ReviewRound:
         spans = self.paren_spans(text)
         for m in self.ROUND.finditer(text):
             n = self.number(text, m)
-            if n and (any(lo < m.start() < hi and self.real(ident, n)
-                          for lo, hi in spans for ident in self.gloss_ids(text, lo))
-                      or self.directly_glossed(text, m, n)):
+            if n and any(lo < m.start() < hi and self.real(ident, n)
+                         for lo, hi in spans for ident in self.gloss_ids(text, lo)):
                 continue
             yield m
 
