@@ -7,7 +7,7 @@ branch (the exclude list likewise only shrinks). A module renamed since that ref
 Against main, only entries the branch's merge-base with main also holds count, so a branch merely behind main passes.
 Known limit: a move whose edits fall below git's 50% rename similarity reads as a plain delete and may leave the list.
 Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
-With a --base whose base..HEAD changes only paths in standard.json's not_code list, the language layers (every tool
+With a --base whose base..HEAD changes only paths with an extension in standard.json's docs_only list, the language layers (every tool
 that needs code or node_modules) are skipped with one line each; the shrink, comment and ruling checks still run.
 With no --base the layers always run.
 Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
@@ -131,14 +131,15 @@ def extension(path):
 
 
 def changes_code(root, base, std):
-    """True when base..HEAD touches a path whose extension is not in standard.json's not_code list, or when the
-    diff cannot be read (unknown is not docs-only, so the layers run). A path with no extension counts as code."""
+    """False only when every path base..HEAD touches, deleted paths included, has an extension in standard.json's
+    docs_only list. Any other path (a config file the layers read, such as a .json, .toml or .yml, included), a path
+    with no extension, or a diff that cannot be read is True, so the layers run."""
     p = sh(["git", "diff", "--name-only", "--no-renames", "-z", "%s..HEAD" % base], root, text=False)
     if p.returncode:
         return True
-    skip = set(std["not_code"]["extensions"])
+    docs = set(std["docs_only"]["extensions"])
     names = [n.decode("utf-8", "replace") for n in p.stdout.split(b"\0") if n]
-    return any(extension(n) not in skip for n in names)
+    return any(extension(n) not in docs for n in names)
 
 
 def classify(root, files, std):
@@ -414,7 +415,7 @@ def main(argv):
                 print("code-check: %s %s: skipped, %s" % (lang, layer, cell["skip"]))
                 continue
             if docs_only:
-                print("code-check: %s %s: skipped, base..HEAD changes no code path" % (lang, layer))
+                print("code-check: %s %s: skipped, base..HEAD changes only docs paths" % (lang, layer))
                 continue
             plan = RUNNERS[cell["run"]](ctx)
             if plan is None:

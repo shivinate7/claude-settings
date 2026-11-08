@@ -1,6 +1,10 @@
 {
   "tools": {"ruff": "0.17.3", "mypy": "2.4.0", "shellcheck-py": "0.11.0.1", "typescript": "5.9.3", "@astrojs/check": "0.9.12"},
   "layers": ["typecheck", "lint", "format"],
+  "docs_only": {
+    "reason": "paths no layer reads: a diff of only these skips the layers; any other path, even one in not_code, runs them",
+    "extensions": [".md", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".webp"]
+  },
   "not_code": {
     "reason": "prose, data and markup: nothing to type check or lint",
     "extensions": [".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".tmpl", ".html", ".css", ".svg", ".png", ".jpg", ".jpeg", ".webp", ".csv", ".webmanifest", ".gitignore", ".gitattributes", ".ste-lint-exclude", ".entitlements", ".worktreeinclude", ".example", ".gz", ".xlsx", ".onnx", ".npz", ".nvmrc", ".npmrc"]

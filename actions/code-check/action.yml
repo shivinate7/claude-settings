@@ -10,7 +10,7 @@ description: >
   name the file does not export, or with no extension; TypeScript-only syntax. checkJs is on for import
   diagnostics only; type errors in plain JS are dropped, so they are not red.
   Formatter layers wait for o2 and do not run.
-  When base is given and base..HEAD changes only paths in standard.json's not_code list (docs-only), the tool
+  When base is given and base..HEAD changes only paths with an extension in standard.json's docs_only list, the tool
   layers are skipped, so a docs-only PR needs no node_modules; the other checks still run.
   It also runs the comment check on lines the change adds (Python, JS/TS, Astro and Swift), against base.
   The JS, TS and Astro part runs the pinned TypeScript through npx, so the runner needs network for it.
