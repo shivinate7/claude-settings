@@ -4,9 +4,9 @@
     python3 lint/find_time_pinned.py <root> [--json]
 
 Lists the tests whose verdict can move with the real clock: a fixed wait, a bound on elapsed time,
-a time limit, or a read of the real date. Decision test-strategy-reset, point 2, covers the first
-three (no fixed sleep, no wall-clock bound); decision test-practices P5 covers the date read. The
-tool fixes none, and it writes nothing. Each finding has one category:
+a time limit, or a read of the real date. Decision test-practices P5 covers all four: no fixed
+sleep, a synthetic clock for a verdict that depends on elapsed time, a hang guard allowed, and a
+date read counted as a real clock. The tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
@@ -52,8 +52,8 @@ Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source 
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
 summary. A file that cannot be read or parsed is unread, never clean.
 Exit 0: no time-pinned finding, nothing unread (hang-guard rows do not count). Exit 1: a finding that is
-not a hang guard. Exit 2: the root cannot be read, or nothing
-found but some file unread, so the result is unknown.
+not a hang guard. Exit 2: the root cannot be read, or some file
+is unread and nothing but hang guards was found, so the result is unknown.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
