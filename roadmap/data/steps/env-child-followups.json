@@ -1,0 +1,11 @@
+{
+  "status": "doing",
+  "lane": "",
+  "title": "The env guard covers repeated docker value flags and npm exec, npx and pnpm exec",
+  "why": "Two env gaps, taken as a PR stacked on #1776 (coordinator, 00:00 CST Nov 8).",
+  "note": "Lane name and stack from the coordinator; the step did not exist on the roadmap. Related open item 399 (env-guard-reads-code). Filed 00:02 CST Nov 8.",
+  "phase": "now",
+  "order": 544,
+  "owner": "triage",
+  "updatedAt": "2026-11-08T00:00:00-06:00"
+}
