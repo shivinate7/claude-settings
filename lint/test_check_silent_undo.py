@@ -2644,10 +2644,13 @@ class RevivedNote(NotesFixture, unittest.TestCase):
 
 
 class NoteRowEdits(NotesFixture, unittest.TestCase):
-    """An edit in place to a note row the base holds is a finding. Rows the branch adds, rows it deletes, one wording of a
-    duplicated slug that it deletes, and main's edits to base rows that a merge brings in all pass. Each case that expects a
-    pass first asserts its scope: the same branch edits a base row and gets a finding. That keeps the case red on a check that
-    never reads rows, and keeps a pass from being a check that flags nothing."""
+    """An edit in place to a note row the base holds is a finding. So is a base row whose slug and text change together, and a
+    notes file that git moves with an edited row. Rows the branch adds, rows it deletes, one wording of a duplicated slug that
+    it deletes, a second row under a base slug while the base row stays, a trailing space, CRLF line ends, and main's edits to
+    base rows that a merge brings in all pass. A base the check cannot read is Unknown. Each case that expects a pass first
+    asserts its scope: the same branch edits a base row and gets a finding. That keeps the case red on a check that never
+    reads rows, and keeps a pass from being a check that flags nothing. A pure rename has no edit to scope it, so its scope is
+    the same rename with a row edited."""
 
     BASE = "- base-note: a finding the base holds (lint/check_base.py)"
     BASE_EDITED = "- base-note: a finding the base holds, reworded (lint/check_base.py)"
@@ -2657,6 +2660,11 @@ class NoteRowEdits(NotesFixture, unittest.TestCase):
     THIRD = "- third-note: a finding the base holds (lint/check_third.py)"
     OWN_EDITED = "- branch-note: a finding the branch adds, reworded (lint/check_branch.py)"
     OWN2 = "- second-branch-note: a finding the branch adds (lint/check_second.py)"
+    RENAMED = "- renamed-note: a finding the base holds, reworded (lint/check_base.py)"
+    UNRELATED = "- fresh-note: a note on the build cache (lint/check_cache.py)"
+    BASE_ALT = "- base-note: a second wording of the same slug (lint/check_base.py)"
+    BASE_TRAILING = BASE + " "  # the base row with one trailing space and no other change
+    MOVED = "docs/debts/notes-moved.md"
 
     @staticmethod
     def sweep(edited=False):
@@ -2762,6 +2770,135 @@ class NoteRowEdits(NotesFixture, unittest.TestCase):
         self.assertNotIn(self.OTHER_ALT, self.notes_at("HEAD"), "premise: the branch deletes the second wording")
         self.assertEqual(self.named(got, "other-note"), [],
                          "deleting one wording of a duplicated slug, with the other kept, is a finding: %r" % got)
+
+    def move_notes(self, lines, msg):
+        """Renames the notes file to MOVED in one commit, and writes `lines` there when given. -> the sha."""
+        self.r.sh("mv", self.NOTES, self.MOVED)
+        if lines is not None:
+            self.r.put(self.MOVED, self.text(*lines))
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", msg)
+        return self.r.sh("rev-parse", "HEAD")
+
+    def git_sees_the_notes_moved(self):
+        """True when git reads the notes file as renamed from its base path to MOVED, between origin/main and head."""
+        for line in self.r.sh("diff", "--name-status", "-M", "origin/main", "HEAD").splitlines():
+            status, *paths = line.split("\t")
+            if status.startswith("R") and paths == [self.NOTES, self.MOVED]:
+                return True
+        return False
+
+    def test_a_base_row_renamed_and_reworded_is_a_finding(self):
+        """The slug and the text change in one commit: the base row left the file, and no row with its text came with it."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.RENAMED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertFalse(any(line.startswith("- base-note:") for line in self.notes_at("HEAD")), "premise: base-note is gone at head")
+        self.assertIn(self.RENAMED, self.notes_at("HEAD"), "premise: the renamed row is at head")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1,
+                         "a base row renamed and reworded in one commit is not a finding: %r" % got)
+
+    def test_a_base_row_deleted_beside_an_unrelated_add_passes(self):  # control
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.THIRD), branch=(self.BASE_EDITED, self.THIRD),
+                   main=(self.BASE, self.OTHER, self.THIRD, self.MAIN))
+        self.commit_notes("add a row unrelated to the deleted one", (self.BASE_EDITED, self.THIRD, self.UNRELATED))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertNotIn(self.OTHER, self.notes_at("HEAD"), "premise: the branch deletes other-note")
+        self.assertIn(self.UNRELATED, self.notes_at("HEAD"), "premise: the branch adds its unrelated row")
+        self.assertEqual(self.named(got, "other-note"), [],
+                         "a base row the branch deletes, beside an unrelated add, is a finding: %r" % got)
+        self.assertEqual(self.named(got, "fresh-note"), [], "the unrelated row the branch adds is a finding: %r" % got)
+
+    def test_a_second_row_under_a_base_slug_with_the_base_row_kept_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE, self.OTHER_EDITED),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.commit_notes("add a second wording under the base slug", (self.BASE, self.OTHER_EDITED, self.BASE_ALT))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "other-note", self.NOTES)), 1, "scope: the other-note edit is not a finding: %r" % got)
+        self.assertIn(self.BASE, self.notes_at("HEAD"), "premise: the base row is kept unchanged")
+        self.assertIn(self.BASE_ALT, self.notes_at("HEAD"), "premise: the branch adds the second wording")
+        self.assertEqual(self.named(got, "base-note"), [],
+                         "a second row under a base slug, with the base row kept, is a finding: %r" % got)
+
+    def test_a_base_row_deleted_then_re_added_with_new_text_is_a_finding_with_no_delete_and_add_remedy(self):
+        """The finding is right; its remedy must not tell the user to delete the row and add it again, which this check flags again."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.OTHER,), main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertNotIn(self.BASE, self.notes_at("HEAD"), "premise: the branch deletes base-note")
+        self.commit_notes("re-add base-note with new wording", (self.OTHER, self.BASE_EDITED))
+        self.assertIn(self.BASE_EDITED, self.notes_at("HEAD"), "premise: the re-add put base-note back, reworded")
+        got = self.r.verdict()
+        named = self.named(got, "base-note", self.NOTES)
+        self.assertEqual(len(named), 1, "a base row deleted and re-added with new text is not a finding: %r" % got)
+        for phrase in ("re-add", "add it back", "delete it and add"):
+            self.assertNotIn(phrase, named[0].lower(),
+                             "the finding's remedy says %r, a delete and an add of the same slug, which this check flags again: %r"
+                             % (phrase, named[0]))
+
+    def test_a_trailing_space_on_a_base_row_is_not_an_edit(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_TRAILING, self.OTHER_EDITED),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertIn(self.BASE_TRAILING, self.notes_at("HEAD"), "premise: base-note carries a trailing space at head")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "other-note", self.NOTES)), 1, "scope: the other-note edit is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "base-note"), [],
+                         "a base row that differs from the base only by a trailing space is an edit: %r" % got)
+
+    def test_a_notes_file_with_crlf_line_ends_and_the_same_rows_is_not_an_edit(self):
+        self.start(union=False, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE, self.OTHER_EDITED),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        crlf = "".join(line + "\r\n" for line in (self.HEADING, self.BASE, self.OTHER_EDITED))
+        self.r.commit("the notes file with CRLF line ends", docs__debts__notes_md=crlf)
+        with open(os.path.join(self.r.dir, *self.NOTES.split("/")), "rb") as f:
+            self.assertIn(b"\r\n", f.read(), "premise: the notes file at head has CRLF line ends")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "other-note", self.NOTES)), 1, "scope: the other-note edit is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "base-note"), [],
+                         "a CRLF notes file with the same rows is an edit of base-note: %r" % got)
+
+    def test_a_notes_file_moved_with_a_base_row_edited_is_a_finding(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.THIRD), branch=(self.BASE, self.OTHER, self.THIRD, self.OWN),
+                   main=(self.BASE, self.OTHER, self.THIRD, self.MAIN))
+        self.move_notes((self.BASE_EDITED, self.OTHER, self.THIRD, self.OWN), "move the notes file and reword a base row")
+        self.assertEqual(self.r.sh("ls-tree", "--name-only", "HEAD", "--", self.NOTES), "",
+                         "premise: the layout's notes path is absent at head")
+        self.assertTrue(self.git_sees_the_notes_moved(), "premise: git reads the notes file as renamed")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note")), 1,
+                         "a base row edited in a notes file moved in the same commit is not a finding: %r" % got)
+
+    def test_a_pure_rename_of_the_notes_file_passes(self):
+        """A rename with no edit. Its scope is test_a_notes_file_moved_with_a_base_row_edited_is_a_finding: the same rename, with a row edited."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.THIRD), branch=(self.BASE, self.OTHER, self.THIRD, self.OWN),
+                   main=(self.BASE, self.OTHER, self.THIRD, self.MAIN))
+        self.move_notes(None, "move the notes file and change nothing else")
+        self.assertTrue(self.git_sees_the_notes_moved(), "premise: git reads the notes file as renamed")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a pure rename of the notes file got a finding: %r" % got)
+
+    def orphan_notes_head(self):
+        """A repo whose branch has no merge base with origin/main, and a notes file at head that holds a note."""
+        self.r = base_repo()
+        r = self.r
+        r.sh("checkout", "-q", "--orphan", "feat")
+        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        r.commit("an orphan branch with a note", docs__debts__notes_md=self.text(self.BASE))
+        self.assertEqual(r.sh("merge-base", "origin/main", "HEAD", ok=False), "", "premise: the branch has no merge base")
+        self.assertIn(self.BASE, self.notes_at("HEAD"), "premise: the head holds a note")
+
+    def test_a_notes_file_at_head_with_no_merge_base_is_unknown_not_clear(self):
+        """The base cannot be read, so the check has nothing to compare the head's row with. It must raise Unknown, not pass."""
+        self.orphan_notes_head()
+        try:
+            got = C.edited_notes(self.r.dir, "origin/main", "HEAD")
+        except C.Unknown:
+            return
+        self.fail("edited_notes read an unreadable base as clear: it returned %r instead of raising Unknown" % got)
+
+    def test_an_unreadable_base_is_unknown_through_the_whole_check(self):  # control
+        self.orphan_notes_head()
+        with self.assertRaises(C.Unknown):
+            C.check(self.r.dir, "origin/main", "HEAD")
 
 
 if __name__ == "__main__":
