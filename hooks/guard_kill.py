@@ -699,6 +699,18 @@ _PS_UNSET = ("$null", "")
 # A script block or a group that runs its body: `{`, `&{`, `.{`, `(`, `$(`, `@(`.
 _PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
 _PS_GLUED_BRACE = re.compile(r"(?<!\$)\{")
+_PS_STATEMENT_START = "\0"   # `_open_script_blocks` puts it before text glued after a block's `}`
+_PS_COND_HEAD = re.compile(r"[A-Za-z]+\(")
+
+
+def _paren_end(text, at):
+    """The index of the `)` that closes the `(` at `at`, or -1 when it is not closed."""
+    depth = 0
+    for i in range(at, len(text)):
+        depth += (text[i] == "(") - (text[i] == ")")
+        if not depth:
+            return i
+    return -1
 
 
 def _open_script_blocks(tokens):
@@ -722,20 +734,25 @@ def _open_script_blocks(tokens):
         out.append(head)
         for part in rest:
             out.append("{")
-            # Text glued after the block's own `}` is split off from the body when it is a keyword
-            # (`try{...}catch`) or when the block is empty (`{}$env:X=1`, a statement right after
-            # `{`). After a non-empty body it stays joined, so a set there is judged as the body's
-            # value and never as a fresh statement.
-            body, brace, tail = part.partition("}")
-            if brace and (not body.rstrip(")") or re.match(r"[A-Za-z]", tail)):
-                part = body
-                tail = tail.rstrip("})")
-            else:
-                tail = ""
-            if part.rstrip("})"):   # a `{` that ends its token leaves no empty piece behind
-                out.append(part.rstrip("})"))
-            if tail:
-                out.append(tail)
+            # Each `}` ends a block, so the text glued after it is a new statement, whatever
+            # block it closed (`if`, `else`, `try`, `catch`, `do`): it is marked with
+            # `_PS_STATEMENT_START` and judged like a statement after `;`.
+            body, *tails = part.split("}")
+            if body.rstrip(")"):   # a `{` that ends its token leaves no empty piece behind
+                out.append(body.rstrip(")"))
+            for tail in tails:
+                tail = tail.lstrip(")")
+                # `while(...)` or `until(...)` ends a `do{}` block: the text after its condition
+                # is a statement too.
+                head = _PS_COND_HEAD.match(tail)
+                cond = _paren_end(tail, head.end() - 1) if head else -1
+                if cond > 0:
+                    out += [_PS_STATEMENT_START, tail[:cond + 1]]
+                    tail = tail[cond + 1:]
+                while tail.endswith(")") and tail.count(")") > tail.count("("):
+                    tail = tail[:-1]
+                if tail:
+                    out += [_PS_STATEMENT_START, tail]
     return out
 
 
@@ -748,7 +765,8 @@ def _ps_env_set(tokens, watch) -> str:
     tokens = _open_script_blocks(tokens)
     start = _skip_assignments_and_keywords(tokens)
     for i, tok in enumerate(tokens):
-        if i != start and not (i and (tokens[i - 1] in ("{", "(", "&") or tokens[i - 1].endswith("{"))):
+        if i != start and not (i and (tokens[i - 1] in ("{", "(", "&", _PS_STATEMENT_START)
+                                      or tokens[i - 1].endswith("{"))):
             continue
         found = re.fullmatch(r"\$\{?env:(" + alt + r")\}?(?:([-+*/]?=)(.*))?", tok, re.I | re.S)
         if found:
@@ -763,6 +781,7 @@ def _ps_env_set(tokens, watch) -> str:
             continue
         if basename(tok).lower() in _PS_CMDLETS:
             rest = tokens[i + 1:]
+            rest = rest[:rest.index(_PS_STATEMENT_START)] if _PS_STATEMENT_START in rest else rest
             named = [m.group(1) for t in rest if (m := re.fullmatch(
                 r"(?:-\w+:)?env:\\?(" + alt + ")", t, re.I))]
             if named and rest[-1] not in _PS_UNSET:
