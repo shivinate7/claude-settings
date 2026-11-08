@@ -13714,10 +13714,10 @@ sendto_allow("a read of a product path, then Write the bug repro, is allowed to 
 sendto_refuse("a read of a product path, then Fix the guard, is refused to a test-author, naming builder",
               SENDTO_AUTHOR, "Read hooks/guard.py. Fix the guard.", T_SENDTO_AUTHOR, "builder",
               lacks=("hooks/guard.py",))
-# Round 1 findings, message-role. Each pins the shared reader that brief-role-scope also calls (`message_edit_paths`).
+# Shared reader cases, message-role. Each pins the shared reader that brief-role-scope also calls (`message_edit_paths`).
 # An allow twin passes its transcript, since no transcript means no judge at all.
 # Passes: a noun (`guard fix`, `bug fix`, `rule update`) names the change. A participle right before `at` makes a path a
-# locator. Lane ruling 2026-11-08 13:03 CST, process-only: a participle before `in` makes no locator.
+# locator. Decision message-role-scope: a participle before `in` makes no locator.
 sendto_allow("a message adding red cases for the guard fix in a product file, to a test-author, is allowed",
              SENDTO_AUTHOR, "Add red cases for the guard fix in hooks/guard.py to tests/test_x.py.", T_SENDTO_AUTHOR)
 sendto_allow("a message adding red cases for the bug fix in a product file, to a test-author, is allowed",
@@ -13726,7 +13726,7 @@ sendto_allow("a message adding red cases for the rule update in a product file, 
              SENDTO_AUTHOR, "Add red cases for the rule update in hooks/guard.py to tests/test_x.py.", T_SENDTO_AUTHOR)
 sendto_allow("a message fixing the failure reported at a test path, to a builder, is allowed",
              SENDTO_BUILDER, "Fix the failure reported at hooks/test_guard.py:120.", T_SENDTO_BUILDER)
-# Refused: a participle before `in` is no locator (lane ruling 2026-11-08 13:03 CST, process-only). The test path is the
+# Refused: a participle before `in` is no locator (decision message-role-scope). The test path is the
 # object of the fix, and a builder is not sent a test edit.
 sendto_refuse("a message fixing the failure shown in a test path, to a builder, is refused, naming test-author",
               SENDTO_BUILDER, "Fix the failure shown in hooks/test_guard.py:120.", T_SENDTO_BUILDER, "test-author",
@@ -13757,7 +13757,7 @@ sendto_refuse("a message saying per the record update a product file, to a test-
               SENDTO_AUTHOR, "Per the record in docs/decisions/x.md update hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
               lacks=("hooks/guard.py",))
 # Refused: a participle before `at` is a locator, but `found` is not one of the five, and before `in` none is
-# (lane ruling 2026-11-08 13:03 CST, process-only). The product path is the object.
+# (decision message-role-scope). The product path is the object.
 sendto_refuse("a message fixing the bug found in a product file, to a test-author, is refused, naming builder",
               SENDTO_AUTHOR, "Fix the bug found in hooks/guard.py.", T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
 sendto_refuse("a message fixing the exception raised in a product file, to a test-author, is refused, naming builder",
@@ -13867,7 +13867,7 @@ brief_allow("a test-author brief that says do not edit a product file is allowed
             "test-author", "Do not edit hooks/guard.py.")
 brief_allow("a builder brief that says edit only a product file is allowed",
             "builder", "Edit only hooks/guard.py.")
-# Round 1 findings, brief-role. The shared reader (`message_edit_paths`) is the cause in each, as in the twins above.
+# Shared reader cases, brief-role. The shared reader (`message_edit_paths`) is the cause in each, as in the twins above.
 # Passes: a noun `fix` (`the guard fix`, `the bug fix`, `the rule update`) names the change. The path after `in` locates it.
 brief_allow("a test-author brief that adds red cases for the guard fix in a product file is allowed",
             "test-author", "Add red cases for the guard fix in hooks/guard.py to tests/test_x.py.")
@@ -13876,7 +13876,7 @@ brief_allow("a test-author brief that adds red cases for the bug fix in a produc
 brief_allow("a test-author brief that adds red cases for the rule update in a product file is allowed",
             "test-author", "Add red cases for the rule update in hooks/guard.py to tests/test_x.py.")
 # Passes: a participle right before `at` makes the test path a locator. The builder assert case above is the control: it
-# stays asked. Lane ruling 2026-11-08 13:03 CST, process-only: a participle before `in` makes no locator, so the test path
+# stays asked. Decision message-role-scope: a participle before `in` makes no locator, so the test path
 # is the object, and a builder is not briefed to edit a test.
 brief_allow("a builder brief that fixes a failure reported at a test path is allowed",
             "builder", "Fix the failure reported at hooks/test_guard.py:120.")
@@ -13909,7 +13909,7 @@ brief_allow("a test-author brief that runs verdict on a test file is allowed",
 brief_allow("a test-author brief that fixes the failing case in a test file is allowed",
             "test-author", "Fix the failing case in hooks/test_guard.py.")
 # Asked: the same forms as the message block, sent to a test-author as a brief. Each edits a product file, so the ask goes
-# to a builder. Lane ruling 2026-11-08 13:03 CST covers the participle forms.
+# to a builder. Decision message-role-scope covers the participle forms.
 brief_ask("a test-author brief saying once the cases are red fix a product file is asked, naming builder",
           "test-author", "Once the cases are red fix hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
 brief_ask("a test-author brief saying for each red case update a product file is asked, naming builder",
