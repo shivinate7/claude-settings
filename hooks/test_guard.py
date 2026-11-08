@@ -11932,6 +11932,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
+# stay one write.
+sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
+   "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -13891,6 +13895,39 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# A quoted argument with a real newline in it, and an escaped quote in a bash -c string, do not hide the write
+# that follows: each is read at its command position, as the shell reads it.
+sh("builder-test: sed -i with a newline in its quoted script, onto a test, is refused",
+   "sed -i '1i\\\ntext' tests/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: cp of a quoted argument with a newline onto a test is refused",
+   'cp "a\nb" tests/x.py', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then ; and a cp onto a test, is refused",
+   r'bash -c "echo \"x\"; cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a test, is refused",
+   r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
+   'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
