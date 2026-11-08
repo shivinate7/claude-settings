@@ -3414,7 +3414,7 @@ def main(argv, host=None, lock=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             body = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
-            if review_state(parse_review(body), a.head)[0] == "done":  # a done record is the handoff, so the lane lint must pass on the head it names (decision pr-review-record)
+            if review_state(parse_review(body), a.head)[0] == "done":  # a done record is what the lane gives the batch runner, so the lane lint must pass on the head it names (decision pr-review-record)
                 try:
                     with release_on_signals(), contextlib.redirect_stdout(sys.stderr):  # a signal removes lane_lint's worktree; its PASS line is no part of the record
                         lane_lint(root, a.head, h, info["base"], a.lint_unknown_ok)  # lane_lint logs a given unknown reason, as under --lane-lint
