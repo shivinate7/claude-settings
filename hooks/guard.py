@@ -4802,7 +4802,12 @@ def judge(payload) -> None:
             names_handoff = None
         target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         sid = payload.get("session_id")
-        if names_handoff and isinstance(target, str) and target and isinstance(sid, str) and sid and names_handoff(target, sid):
+        try:
+            hit = bool(names_handoff and isinstance(target, str) and target and isinstance(sid, str) and sid
+                       and names_handoff(target, sid))
+        except Exception:
+            hit = False  # any failure of the path check allows, so a broken helper never ends in guard-crash
+        if hit:
             refuse(tool, "deny", "agent-handoff-write", AGENT_HANDOFF_WRITE_REASON, target)
     # 0. Each agent stays inside its own worktree.
     home_hit = worktree_home_hit(payload, tool, tool_input, cwd)
