@@ -12643,6 +12643,13 @@ class ReviewEnv(Env):
         `reads` go to PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
         return PullsHost([batch_pull(7, head, base=base)], {}, comments=comments, **reads)
 
+    def incident(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS):
+        """A posted record with reviewer prose between its CI line and its rule, which the parser refuses. -> (the record as posted, the same text cut after
+        its CI line). The cut parses, so the prose is the one difference between the two."""
+        bad = record_text(head=head, rounds=rounds) + "\nReviewer prose.\n" + REVIEW_FOOTER
+        cut = bad[:bad.index(REVIEW_CI_LINE) + len(REVIEW_CI_LINE)] + "\n"
+        return bad, cut
+
     def listing(self, pulls, comments=(), check_rows=None, **reads):
         """`merge --reviewed` over the open `pulls` and the repo's `comments`, on a PullsHost: -> (host, rc, out, err). The one home of that read."""
         host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
@@ -13050,6 +13057,133 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertIn(f"cannot read the compare of {self.BASE_BRANCH} and {self.ANC[:9]}", err, "the short base main is not named whole:\n" + err)
         rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, base=base)
         self.assertEqual(rc, 0, "control: the same record with the base compare answering was refused:\n" + out + err)
+
+class ReviewRecordRoundsOwnHead(ReviewEnv):
+    """A record's Round lines below its top round must already appear in an earlier parsed review record on this pull request, or in the source
+    record a --fix-base-record names, with the same round number, role, model and verdict. The top round's own lines are new, so they need no earlier
+    record. A missing line refuses the record: exit 2, no record printed, and stderr names the first missing line in record form. Lines of another
+    pull request, and of a record that does not parse, supply none. The rule runs on the plain path and on the --fix-check path. It stops the mistake
+    of pull request 2235: a first record of rounds 1 to 3, read on another pull request's heads, with no earlier record of its own
+    (roadmap step record-rounds-name-own-head, the step that adds this rule; decision pr-review-record)."""
+
+    HEAD_A = "3a" * 20  # the Head of an earlier record that holds round 1
+    HEAD_B = "3b" * 20  # the Head of a later earlier record, which holds round 2
+    ANCESTOR = "3c" * 20  # a head the live head descends from: the Head of an earlier FAIL record in the same-head cases
+    FIRST, SECOND, THIRD = "Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, haiku, FAIL", "Round 3: reviewer, opus, PASS"  # the lines of the #2235 shape
+    SHAPE = round_args((FIRST, SECOND, THIRD))  # the same three lines as --round values
+
+    def post(self, *comments, rounds, guard="no", net="not owed", extra=(), **reads):
+        """`merge 7 --review-record` on the live head with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them, and the repo's `comments`, oldest
+        first. `reads` go to the host (record_host). -> (rc, out, err)."""
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", guard, "--head", REVIEW_HEAD, "--net-value", net]
+        argv += [a for r in rounds for a in ("--round", r)]
+        rc, out, err = self.run_args(*argv, *extra, host=self.record_host(*comments, **reads))
+        return rc, out, err
+
+    def assert_refused_without_record(self, rc, out, err, cause):
+        """`cause` refuses the record: exit 2, no record printed, no traceback, and stderr cites the decision."""
+        self.assertEqual(rc, 2, f"{cause} was not refused with exit 2:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, f"{cause} was refused but still printed a record")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(merge.REVIEW_CITE, err, f"the refusal for {cause} does not cite its decision:\n" + err)
+
+    def assert_missing_line(self, rc, out, err, line):
+        """A record with a lower round that no earlier record holds: refused, and stderr names `line`."""
+        self.assert_refused_without_record(rc, out, err, "a record with a lower round no earlier record holds")
+        self.assertIn(line, err, f"the refusal does not name the first missing line, {line!r}:\n" + err)
+
+    def test_a_first_record_of_rounds_one_to_three_is_refused_and_names_round_one(self):
+        # the #2235 shape: no earlier record on the pull request, and every round written at once
+        rc, out, err = self.post(rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_missing_line(rc, out, err, self.FIRST)
+
+    def test_the_same_record_is_written_when_earlier_records_hold_its_lower_rounds(self):
+        # control: round 1 is held by the earlier record at HEAD_A, and round 2 by a later one at HEAD_B, whose round 1 is a different line
+        a = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        b = review_comment(2, 7, record_text(head=self.HEAD_B, rounds=("Round 1: reviewer, sonnet, PASS", self.SECOND)))
+        rc, out, err = self.post(a, b, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "a record whose lower rounds earlier records hold was refused:\n" + out + err)
+
+    def test_a_round_two_record_whose_round_one_line_changed_is_refused(self):
+        earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        # control: the round 1 line the earlier record holds, unchanged, is written
+        rc, out, err = self.post(earlier, rounds=(self.SHAPE[0], self.SHAPE[1]))
+        self.assertEqual(rc, 0, "control: a round 2 record that copies the earlier round 1 line was refused:\n" + out + err)
+        for label, changed in (("model", "1:reviewer:sonnet:FAIL"), ("verdict", "1:reviewer:haiku:PASS")):
+            with self.subTest(changed=label):
+                rc, out, err = self.post(earlier, rounds=(changed, self.SHAPE[1]))
+                self.assert_missing_line(rc, out, err, self.FIRST)
+
+    def test_a_first_record_with_round_one_only_needs_no_earlier_record(self):
+        rc, out, err = self.post(rounds=(self.SHAPE[0],))
+        self.assertEqual(rc, 0, "a first record with round 1 only was refused:\n" + out + err)
+
+    def test_the_top_rounds_own_lines_need_no_earlier_record(self):
+        earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        rc, out, err = self.post(earlier, rounds=(self.SHAPE[0], "2:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "a record whose top round is new to the pull request was refused:\n" + out + err)
+
+    def test_lines_of_an_earlier_record_on_another_pull_request_do_not_count(self):
+        other = review_comment(1, 8, record_text(n=8, head=self.HEAD_A, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(other, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_missing_line(rc, out, err, self.FIRST)
+
+    def test_the_same_record_on_this_pull_request_supplies_its_lines(self):
+        # control: the record that the other-pull-request case posts on pull request 8 supplies the same lines here
+        own = review_comment(1, 7, record_text(n=7, head=self.HEAD_A, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(own, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "control: the same record on this pull request was refused:\n" + out + err)
+
+    def test_an_earlier_record_that_does_not_parse_supplies_no_line(self):
+        bad, _cut = self.incident(head=self.HEAD_A, rounds=(self.FIRST, self.SECOND))
+        self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the unparsable record parses, so the case tests nothing")
+        later = review_comment(2, 7, record_text(head=self.HEAD_B, rounds=(self.FIRST,)))
+        rc, out, err = self.post(review_comment(1, 7, bad), later, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_missing_line(rc, out, err, self.SECOND)
+
+    def test_the_same_record_cut_after_its_ci_line_supplies_its_lines(self):
+        # control: the record cut after its CI line parses, and its round 2 line is held
+        _bad, cut = self.incident(head=self.HEAD_A, rounds=(self.FIRST, self.SECOND))
+        self.assertIsNotNone(review_fn(self, "parse_review")(cut), "scope: the cut record does not parse, so the control tests nothing")
+        later = review_comment(2, 7, record_text(head=self.HEAD_B, rounds=(self.FIRST,)))
+        rc, out, err = self.post(review_comment(1, 7, cut), later, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "control: the same record cut after its CI line was refused:\n" + out + err)
+
+    def test_a_fix_check_copy_that_adds_a_round_one_line_no_earlier_record_holds_is_refused(self):
+        # the fix base holds round 1 as sonnet PASS. The copy adds haiku FAIL on round 1, which no earlier record holds, then round 2 sonnet PASS
+        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        rounds = ("1:reviewer:sonnet:PASS", "1:reviewer:haiku:FAIL", "2:reviewer:sonnet:PASS")
+        base = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS",)))
+        rc, out, err = self.post(base, rounds=rounds, extra=fix)
+        self.assert_missing_line(rc, out, err, "Round 1: reviewer, haiku, FAIL")
+
+    def test_a_fix_check_copy_whose_fix_base_holds_every_round_one_line_is_written(self):
+        # control: the fix base holds the added round 1 line, so the copy holds every lower line
+        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        rounds = ("1:reviewer:sonnet:PASS", "1:reviewer:haiku:FAIL", "2:reviewer:sonnet:PASS")
+        held = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: reviewer, haiku, FAIL")))
+        rc, out, err = self.post(held, rounds=rounds, extra=fix)
+        self.assertEqual(rc, 0, "control: a fix check copy whose fix base holds its round 1 lines was refused:\n" + out + err)
+
+    def test_a_pass_top_round_at_the_head_of_an_earlier_fail_is_refused(self):
+        # the #2235 mistake: round 2 FAILed and round 3 PASSed at one head, with no fix commit between them
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive")
+        self.assert_refused_without_record(rc, out, err, "a PASS top round at the head of an earlier FAIL")
+
+    def test_a_pass_top_round_after_a_fail_at_an_earlier_ancestor_head_is_written(self):
+        # control: the earlier FAIL record is at a head the live head descends from, not at the live head, so the same record is written
+        earlier = review_comment(1, 7, record_text(head=self.ANCESTOR, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive",
+                                 diffs={(self.ANCESTOR, REVIEW_HEAD): compare_of("ahead")})
+        self.assertEqual(rc, 0, "control: a PASS top round after a FAIL at an earlier head was refused:\n" + out + err)
+
+    def test_a_fix_check_at_the_head_after_a_fail_at_its_fix_base_is_written(self):
+        # control: the fix base is the FAIL record's head, and the copy keeps every line of that record, so the fix check stays allowed
+        earlier = review_comment(1, 7, record_text(head=self.ANCESTOR, rounds=(self.FIRST, self.SECOND)))
+        rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive",
+                                 extra=("--fix-check", f"{self.ANCESTOR}:reviewer:haiku:PASS"))
+        self.assertEqual(rc, 0, "control: a fix check at the head, whose fix base is the FAIL record's head, was refused:\n" + out + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
@@ -13822,13 +13956,6 @@ class ReviewFixRemedies(ReviewChainFixture):
     def test_a_pull_request_with_no_review_record_names_posting_the_round_record_first(self):
         rc, out, err, _ = self.run_chain(self.NEWEST)
         self.assert_own_remedy(rc, out, err, "must exist", self.MISSING_REMEDY)
-
-    def incident(self):
-        """A posted record with reviewer prose between its CI line and its rule, which the parser refuses. -> (the record as posted, the same text cut after its CI
-        line). The cut parses, so the prose is the one difference between the two."""
-        bad = record_text(head=self.NEWEST, rounds=REVIEW_PASS) + "\nReviewer prose.\n" + REVIEW_FOOTER
-        cut = bad[:bad.index(REVIEW_CI_LINE) + len(REVIEW_CI_LINE)] + "\n"
-        return bad, cut
 
     def test_an_unparsable_newest_record_is_refused_as_unparsable_with_the_prose_remedy(self):
         # the newest record exists but does not parse, so the refusal says it does not parse, not that no record exists, and its remedy says where
