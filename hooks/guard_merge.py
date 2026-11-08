@@ -1219,11 +1219,11 @@ def stamp_hit(tool: str, tool_input):
 # Written values: an ISO instant with an offset, in three places (rule message-time-matches-clock). The Bash scan
 # reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
 # a lone apostrophe, which is where an incident's literal sat. It reads the key `updatedAt`, bare or quoted, with
-# an optional `]` after it. Then `:`, `=` or jq's `|=`, then a double-quoted value. It skips `==`, `>` and a
-# single-quoted value.
+# an optional `]` after it. Then `:`, `=` or jq's `|=`, then a single- or double-quoted value, closed by the
+# same quote. It skips `==` and `>`.
 _ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
 _ISO_FULL = re.compile(_ISO_INSTANT)
-_UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?\"""" + _ISO_INSTANT + r'\\?"')
+_UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?(["'])""" + _ISO_INSTANT + r"\\?\1")
 # A str_replace of `added` may carry only the time part of the value, such as `T20:24:00Z`.
 _TIME_FRAGMENT = re.compile(r"T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})")
 _STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
@@ -1339,9 +1339,9 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
     the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
-    text. In a shell command: the last literal `updatedAt` key with a double-quoted value. Only a value with an offset is
-    read. Cost: one clock read, and only when a judged value is present; one local file read, only for an items
-    write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
+    with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
