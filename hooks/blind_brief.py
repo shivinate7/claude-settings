@@ -144,8 +144,8 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
     r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
     r"|General Sans)\b",
-    r"\b[Ff]onts?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
-    r"\b[Tt]ypefaces?\b(?:(?::|\s+(?:is|are))\s+|[ \t]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Ff]onts?\b(?:(?::|\s+(?:is|are))\s+|[^\S\n]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?:(?::|\s+(?:is|are))\s+|[^\S\n]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
     # After the bare word and a line break, a capital word then an article starts a new line ("font" / "Uses a
     # magnifier."), not a font name.
     r"\b[Ff]onts?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)",
