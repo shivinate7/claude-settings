@@ -29,7 +29,7 @@ Claude writes both in normal work: it states what code does from memory, and it 
 
 - The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id.
 - STALE009 reports, never fails: a sentence on a line a range adds in a decision record that states what code does, with no code cite (lint/stale_cites.py `CodeClaimReader`).
-- STALE010 fails the PR: an added line in governed Markdown cites a Python name in a tracked top folder. The file is absent at head, or the name is not bound there (lint/stale_cites.py `dead_name_cites`). A cite whose top folder is one edit, or a case change, from a tracked folder is still checked (lint/stale_cites.py `typo_of_tracked_top`).
+- STALE010 fails the PR: an added line in governed Markdown cites a Python name in a tracked top folder. The file is absent at head, or the name is not bound there (lint/stale_cites.py `dead_name_cites`). A cite whose top folder is one edit, or a case change, from a tracked folder is checked only when its corrected path is at head (lint/stale_cites.py `typo_of_tracked_top`). The corrected path is the cite with its top folder replaced by that tracked folder; without it the cite stays silent, as for a far folder.
 - Whether the claim is true stays with the reviewer: `agents/reviewer.md` reads each cited name against its claim.
 - The module docstring of `lint/stale_cites.py` and `skills/fresh-prose/SKILL.md` state the cost. Both run inside the existing ste-lint step.
 

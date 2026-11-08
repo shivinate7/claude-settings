@@ -70,7 +70,9 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             not bind the name there (`names_in`; a node id is judged one segment at a time). A cite whose first folder
             is no tracked top folder at head (another repo, a library, a src-layout package) is no cite, the test STALE003
             applies (`in_tracked_top`), unless that folder is one edit, or a case change, from a tracked one
-            (`typo_of_tracked_top`): a likely typo, checked as a normal cite. The top folders come from a read of head's root tree through the one `cat-file`,
+            (`typo_of_tracked_top`), and only when the cite with that tracked folder in its place is a file at head: a
+            likely typo of a real file, checked as a normal cite. A near folder with no such file stays silent, as a
+            far folder does. The top folders and that file come from reads of head through the one `cat-file`,
             so it starts no process of its own. Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
@@ -583,11 +585,16 @@ def one_edit_apart(a, b):
     return short[i:] == long_[i + 1:]
 
 
-def typo_of_tracked_top(cite, tops):
+def typo_of_tracked_top(cite, tops, exists):
     """True when the first folder of a path cite is no tracked top folder but is one edit from one, or differs from one
-    only in case: a likely typo of a folder this tree holds. Only STALE010 calls it, so STALE003 keeps its verdict."""
-    first = cite.split("/", 1)[0]
-    return first not in tops and any(first.lower() == top.lower() or one_edit_apart(first, top) for top in tops)
+    only in case, and the cite with that tracked folder in its place is a file `exists` finds at head. A near folder
+    with no such file is no likely typo of a real file, so it stays silent like a far folder. Only STALE010 calls it,
+    so STALE003 keeps its verdict."""
+    first, _, rest = cite.partition("/")
+    if first in tops:
+        return False
+    return any((first.lower() == top.lower() or one_edit_apart(first, top)) and exists("%s/%s" % (top, rest))
+               for top in sorted(tops))
 
 
 def cite_path(text):
@@ -1334,10 +1341,15 @@ def dead_name_cites(rng):
     """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
     governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
     or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into a far untracked top folder is
-    no cite; one that is one edit or a case change from a tracked folder is a likely typo and is checked.
+    no cite; so is a near folder (one edit or a case change from a tracked one) whose corrected path is absent
+    at head. With the corrected path at head it is a likely typo and is checked.
     Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`, and only for a line that cites a .py file."""
     found, excludes = {}, exclude_patterns(".")
     gone = set(rng.removed) | set(rng.renamed)
+
+    def head_has(path):
+        return rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is not None
+
     for md in sorted(rng.added_lines):
         if not governed(md, excludes):
             continue
@@ -1350,8 +1362,8 @@ def dead_name_cites(rng):
                     continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
                 if rng.tops is None:
                     rng.tops = rng.batch.root_folders(rng.head)
-                if not in_tracked_top(path, rng.tops) and not typo_of_tracked_top(path, rng.tops):
-                    continue  # a cite into a far untracked top folder, as STALE003 reads it
+                if not in_tracked_top(path, rng.tops) and not typo_of_tracked_top(path, rng.tops, head_has):
+                    continue  # a cite into a far or near untracked top folder, as STALE003 reads it
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
