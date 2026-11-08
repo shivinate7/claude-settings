@@ -123,6 +123,136 @@ REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA",
                  "Red-run: _build/run_tests.sh -> 1 failed on SHA",
                  "Red-run: __main__.py -> 1 failed on SHA")
+# The label word, one row per line form: (line, expected, source). `refused` is a line the check must refuse as a
+# failed form, `valid` one it must pass. `SHA` is filled with LABEL_SHA. The source names the PR, or the plan row, that
+# wrote the form. A row runs three ways: valid_line alone, beside a valid line, and the mutant hint in the FAIL line.
+LABEL_SHA = "abcdef1"
+LABEL_FORMS = (
+    # #1691: forms the check must refuse: a mutant or none typo, or a key variant.
+    ("Red-run: mutant A (...) -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutant(A) -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutant-A -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutantA: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutant= x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutated x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutating x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutates: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutan: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: mutnat: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: nonee: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: none x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: non: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run: runner: x -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-Run: python3 lint/test_x.py -> 1 failed on SHA", "refused", "#1691"),
+    ("red-run: python3 lint/test_x.py -> 1 failed on SHA", "refused", "#1691"),
+    ("Red-run : python3 lint/test_x.py -> 1 failed on SHA", "refused", "#1691"),
+    # #1728: wrapped and typo'd words. The check already refuses these.
+    ("Red-run: (mutant A) -> 1 failed on SHA", "refused", "#1728"),
+    ('Red-run: "mutant A" -> 1 failed on SHA', "refused", "#1728"),
+    ("Red-run: [mutant] -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: - mutant: A -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mutnat x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mtuant x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mutnt x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mutaiton x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mutate=x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: mutan=x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: (none) -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: **none** x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: `none` x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: `mutant` x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: _mutant_ x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: _mutnat_ x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: “mutant A” -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: ‘mutant’ x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: #mutant x -> 1 failed on SHA", "refused", "#1728"),
+    ("Red-run: **mutant** x -> 1 failed on SHA", "refused", "#1728"),
+    # #1728 open findings: a wrapper nested inside an underscore, or a list marker, tilde, brace or angle bracket.
+    ("Red-run: _**mutant**_ x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: _`mutant`_ x -> 1 failed on SHA", "refused", "#1728 open"),
+    ('Red-run: _"mutant"_ x -> 1 failed on SHA', "refused", "#1728 open"),
+    ("Red-run: _'mutant'_ x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: _(none)_ x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: ~mutant~ x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: > mutant x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: 1) mutant x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: {mutant} x -> 1 failed on SHA", "refused", "#1728 open"),
+    ("Red-run: <mutant> x -> 1 failed on SHA", "refused", "#1728 open"),
+    # A fixed point, not a fixed count of passes: forty wrappers each side still read as the word.
+    ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "refused", "fixed point"),
+    # Real commands pass as the failed form. These are the must-pass rows.
+    ("Red-run: python3 -m pytest -k mutant_case -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: lint/mutation/run.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: ./mutation_probe.sh -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: env mutatest run -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
+    ('Red-run: MUTATE_ONLY="worktree-home: the cross-checkout read costs" python3 hooks/test_guard.py -> 1 failed on SHA',
+     "valid", "must-pass"),
+    ("Red-run: node lint/test_x.js -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: mutagen run -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: mutmut run -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: (cd lint && python3 test_x.py) -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: _build/run_tests.sh -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: __main__.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: _mutant.sh -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: _mutation_probe.sh -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: __none__.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: ./mutant -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: nonstop lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: NONE=1 python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
+    ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "valid", "must-pass"),
+    # Controls: the two valid keyword forms, so a refusal above is not a broken line shape.
+    ("Red-run: mutant: drop the guard -> 1 failed on SHA", "valid", "control"),
+    ("Red-run: none: re-points fixtures", "valid", "control"),
+)
+# The normalised label word of a line: the first word after `Red-run:`, with its wrappers, list markers, emphasis and
+# trailing closers and colons stripped, in lower case. A leading underscore that closes no underscore stays (a real name).
+LABEL_WORDS = (
+    ("Red-run:", ""),  # the empty state: no word
+    ("Red-run: (mutant A) -> 1 failed on SHA", "mutant"),
+    ('Red-run: "mutant A" -> 1 failed on SHA', "mutant"),
+    ("Red-run: [mutant] -> 1 failed on SHA", "mutant"),
+    ("Red-run: - mutant: A -> 1 failed on SHA", "mutant"),
+    ("Red-run: * mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: > mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: 1) mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: 1. mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: {mutant} x -> 1 failed on SHA", "mutant"),
+    ("Red-run: <mutant> x -> 1 failed on SHA", "mutant"),
+    ("Red-run: `mutant` x -> 1 failed on SHA", "mutant"),
+    ("Red-run: “mutant A” -> 1 failed on SHA", "mutant"),
+    ("Red-run: ‘mutant’ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: #mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: ~mutant~ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: _mutant_ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: _mutant A_ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: _mutnat_ x -> 1 failed on SHA", "mutnat"),
+    ("Red-run: **none** x -> 1 failed on SHA", "none"),
+    ("Red-run: (none) x -> 1 failed on SHA", "none"),
+    ("Red-run: _(none)_ x -> 1 failed on SHA", "none"),
+    ("Red-run: _**mutant**_ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: **_mutant_** x -> 1 failed on SHA", "mutant"),
+    ("Red-run: _`mutant`_ x -> 1 failed on SHA", "mutant"),
+    ('Red-run: _"mutant"_ x -> 1 failed on SHA', "mutant"),
+    ("Red-run: _'mutant'_ x -> 1 failed on SHA", "mutant"),
+    ("Red-run: mutant: x -> 1 failed on SHA", "mutant"),
+    ("Red-run: mutant, x -> 1 failed on SHA", "mutant"),
+    ("Red-run: (mutant:) x -> 1 failed on SHA", "mutant"),
+    ("Red-run: MUTANT: x -> 1 failed on SHA", "mutant"),
+    ("Red-run: Mutant x -> 1 failed on SHA", "mutant"),
+    ("Red-run: mutnt x -> 1 failed on SHA", "mutnt"),
+    ("Red-run: mutant=x x -> 1 failed on SHA", "mutant=x"),
+    ("Red-run: _build/run_tests.sh -> 1 failed on SHA", "_build/run_tests.sh"),
+    ("Red-run: _Build/Run_Tests.sh x -> 1 failed on SHA", "_build/run_tests.sh"),
+    ("Red-run: __main__.py -> 1 failed on SHA", "__main__.py"),
+    ("Red-run: _mutant.sh x -> 1 failed on SHA", "_mutant.sh"),
+    ("Red-run: _mutation_probe.sh x -> 1 failed on SHA", "_mutation_probe.sh"),
+    ("Red-run: __none__.py x -> 1 failed on SHA", "__none__.py"),
+    ("Red-run: ./mutant x -> 1 failed on SHA", "./mutant"),
+    ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "python3"),
+    ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "mutant"),
+)
 BASE_REF = "origin/main"
 # origin/main's name for the message verdict, read from its checker. #1672 renames has_trailer to has_valid_trailer,
 # so the baseline read takes either name.
@@ -759,6 +889,54 @@ class CheckCase(Fixture):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", normal)
+
+
+class LabelForms(unittest.TestCase):
+    """Each LABEL_FORMS row alone and beside a valid line, and the LABEL_WORDS table of label_word."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.check = load_module("check_red_run_label_forms", MODULE)
+
+    def test_form_alone_is_refused_or_passed(self):
+        for line, expected, source in LABEL_FORMS:
+            line = filled([line], LABEL_SHA)[0]
+            with self.subTest(line=line):
+                self.assertEqual(self.check.valid_line(line), expected == "valid",
+                                 "%s: this line must be %s as a failed form: %s" % (source, expected, line))
+
+    def test_form_beside_a_valid_line_is_refused_or_passed(self):
+        for line, expected, source in LABEL_FORMS:
+            line = filled([line], LABEL_SHA)[0]
+            message = "fixture subject\n\n" + "\n".join(filled([VALID_LINE, line], LABEL_SHA)) + "\n"
+            with self.subTest(line=line):
+                self.assertEqual(self.check.has_valid_trailer(message), expected == "valid",
+                                 "%s: this line must be %s beside a valid line: %s" % (source, expected, line))
+
+    def test_label_word_reads_the_normalised_word(self):
+        fn = getattr(self.check, "label_word", None)
+        self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
+        for line, word in LABEL_WORDS:
+            with self.subTest(line=line):
+                self.assertEqual(fn(line), word, "label_word(%r) must be %r" % (line, word))
+
+
+class LabelFormHints(Fixture):
+    """The mutant hint: a refused form whose text holds `mut` names the mutant form in its FAIL line."""
+
+    def test_refused_mut_form_names_the_mutant_hint(self):
+        check = load_module("check_red_run_label_hints", MODULE)
+        rows = [filled([line], LABEL_SHA)[0] for line, expected, _source in LABEL_FORMS
+                if expected == "refused" and "mut" in line.lower()]
+        self.base()  # one commit per row, so one check run reads every form
+        shas = [self.commit("label form %d" % index, {self.new_test_path(): TEST_TEXT}, red=line)
+                for index, line in enumerate(rows)]
+        bad = check.gaps(self.tree, self.base_sha)
+        for line, sha in zip(rows, shas):
+            fail = [out for out in bad if sha[:7] in out]
+            with self.subTest(line=line):
+                self.assertTrue(fail, "this line must be flagged before its hint can be read: " + line)
+                self.assertIn("Red-run: mutant:", fail[0], "the FAIL line holds no hint naming the mutant form: " + line)
 
 
 class MainHistory(unittest.TestCase):
