@@ -14,7 +14,8 @@ review record for its live head. Choices pinned here:
 - The record: the newest comment whose first line is the review marker, read by merge/merge.py parse_review, that
   names the pull request (PR: #N) and the live head, and that merge/merge.py review_state calls done for that head.
   The newest record decides. The check takes merge's verdict, never a PASS word of its own. A newest record that does
-  not parse is refused with wording that says so, never with the no-record wording; the parser stays strict.
+  not parse is refused with wording that says so, never with the no-record wording. It names the CI line as the cause
+  only when text follows the CI line; the parser stays strict. The remedy re-posts through `merge <n> --review-record`.
 - The reads: the live head (pulls/<n>) and the comments (issues/<n>/comments), two REST reads per PR, made only for
   such a claim in a lane. A failed read, or an exception in the check, never blocks: the reply gets a systemMessage
   with UNKNOWN, never "clear".
@@ -333,6 +334,13 @@ class ReviewRecordTests(unittest.TestCase):
     def assert_two_rest_reads(self):
         self.assert_reads_of(PR)
 
+    def assert_unparsed_remedy(self, reason, n):
+        """The remedy of an unparsed record names the merge act for PR `n` and a post through it, and never a record written by hand."""
+        self.assertIn("merge %d --review-record" % n, reason, "the remedy does not name `merge %d --review-record`: %r" % (n, reason))
+        self.assertRegex(reason, r"(?i)\bpost", "the remedy does not say to post the record through that act: %r" % reason)
+        self.assertNotRegex(reason, r"(?i)by hand|hand-writ|write the record",
+                            "the remedy tells the lane to write the record by hand: %r" % reason)
+
     # Refused: a lane's claim with no record for its live head.
 
     def test_lane_round_pass_without_a_record_blocks(self):
@@ -526,6 +534,24 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertRegex(reason, r"(?i)CI line", "the refusal does not name the CI line as the cause: %r" % reason)
         self.assertNotIn("has no review record for its live head", reason,
                          "the refusal says no record exists, though the newest record exists: %r" % reason)
+        self.assert_unparsed_remedy(reason, INCIDENT_PR)
+
+    def test_newest_record_with_a_bad_kind_is_unparsed_with_no_ci_line_cause(self):
+        # Catches: a record that fails on a bad Kind line named as a CI-line failure, which sends the lane to fix a line that
+        # is not the cause; or named as no record, which hides that the newest record exists. The refusal says it does not parse.
+        bad_kind = merge_mod.review_body(PR, LIVE, "weird", "no", ROUNDS, "not owed")
+        self.assertIsNone(merge_mod.parse_review(bad_kind), "fixture: the bad-Kind record parses, so it is not unparsed")
+        self.serve(comments=[bad_kind])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        reason = out["reason"]
+        self.assertIn("PR #12", reason, "the refusal does not name PR #12: %r" % reason)
+        self.assertRegex(reason, r"(?i)does not parse", "the refusal does not say the newest record does not parse: %r" % reason)
+        self.assertNotRegex(reason, r"(?i)CI line", "the refusal names the CI line as the cause of a bad Kind line: %r" % reason)
+        self.assertNotIn("has no review record for its live head", reason,
+                         "the refusal says no record exists, though the newest record exists: %r" % reason)
+        self.assert_unparsed_remedy(reason, PR)
 
     def test_no_marked_comment_keeps_the_no_record_wording(self):
         # Catches: the parse wording replacing the no-record wording when no comment carries the marker at all.
