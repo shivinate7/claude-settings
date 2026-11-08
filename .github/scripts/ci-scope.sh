@@ -7,7 +7,9 @@
 #   checks_macos gates both checks-macos and checks-macos-b.
 # mutation_report is set apart (the end of this file): true on a pull request whose HEAD_REF starts with `batch-`, and on any other event.
 # Everything is true on push, schedule and dispatch, on an unreadable diff, on a change to this
-# script or the workflow, and on any path the table below does not name. Inputs (env): EVENT,
+# script or the workflow, and on any path the table below does not name. A pull request run also reads hooks/guard.py's import closure
+# from merge/merge.py (`--guard-closure`, or CI_SCOPE_MERGE): each member gets guard.py's flags, added to the flags its own arm sets.
+# Cost: one python start, about 0.6 s per run. Fail safe: a read that errors or prints nothing turns every flag on. Inputs (env): EVENT,
 # BASE_SHA, HEAD_REF.
 set -u
 JOBS="checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos pointer_windows"
@@ -21,7 +23,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
   # hooks/guard.py's import closure comes from merge.py, the one home (merge --guard-closure), read once. A read that fails or prints
   # nothing turns everything on: a real closure always holds hooks/guard.py.
   merge_py="${CI_SCOPE_MERGE:-$(dirname "${BASH_SOURCE[0]}")/../../merge/merge.py}"
-  closure=$(python3 "$merge_py" --guard-closure 2>/dev/null) && [ -n "$closure" ] || { closure=""; on="$on $ALL "; }
+  closure=$(python3 "$merge_py" --guard-closure) && [ -n "$closure" ] || { closure=""; on="$on $ALL "; echo "CI scope: the guard import closure could not be read from $merge_py (see above); every flag is on"; }
   while IFS= read -r f; do
     # A closure member gets guard.py's flags whatever arm it falls to below (that arm adds its own on top).
     # Whole-line match, so a member is never a substring of another path.
@@ -91,7 +93,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
-      *) grep -Fxq -- "$f" <<< "$closure" || on="$on $ALL " ;;
+      *) on="$on $ALL " ;;
     esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and
