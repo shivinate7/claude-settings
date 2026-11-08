@@ -9,7 +9,8 @@ import shlex
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _drop_heredoc_bodies, _runs_written_file,
+    _split_heredocs, _without_message_values,
     inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
@@ -343,17 +344,24 @@ def _plain_escaped_quotes(cmd: str) -> str:
     character. Those languages read the backslash as an escape, but the word reader below does not:
     a `\\'` would flip its quote state, and the prose after it would read as bare shell words.
 
-    A backtick in the body of a heredoc with a QUOTED delimiter is text: bash runs no substitution
-    there, so it is written as a plain character too. An unquoted body keeps its backticks."""
-    if "<<" not in cmd or ("\\" not in cmd and "`" not in cmd):
+    The body of a heredoc with a QUOTED delimiter is text for bash, as long as nothing runs the file
+    it is written to (`_runs_written_file`, the test `strip_heredoc_bodies` uses). Its backticks are
+    plain characters, and its lines join into one, so a line that starts `bash -c` is no command.
+    An unquoted body keeps its backticks and its lines."""
+    if "<<" not in cmd:
         return cmd
-    for quote, body, header in _split_heredocs(cmd)[1]:
+    bodies = _split_heredocs(cmd)[1]
+    runs_file = None
+    for quote, body, header in bodies:
         header = _without_message_values(header)
         if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
             plain = _ESCAPED_QUOTE.sub(
                 lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body)
-            if quote:
-                plain = plain.replace("`", "_")
+            if quote and runs_file is None:
+                runs_file = _runs_written_file(
+                    _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in bodies])
+            if quote and not runs_file:
+                plain = plain.replace("`", "_").rstrip("\n").replace("\n", " ") + body[len(body.rstrip("\n")):]
             cmd = cmd.replace(body, plain, 1)
     return cmd
 
