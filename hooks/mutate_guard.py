@@ -2424,12 +2424,12 @@ MUTATIONS = [
      '    if agent or tool != RESUME_TOOL or not isinstance(target, str)',
      '    if tool != RESUME_TOOL or not isinstance(target, str)',
      "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
-    ("resume-finished-reviewer: the caller never passes the agent_id",
+    ("resume-finished-reviewer: every send is taken as an agent's own, so the rule skips it",
      '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")),\n'
      '        lambda role: role_isolation_pin',
-     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", False,\n'
+     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", True,\n'
      '        lambda role: role_isolation_pin',
-     "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
+     "guard", "a finished background reviewer, named by its agent id, is refused"),
     ("resume-finished-reviewer: a state the read cannot place is let through",
      '    if state == reader.UNKNOWN:',
      '    if False:',
