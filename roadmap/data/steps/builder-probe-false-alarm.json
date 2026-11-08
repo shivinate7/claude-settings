@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzDBTjFbhzwzV96i8v",
   "why": "Rule builder-test-edit refused a builder probe under /tmp, which decision builders-cannot-edit-tests (line 58) allows. A false alarm, reported by lane test-file-in-ci.",
-  "note": "Coordinator 18:52 CST Nov 7.",
-  "updatedAt": "2026-11-07T18:52:00-06:00"
+  "note": "Coordinator 18:52 CST Nov 7. Nov 7 22:45 CST: held after round 3 (hole: after an uncertain cd with ;, newline or ||, a non-test file in a test folder is allowed). Archive archive/bpfa-build at 5fe1c2e70. Waiting-page item 396 builder-probe-round-4 asks for a fourth round.",
+  "updatedAt": "2026-11-07T22:45:00-06:00"
 }
