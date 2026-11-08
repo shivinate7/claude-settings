@@ -3584,7 +3584,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = "" if POWERSHELL_CALL[0] else git_after_cd_hit(stripped, cwd)
     if matched:
         refuse(tool, "deny", "git-after-cd", GIT_AFTER_CD_REASON, matched)
-    matched = "" if POWERSHELL_CALL[0] else git_push_after_check_hit(stripped)
+    # A pending ask settles first: its own refusal (ask-alone for a chained ask, else the ask) is the verdict
+    # these cases pin, and a `;` or newline join before an ask command is a second command in `settle_ask`.
+    matched = "" if POWERSHELL_CALL[0] or PENDING_ASK else git_push_after_check_hit(stripped)
     if matched:
         refuse(tool, "deny", "git-after-cd", GIT_PUSH_AFTER_CHECK_REASON, matched)
 
