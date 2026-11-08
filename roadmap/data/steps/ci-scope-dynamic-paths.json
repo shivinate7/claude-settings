@@ -2,10 +2,10 @@
   "title": "The ci-scope merge walker sees paths built at run time",
   "order": 103.56,
   "why": "The ci-scope-merge-closure walker reads no path built with normpath(), str(), + or an f-string. So actions/ci-alarm/events.json, read at merge/merge.py line 1136, has no merge flag, and a change to it does not run merge's checks. Found by lane sha-hex-followups (#1781; coordinator, 23:05 CST Nov 7).",
-  "note": "Done check: a red test where a file merge.py reads through a built path is in the merge closure. Unmeasured: how many such reads exist. Slug and title by triage; no source gave one. Waits under the item 384 hold unless the coordinator counts it as a queue fix.",
+  "note": "Done check: a red test where a file merge.py reads through a built path is in the merge closure. Unmeasured: how many such reads exist. Slug and title by triage; no source gave one. Waits under the item 384 hold unless the coordinator counts it as a queue fix. 23:09 CST: not a queue fix, because it blocks no merge (coordinator). It waits under the item 384 hold.",
   "phase": "now",
   "status": "todo",
   "owner": "coordinator",
   "lane": null,
-  "updatedAt": "2026-11-07T23:05:00-06:00"
+  "updatedAt": "2026-11-07T23:06:00-06:00"
 }

@@ -1,0 +1,11 @@
+{
+  "title": "The feedback guard's text and code agree on where `same` goes",
+  "order": 103.57,
+  "why": "hooks/feedback_guard.py lines 105-106 and 1171-1172 say the output \"ended with the line `same`\", but `_cleared` now accepts `same` anywhere in the output. Found by lane page-check-at-publish (#1367; coordinator, 23:06 CST Nov 7).",
+  "note": "The fix decides whether the text or the code is wrong. Done check: a test pins the chosen form, and the text says the same. Slug and title by triage; no source gave one. Waits under the item 384 hold unless the coordinator counts it as a queue fix.",
+  "phase": "now",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:06:00-06:00"
+}

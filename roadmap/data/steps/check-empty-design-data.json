@@ -1,0 +1,11 @@
+{
+  "title": "`export_page.py --check` fails when the fetched items folder is empty",
+  "order": 103.58,
+  "why": "`export_page.py --check` prints `checks pass` with an empty fetched items folder. Found by lane page-check-at-publish (#1367; coordinator, 23:06 CST Nov 7). The coordinator named an existing step check-empty-design-data; none was on the roadmap, main or an open PR (triage, 23:09 CST), so this step takes that slug.",
+  "note": "Done check: a red test where --check on an empty items folder exits non-zero. Related: step page-check-at-publish (#1367); the archived lane there also found that --check passes a page with none of an item's mockups (item 276 a). Waits under the item 384 hold unless the coordinator counts it as a queue fix.",
+  "phase": "now",
+  "status": "todo",
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-07T23:06:00-06:00"
+}
