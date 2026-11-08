@@ -12730,7 +12730,7 @@ class ReviewFixBase(ReviewEnv):
         note = record_text(head=REVIEW_OLD_HEAD) + "Lane note.\n" + REVIEW_FOOTER
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, note)))
         self.assert_refused(rc, out, err)
-        self.assertIn("nothing between the CI line", err, "the refusal does not name the rule remedy:\n" + err)
+        self.assertIn("between the CI line and", err, "the refusal does not name the rule remedy:\n" + err)
         self.assertIn("---", err, "the refusal does not name the --- line:\n" + err)
 
 
@@ -13054,7 +13054,7 @@ class ReviewedList(ReviewEnv):
                 host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
                 self.assertEqual(rc, 0, out + err)
                 line = list_line(self, out, 7)
-                self.assertIn("nothing between the CI line", line, "the bad line does not name the rule remedy:\n" + out)
+                self.assertIn("between the CI line and", line, "the bad line does not name the rule remedy:\n" + out)
                 self.assertIn("---", line, "the bad line does not name the --- line:\n" + out)
 
     def test_a_bad_line_that_fails_elsewhere_gets_no_rule_sentence(self):
@@ -13063,7 +13063,7 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         line = list_line(self, out, 7)
-        self.assertNotIn("nothing between the CI line", line, out)
+        self.assertNotIn("between the CI line and", line, out)
         self.assertNotIn("---", line, out)
 
     def test_a_bad_record_line_names_the_comment_it_came_from(self):

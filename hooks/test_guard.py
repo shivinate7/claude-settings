@@ -10233,14 +10233,14 @@ mcp_post("review-record: a prose line over 80 characters is named cut to 80, MCP
 mcp_post("review-record: a record with a bad Kind names the Kind line, MCP add_issue_comment", REVIEW_BAD_KIND, "deny",
          rule=REVIEW_RULE, carries=("line 4: Kind: bogus",))
 # The remedy of a body whose first failing line sits right after the CI line: a note between the CI line and `---`, then a footer. The reason
-# says the free text goes below a `---` line with nothing between the CI line and it. A body that fails elsewhere gets no such sentence.
-REMEDY_FRAGMENTS = ("nothing between the CI line", "---")
+# says the free text goes below a `---` line with between the CI line and and it. A body that fails elsewhere gets no such sentence.
+REMEDY_FRAGMENTS = ("between the CI line and", "---")
 mcp_post("review-record: a note between the CI line and --- is refused with the rule remedy, MCP add_issue_comment", REVIEW_PROSE_FOOTED, "deny",
          rule=REVIEW_RULE, carries=REMEDY_FRAGMENTS)
 bash_post("review-record: a note between the CI line and --- is refused with the rule remedy, gh pr comment --body",
           "%s --body '%s'" % (PR_CMD, REVIEW_PROSE_FOOTED), "deny", rule=REVIEW_RULE, carries=REMEDY_FRAGMENTS)
 mcp_post("review-record: a bad Kind is refused with no rule sentence, MCP add_issue_comment", REVIEW_BAD_KIND, "deny",
-         rule=REVIEW_RULE, carries=("line 4: Kind: bogus",), lacks=("nothing between the CI line",))
+         rule=REVIEW_RULE, carries=("line 4: Kind: bogus",), lacks=("between the CI line and",))
 # A well-formed record with its Stamp line taken out, as a body typed by hand is: the Stamp was owed just above the CI line, so the CI line is named.
 mcp_post("review-record: a fresh post with no Stamp line names the CI line where the Stamp was owed, MCP add_issue_comment", REVIEW_NO_STAMP,
          "deny", rule=REVIEW_RULE, carries=("line 8: " + CI_LINE_TEXT,))
