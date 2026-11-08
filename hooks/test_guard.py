@@ -28736,12 +28736,13 @@ FAMILY = "simulator"
 #                          and the Mac shares one simulator across repos (decision sim-test-is-the-one-boot-path,
 #                          ruling 5). Judged after cap and twin. The reason names sim-test and the lease. A booted
 #                          device is never refused by this rule.
-#   simulator-device-lease refuses every simulator MCP call except launch (tap, screenshot, appearance, swipe,
-#                          type) unless this session holds a live sim-lease for the device it names. Device and
-#                          udid are both judged, and a name or UDID matches the list without case or outer spaces.
-#                          A call that names no device needs one live lease of its own. A name no simulator holds
-#                          is refused. A launch of a booted device is judged here too. Fails open when the device
-#                          list cannot be read (no janitor beside guard.py, no xcrun, or an unreadable list).
+#   simulator-device-lease refuses a simulator MCP call that acts on a device this session holds no live sim-lease
+#                          for: every call, launch too, judged after the boot rules. Device and udid are both
+#                          judged, and a name or UDID matches the list without case or outer spaces. A call that
+#                          names no device needs a live lease for every booted device. A name no simulator holds is
+#                          refused, except for a launch. The remedy names the role: `sim-test --device pro --hold`
+#                          for the 18 Pro, else `sim-test --hold`. Fails open when the device list cannot be read
+#                          (no janitor beside guard.py, no xcrun, or an unreadable list).
 # A fake `xcrun` and `ps` on PATH answer `simctl list devices` and the process table. A reason names
 # UDIDs and device names only, never the config folder or the record file.
 
@@ -29423,6 +29424,7 @@ LEASE_OWN, LEASE_OTHER = "sess-own-0001", "sess-other-0002"
 LEASE_ENV = {"CI": None, "GITHUB_ACTIONS": None}  # sim-lease's no-op reads CI; the guard's lease read must not
 # The 18 Pro booted under its own pro lease (the device-lease cases): the fake ps needs its launchd_sim pid.
 LAUNCHD_PID[LEASE_PRO] = 4006
+LAUNCHD_PID[LEASE_DUO1] = 4007  # Duo 1 booted alone or beside the 18 Pro (the no-device cases)
 # Rule simulator-device-lease: every simulator MCP call except launch names a device the session must hold a lease for.
 DEV_RULE = "simulator-device-lease"
 DEV_CARRIES = ("lease",)
@@ -29458,7 +29460,7 @@ def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_di
 
 
 def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None,
-                 action="launch"):
+                 action="launch", lacks=()):
     """One simulator MCP case against FIXTURE, naming the device by DEVICE or by UDID, with ACTION (a launch unless the
     case names another). SESSION rides on the payload, and None sends no session key. A deny carries LEASE_CARRIES
     unless CARRIES says otherwise. Returns the case."""
@@ -29471,7 +29473,7 @@ def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_
     if carries is None:
         carries = LEASE_CARRIES if expected == "deny" else ()
     add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
-        carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
+        carries=carries, lacks=lacks, env=LEASE_ENV, raw=raw, **tool_input)
     return CASES[-1]
 
 
@@ -29730,10 +29732,35 @@ def register_simulator_lease_cases():
                  "deny", dev_empty, action="type", rule=DEV_RULE, carries=DEV_CARRIES)
     lease_launch("device-lease: a tap with no device field, the session's only lease dead, is refused",
                  "deny", dev_dead, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
-    lease_launch("device-lease control: a tap with no device field under this session's live lease is allowed",
-                 "allow", own1, action="tap")
-    lease_launch("device-lease control: a tap with no device field, two live leases of this session, is allowed",
-                 "allow", dev_two, action="tap")
+    # A call with no device passes only when this session holds a live lease for every booted device. Beta Air is
+    # booted in these fixtures and this session leases neither it nor any other device it lists, so both are refused.
+    lease_launch("device-lease: a tap with no device field under this session's live lease is refused while Beta Air is booted unleased",
+                 "deny", own1, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap with no device field, two live leases of this session, is refused while Beta Air is booted unleased",
+                 "deny", dev_two, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    dev_duo_pro = lease_fixture("dev_duo_pro_booted", [(LEASE_DUO1, "iPhone Duo A", "Booted", SIM_TYPE_MINI, SIM_RT),
+                                                       (LEASE_PRO, "iPhone 18 Pro", "Booted", SIM_TYPE_PRO, SIM_RT),
+                                                       (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT)],
+                                live, [lease_entry("1")])
+    dev_duo_only = lease_fixture("dev_duo_only_booted", [(LEASE_DUO1, "iPhone Duo A", "Booted", SIM_TYPE_MINI, SIM_RT),
+                                                         (LEASE_PRO, "iPhone 18 Pro", "Shutdown", SIM_TYPE_PRO, SIM_RT),
+                                                         (LEASE_DUO2, "iPhone Duo B", "Shutdown", SIM_TYPE_MINI, SIM_RT)],
+                                 live, [lease_entry("1")])
+    lease_launch("device-lease: a tap with no device field is refused while the 18 Pro is booted beside Duo 1, which this session leases",
+                 "deny", dev_duo_pro, action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap with an empty device field is refused while the 18 Pro is booted beside Duo 1",
+                 "deny", dev_duo_pro, device="", action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease: a tap with a list for its device field is refused while the 18 Pro is booted beside Duo 1",
+                 "deny", dev_duo_pro, device=[duo1], action="tap", rule=DEV_RULE, carries=DEV_CARRIES)
+    lease_launch("device-lease control: a tap with no device field is allowed when Duo 1 is the only booted device and this session leases it",
+                 "allow", dev_duo_only, action="tap")
+    # The remedy names the role of the refused device: the 18 Pro is slot pro, a Duo is slot duo (the default).
+    lease_launch("device-lease: the refusal for the 18 Pro names sim-test --device pro --hold",
+                 "deny", pro_ended, device="iPhone 18 Pro", action="tap", rule=DEV_RULE,
+                 carries=("sim-test --device pro --hold",))
+    lease_launch("device-lease: the refusal for Duo 2 names sim-test --hold and never --device pro",
+                 "deny", own1, device=duo2, action="tap", rule=DEV_RULE, carries=("sim-test --hold",),
+                 lacks=("--device pro",))
     lease_launch("device-lease control: a full state, a tap of Duo 1 under this session's slot 1 lease is allowed",
                  "allow", full, device=duo1, action="tap")
     lease_launch("device-lease: a full state, a tap of Duo 2 under another session's lease is refused",
