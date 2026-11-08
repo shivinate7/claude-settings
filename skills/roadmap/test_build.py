@@ -3890,15 +3890,20 @@ class IdleLanes(UpkeepFixture):
         count, detail = self.row(out, self.ROW)
         return count, self.entries(detail)
 
+    def steps_and_marks(self):
+        """The record's steps and the landed marks main gives them, read as the build reads them for idle_lanes."""
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        return steps, marks
+
     def idle_direct(self):
         """build.idle_lanes on the fixture's live file, with the steps, marks and repo name the build reads."""
         fn = getattr(build, "idle_lanes", None)
         if fn is None:
             self.fail("build.idle_lanes is absent: no function names the lanes to archive")
-        source, why = build.record_source(self.repo, "roadmap")
-        self.assertIsNotNone(source, why)
-        steps = build.load(source)["steps"]
-        marks, _strays, _why = build.landed_marks(self.repo, build.main_ref(self.repo, "main"), "main", steps)
+        steps, marks = self.steps_and_marks()
         work = build.live_work(str(self.live), steps, self.SLUG)
         return fn(work, steps, marks, self.SLUG, self.repo)
 
@@ -4419,6 +4424,102 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+    def test_completed_lane_with_a_doing_step_under_it_is_held_not_archived(self):
+        # c1 is the lane's own step, landed. c2 is still doing and names this lane, so nothing else owns it: the lane reads
+        # a hold line that names c2, and no archive line. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), "session_a", "scope: c2 does not name session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        self.assertEqual(self.idle_direct(), ["hold (step c2 still doing under this lane; lane session_a)",
+                                              "session_b (c3; topic -)"],
+                         "a completed lane with a doing step still under it was archived, not held")
+
+    def test_completed_lane_with_an_active_step_under_it_is_held_not_archived(self):
+        # The same shape with status active. The hold wording is the spec's one line, so it still reads "still doing".
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "active", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual((steps["c2"].get("status"), steps["c2"].get("lane")), ("active", "session_a"),
+                         "scope: c2 is not an active step under session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still open")
+        self.assertEqual(self.idle_direct(), ["hold (step c2 still doing under this lane; lane session_a)",
+                                              "session_b (c3; topic -)"],
+                         "a completed lane with an active step still under it was archived, not held")
+
+    def test_two_doing_steps_under_a_completed_lane_are_one_hold_line_naming_both_sorted(self):
+        # c2 and c3 are doing under session_a, and their order fields run the other way, so the hold line must sort by
+        # step id, not by order. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 3, "lane": "session_a"},
+                   "c3": {"status": "doing", "order": 2, "lane": "session_a"}, "c4": {"status": "done", "order": 4}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c4")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual([k for k in sorted(steps) if steps[k].get("lane") == "session_a" and k not in marks], ["c2", "c3"],
+                         "scope: the two doing steps under session_a are not both open")
+        self.assertEqual(self.idle_direct(), ["hold (step c2 c3 still doing under this lane; lane session_a)",
+                                              "session_b (c4; topic -)"],
+                         "two doing steps under a completed lane did not read as one sorted hold line")
+
+    def test_doing_step_under_another_session_does_not_hold_this_lane(self):
+        # c2 is doing under session_other, which has no live row here. session_a is archived as it is today.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_other"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), "session_other", "scope: c2 does not name session_other")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so the lane is not held by a landed step")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a doing step under another session changed this lane's archive line")
+
+    def test_completed_lane_with_no_doing_step_under_it_is_archived_unchanged(self):
+        # c2 names this lane and is done, not doing, so no step is still open under it. session_a is archived as today.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), "done", "scope: c2 is not done, so it is not the control")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a done step under a completed lane changed its archive line")
+
+    def test_doing_step_under_a_lane_landed_by_a_step_trailer_on_main_does_not_hold_it(self):
+        # c2 still reads doing on the record, but a Step trailer on main lands it, so it is not still open under the lane.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"}})
+        self.trailer_on_main("c2")
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertIn("c2", marks, "scope: the Step trailer on main did not land c2")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a doing step that a Step trailer on main landed still held its lane")
+
+    def test_lane_waiting_on_its_own_step_a_pull_or_an_item_gets_no_line_under_a_doing_step(self):
+        # Each lane waits on one thing: its own step c1 still doing, an open pull on lane/c2, or an open item on c3. Each
+        # has a doing step under it (c1, c4, c5, c6), so a hold check placed before a wait check shows a line here.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1, "lane": "session_own"},
+                   "c2": {"status": "done", "order": 2}, "c3": {"status": "done", "order": 3},
+                   "c4": {"status": "doing", "order": 4, "lane": "session_own"},
+                   "c5": {"status": "doing", "order": 5, "lane": "session_pull"},
+                   "c6": {"status": "doing", "order": 6, "lane": "session_item"},
+                   "c7": {"status": "done", "order": 7}})
+        self.publish(sessions=[self.lane("session_own", "c1"), self.lane("session_pull", "c2"),
+                               self.lane("session_item", "c3"), self.lane("session_b", "c7")],
+                     pulls=[{"number": 61, "title": "lane c2", "branch": "lane/c2"}],
+                     items=[self.item(1, home="step c3", status="open", lane="c3")])
+        steps, marks = self.steps_and_marks()
+        under = {"session_own": ("c1", "c4"), "session_pull": ("c5",), "session_item": ("c6",)}
+        for sid, ks in under.items():
+            for k in ks:
+                self.assertEqual((steps[k].get("lane"), k in marks), (sid, False),
+                                 "scope: %s is not a doing step still open under %s" % (k, sid))
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c7; topic -)", entries)
+        for sid, wait in (("session_own", "its own step c1 still doing"), ("session_pull", "an open pull on lane/c2"),
+                          ("session_item", "an open page item on c3")):
+            with self.subTest(lane=sid, wait=wait):
+                self.assertEqual([e for e in entries if sid in e], [],
+                                 "a lane waiting on %s got a line under its doing steps: %r" % (wait, entries))
 
 
 class SharedTagNames(unittest.TestCase):

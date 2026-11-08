@@ -195,6 +195,21 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[-1:], [SUMMARY_ONE], out)
 
+    def test_a_doing_step_under_a_completed_lane_prints_a_hold_line_and_counts_it_held(self):
+        # The control is session_a with nothing under it: it is listed. Then c3 is doing under session_a, whose own step
+        # c1 is done. The lane is held, not listed: its hold line names c3, and the summary counts one held lane and no
+        # lane to archive.
+        self.publish([lane("session_a", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before c3 is doing")
+        step = dict(roadmap.STEP, order=3, status="doing", lane="session_a")
+        (self.repo / "roadmap" / "data" / "steps" / "c3.json").write_text(json.dumps(step), encoding="utf-8")
+        roadmap.git(self.repo, "add", "-A")
+        roadmap.git(self.repo, "commit", "-q", "-m", "step c3")
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.splitlines(), ["hold (step c3 still doing under this lane; lane session_a)", HELD_ONE], out)
+
 
 if __name__ == "__main__":
     unittest.main()
