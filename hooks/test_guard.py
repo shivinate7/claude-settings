@@ -11803,6 +11803,87 @@ sh("frozen: a uv --directory value holding a space, wrapped cat of the config ho
    'uv --directory "a b" run --with x cat ' + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: a docker exec -e value holding a space, wrapped cat of the config hook, is allowed",
    'docker exec -e "A=b c" ctr cat ' + CFG_HOOK, "allow", cwd=NOGIT)
+# A QUOTED VALUE GLUED TO A LONG FLAG IS ONE WORD. The frozen scan splits `--user="root"` into `--user=root`,
+# `--user=` and `root`, so `root` reads as the command word and the write behind it is never seen. `-u"root"` and
+# `-u "root"` read as one value, so their rows are green controls. A runner that no wrapper table names (uvx,
+# `uv tool run`, nsenter, chroot, setpriv, numactl, systemd-run, parallel, eatmydata) runs its own command, so a write
+# behind it is still a write to its path. Each row below names one form and one verb.
+sh("frozen: a sudo --user value glued to a quoted root, wrapped cp onto the config hook, is denied",
+   'sudo --user="root" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an env --chdir value glued to a quoted path, wrapped rm of the config hook, is denied",
+   'env --chdir="$D" rm ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run --with value glued to a quoted name, wrapped tee onto the config hook, is denied",
+   'uv run --with="requests" tee ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo --user value glued to a quoted root, wrapped mv onto the config hook, is denied",
+   'sudo --user="root" mv x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo --user value glued to a quoted root, wrapped install onto the config hook, is denied",
+   'sudo --user="root" install x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo --user value glued to a quoted root, wrapped chmod of the config hook, is denied",
+   'sudo --user="root" chmod 644 ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo --user value glued to a quoted root, wrapped ln onto the config hook, is denied",
+   'sudo --user="root" ln x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo --user value glued to a quoted root, wrapped sed -i of the config hook, is denied",
+   'sudo --user="root" sed -i s/a/b/ ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value glued to a quoted root, wrapped cp onto the config hook, is denied",
+   'sudo -u"root" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value in its own quotes, wrapped cp onto the config hook, is denied",
+   'sudo -u "root" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The same verb behind the spaced value, and the verb behind a wrapper the table names: each denies, so the
+# glued-value red above is the one cause that differs.
+sh("frozen: a sudo -u value in its own quotes, wrapped mv onto the config hook, is denied",
+   'sudo -u "root" mv x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value in its own quotes, wrapped install onto the config hook, is denied",
+   'sudo -u "root" install x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value in its own quotes, wrapped chmod of the config hook, is denied",
+   'sudo -u "root" chmod 644 ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value in its own quotes, wrapped ln onto the config hook, is denied",
+   'sudo -u "root" ln x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a sudo -u value in its own quotes, wrapped sed -i of the config hook, is denied",
+   'sudo -u "root" sed -i s/a/b/ ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an env --chdir value in its own quotes, wrapped rm of the config hook, is denied",
+   'env --chdir "$D" rm ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv run --with value in its own quotes, wrapped tee onto the config hook, is denied",
+   'uv run --with "requests" tee ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a nice -n wrapped cp onto the config hook is denied",
+   "nice -n 5 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a nice -n wrapped rm of the config hook is denied",
+   "nice -n 5 rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uvx wrapped cp onto the config hook is denied",
+   "uvx --with x cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uv tool run wrapped cp onto the config hook is denied",
+   "uv tool run cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter -t 1 -m wrapped cp onto the config hook is denied",
+   "nsenter -t 1 -m cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a chroot wrapped cp onto the config hook is denied",
+   "chroot / cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a setpriv wrapped cp onto the config hook is denied",
+   "setpriv --reuid=1000 --clear-groups cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a numactl -N value wrapped cp onto the config hook is denied",
+   "numactl -N 0 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a systemd-run wrapped cp onto the config hook is denied",
+   "systemd-run --wait --pipe cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel wrapped rm of the config hook, through a ::: separator, is denied",
+   "parallel rm ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an eatmydata wrapped cp onto the config hook is denied",
+   "eatmydata cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a uvx wrapped cat of the config hook is a read and is allowed",
+   "uvx --with x cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a uv tool run wrapped grep of the config hook is a read and is allowed",
+   "uv tool run grep x " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: an nsenter wrapped grep of the config hook is a read and is allowed",
+   "nsenter -t 1 -m grep x " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a chroot wrapped cat of the config hook is a read and is allowed",
+   "chroot / cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a setpriv wrapped cat of the config hook is a read and is allowed",
+   "setpriv --reuid=1000 --clear-groups cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a numactl wrapped cat of the config hook is a read and is allowed",
+   "numactl -N 0 cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a systemd-run wrapped cat of the config hook is a read and is allowed",
+   "systemd-run --wait --pipe cat " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel wrapped cat of the config hook is a read and is allowed",
+   "parallel cat ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: an eatmydata wrapped grep of the config hook is a read and is allowed",
+   "eatmydata grep x " + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -22015,6 +22096,81 @@ sh("other-checkout: a setsid -w wrapped cp into a separate clone is refused",
    "setsid -w cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: an env wrapped cp with a quoted spaced assignment, into a separate clone, is refused",
    'env FOO="a b" cp x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+# THE GAPS OF THE FROZEN BLOCK ABOVE, WRITING INTO A SEPARATE CLONE. A quoted value glued to a long flag and a runner
+# outside every wrapper table hide the write verb from this scan as they hide it from the frozen scan. The spaced
+# `-u "root"` row is the control: the same verb reads through it.
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped cp into a separate clone, is refused",
+   'sudo --user="root" cp x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an env --chdir value glued to a quoted path, wrapped rm into a separate clone, is refused",
+   'env --chdir="$D" rm ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a uv run --with value glued to a quoted name, wrapped tee into a separate clone, is refused",
+   'uv run --with="requests" tee ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped mv into a separate clone, is refused",
+   'sudo --user="root" mv x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped install into a separate clone, is refused",
+   'sudo --user="root" install x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped chmod of a separate clone, is refused",
+   'sudo --user="root" chmod 644 ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped ln into a separate clone, is refused",
+   'sudo --user="root" ln x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo --user value glued to a quoted root, wrapped sed -i of a separate clone, is refused",
+   'sudo --user="root" sed -i s/a/b/ ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped cp into a separate clone, is refused",
+   'sudo -u "root" cp x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped mv into a separate clone, is refused",
+   'sudo -u "root" mv x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped install into a separate clone, is refused",
+   'sudo -u "root" install x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped chmod of a separate clone, is refused",
+   'sudo -u "root" chmod 644 ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped ln into a separate clone, is refused",
+   'sudo -u "root" ln x ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a sudo -u value in its own quotes, wrapped sed -i of a separate clone, is refused",
+   'sudo -u "root" sed -i s/a/b/ ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an env --chdir value in its own quotes, wrapped rm into a separate clone, is refused",
+   'env --chdir "$D" rm ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a uv run --with value in its own quotes, wrapped tee into a separate clone, is refused",
+   'uv run --with "requests" tee ' + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a nice -n wrapped cp into a separate clone is refused",
+   "nice -n 5 cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a nice -n wrapped rm of a separate clone is refused",
+   "nice -n 5 rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a uvx wrapped cp into a separate clone is refused",
+   "uvx --with x cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a uv tool run wrapped cp into a separate clone is refused",
+   "uv tool run cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter -t 1 -m wrapped cp into a separate clone is refused",
+   "nsenter -t 1 -m cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a chroot wrapped cp into a separate clone is refused",
+   "chroot / cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a setpriv wrapped cp into a separate clone is refused",
+   "setpriv --reuid=1000 --clear-groups cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a numactl -N value wrapped cp into a separate clone is refused",
+   "numactl -N 0 cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a systemd-run wrapped cp into a separate clone is refused",
+   "systemd-run --wait --pipe cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel wrapped rm into a separate clone, through a ::: separator, is refused",
+   "parallel rm ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an eatmydata wrapped cp into a separate clone is refused",
+   "eatmydata cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a uvx wrapped cat of a separate clone is a read and is allowed",
+   "uvx --with x cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a uv tool run wrapped grep of a separate clone is a read and is allowed",
+   "uv tool run grep x " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter wrapped grep of a separate clone is a read and is allowed",
+   "nsenter -t 1 -m grep x " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a chroot wrapped cat of a separate clone is a read and is allowed",
+   "chroot / cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a setpriv wrapped cat of a separate clone is a read and is allowed",
+   "setpriv --reuid=1000 --clear-groups cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a numactl wrapped cat of a separate clone is a read and is allowed",
+   "numactl -N 0 cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a systemd-run wrapped cat of a separate clone is a read and is allowed",
+   "systemd-run --wait --pipe cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel wrapped cat of a separate clone is a read and is allowed",
+   "parallel cat ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: an eatmydata wrapped grep of a separate clone is a read and is allowed",
+   "eatmydata grep x " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
