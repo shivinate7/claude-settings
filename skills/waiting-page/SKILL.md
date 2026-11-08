@@ -585,8 +585,10 @@ the writer finds the receiver by the lookup in "Never-ending wait", before any u
 the item id and that the act is withdrawn. If that lookup finds no session or cannot run (status `unknown`), the close still goes
 ahead and the writer names the miss in its report. `page_grant.py` already refuses a closed item. An item with no `lane` gets no tell.
 The writer adds `{id, ref, note}` to
-`meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it is a slug of 32 characters or fewer and
-unique in the list, else a new slug. `ref` is the item's home and title in plain words, and `note` is the answer's note.
+`meta/page.parked` in one update pinned with `if_version`. `id` is the item's id when it fullmatches the page's `parkId` pattern
+(lowercase letters, digits and hyphens, 32 characters or fewer) and is unique in the list, else a new slug of the `ref` that does.
+The update carries the whole list, so keep each other line and its `id`. A line with no usable `id` has Unpark and Drop off, and the
+guard refuses the write (rule `parked-line-id`). `ref` is the item's home and title in plain words, and `note` is the answer's note.
 Then it closes the item with `lastAnswer` `{act: "park", note, at}`, so the owning session sees at its wake that the item is parked and stops
 waiting, and it deletes the answer. When the item has `lane`, that close update also drops it (`{"lane": {"__delete__": true}}`): a Park
 withdraws the item, so no card says it waits on a lane. The owning session sends no second tell. It does not reopen or
