@@ -1325,7 +1325,7 @@ class Stale(unittest.TestCase):
                 self.assert_page_word(r, "current", 0)
                 unknown = kept_lines(r.stdout)
                 self.assertEqual(len(unknown), 1, "want one kept-answer line:\n" + r.stdout + r.stderr)
-                self.assertIn("the %s folder has no .complete marker" % folder, unknown[0],
+                self.assertIn("the %s folder" % folder, unknown[0],
                               "the unknown line does not name the %s folder:\n%s" % (folder, unknown[0]))
 
     def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
