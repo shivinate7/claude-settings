@@ -8,8 +8,10 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
-in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
-(merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
+in this process, except the hung-lint case. That case reads the slot's lock in this process once lane_lint returns: a lock that a
+subprocess leaks is freed when the subprocess exits, so only a probe here sees the leak. The other slot cases (lint slots: a lane lint
+waits for one of merge.lint_slots() slots) set the slot count and the bound (merge.LINT_SECONDS) in that subprocess, and read the order
+of the stub's starts and ends, never the clock.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -113,6 +115,15 @@ def most_running(events):
             running.discard(e["pid"])
         most = max(most, len(running))
     return most
+
+def slot_is_free(path):
+    """True when a new fd of this process takes the lock on the slot file at `path`. An open fd of this process that still holds the lock makes it read as held."""
+    import guard_core  # hooks/, on sys.path from merge.py
+    fd = os.open(path, os.O_RDWR)
+    try:
+        return guard_core.try_lock_fd(fd)
+    finally:
+        os.close(fd)  # closing the fd frees the lock this probe took
 
 def harness_text(stub, slots=None, bound=None):
     """HARNESS, with the seams a case gives set before main runs: merge.lint_slots (the slot count) and merge.LINT_SECONDS (the bound).
@@ -618,26 +629,21 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(len(pass_lines(out)), 1, out + err)
 
-    def test_a_hung_lint_ends_at_the_bound_and_frees_its_slot_for_the_next_lint(self):
-        """A hung ci-job ends unknown at the bound and frees its slot. The next lint's ci-job starts only then: its start record
-        reads that the hung run is no longer alive (holder_alive). The next lint then passes."""
-        hung = self.write_stub(PASSING, 0, sleep=60)  # it runs past the bound, so the bound ends it
-        head = self.head("feat")
-        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1, bound=8)
-        holders = self.wait_for_starts(1)
-        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
-        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1, bound=8)
-        rc1, out1, err1 = self.finish(first)
-        rc2, out2, err2 = self.finish(second)
-        starts = [e for e in self.lint_events() if e["kind"] == "start"]
-        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
-        self.assertIs(starts[1]["holder_alive"], False,
-                      "the next lint's ci-job started while the hung one still ran: no slot was held")
-        self.assertEqual(rc1, 1, out1 + err1)
-        self.assertIn("did not finish", out1 + err1)
-        self.assertEqual(pass_lines(out1), [], out1)
-        self.assertEqual(rc2, 0, out2 + err2)
-        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
+    def test_a_hung_lint_ends_at_the_bound_and_frees_its_slot_when_lane_lint_returns(self):
+        """A hung ci-job ends unknown at the bound. lane_lint returns while this process still lives, so the slot must be free here:
+        lint_slot's open fd holds the lock until lint_slot closes that fd. The probe's fd takes the lock only when no open fd still holds it."""
+        self.write_stub(PASSING, 0, sleep=60)  # it runs past the bound, so the bound ends it
+        for patch in (unittest.mock.patch.object(merge, "CI_JOB", self.stub), unittest.mock.patch.object(merge, "LINT_SECONDS", 2),
+                      unittest.mock.patch.object(merge, "lint_slots", lambda: 1)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("did not finish", out)
+        self.assertEqual(pass_lines(out), [], out)
+        slot = os.path.join(self.cfg, "state", "lane-lint-slots", "slot-0.lock")
+        self.assertTrue(os.path.exists(slot), "the lint took no slot: " + out)
+        self.assertTrue(slot_is_free(slot), "the slot's lock was still held once lane_lint returned: the slot's fd was not closed")
 
     def test_with_two_slots_a_lint_starts_beside_a_hung_one_and_reads_it_alive(self):
         """The control for the holder check: a hung run that still holds its slot reads as alive to the next lint's start."""
