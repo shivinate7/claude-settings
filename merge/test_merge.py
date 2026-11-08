@@ -14099,11 +14099,25 @@ class ReviewStampSince(unittest.TestCase):
         subprocess.run(["git", "-C", root, "update-ref", f"refs/remotes/origin/{branch}", "HEAD"], check=True, capture_output=True)
         return root
 
-    def tool_checkout(self):
+    def tool_checkout(self, salt_at=2, depth=None, repo=True):
         """-> a patch that points merge.__file__ at a temp checkout of the merge tool, so tool_stamp_since reads that checkout's salt commit.
-        Its committer time is 2026-10-21T15:04:05Z. A case starts the patch with `with`."""
-        tool = self.repo(salt_at=2, branch="fixture")
+        Its committer time is 2026-10-21T15:04:05Z when the salt is at commit 2. `salt_at` None gives a checkout with no salt commit. `depth` makes
+        a shallow clone of that history, whose boundary is the commit `depth` cuts. `repo=False` gives a folder with no git repository, so the read
+        fails. A case starts the patch with `with`, and reads the checkout's path with tool_root()."""
+        if not repo:
+            tool = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+            self.addCleanup(shutil.rmtree, tool, True)
+            os.makedirs(os.path.join(tool, "merge"))
+        else:
+            tool = self.repo(salt_at=salt_at, branch="fixture")
+            if depth is not None:
+                tool = self.shallow_origin(tool, depth)
         return unittest.mock.patch.object(merge, "__file__", os.path.join(tool, "merge", "merge.py"))
+
+    @staticmethod
+    def tool_root():
+        """-> the checkout the patched merge.__file__ names: the parent of its merge folder, as tool_stamp_since finds it."""
+        return os.path.dirname(os.path.dirname(os.path.abspath(merge.__file__)))
 
     def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
         root = self.repo(salt_at=2)
@@ -14308,6 +14322,48 @@ class ReviewStampSince(unittest.TestCase):
         after = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=cutover)
         state, why = review_fn(self, "review_state")(after, REVIEW_HEAD)
         self.assertEqual(state, "bad", "an unstamped record created after the tool cutover reads %s: %s" % (state, why))
+
+    def test_a_tool_checkout_whose_git_read_fails_stops_naming_the_checkout(self):
+        # The tool checkout is not a git repository, so its read fails and the cutover is unknown. The read stops naming that checkout. It never
+        # returns None, which would read every unstamped record as old.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(repo=False):
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout is not a repository, instead of stopping" % (got,))
+
+    def test_a_shallow_tool_checkout_whose_boundary_is_the_salt_commit_stops_naming_the_checkout(self):
+        # A depth-2 tool checkout cuts the history under its salt commit: that commit is the boundary, so its first salt commit is unknown. The
+        # Stop names the checkout the read ran in, not HEAD, the ref it read.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(depth=2):
+            tool = self.tool_root()
+            self.assertEqual(sh(tool, "git", "rev-parse", "--is-shallow-repository"), "true", "the merge tool's checkout is not shallow")
+            self.assertIn("REVIEW_STAMP_SALT =", sh(tool, "git", "show", "HEAD~1:merge/merge.py"), "the merge tool's checkout boundary is not the salt commit")
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since read a shallow merge tool's checkout as full history and returned %r instead of stopping" % (got,))
+
+    def test_a_tool_checkout_with_no_salt_commit_stops_saying_it_lacks_the_salt(self):
+        # The tool checkout's HEAD has no salt commit, so the cutover is unknown. The read stops and says the checkout lacks the stamp salt. It
+        # never returns None, which would read every unstamped record as old.
+        root = self.repo(salt_at=None, branch="fixture")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"), self.tool_checkout(salt_at=None):
+            tool = self.tool_root()
+            try:
+                got = review_fn(self, "review_stamp_since")(root, "fixture")
+            except merge.Stop as stop:
+                self.assertIn(tool, str(stop), "the Stop does not name the merge tool's checkout:\n" + str(stop))
+                self.assertIn("salt", str(stop), "the Stop does not say the merge tool's checkout lacks the stamp salt:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since returned %r while the merge tool's checkout has no salt commit, instead of stopping" % (got,))
 
 
 if __name__ == "__main__":
