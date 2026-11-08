@@ -2474,10 +2474,16 @@ def _py_bound_value(name, bound):
 
 
 class _ComposeDepth(ValueError):
-    """A path built from expressions nested past the cap of `_py_composed_text`. It is never read as a
-    harmless part: `_py_composed_paths` lets it through, and the frozen caller reads the script as plain text."""
+    """A path built from expressions nested past the depth cap, or past the visit budget, of
+    `_py_composed_text`. `_py_composed_paths` loses the expression when its use is a read, a check or a
+    printed string. When it is a write target (or its use is not told), it adds a `CAPPED_MODE` entry, and
+    the frozen caller reads the script as plain text besides, keeping the paths it composed."""
 
 
+CAPPED_MODE = "capped"   # the mode of the entry (`""`, `CAPPED_MODE`) that tells a path the cap could not read
+_COMPOSE_DEPTH = 100     # levels of nesting one path expression may read (a name read counts one level)
+_COMPOSE_BUDGET = 1200   # reads of one top-level expression: a value that doubles at each step ends here, not at 2**depth
+_PY_BUDGET = [_COMPOSE_BUDGET]
 _PY_EXPANDING = set()   # the bound values `_py_composed_text` is reading now, so a value that holds itself ends
 
 
@@ -2487,8 +2493,11 @@ def _py_composed_text(node, bound, depth=0) -> str:
     `str(p)` and `p.joinpath(a)` read as `p` and a join, `"%s/x" % p` as an f-string, the home
     directory reads as `~`. `_` stands for a part it cannot tell (a call, a name never bound), so a
     frozen folder followed by an unknown child reads `<frozen folder>/_`."""
-    if depth > 8:
-        raise _ComposeDepth("a path built from expressions nested past 8 levels")
+    if depth == 0:
+        _PY_BUDGET[0] = _COMPOSE_BUDGET
+    _PY_BUDGET[0] -= 1
+    if depth > _COMPOSE_DEPTH or _PY_BUDGET[0] < 0:
+        raise _ComposeDepth("a path built from expressions nested past the cap or the read budget")
     step = depth + 1
     if isinstance(node, ast.Constant):
         return node.value if isinstance(node.value, str) else "_"
@@ -2582,10 +2591,32 @@ def _py_composed_paths(tree, parents, names, bound):
         try:
             found.extend(_py_composed_node(node, parents, names, bound))
         except _ComposeDepth:
-            raise   # the depth cap read nothing of the path: the script goes to the crash fallback
+            # The cap read nothing of this path. Only this expression is lost, and the composed paths of
+            # the rest of the script stay. A write target, or a use the reader cannot tell, must not read
+            # as harmless: the entry tells the frozen caller to read the script as plain text as well.
+            if not _py_cap_hit_is_harmless(node, parents, names, bound):
+                found.append(("", CAPPED_MODE))
+            continue
         except Exception:   # one unreadable expression must not hide a write later in the script
             continue
     return found
+
+
+def _py_cap_hit_is_harmless(node, parents, names, bound) -> bool:
+    """True when the use of an expression the depth cap could not read is a read, an existence check or a
+    printed or compared string, so losing its path hides no write. A value bound to a name that only longer
+    path expressions read is a link of a chain: the chain's last expression is read for its own use."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Assign) and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name):
+        loads = names.get(parent.targets[0].id, [])
+        if loads and all(_py_builds_path(parents.get(load), bound) for load in loads):
+            return True
+    try:
+        path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
+            isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
+        return _python_mode(node, parents, path_object, names, frozen=True, bound=bound) in ("read", "exists", "text")
+    except Exception:
+        return False
 
 
 def _py_composed_node(node, parents, names, bound):
@@ -2660,23 +2691,38 @@ def _python_paths(code: str, frozen=False):
     return found + _py_composed_paths(tree, parents, names, bound) if frozen else found
 
 
-def _python_token_strings(code: str):
+def _python_token_strings(code: str, spans=False, strict=False):
+    """The text of each string token of `code`, quotes and prefix off. `spans` gives (text, start, end)
+    instead, start and end being offsets in `code` of the quoted token, and leaves out an f-string, so the
+    text between two tokens holds it. `strict` raises the tokenizer's error instead of keeping what was
+    read before the break."""
     found = []
     middle = getattr(tokenize, "FSTRING_MIDDLE", None)
+    starts = [0]
+    if spans:
+        for line in code.split("\n"):
+            starts.append(starts[-1] + len(line) + 1)
     try:
         for token in tokenize.generate_tokens(io.StringIO(code).readline):
             if token.type == tokenize.STRING:
                 text = token.string.lstrip("rRbBuUfF")
+                if spans and "f" in token.string[:len(token.string) - len(text)].lower():
+                    continue
                 for quote in ('"""', "'''", '"', "'"):
                     if text.startswith(quote) and text.endswith(quote) and len(text) >= 2 * len(quote):
                         text = text[len(quote):-len(quote)]
                         break
-                found.append(text)
-            elif middle is not None and token.type == middle:
+                if spans:
+                    found.append((text, starts[token.start[0] - 1] + token.start[1],
+                                  starts[token.end[0] - 1] + token.end[1]))
+                else:
+                    found.append(text)
+            elif middle is not None and token.type == middle and not spans:
                 found.append(token.string)
     except (tokenize.TokenError, SyntaxError):
-        pass  # what was read before the break still counts
-    return found
+        if strict:
+            raise   # a break in the code: the caller reads the whole text another way
+    return found   # without `strict`, what was read before the break still counts
 
 
 def _js_file_mode(name: str, index: int, frozen=False) -> str:

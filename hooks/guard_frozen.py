@@ -943,27 +943,53 @@ FROZEN_CRASH_NOTE = " The frozen reader crashed on this script, so it was read a
 _CRASH_WORD = re.compile(r"[^\s\"'`()\[\]{},;=+]*[/\\][^\s\"'`()\[\]{},;=+]*")
 
 
-_CRASH_LITERAL = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
+_CRASH_LITERAL = re.compile(r"\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'")
 _CRASH_PARTS = 6   # string parts after the config directory's name that one path may span
+_CRASH_JOINER = re.compile(r"[\s,/+()\[\]]*")   # all that sits between two strings of one joined path
 
 
-def _crash_parts_hit(text: str, cwd: str, predicate, config: str, name: str) -> str:
+def _crash_literals(text: str, language: str):
+    """[(string, start, end)] for the quoted strings of `text`. Python code is read with Python's own
+    tokenizer, so a quote in a comment or a multi-line string starts no string and an escaped quote does
+    not end one. Any other text, and python the tokenizer cannot read, is read with `_CRASH_LITERAL`."""
+    if language == "python":
+        try:
+            return guard_core._python_token_strings(text, spans=True, strict=True)
+        except Exception:
+            pass   # a break in the code: the whole text is read the plain way
+    return [(match.group(1) if match.group(1) is not None else match.group(2), match.start(), match.end())
+            for match in _CRASH_LITERAL.finditer(text)]
+
+
+def _crash_parts_hit(text: str, cwd: str, predicate, config: str, name: str, language: str = "") -> str:
     """A path the script joins from string parts with no `/` between them (`os.path.join(h, ".claude",
     "hooks", "x")`, `Path(h) / ".claude" / "hooks" / "x"`): the config directory's name as a part, or as
-    the last folder of one, followed by the parts after it, judged under the config directory. The
-    predicate holds the frozen names, so no list is copied here. '' when no such path is frozen."""
-    parts = [first or second for first, second in _CRASH_LITERAL.findall(text)]
+    the last folder of one, followed by the parts after it. Strings that come right before that part
+    (`"~", "ab", ".claude"`) belong to the path and are judged with it, so only the real config folder
+    matches. With a name or a call before it (`h, ".claude"`), the name stands for the config directory's
+    parent. The predicate holds the frozen names, so no list is copied here. '' when no such path is frozen."""
+    literals = _crash_literals(text, language)
+    parts = [part for part, _, _ in literals]
     for at, part in enumerate(parts):
-        if part.rstrip("/\\") != name and not part.rstrip("/\\").endswith(("/" + name, "\\" + name)):
+        trimmed = part.rstrip("/\\")
+        if trimmed != name and not trimmed.endswith(("/" + name, "\\" + name)):
             continue
+        before = at
+        while before > 0 and _CRASH_JOINER.fullmatch(text[literals[before - 1][2]:literals[before][1]]):
+            before -= 1
+        head = parts[before:at]
         for end in range(at + 2, min(len(parts), at + 1 + _CRASH_PARTS) + 1):
-            candidate = os.path.join(config, *(piece.strip("/\\") for piece in parts[at + 1:end]))
+            tail = [piece.strip("/\\") for piece in parts[at + 1:end]]
+            if head or trimmed != name:
+                candidate = os.path.join(*head, trimmed, *tail)
+            else:
+                candidate = os.path.join(config, *tail)
             if predicate(candidate, cwd):
                 return candidate
     return ""
 
 
-def _crash_text_hit(text: str, cwd: str, predicate) -> str:
+def _crash_text_hit(text: str, cwd: str, predicate, language: str = "") -> str:
     """The first path-like word of `text` that `predicate` accepts, tagged with FROZEN_CRASH_TAG, else ''."""
     try:
         config = guard_core.config_dir()
@@ -976,7 +1002,7 @@ def _crash_text_hit(text: str, cwd: str, predicate) -> str:
             if any(predicate(spelling, cwd) for spelling in spellings):
                 return word + FROZEN_CRASH_TAG
         if name:
-            found = _crash_parts_hit(text, cwd, predicate, config, name)
+            found = _crash_parts_hit(text, cwd, predicate, config, name, language)
             if found:
                 return found + FROZEN_CRASH_TAG
     except Exception:
@@ -1003,9 +1029,14 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
         try:
             literals = code_paths(code, language, frozen=True)
         except Exception:   # a crash, or node code nested past JS_DEPTH (ValueError): the plain text is read
-            return _crash_text_hit(code, where, predicate)
+            return _crash_text_hit(code, where, predicate, language)
         for text, mode in literals:
             text = text.strip()
+            if mode == guard_core.CAPPED_MODE:   # a path the composed reader could not read: the plain text is read too
+                found = _crash_text_hit(code, where, predicate, language)
+                if found:
+                    return found
+                continue
             if mode == "shell":   # `sh -c <script>` from subprocess: the shell write scan reads the script
                 found = frozen_shell_hit(text, where)
                 if found:
