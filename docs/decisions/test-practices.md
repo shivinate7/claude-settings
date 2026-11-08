@@ -74,7 +74,7 @@ P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-ru
 
 ### Checks that could hold these (not built)
 
-- P5 (a verdict that depends on elapsed time uses a synthetic clock): built as a finder. `lint/find_time_pinned.py` lists sleeps, elapsed asserts, calendar reads and hang guards in test files. Nothing gates on it: CI runs only the finder's fixture suite. The gate is not built: a check that fails on wall-clock reads, date and zone reads and fixed sleeps in test asserts (time.time, performance.now, Date.now, sleep).
+- P5 (a verdict that depends on elapsed time uses a synthetic clock): built as a finder. `lint/find_time_pinned.py` lists sleeps, elapsed asserts, calendar reads and hang guards in test files. Nothing gates on it: CI runs the finder only on test fixtures, in its own suite and in `lint/test_scanner_traps.mjs`. The gate is not built: a check that fails on wall-clock reads, date and zone reads and fixed sleeps in test asserts (time.time, performance.now, Date.now, sleep).
 - P7 (scope first): a lint for an assert inside a conditional on the subject's presence, such as `if (await x.count())`.
 - P3 (named cause): the mutation report already counts a crash as no kill (hooks/mutate_shared.py).
 
