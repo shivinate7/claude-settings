@@ -1212,11 +1212,14 @@ def stamp_hit(tool: str, tool_input):
 
 # Written values: an ISO instant with an offset, in three places (rule message-time-matches-clock). The Bash scan
 # reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
-# a lone apostrophe, which is where an incident's literal sat. It needs a double-quoted value, so a single-quoted
-# `'updatedAt': '...'` in a script's body is not read.
+# a lone apostrophe, which is where an incident's literal sat. It reads the key `updatedAt`, bare or quoted, with
+# an optional `]` after it. Then `:`, `=` or jq's `|=`, then a double-quoted value. It skips `==`, `>` and a
+# single-quoted value.
 _ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
 _ISO_FULL = re.compile(_ISO_INSTANT)
-_UPDATED_AT = re.compile(r'updatedAt\\?"?\s*[:=]\s*\\?"' + _ISO_INSTANT + r'\\?"')
+_UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?\"""" + _ISO_INSTANT + r'\\?"')
+# A str_replace of `added` may carry only the time part of the value, such as `T20:24:00Z`.
+_TIME_FRAGMENT = re.compile(r"T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})")
 _STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
 WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
 WRITTEN_REASON = (
@@ -1226,18 +1229,37 @@ WRITTEN_REASON = (
 )
 
 
+def _offset(zone):
+    """The timezone of an ISO offset, `Z` or `[+-]HH[:]MM`. Raises ValueError for an impossible offset."""
+    if zone == "Z":
+        return timezone.utc
+    digits = zone[1:].replace(":", "")
+    return timezone(timedelta(hours=int(digits[:2]), minutes=int(digits[2:])) * (-1 if zone[0] == "-" else 1))
+
+
 def _instant(found):
     """The aware datetime of an _ISO_INSTANT match, or None for an impossible date or offset."""
     year, month, day, hour, minute, zone = found.groups()
     try:
-        if zone == "Z":
-            offset = timezone.utc
-        else:
-            digits = zone[1:].replace(":", "")
-            offset = timezone(timedelta(hours=int(digits[:2]), minutes=int(digits[2:])) * (-1 if zone[0] == "-" else 1))
-        return datetime(int(year), int(month), int(day), int(hour), int(minute), tzinfo=offset)
+        return datetime(int(year), int(month), int(day), int(hour), int(minute), tzinfo=_offset(zone))
     except ValueError:
         return None
+
+
+def _fragment_ahead(found, now):
+    """Minutes a _TIME_FRAGMENT match is ahead of `now`, or None for an impossible time or offset. The guard reads
+    no page, so the date the fragment lands on is unknown. It takes the day that puts the time nearest the clock,
+    a signed offset in [-720, 720) as an undated header stamp has. So a behind fragment passes, and yesterday's
+    late time does not read as almost a day ahead after UTC midnight. It is not refused outright, because a value
+    behind the clock passes."""
+    hour, minute, zone = int(found.group(1)), int(found.group(2)), found.group(3)
+    if hour > 23 or minute > 59:
+        return None
+    try:
+        there = now.astimezone(_offset(zone))
+    except ValueError:
+        return None
+    return (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
 
 
 def _document_added(entry, cwd):
@@ -1260,8 +1282,9 @@ def _document_added(entry, cwd):
 
 
 def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
-    """The text of each written value this call carries that holds an ISO instant to judge: ISO strings alone
-    (an `added`), or text holding a literal `updatedAt` (a step's content, an edit's new text, a command)."""
+    """The text of each written value this call carries that holds an ISO instant or time fragment to judge: an
+    `added` alone, each offset instant in a step edit's new text, or each literal `updatedAt` in a step's content
+    or a command."""
     if tool == DATA_TOOL:
         action = tool_input.get("action")
         writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
@@ -1280,11 +1303,17 @@ def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
     if tool in WRITE_TOOLS:
         paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
         if any(_STEP_FILE.search(p) for p in paths):
-            parts = [tool_input.get(f) for f in ("content", "new_string")]
-            parts += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
-            for part in parts:
-                if isinstance(part, str) and "updatedAt" in part:
-                    for found in _UPDATED_AT.finditer(part):
+            content = tool_input.get("content")
+            if isinstance(content, str) and "updatedAt" in content:
+                for found in _UPDATED_AT.finditer(content):
+                    yield found.group(0), found.group(0)
+            # An edit can replace the value alone, with no key in its new text. Every time a step holds is past
+            # by nature (createdAt, updatedAt), so each offset instant an edit writes is judged.
+            news = [tool_input.get("new_string")]
+            news += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            for new in news:
+                if isinstance(new, str):
+                    for found in _ISO_FULL.finditer(new):
                         yield found.group(0), found.group(0)
         return
     command = tool_input.get("command")
@@ -1297,26 +1326,30 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES ahead of the clock,
     else None. A value behind the clock passes: a kept old value is always behind. Judged: `added` in an
     ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
-    the new text of a str_replace on `added`; `updatedAt` in a Write or Edit to roadmap/data/steps/<name>.json; a
-    literal double-quoted `updatedAt` in a shell command. Only an instant with an offset is read. Cost: one clock
-    read, and only when a judged value is present; one local file read, only for an items write that carries
-    `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
+    roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
+    text. In a shell command: a literal `updatedAt` key with a double-quoted value. Only a value with an offset is
+    read. Cost: one clock read, and only when a judged value is present; one local file read, only for an items
+    write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
     if not isinstance(tool_input, dict):
         return None
     judged = []
     for what, text in _written_texts(tool, tool_input, cwd):
         found = _ISO_FULL.search(text)
-        then = _instant(found) if found else None
-        if then:
-            judged.append((what, then))
+        if found:
+            then = _instant(found)
+            if then:
+                judged.append((what, then))
+        elif fragment := _TIME_FRAGMENT.fullmatch(text):
+            judged.append((what, fragment))
     if not judged:
         return None
     try:
         import local_time
         now = local_time.clock().replace(second=0, microsecond=0)
         for what, then in judged:
-            off = _minutes_ahead(then, now)
-            if off > STAMP_LIMIT_MINUTES:
+            off = _minutes_ahead(then, now) if isinstance(then, datetime) else _fragment_ahead(then, now)
+            if off is not None and off > STAMP_LIMIT_MINUTES:
                 return what, WRITTEN_REASON.format(
                     what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now),
                     utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
