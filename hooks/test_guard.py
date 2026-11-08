@@ -8333,6 +8333,49 @@ sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a co
 sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
    "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
 
+# The false alarms that decision env-file-stays-unread names. Each allow runs its program with env only
+# as an argument, and the flag before the program takes no value. The guard reads that flag's next word
+# as its value, so the program's word starts a child and env is read as the child. Each deny beside it
+# puts env in the child's place with the same flag, so a fix that stops reading these flags fails it.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter -k env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
+   "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
+   "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter -t env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --silent takes no value, so env is the child, the control for --silent",
+   "npx --env-file=" + ENV + " --silent env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec --stream takes no value, so vitest runs with the filter env",
+   "pnpm --env-file=" + ENV + " exec --stream vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " exec --stream env", "deny", "env-file", cwd=NOGIT)
+# After --stream, jest's -c is jest's option, so the allow holds. pnpm's own -c stays a shell string,
+# so the deny beside it holds too.
+sh("env-child: allow, pnpm exec --stream takes no value, so jest -c env is jest's option",
+   "pnpm --env-file=" + ENV + " exec --stream jest -c env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream then -c env, so pnpm's own -c is a shell string, the control",
+   "pnpm --env-file=" + ENV + " exec --stream -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, bun x --bun takes no value, so vitest runs with the filter -t env",
+   "bun --env-file=" + ENV + " x --bun vitest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, bun x --bun takes no value, so env is the child, the control for --bun",
+   "bun --env-file=" + ENV + " x --bun env", "deny", "env-file", cwd=NOGIT)
+# `container` is the management word docker and podman give to run, so `container run` starts the same
+# child as `run`. The allows beside it run the image's own command, with env only as an argument.
+sh("env-child: deny, docker container run is docker run, so env runs in img",
+   "docker container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker container run --rm takes no value, so printenv runs in alpine",
+   "docker container run --env-file " + ENV + " --rm alpine printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, podman container run is podman run, so env runs in img",
+   "podman container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker container run with serve as the child, the control for the gap",
+   "docker container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, podman container run with serve as the child, the control for the gap",
+   "podman container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
