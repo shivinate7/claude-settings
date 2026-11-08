@@ -1,11 +1,11 @@
 {
   "title": "The other-checkout guard stops reading a redirect inside quoted or heredoc text on an interpreter line as a real write",
   "why": "guard.log, 2026-11-08 06:25-06:26 CST: the other-checkout guard refused three test-author probes, reading a redirect inside quoted or heredoc text on an interpreter line as a write into another checkout (lane guard-relative-write-escape, 06:38 CST).",
-  "note": "Failing tests at 530513e66 on branch guard-python-quoted-redirect-red. Follow-up PR with Merge after: naming the lane's guard-relative-write-escape PR. Doing in lane session_013NEJKzJxDxuXzuwNe7fhYn (coordinator, 06:38 CST Nov 8; owner items 386 and 410 a). False-alarm tests pushed on guard-python-quoted-redirect-red at 8c8b9bba4 (lane, 07:50 CST Nov 8). 10:38 CST Nov 8: branch guard-quoted-args-data (8e8cf9232) is held under decision hold-unsafe-after-round-3 (one built-path hole opened). Owner question: page item 429 (quoted-args-held-hole).",
+  "note": "Failing tests at 530513e66 on branch guard-python-quoted-redirect-red. Follow-up PR with Merge after: naming the lane's guard-relative-write-escape PR. Doing in lane session_013NEJKzJxDxuXzuwNe7fhYn (coordinator, 06:38 CST Nov 8; owner items 386 and 410 a). False-alarm tests pushed on guard-python-quoted-redirect-red at 8c8b9bba4 (lane, 07:50 CST Nov 8). 10:38 CST Nov 8: branch guard-quoted-args-data (8e8cf9232) is held under decision hold-unsafe-after-round-3 (one built-path hole opened). Owner question: page item 429 (quoted-args-held-hole). Item 429 a (owner, 11:00 CST Nov 8): one new fix lane from round 1 keeps every body when a kept body runs a path the guard cannot resolve (hooks/guard_core.py _kept_headers); then a fix check; merges after #1906.",
   "phase": "now",
   "status": "doing",
   "order": 635,
   "owner": "triage",
   "lane": "session_013NEJKzJxDxuXzuwNe7fhYn",
-  "updatedAt": "2026-11-08T10:38:00-06:00"
+  "updatedAt": "2026-11-08T11:00:00-06:00"
 }
