@@ -8614,7 +8614,7 @@ sh("env-child: deny, a # inside a quoted word does not hide a later $( ) that ru
 sh("env-child: deny, double quotes do not hide a $( ) that runs env in cd, uv run",
    "uv run --env-file " + ENV + " sh -c 'cd \"$(env)\"'", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, a lone quote in text does not hide a $( ) that runs env, uv run",
-   "uv run --env-file " + ENV + " sh -c \"echo don't; ls $(env)\"", "deny", "env-file", cwd=NOGIT)
+   "uv run --env-file " + ENV + " sh -c \"echo don't; ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, a line break in a shell string starts a segment whose $( ) runs env, uv run",
    "uv run --env-file " + ENV + " sh -c 'npm ci\nls $(env)'", "deny", "env-file", cwd=NOGIT)
 sh("env-child: deny, echo prints the output of a $( ) that runs env, the twin of echo $(date), uv run",
@@ -8642,6 +8642,37 @@ sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for t
    "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
 sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
    "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
+
+# A nested substitution, a /proc environ glob, an escaped $ that the child shell expands, and a redirect
+# that writes the environment to a file each print or save a file value, so each is denied.
+sh("env-child: deny, sh -c echo $(echo $X) prints a variable through a nested substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(echo $X)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat /proc/*/environ reads every process environment, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat /proc/*/environ'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls $(env) with an escaped dollar runs env in the child shell, uv run",
+   "uv run --env-file " + ENV + " sh -c \"ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c env > out.txt writes the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'env > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c set > out.txt writes the shell variables to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c printenv >> log appends the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'printenv >> log'", "deny", "env-file", cwd=NOGIT)
+
+# A double-quoted substitution is expanded by the parent shell before uv runs, and the parent holds no
+# file value, so it prints HOME and nothing from the file. docker compose config prints service names
+# or nothing. perl -pe rewrites text in a file it reads and prints no variable.
+sh("env-child: allow, bash -c with a double-quoted $(printenv HOME) is expanded by the parent, uv run",
+   "uv run --env-file " + ENV + " bash -c \"echo $(printenv HOME)\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config --services prints service names, not values",
+   "docker compose --env-file " + ENV + " config --services", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config -q prints nothing",
+   "docker compose --env-file " + ENV + " config -q", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -pe rewrites text in config.yml and prints no variable, uv run",
+   "uv run --env-file " + ENV + " perl -pe 's/ENV/prod/' config.yml", "allow", cwd=NOGIT)
+
+# A pin beside the deny pins above (perl print %ENV and docker compose config): one variable read by perl.
+sh("env-child: deny, perl -e print $ENV{KEY} prints one variable from the environment, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print $ENV{KEY}'", "deny", "env-file", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
