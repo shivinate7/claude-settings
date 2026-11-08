@@ -59,7 +59,11 @@ LEADING_MARK_CHARS = r"[\s>*#-]"
 LEADING_MARKS = re.compile(r"^" + LEADING_MARK_CHARS + r"+")
 LANE_LINE = re.compile(r"^" + re.escape(DESIGNER_HEADER) + r"\s*[A-Za-z0-9][\w-]*-blind-[1-9][0-9]*\s*$")
 # Leading marks and bold are read as in KIND_LINE and LEADING_MARKS: `- Blind designers: 2`, `**Blind designers:** 2`.
-BLIND_COUNT = re.compile(r"^" + LEADING_MARK_CHARS + r"*" + re.escape(COUNT_HEADER) + r"\**\s*(.*?)\s*\**\s*$", re.I | re.M)
+_COUNT_TAIL = re.escape(COUNT_HEADER) + r"\**\s*(.*?)\s*\**\s*$"
+BLIND_COUNT = re.compile(r"^" + LEADING_MARK_CHARS + r"*" + _COUNT_TAIL, re.I | re.M)
+# A count line at column 0 with no mark. It outranks a marked line: a bulleted line is often a template or
+# an example the brief quotes, while the plain line is the one the brief states as its own count.
+PLAIN_BLIND_COUNT = re.compile(r"^" + _COUNT_TAIL, re.I | re.M)
 # The kind header before the rename. kind_of never reads it; the spawn hook refuses it and names KIND_HEADER.
 OLD_KIND_LINE = re.compile(r"^lane\s+kind\s*:", re.I)
 OWNER_NONE = re.compile(r"^none,\s*owner:\s*\"[^\"]*\w[^\"]*\"$", re.I)
@@ -367,7 +371,7 @@ def brief_faults(text, current=(), template=None, devices=None):
 def blind_designers_ok(text):
     """True when an informed or directed brief says its run has a blind designer, or carries the owner's
     words for none."""
-    m = BLIND_COUNT.search(text)
+    m = PLAIN_BLIND_COUNT.search(text) or BLIND_COUNT.search(text)
     if not m:
         return False
     value = m.group(1)
