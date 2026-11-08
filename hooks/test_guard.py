@@ -11993,6 +11993,15 @@ SI_F1CW = os.path.join(STALEROOT, "f1c-wt")         # ... then removes k.py, whi
 SI_F2P = os.path.join(STALEROOT, "f2")              # the primary holds branch next, one commit ahead of topic
 SI_F2A = os.path.join(STALEROOT, "f2-wt")           # a worktree on topic, at the old head
 SI_F2SQ = os.path.join(STALEROOT, "f2sq")           # a clean topic with two commits, for a chained squash
+SI_RNP = os.path.join(STALEROOT, "rn")              # the new remedy: a stale worktree, then read-tree and reset -q
+SI_RNA = os.path.join(STALEROOT, "rn-wt")           # ... then a deliberate rm of h.py, which the moved head added
+SI_ROP = os.path.join(STALEROOT, "ro")              # the old remedy alone: a stale worktree, then read-tree only
+SI_ROA = os.path.join(STALEROOT, "ro-wt")           # ... then the same deliberate rm of h.py
+SI_PLP = os.path.join(STALEROOT, "pl")              # a primary on main: topic at C, and feed one commit ahead of it
+SI_PLA = os.path.join(STALEROOT, "pl-wt")           # a worktree on topic, which pulls --ff-only from feed
+SI_PLF = os.path.join(STALEROOT, "pl-feed")         # a worktree on feed, holding that one commit
+SI_WAP = os.path.join(STALEROOT, "wa")              # a primary that moves topic to N, then adds a worktree on topic
+SI_WAA = os.path.join(STALEROOT, "wa-wt")           # the worktree added on topic
 SI_COSTP = os.path.join(STALEROOT, "cost")          # no move, one staged change
 NEW_HEAD = {"f.py": "x = 2\n", "h.py": "z = 1\n"}  # what the moved head N changes and adds
 NEW_ADD = {"k.py": "k = 1\n"}                       # a moved head that only adds k.py
@@ -12184,6 +12193,45 @@ def _build_stale_index():
     _si_clean(SI_F2SQ)
     _si_proof(SI_F2SQ, [])
 
+    # RN and RO: a stale worktree, then a deliberate rm of h.py, which the moved head added. RN runs the new remedy,
+    # read-tree then reset -q. RO runs the old remedy alone.
+    old = _si_base(SI_RNP)
+    _cmk_run(SI_RNP, "worktree", "add", "-q", SI_RNA, "topic")
+    n = _si_new_head(SI_RNP, NEW_HEAD)
+    _cmk_run(SI_RNP, "update-ref", "refs/heads/topic", n)
+    _cmk_run(SI_RNA, "read-tree", "-m", "-u", old, "HEAD")
+    _cmk_run(SI_RNA, "reset", "-q")
+    _cmk_run(SI_RNA, "rm", "-q", "h.py")
+    _si_proof(SI_RNA, ["h.py"])
+
+    old = _si_base(SI_ROP)
+    _cmk_run(SI_ROP, "worktree", "add", "-q", SI_ROA, "topic")
+    n = _si_new_head(SI_ROP, NEW_HEAD)
+    _cmk_run(SI_ROP, "update-ref", "refs/heads/topic", n)
+    _cmk_run(SI_ROA, "read-tree", "-m", "-u", old, "HEAD")
+    _cmk_run(SI_ROA, "rm", "-q", "h.py")
+    _si_proof(SI_ROA, ["h.py"])
+
+    # PL: a second worktree on feed, one commit ahead of topic, which a fast-forward pull brings into topic.
+    _si_base(SI_PLP)
+    _cmk_run(SI_PLP, "branch", "feed", "topic")
+    _cmk_run(SI_PLP, "worktree", "add", "-q", SI_PLF, "feed")
+    _cmk_run(SI_PLP, "worktree", "add", "-q", SI_PLA, "topic")
+    _cmk_stage(SI_PLF, "f.py", "x = 2\n")
+    _cmk_stage(SI_PLF, "h.py", "z = 1\n")
+    _cmk_run(SI_PLF, "commit", "-q", "-m", "n")
+    _cmk_run(SI_PLA, "pull", "-q", "--ff-only", SI_PLF, "feed")
+    _cmk_stage(SI_PLA, "g.py", "y = 2\n")
+    _si_proof(SI_PLA, ["g.py"])
+
+    # WA: the primary moves topic to N, then a new worktree is added on topic.
+    _si_base(SI_WAP)
+    n = _si_new_head(SI_WAP, NEW_HEAD)
+    _cmk_run(SI_WAP, "update-ref", "refs/heads/topic", n)
+    _cmk_run(SI_WAP, "worktree", "add", "-q", SI_WAA, "topic")
+    _cmk_stage(SI_WAA, "g.py", "y = 2\n")
+    _si_proof(SI_WAA, ["g.py"])
+
     # The cost row: no move, one staged change.
     _si_base(SI_COSTP)
     _cmk_run(SI_COSTP, "checkout", "-q", "topic")
@@ -12193,13 +12241,15 @@ def _build_stale_index():
 
 lazy_fixture([SI_R1P, SI_R1A, SI_R3P, SI_R3A, SI_R4P, SI_R4A, SI_R4X, SI_R5P, SI_R5A, SI_R6P, SI_R6A,
               SI_R7P, SI_R7A, SI_R8P, SI_R8A, SI_A1P, SI_A1A, SI_A2P, SI_A3P, SI_A4P, SI_A5P, SI_A6P, SI_A7P,
-              SI_A7A, SI_F1AP, SI_F1AW, SI_F1BP, SI_F1BW, SI_F1CP, SI_F1CW, SI_F2P, SI_F2A, SI_F2SQ, SI_COSTP],
+              SI_A7A, SI_F1AP, SI_F1AW, SI_F1BP, SI_F1BW, SI_F1CP, SI_F1CW, SI_F2P, SI_F2A, SI_F2SQ, SI_COSTP,
+              SI_RNP, SI_RNA, SI_ROP, SI_ROA, SI_PLP, SI_PLA, SI_PLF, SI_WAP, SI_WAA],
              _build_stale_index)
 
 
 def stale_refuse(name, command, cwd, carries=(), lacks=()):
+    # Every refusal names the remedy in full: the read-tree, then the reset that re-syncs the index.
     sh("stale-index: %s is refused" % name, command, "deny", STALE_RULE, cwd=cwd,
-       carries=("read-tree",) + tuple(carries), lacks=lacks)
+       carries=("read-tree", "git reset -q") + tuple(carries), lacks=lacks)
 
 
 def stale_allow(name, command, cwd):
@@ -12247,6 +12297,20 @@ stale_allow("after a switch away and back, a removal of a file the head added, t
             VCS + " commit -m x", SI_F1CW)
 stale_allow("a chained backward reset --soft to HEAD~2, then a squash commit",
             VCS + " reset --soft HEAD~2 && " + VCS + " commit -m squash", SI_F2SQ)
+
+
+# 4. The remedy. After the new remedy, the reset leaves a HEAD log line, and a deliberate rm is allowed. The old remedy
+# alone leaves no such line, and the same rm is refused.
+stale_allow("after the new remedy (read-tree, reset -q), a deliberate rm of a file the moved head added, a commit",
+            VCS + " commit -m x", SI_RNA)
+stale_refuse("after the old remedy alone (read-tree), the same deliberate rm, then a commit",
+             VCS + " commit -m x", SI_ROA, carries=("h.py",))
+
+# 5. A fast-forward pull and a new worktree each leave the index at the head the commit sits on.
+stale_allow("after a fast-forward pull of topic from a second worktree, a staged edit, then a plain commit",
+            VCS + " commit -m x", SI_PLA)
+stale_allow("after a worktree add on topic, which the primary moved, a staged edit, then a plain commit",
+            VCS + " commit -m x", SI_WAA)
 
 
 # The commit check reads the index once more than before, for a commit segment with no move. STALE_COST_BASE is the
