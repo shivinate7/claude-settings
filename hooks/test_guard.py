@@ -5778,6 +5778,16 @@ add("wait-until: a clock loop then a second loop with no pause stays refused und
     command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
             r'until [ -f x ]; do :; done; cmd',
     run_in_background=True)
+# A variable is no date read, so its ordering against a literal is refused: nothing says the variable moves.
+add("wait-until: a loop on a variable with no date read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$NOW" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop that tests the clock for equality with a full ISO time stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" = "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop written as an arithmetic test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until (( $(date +%s) > 1762470000 )); do sleep 15; done; cmd',
+    run_in_background=True)
 # ALLOW, kept: a numeric epoch and a while loop that waits while the clock is earlier than a literal.
 add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
     cwd=NOGIT, command='until [ "$(date +%s)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
