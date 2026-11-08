@@ -1064,12 +1064,16 @@ def queued_rec(text):
             "attachment": {"type": "queued_command", "prompt": text}}
 
 
-def result_rec(tool_id="t1", content="ok", is_error=False):
-    """The user record that holds the tool_result of `tool_id`, with `content` as the tool printed it."""
+def result_rec(tool_id="t1", content="ok", is_error=False, tool_use_result=None):
+    """The user record that holds the tool_result of `tool_id`, with `content` as the tool printed it.
+    `tool_use_result` is the record's toolUseResult, left out when None."""
     block = {"type": "tool_result", "tool_use_id": tool_id, "content": content}
     if is_error:
         block["is_error"] = True
-    return {"type": "user", "message": {"content": [block]}}
+    rec = {"type": "user", "message": {"content": [block]}}
+    if tool_use_result is not None:
+        rec["toolUseResult"] = tool_use_result
+    return rec
 
 
 def said_rec(text):
@@ -1149,6 +1153,89 @@ def case_page_sendmessage_proof_passes():
                  [owner_rec("98: a"), used_rec("SendMessage", {"to": "page-writer",
                                                                  "message": "page 98: a"})])
     expect_silent("page: a SendMessage naming 98 after the owner record passes", p)
+
+
+CLOUD_UNVERIFIED = "target session could not be verified; retry send_message shortly"  # a cloud send_message failure
+# A failed local SendMessage (unknown name) has no is_error flag: the text is this JSON, and the user record's
+# toolUseResult carries success false. The name here is a fixture, since the real message is not fixed.
+LOCAL_UNKNOWN_NAME = '{"success":false,"message":"No agent named page-writer is reachable"}'
+LOCAL_UNKNOWN_NAME_RESULT = {"success": False, "message": "No agent named page-writer is reachable",
+                             "display": "No agent named page-writer is reachable"}
+
+
+def case_page_send_with_error_result_does_not_count():
+    """A send_message whose tool_result, the one with its tool_use_id, is an error does not prove page item 98.
+    The send's text names 98, so only its failed result can make the guard block. The result text is the measured
+    cloud failure."""
+    p = page_run(new_cfg(), "page-send-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(SEND, {"session_id": "session_0unknown", "message": "Ruling on page item 98: a"},
+                           tool_id="s1"),
+                  result_rec("s1", CLOUD_UNVERIFIED, is_error=True)])
+    expect_send_missing("page: a send_message whose result is an error does not prove 98", p, "fb-0958-7", "98")
+
+
+def case_page_send_with_ok_result_still_counts():
+    """The same send with a result that is no error still proves page item 98. The green control for the error
+    case: the fix must not block a send that worked."""
+    p = page_run(new_cfg(), "page-send-ok", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"},
+                           tool_id="s1"),
+                  result_rec("s1", "ok")])
+    expect_silent("page: a send_message naming 98 whose result is no error still proves 98", p)
+
+
+def case_page_error_result_of_another_call_does_not_cancel_the_send():
+    """A send that proves page item 98 keeps its proof when a second send in the same turn fails. The two
+    results come back in one user record, the failed one first, so only pairing by tool_use_id picks the right
+    result: a fix that pairs by position, or cancels on any error, blocks here."""
+    proving = used_rec(SEND, {"session_id": "session_0page", "message": "Ruling on page item 98: a"}, tool_id="s1")
+    proving["message"]["content"] += used_rec(SEND, {"session_id": "session_0unknown",
+                                                     "message": "A note for another session"},
+                                              tool_id="s2")["message"]["content"]
+    results = result_rec("s2", CLOUD_UNVERIFIED, is_error=True)
+    results["message"]["content"] += result_rec("s1", "ok")["message"]["content"]
+    p = page_run(new_cfg(), "page-send-other-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"), proving, results])
+    expect_silent("page: a failed send with another tool_use_id, results out of order, does not cancel the send"
+                  " that proves 98", p)
+
+
+def case_page_sendmessage_failed_result_does_not_count():
+    """A failed local SendMessage (unknown name) has no is_error flag. Its result text and the record's
+    toolUseResult both say success false, so the send does not prove page item 98."""
+    p = page_run(new_cfg(), "page-sendmessage-failed", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec("SendMessage", {"to": "page-writer", "message": "page 98: a"}, tool_id="s1"),
+                  result_rec("s1", LOCAL_UNKNOWN_NAME, tool_use_result=LOCAL_UNKNOWN_NAME_RESULT)])
+    expect_send_missing("page: a SendMessage whose result says success false does not prove 98", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_sendmessage_success_result_still_counts():
+    """A local SendMessage whose toolUseResult says success true still proves page item 98. The success text is
+    a fixture: only the success flag is measured for this shape."""
+    p = page_run(new_cfg(), "page-sendmessage-success", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec("SendMessage", {"to": "page-writer", "message": "page 98: a"}, tool_id="s1"),
+                  result_rec("s1", '{"success":true,"message":"Sent to page-writer"}',
+                             tool_use_result={"success": True, "message": "Sent to page-writer",
+                                              "display": "Sent to page-writer"})])
+    expect_silent("page: a SendMessage whose toolUseResult says success true still proves 98", p)
+
+
+def case_page_artifactdata_error_result_does_not_count():
+    """An ArtifactData write that would prove page item 98, whose result is an error, does not count. The error
+    text is a fixture; the is_error flag is the one read. This pins the fix's widening to every tool, not only
+    sends."""
+    p = page_run(new_cfg(), "page-artifact-error", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec("ArtifactData", {"action": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}},
+                           tool_id="a1"),
+                  result_rec("a1", "item write failed", is_error=True)])
+    expect_send_missing("page: an ArtifactData write whose result is an error does not prove 98", p,
+                        "fb-0958-7", "98")
 
 
 def case_page_artifactdata_n_proof_passes():
@@ -1702,6 +1789,18 @@ def case_repo_send_naming_the_repo_passes():
         p = page_run(new_cfg(), "repo-send", [("rename", (REPO_ITEM,))],
                      [owner_rec("rename"), used_rec(name, {"to": "coordinator", "message": message})])
         expect_silent("repo: %s passes" % label, p)
+
+
+def case_repo_send_with_error_result_does_not_count():
+    """A send that names the repo, whose tool_result (the one with its tool_use_id) is an error, does not prove
+    the repo item. repo_problem reads the same proof through Pages.sent, so the fix must reach that path too."""
+    p = page_run(new_cfg(), "repo-send-error", [("rename", (REPO_ITEM,))],
+                 [owner_rec("rename"),
+                  used_rec(SEND, {"session_id": "session_0unknown", "message": "Filed the rename in `acme/widgets`"},
+                           tool_id="s1"),
+                  result_rec("s1", CLOUD_UNVERIFIED, is_error=True)])
+    expect_repo_unsent("repo: a send_message naming the repo whose result is an error does not prove it", p,
+                       "fb-0958-21", REPO_SLUG)
 
 
 def case_repo_slug_match_ignores_case():
@@ -3656,6 +3755,12 @@ CASES = (
     case_guard_router_home_names_the_tracked_ruling_homes,
     case_page_send_message_proof_passes,
     case_page_sendmessage_proof_passes,
+    case_page_send_with_error_result_does_not_count,
+    case_page_send_with_ok_result_still_counts,
+    case_page_error_result_of_another_call_does_not_cancel_the_send,
+    case_page_sendmessage_failed_result_does_not_count,
+    case_page_sendmessage_success_result_still_counts,
+    case_page_artifactdata_error_result_does_not_count,
     case_page_artifactdata_n_proof_passes,
     case_page_without_a_send_blocks,
     case_page_send_before_the_owner_record_blocks,
@@ -3690,6 +3795,7 @@ CASES = (
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
     case_repo_send_naming_the_repo_passes,
+    case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
     case_repo_send_before_the_owner_record_blocks,
     case_repo_send_naming_another_repo_blocks,

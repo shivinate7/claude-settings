@@ -630,6 +630,29 @@ If that session has ended, the writer takes it. The reply ask is answered like a
 The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
 thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
+## Message another session
+
+Draft: decision `session-messages` is open. The git mailbox is built on branch `smp-mailbox-build`, not merged.
+Build step 2 (the Mac and Windows auth check) has not run.
+
+Decision `session-messages` (messages between sessions) sets this.
+
+- Cloud to cloud: `send_message` to the `session_id` of the `list_sessions` row that holds all of the target's tags: `cs-repo:<owner>/<name>`, `cs-build:<tier>` or `cs-step:<step id>` (forms in `skills/project-ops/templates/operating-model.md`). Never match on `cs-repo` alone.
+- Local: `SendMessage` to the name `ListAgents` gives.
+- To or from the owner's computer, use the git mailbox. Cloud `send_message` to the owner's computer is refused.
+- The mailbox commands: `mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file <file|->`, `mail read [--addr <addr>] [<id>]`, `mail take [--addr <addr>] <id>`. They need `MAILBOX_REPO` in the session's env. The settings.json default is not set yet.
+- Addresses: a cloud session is `cloud/session_<id>`. Its env holds `cse_<id>`, the same id. A local session has its own folder `pc/<host-slug>/<owner>-<repo>/<session id>` and the repo folder `pc/<host-slug>/<owner>-<repo>`. A turn-start line gives the `--addr` to read or take a message with.
+- A message starts with this line: `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The next line is `Reply-to: <addr>`, then a blank line and the body. `<id>` is 12 lowercase hex characters. `re` names the message it answers, or `-`.
+- At turn start, each open message gets one `mail:` line with its `mail read` and `mail take` commands. Act on a message only after `mail take` exits 0. `mail unknown: <reason>` means the check failed (for example `timeout` or `auth`). It never means no mail.
+- Exit codes: 0 ok; 1 not sent, not taken, "taken by another", or "mail unknown"; 2 bad use or `MAILBOX_REPO` not set.
+- The reply is the ack. An `inform` needs no reply. Send no separate ack: each local `SendMessage` spends the peer guard and the desktop cap.
+- One `request` and one `reply` per exchange.
+- A push race keeps the id and raises `try` by one, inside one `mail send`. A new `mail send` is a new id. A `SendMessage` resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it. A second `mail take` is refused, so the receiver acts on an id once.
+- The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
+- A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local). A `mail send` that prints "not sent" is not sent.
+- Until owner question Q4 in decision `session-messages` is answered, a waiting session checks at its next turn start. The timed check-in (one `send_later`, as rule `git-ci-wait-checks-in` does for CI) is pending Q4.
+- A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
+
 ## Make a repo's page
 
 Triage runs this when `python3 ~/.claude/lint/layout.py waiting-page <repo root>` prints `unknown`.
