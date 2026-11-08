@@ -116,7 +116,7 @@ FIX_LAYOUT_EXTRAS_REMEDY = "Fix the file the error names, then run the fix check
 FIX_PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
 FIX_OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
 FIX_CAP_REMEDY = "Start a fresh chain at round 1: post the review records again from round 1, with no Fix check line."
-FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change starts a fresh chain at round 1
+FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change starts a fresh chain from the first round
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_FINAL_FAIL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
@@ -3277,10 +3277,11 @@ def floor_problem(earlier, rec):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none", f"Round {n + 1} needs a FAIL line: pass it with --round."
 
 def uncleared_round(earlier, rec):
-    """-> why, when a failed round stays failed; else None. An earlier record's last round N is uncleared when it has a FAIL or PARTIAL line, or the
-    record's fix check is FAIL or WIDE. That record, or one after it (up to `rec`), clears it by reaching a round above N or by carrying a fix check PASS; at
-    round 3 only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. The why names the earliest record at the highest such
-    round. Only the listing reads it: a fix check is the record that clears a failed round, so writing one never asks."""
+    """-> why, when a failed round stays failed; else None. A failed round stays failed: an earlier record's last round N is uncleared when it has a
+    FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it (up to `rec`), clears it by reaching a round above N
+    or by carrying a fix check PASS; at the last round (REVIEW_LAST_ROUND) only the PASS can. A fix check PASS never clears a design reviewer's FAIL
+    or PARTIAL. An uncleared round reads open, and the why names the earliest record at the highest such round. The floor comes from the bodies the
+    listing already holds. Only the listing reads it: a fix check is the record that clears a failed round, so writing one never asks."""
     stuck = None  # (round, design, record): the earliest record at the highest uncleared round
     later = [*earlier, rec]
     for k, e in enumerate(earlier):
