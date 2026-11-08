@@ -30,6 +30,7 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import _transcript  # noqa: E402  the transcript reader the guard uses (lint/_transcript.py)
 sys.path.insert(0, HERE)
 
 ROOT = _test_temp.run_folder()
@@ -270,15 +271,17 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
-    """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             session=SESSION):
+    """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the page writer label the
+    transcript names (None: unknown). `session` is the hook's own session_id. `extra_env` adds variables for
+    this run. No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
-    payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
+    payload = {"hook_event_name": "Stop", "session_id": session, "stop_hook_active": stop_active,
                "cwd": cwd, "transcript_path": transcript(folder, records)}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
@@ -291,7 +294,7 @@ def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SES
     if count_git:
         env["RUN_GIT_LOG"] = git_log
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    inbox = os.path.join(cfg, "handoffs", SESSION + ".inbox.md")
+    inbox = os.path.join(cfg, "handoffs", session + ".inbox.md")
     try:
         cp = subprocess.run([sys.executable, PROBE_PATH, HERE, GUARD_PATH], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=60)
@@ -623,6 +626,63 @@ def case_n12_remote_writer_without_the_env_passes():
     expect_pass("N12", p)
 
 
+def labelled(ident, name="Triage"):
+    """A page writer label as a real page holds it: a name, then the session id in parentheses."""
+    return "%s (%s)" % (name, ident)
+
+
+def writer_seen(label):
+    """The writer string the transcript names, read the way the guard reads it. The scope of the cases that
+    probe the writer match: the label must come through whole before the match is the subject."""
+    return _transcript.page_writer_id(with_writer([], label))
+
+
+OWN_SESSION = "session_3d6a"  # this session's id in the cases that name another session in the label
+UUID_SESSION = "5f0c9a1e-3b2d-4e8f-9a6b-7d1c2e3f4a5b"  # a local session id in the shape a hook payload carries
+
+
+def case_n18_labelled_writer_named_by_the_remote_session_id_blocks():
+    """The page writer is `Triage (session_7c1d)`, and this run's env names the same id as cse_7c1d. The label
+    names this session, so its stale items write blocks. Its green control is N11, the bare id."""
+    label = labelled("session_7c1d")
+    check("N18 scope: the transcript names the labelled writer", writer_seen(label) == label, writer_seen(label))
+    p = run_stop("n18", base_repo("n18"), [owner(at(18, 50))] + page_write(at(19)), writer=label,
+                 extra_env={REMOTE_ENV: "cse_7c1d"})
+    expect_block("N18", p, (SCRIPT,))
+
+
+def case_n19_labelled_writer_with_this_local_session_blocks():
+    """The hook's own session is the uuid the label names, and the remote env is unset. The label names this
+    session, so its stale items write blocks. Its green control is S1, the bare id."""
+    label = labelled(UUID_SESSION)
+    check("N19 scope: the transcript names the labelled writer", writer_seen(label) == label, writer_seen(label))
+    p = run_stop("n19", base_repo("n19"), [owner(at(18, 50))] + page_write(at(19)), writer=label,
+                 session=UUID_SESSION)
+    expect_block("N19", p, (SCRIPT,))
+
+
+def case_n20_labelled_writer_naming_another_id_passes():
+    """The page writer is `Triage (session_8e1b)`, another session. This session is session_3d6a, with the env
+    unset. Its control: the same fixture, with the bare id of this session, blocks."""
+    label = labelled("session_8e1b")
+    check("N20 scope: the label names another id", writer_seen(label) == label and "session_8e1b" in label
+          and OWN_SESSION not in label, label)
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("N20", run_stop("n20", base_repo("n20"), records, writer=label, session=OWN_SESSION))
+    expect_block("N20 control", run_stop("n20c", base_repo("n20c"), records, writer=OWN_SESSION,
+                                         session=OWN_SESSION), (SCRIPT,))
+
+
+def case_n21_label_holding_this_id_as_a_substring_passes():
+    """The page writer is `Triage (session_3d6a2)`: this session's id, session_3d6a, is a substring of the label,
+    but the label names session_3d6a2. A substring match would block here; the named id is not this session."""
+    label = labelled(OWN_SESSION + "2")
+    check("N21 scope: this id is a substring of the label, and not the label's id",
+          OWN_SESSION in label and writer_seen(label) == label, label)
+    expect_pass("N21", run_stop("n21", base_repo("n21"), [owner(at(18, 50))] + page_write(at(19)),
+                                writer=label, session=OWN_SESSION))
+
+
 def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
     """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
     session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
@@ -742,6 +802,10 @@ CASES.extend((
     case_n10_unknown_writer_passes_with_no_note,
     case_n11_writer_named_by_the_remote_session_id_blocks,
     case_n12_remote_writer_without_the_env_passes,
+    case_n18_labelled_writer_named_by_the_remote_session_id_blocks,
+    case_n19_labelled_writer_with_this_local_session_blocks,
+    case_n20_labelled_writer_naming_another_id_passes,
+    case_n21_label_holding_this_id_as_a_substring_passes,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
     case_n15_writer_set_of_receipts_passes,

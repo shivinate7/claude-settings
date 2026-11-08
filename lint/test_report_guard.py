@@ -2127,6 +2127,18 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(self.PICK))])
                 self.assertIsNone(out)
 
+    def test_qm_green_labelled_writer_passes_a_send_to_its_bare_id(self):
+        # Catches: the page's writer label "Triage (id)" compared whole, so a send to the bare id is no send to
+        # the writer. RED on main: report_guard.py compares the raw label with `in`. The bare-id case above is
+        # its green control.
+        labelled = "Triage (%s)" % self.WRITER
+        for label, send in (("session_id", self.send(session_id=self.WRITER)),
+                            ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *self.writer_read(labelled), *send,
+                                 assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out)
+
     def test_qm_red_send_to_another_session_blocks(self):
         # Catches: a send to a session that is not the writer passing as the question's send.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER),
