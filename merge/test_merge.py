@@ -931,7 +931,7 @@ class CloudProxy(Env):
         self.now += 601
         self.assertTrue(self.lock.acquire("main", 600))
 
-    # coordinator pick, 2026-11-07, lane merge-lock-expired-delete-race
+    # Every session takes GitLock, whatever CLAUDE_CODE_REMOTE holds (decision merge-lock, Backend: GitLock on every host).
     def test_every_session_picks_the_git_lock(self):
         for remote in ("true", "", None):  # None: CLAUDE_CODE_REMOTE unset
             with unittest.mock.patch.dict(os.environ):
