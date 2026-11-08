@@ -83,6 +83,34 @@ SIX = "a52e7a"  # 6 hex characters: too short to name a commit
 SEVEN = "a52e7a0"  # 7: the shortest hex token that names a commit
 FORTY = "a52e7a0fe" * 4 + "a52e"  # 40: the longest hex token that names a commit
 FORTY_ONE = FORTY + "7"  # 41: too long to name a commit
+# The Fix-none lines of the PR bodies of PR 2021 and PR 2024, as the review wrote them. The body reader reads a free
+# reason, so a commit or a cost in it is refused unless check output follows. The bare lines are refused; the
+# *_CHECKED lines are the same text with check output after the reason, which passes.
+BODY_COMMIT = ("- Review note 14: `Fix: none — the open lane export-page-cookie-linear (a52e7a0fe, not yet on main) "
+               "makes the cookie-header scan linear and pins it. Until: 2026-11-21`")  # names a commit
+BODY_QUADRATIC = ("- Review note 13, digit past the cap: `Fix: none — any finite lookahead leaves a digit past it, and "
+                  "an unbounded one is quadratic (export_page.py:95-97). A larger cap moves the gap and does not close "
+                  "it. Until: 2026-11-21`")  # names a cost
+BODY_LINEAR_BOUND = ("- Review note 81, two-level expansion: `Fix: none — a second level breaks the linear bound "
+                     "(question_form.py:409-410). Until: 2026-11-21`")  # names a cost
+BODY_TIMING = ("- Review note 82: `Fix: none — a timing assert needs a clock, which test-practices P5 forbids. "
+               "Until: 2026-11-21`")  # names neither
+BODY_QUOTES = ('- Review note 2, span flag: `Fix: none — no syntax tells prose "the -x flag" from a refused "grep -r x"; '
+               'the documented rule (question_form.py:440-441) stands. Until: 2026-11-21`')  # names neither
+BODY_COMMIT_CHECKED = ("- Review note 14: Fix: none — the open lane export-page-cookie-linear (a52e7a0fe, not yet on "
+                       "main) makes the cookie-header scan linear and pins it; `verdict python3 "
+                       "lint/test_export_page.py` pass. Until: 2026-11-21")
+BODY_QUADRATIC_CHECKED = ("- Review note 13, digit past the cap: Fix: none — any finite lookahead leaves a digit past "
+                          "it, and an unbounded one is quadratic (export_page.py:95-97); `verdict python3 "
+                          "lint/test_export_page.py` pass. Until: 2026-11-21")
+BODY_LINEAR_BOUND_CHECKED = ("- Review note 81, two-level expansion: Fix: none — a second level breaks the linear bound "
+                             "(question_form.py:409-410); `verdict python3 lint/test_question_form.py` pass. "
+                             "Until: 2026-11-21")
+BODY_COMMENT_OPENERS = ("- Review note 90: `Fix: none — Don't hold the lock: see #2021 and /* the old block */, then "
+                        "the call takes 1.3 s. Until: 2026-11-21`")  # names a cost, after a lone quote and openers
+PR_SUMMARY = "## Summary\n\nThe lane reads the PR body for the Fix-none cite rule.\n\n## Review findings\n\n"
+PR_FOOTER = ("\n\n---\n\nGenerated with [Claude Code](https://claude.com/claude-code)\n\n"
+             "https://claude.ai/code/session_013NEJL2ChVc4QiMs2icnEB8\n")
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -111,6 +139,26 @@ def none_note(slug, text):
     return "- %s: a gap. Fix: none — %s. Until: 2026-11-20\n" % (slug, text)
 
 
+def make_body(*lines):
+    """A PR body in the shape of a real one: a summary, the review-finding lines in their own paragraph, then the
+    attribution footer as the last paragraph. The body reader reads every paragraph, not only the last one."""
+    return PR_SUMMARY + "\n".join(lines) + "\n" + PR_FOOTER
+
+
+def cite_causes(out):
+    """The cause each FAIL line names, sorted: "a commit" or "a cost", from the cite rule's wording. A FAIL line with
+    neither is kept whole, so an unknown-option line shows as itself."""
+    causes = []
+    for line in fail_lines(out):
+        if "naming a commit" in line:
+            causes.append("a commit")
+        elif "naming a cost" in line:
+            causes.append("a cost")
+        else:
+            causes.append(line)
+    return sorted(causes)
+
+
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
@@ -125,17 +173,20 @@ class RecordSlugsTests(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def lint(self, *args):
+    def lint(self, *args, pr_body=None):
         env = dict(os.environ)
         env.pop("CI", None)  # CI turns an unknown diff into red; these cases run locally
+        env.pop("PR_BODY", None)  # CI sets it from the PR body; a case sets it itself, or runs with no body
+        if pr_body is not None:
+            env["PR_BODY"] = pr_body
         env["FIXED_TODAY"] = PINNED_TODAY  # the check's date comes from here, never from the clock
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_record_slugs.py"), *args]
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
-    def assert_passes(self, *args):
-        rc, out = self.lint(*args)
+    def assert_passes(self, *args, pr_body=None):
+        rc, out = self.lint(*args, pr_body=pr_body)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("FAIL", out)
 
@@ -985,6 +1036,95 @@ class RecordSlugsTests(unittest.TestCase):
             "dash-en-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` – pass",
             "arrow-fat-green": "owner decides: the call takes 1.3 s; `verdict bench` => green",
         })
+
+    # The PR body reader. CI sets PR_BODY from the pull request body, and `--pr-body` is the same read by hand. A `Fix: none`
+    # line in the body takes the cite rule: a commit or a cost in its free reason needs check output after it. Each case
+    # commits one clean branch, so the diff runs and only the body can refuse. Each refused line gets one FAIL line.
+
+    def clean_branch(self):
+        """A committed branch that adds one valid notes line, so the default run reads a diff and finds nothing to refuse."""
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_NONE)
+        self.commit_change()
+
+    def body_verdict(self, rc, out, causes):
+        """Exit 1 when a body line is refused, and the FAIL lines name exactly `causes`, one per refused line."""
+        want = 1 if causes else 0
+        self.assertEqual(rc, want, "exit %d, want %d: %s" % (rc, want, out))
+        got = cite_causes(out)
+        self.assertEqual(got, sorted(causes), "FAIL lines name %s, want %s:\n%s" % (got, sorted(causes), out))
+
+    def test_body_fix_none_naming_a_commit_is_refused(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_COMMIT))
+        self.body_verdict(rc, out, ["a commit"])
+
+    def test_body_fix_none_naming_a_quadratic_cost_is_refused(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_QUADRATIC))
+        self.body_verdict(rc, out, ["a cost"])
+
+    def test_body_fix_none_naming_a_linear_bound_is_refused(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_LINEAR_BOUND))
+        self.body_verdict(rc, out, ["a cost"])
+
+    def test_each_refused_body_line_gets_its_own_fail_line(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_COMMIT, BODY_QUADRATIC, BODY_LINEAR_BOUND))
+        self.body_verdict(rc, out, ["a commit", "a cost", "a cost"])
+
+    def test_comment_opener_and_lone_quote_in_a_body_reason_do_not_hide_a_cost(self):
+        # "#" and "/*" are text in the reason, and "Don't" holds a lone quote. A reader that stops at either misses the cost.
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_COMMENT_OPENERS))
+        self.body_verdict(rc, out, ["a cost"])
+
+    def test_pr_body_flag_is_read_and_refuses_a_commit_over_a_clean_env_body(self):
+        # The flag is read before its refusal is judged: a clean env body beside it must not hide the refusal.
+        self.clean_branch()
+        rc, out = self.lint("--pr-body", make_body(BODY_COMMIT), pr_body=make_body(BODY_TIMING))
+        self.assertNotIn("unknown option", out, "the flag is not read: " + out)
+        self.body_verdict(rc, out, ["a commit"])
+
+    def test_pr_body_flag_overrides_a_refused_env_body(self):
+        self.clean_branch()
+        rc, out = self.lint("--pr-body", make_body(BODY_TIMING), pr_body=make_body(BODY_COMMIT))
+        self.assertNotIn("unknown option", out, "the flag is not read: " + out)
+        self.body_verdict(rc, out, [])
+
+    def test_body_with_no_fix_line_passes(self):
+        self.clean_branch()
+        self.assert_passes(pr_body=make_body("- Review note 3: a gap named in prose, with no Fix field."))
+
+    def test_empty_pr_body_passes(self):
+        self.clean_branch()
+        self.assert_passes(pr_body="")
+
+    def test_unset_pr_body_passes_for_a_push_run(self):
+        self.clean_branch()
+        self.assert_passes()  # no PR_BODY in the environment: a push run reads no body
+
+    # The controls below are paired with a bare refused line in the same body. The one FAIL line proves the body was
+    # read, so a control cannot pass by a reader that never reads the body.
+
+    def test_fix_none_lines_with_check_output_pass_beside_a_refused_line(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_COMMIT_CHECKED, BODY_QUADRATIC_CHECKED, BODY_LINEAR_BOUND_CHECKED,
+                                              BODY_QUADRATIC))
+        self.body_verdict(rc, out, ["a cost"])
+
+    def test_fix_none_line_naming_neither_a_commit_nor_a_cost_passes_beside_a_refused_line(self):
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(BODY_TIMING, BODY_QUOTES, BODY_QUADRATIC))
+        self.body_verdict(rc, out, ["a cost"])
+
+    def test_fix_none_line_inside_a_fence_is_skipped(self):
+        # The fence is stripped the way the silent-undo reader strips a fenced block: the line inside it is no body line.
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body("```", BODY_COMMIT, "```", BODY_QUADRATIC))
+        self.body_verdict(rc, out, ["a cost"])
 
 
 class ImportTests(unittest.TestCase):
