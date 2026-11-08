@@ -16,7 +16,7 @@ Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
 Exit 2 when the base or a file cannot be read: an unread diff is never a clean one. An unread file does not stop
 the scan: every other file is read, every hit prints, and the run then exits 2.
 Exit 3 when the node tool for JS, TS and Astro cannot run (no npx, an npx error, comment_scan.mjs missing,
-typescript not found). Every Python and Swift hit prints first. Exit 3 wins over exit 2.
+typescript not found). Every Python, Swift and shell hit prints first. Exit 3 wins over exit 2.
 """
 import argparse
 import ast
@@ -42,6 +42,24 @@ class DatedText:
 
     def finditer(self, text):
         return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
+
+
+class ReviewRound:
+    """The `review round` group. A round number is narration whatever follows "in", "after" or "from", and a bare
+    one is narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic. A line that cites
+    an id holding `round-N` (hold-unsafe-after-round-3) quotes a rule, so its "round N" with the same N is not
+    history; an id holding another number does not clear it."""
+    ROUND = re.compile(r"\b(?:in|after|from)\s+round\s*\d+"
+                       r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
+                       r"|\breview\s+(?:round|finding|points?)\b", re.I)
+    CITED = re.compile(r"[\w-]*\bround-(\d+)(?!\d)", re.I)
+
+    def finditer(self, text):
+        cited = {m.group(1) for m in self.CITED.finditer(text)}
+        for m in self.ROUND.finditer(text):
+            n = re.search(r"round\s*(\d+)", m.group(0), re.I)
+            if not (n and n.group(1) in cited):
+                yield m
 
 
 class HistoryPhrase:
@@ -84,9 +102,7 @@ class HistoryPhrase:
 PATTERNS = {
     # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
     # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
-    "review round": re.compile(r"\b(?:in|after|from)\s+round\s*\d"
-                               r"|\bround\s*\d+(?!\d)(?!\s*(?:decimals?|places?|digits?)\b)"
-                               r"|\breview\s+(?:round|finding|points?)\b", re.I),
+    "review round": ReviewRound(),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
@@ -462,8 +478,12 @@ def sh_heredoc_bodies(src, i, pending):
 def sh_code_end(src, i, spans, pending, close=None):
     """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
     the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
-    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment."""
-    depth, ws = 0, True
+    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. A paren
+    inside `[[ ]]` (a regex group) or right after `?*+@!` (an extglob group) does not end a word either, so `)#b`
+    there holds none. `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` and in `let` arguments;
+    `((` and `$((` are read by sh_try_arith."""
+    kinds, ws = [], True  # kinds: one entry per open paren, True when the paren is part of a word
+    dbl = sub = let = False  # inside [[ ]]; array subscript depth; inside a `let` command
     while i < len(src):
         c = src[i]
         if c == "\\":
@@ -494,9 +514,12 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws = True
+            ws, sub, let = True, 0, False
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
+            ws = True
+        elif (sub or let) and src.startswith("<<", i):
+            i += 2
             ws = True
         elif src.startswith("<<", i):
             i, entry = sh_heredoc_word(src, i + 2)
@@ -505,17 +528,37 @@ def sh_code_end(src, i, spans, pending, close=None):
         elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
             i = j
             ws = False
+        elif ws and src.startswith("[[", i) and src[i + 2:i + 3] in (" ", "\t", "\n"):
+            dbl = True
+            i += 2
+            ws = False
+        elif dbl and ws and src.startswith("]]", i):
+            dbl = False
+            i += 2
+            ws = False
+        elif c == "[" and i and (src[i - 1].isalnum() or src[i - 1] in "_]"):
+            sub += 1
+            i += 1
+            ws = False
+        elif c == "]" and sub:
+            sub -= 1
+            i += 1
+            ws = False
         elif c == "(":
-            depth += 1
+            kinds.append(dbl or (i > 0 and src[i - 1] in "?*+@!"))
+            ws = not kinds[-1]
             i += 1
-            ws = True
         elif c == ")":
-            if close == ")" and depth == 0:
+            if close == ")" and not kinds:
                 return i + 1
-            depth -= 1
+            ws = not (kinds.pop() if kinds else dbl)
+            let = False
             i += 1
-            ws = True
         else:
+            if ws and src[i:i + 4] in ("let ", "let\t"):
+                let = True
+            elif c in ";&|":
+                let = False
             i += 1
             ws = c in " \t;&|<>"
     if close:
