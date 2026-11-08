@@ -15,8 +15,9 @@ The rule takes effect only once it is on main. A lane branched before it merges 
 Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
 versions stay. A note that one lane deletes or reverts can come back when another lane appends. A merge of a PR's
 new base revived notes the PR had deleted (PR #1825, 2026-11-08). `check_silent_undo` now refuses a
-revived note, matched by slug, so a reworded copy is caught. A note re-added by a non-merge commit
-passes. `lint/test_notes_union_merge.py` pins the rewrite case.
+revived note, matched by slug, so a reworded copy is caught. It counts copies per slug: it refuses only when head
+holds more copies than the branch's last lowering commit left, so a dedupe that keeps a copy passes. It skips a note
+with no `- slug:` form. A note re-added by a non-merge commit passes. `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.

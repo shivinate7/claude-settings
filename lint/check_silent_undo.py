@@ -22,12 +22,14 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               when the lost work is the rebase-base commit or later).
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
-              its slug (`- <slug>:` at line start), so a reworded copy counts. The branch's own non-merge
-              commits (upstream..head) are read oldest first: a slug whose last event is a delete, and that head
-              holds, is refused. A note re-added by a non-merge commit passes. Cost, per run: when the repo's
-              notes file (lint/layout.py, kind debt-notes) exists at head and holds a note, two git reads, one
-              `git show head:<file>` and one `git log -p` of that file over upstream..head. With no notes file
-              at head or no note in it, one read or none; no process stays running.
+              its slug (`- <slug>:` at line start), so a reworded copy counts. Copies are counted per slug. The
+              branch's own non-merge commits (upstream..head) are replayed oldest first, each counted from its file
+              state and its parent's. A slug is refused when its last count change was a delete and head holds more
+              copies than that commit left. A note re-added by a non-merge commit passes, and so does a dedupe that
+              keeps a copy. Cost, per run and per notes path (lint/layout.py, kind debt-notes): a missing file
+              at head, two git reads (`git show`, then `git ls-tree`). A file with no note, one read. A file with a
+              note, three: `git show head:<file>`, one `git log` of upstream..head over the file, and one
+              `git cat-file --batch` run for every commit's file and its parent's. No process stays running.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -565,14 +567,47 @@ def fmt_lost(m, path, p, lost):
 NOTE = re.compile(r"^- ([^\s:]+):")
 
 
-def note_slugs(text):
-    return {m.group(1) for m in map(NOTE.match, text.splitlines()) if m}
+def note_counts(text):
+    """slug -> how many note lines carry it. A slug is the `- <slug>:` at line start."""
+    return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
+
+
+def blobs_at(cwd, specs):
+    """The text of each `rev:path` in specs ("" for one the tree lacks), through one `git cat-file --batch` run."""
+    try:
+        r = _nowindow.run(["git", "-C", cwd, "cat-file", "--batch"], input="".join(s + "\n" for s in specs).encode("utf-8", "surrogateescape"),
+                          capture_output=True)
+    except OSError as e:
+        raise Unknown("git cat-file failed: %s" % e)
+    if r.returncode != 0:
+        raise Unknown("git cat-file failed: %s" % (r.stderr.decode("utf-8", "replace").strip() or r.returncode))
+    out, at, texts = r.stdout, 0, []
+    for spec in specs:
+        end = out.find(b"\n", at)
+        head = out[at:end].split() if end >= 0 else []
+        if end < 0 or not head:
+            raise Unknown("git cat-file gave no usable header for %s" % spec[:60])
+        at = end + 1
+        if head[-1] == b"missing":
+            texts.append("")
+        elif len(head) == 3 and head[2].isdigit():
+            size = int(head[2])
+            if len(out) < at + size:
+                raise Unknown("git cat-file ended early on %s" % spec[:60])
+            texts.append(out[at:at + size].decode("utf-8", "replace") if head[1] == b"blob" else "")
+            at += size + 1
+        else:
+            raise Unknown("git cat-file gave no usable header for %s: %r" % (spec[:60], b" ".join(head)[:80]))
+    return texts
 
 
 def revived_notes(cwd, upstream, head):
-    """[(notes path, problem line)] for each note the branch deleted that head holds again. The branch's non-merge commits
-    are replayed oldest first: a delete sets the slug's last event to that commit, a line added under the slug (a re-add, or a
-    reword that removes and adds it) clears it. A slug still deleted at head, and present there, came back through a merge."""
+    """[(notes path, problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
+    counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
+    state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
+    The slug is refused when its last event lowered the count and head holds more copies than that commit left: a merge
+    put a copy back. A last event that raised the count is a deliberate re-add and passes. A note with no `- <slug>:` form
+    has no slug, so the check does not see it."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as retire_excuses loads check_debt_retire
     try:
@@ -581,32 +616,29 @@ def revived_notes(cwd, upstream, head):
         raise Unknown("the notes file is not known: %s" % e)
     found = []
     for path in paths:
-        present = note_slugs(blob(cwd, head, path))
+        present = note_counts(blob(cwd, head, path))
         if not present:
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
         # simplification would then drop the branch's own delete commit from the walk.
-        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "-p", "-U0", "--no-color", "--no-ext-diff", "--no-renames",
-                     "--format=%x00%H", "%s..%s" % (upstream, head), "--", path)
-        deleted = {}  # slug -> the commit whose delete is the slug's last event
-        for chunk in out.split("\0")[1:]:
-            sha, _, body = chunk.partition("\n")
-            gone, added, in_hunk = set(), set(), False
-            for l in body.split("\n"):  # not splitlines: a form feed inside a line is no line break
-                if l.startswith("diff --git "):
-                    in_hunk = False
-                elif l.startswith("@@"):
-                    in_hunk = True
-                elif in_hunk and l[:1] in ("+", "-") and (m := NOTE.match(l[1:])):
-                    (added if l[0] == "+" else gone).add(m.group(1))
-            for slug in added:
-                deleted.pop(slug, None)
-            for slug in gone - added:
-                deleted[slug] = sha.strip()
-        for slug in sorted(present & set(deleted)):
-            found.append((path, "%s: note `%s` is back at the head. Commit %s deleted it, and a merge put it back. "
-                          "Delete the note line again, or, if the re-add is wanted, re-add it in a non-merge commit."
-                          % (path, slug, deleted[slug][:9])))
+        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H", "%s..%s" % (upstream, head), "--", path)
+        shas = out.split()
+        texts = blobs_at(cwd, [spec for sha in shas for spec in ("%s^:%s" % (sha, path), "%s:%s" % (sha, path))])
+        last = {}  # slug -> (commit, copies it left) for the last commit that lowered the slug's count
+        for i, sha in enumerate(shas):
+            before, after = note_counts(texts[2 * i]), note_counts(texts[2 * i + 1])
+            for slug in present:
+                if after[slug] < before[slug]:
+                    last[slug] = (sha, after[slug])
+                elif after[slug] > before[slug]:
+                    last.pop(slug, None)
+        for slug in sorted(last):
+            sha, left = last[slug]
+            if present[slug] > left:
+                found.append((path, "%s: note `%s`: head holds %d cop%s, and commit %s left %d. A merge put the extra back. "
+                              "Delete the extra %s to bring the count back to %d, or, if the re-add is wanted, re-add it in a non-merge commit."
+                              % (path, slug, present[slug], "y" if present[slug] == 1 else "ies", sha[:9], left,
+                                 "line" if present[slug] - left == 1 else "lines", left)))
     return found
 
 
