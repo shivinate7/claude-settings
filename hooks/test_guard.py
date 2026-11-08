@@ -2128,6 +2128,45 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: origin/main holds design-pair's mockup, so the "
                  "file would not be a design file main lacks")
 
+    # design-chain's tip is held by origin/design-chain and by its archive, and by no other ref once the
+    # local branch goes: a call that deletes both names leaves the tip with no holder. design-chain-held's
+    # tip is held by a third origin ref, design-chain-kept, so its pair keeps a holder: the control.
+    chain_rel = design + "/chain.html"
+    design_branch("design-chain", chain_rel, "held by a branch and its archive, nothing else\n")
+    chain_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                            "design-chain:refs/heads/archive/design-chain")
+    if chain_archive.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-chain failed. stderr: %s"
+                 % chain_archive.stderr.strip())
+    run_vcs(BRANCHREPO, "branch", "-q", "-D", "design-chain")
+    held_rel = design + "/held.html"
+    design_branch("design-chain-held", held_rel, "held by a branch, its archive and a third branch\n")
+    held_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                           "design-chain-held:refs/heads/archive/design-chain-held")
+    held_kept = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                        "design-chain-held:refs/heads/design-chain-kept")
+    if held_archive.returncode != 0 or held_kept.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving or keeping design-chain-held failed. "
+                 "stderr: %s" % (held_archive.stderr.strip() or held_kept.stderr.strip()))
+    run_vcs(BRANCHREPO, "branch", "-q", "-D", "design-chain-held")
+    if holders("origin/design-chain") != {"refs/remotes/origin/design-chain",
+                                          "refs/remotes/origin/archive/design-chain"}:
+        sys.exit("fixture setup failed in build_fixtures: a ref other than origin/design-chain and its archive "
+                 "holds design-chain's tip, so the pair would not be the only copy")
+    if holders("origin/design-chain-held") != {"refs/remotes/origin/design-chain-held",
+                                               "refs/remotes/origin/archive/design-chain-held",
+                                               "refs/remotes/origin/design-chain-kept"}:
+        sys.exit("fixture setup failed in build_fixtures: design-chain-held's tip is not held by its branch, "
+                 "its archive and design-chain-kept alone")
+    if listed("origin/main", chain_rel) or listed("origin/main", held_rel):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds a chained design file, so the "
+                 "branch would not be a design branch main lacks")
+    # The subfolder cases run from docs/, a folder main tracks through docs/design/. The prefix read proves
+    # the folder is inside the work tree and is docs/, so a read from it is a read from a subfolder.
+    sub = os.path.join(BRANCHREPO, "docs")
+    if not os.path.isdir(sub) or run_vcs(sub, "rev-parse", "--show-prefix").stdout.strip() != "docs/":
+        sys.exit("fixture setup failed in build_fixtures: BRANCHREPO/docs is not a subfolder of the repo")
+
     # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
     # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
     run_vcs(BRANCHREPO, "tag", "v1.0", "main")
@@ -2192,6 +2231,14 @@ def _build_branch():
     if base_check2.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
+
+    # A subfolder of trunk for the subfolder case of the local ask. git does not track an empty folder, so
+    # trunk's tree is unchanged; the prefix read proves the folder is inside the work tree.
+    nobase_sub = os.path.join(BRANCHNOBASE, "docs")
+    os.makedirs(nobase_sub, exist_ok=True)
+    if run_vcs(nobase_sub, "rev-parse", "--show-prefix").stdout.strip() != "docs/":
+        sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE/docs is not a subfolder of the repo")
+
 
 def _build_push():
     """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
@@ -3828,6 +3875,34 @@ sh("push: a --delete of two archive branches at one design tip with no other hol
    cwd=BRANCHREPO, carries="archive/", lacks=("design-pair",))
 sh("push: a --delete of one of two archive branches at one design tip allows, the other still holds it",
    VCS + " push origin --delete archive/design-pair-a", "allow", cwd=BRANCHREPO)
+# A SUBFOLDER RUN READS THE DESIGN FOLDER FROM THE SUBFOLDER. The design read names the folder with a
+# pathspec, and git resolves a pathspec from the directory it runs in. From docs/, docs/design/ names no
+# folder, so a design file that only one origin ref holds reads as none and its delete is allowed. The read
+# must name the folder from the repo root. Each control holds the tip on another origin ref, so it allows.
+sh("push: a --delete of the only copy of a design file, run from a subfolder of the repo, denies",
+   VCS + " push origin --delete design-only", "deny", ARCHIVE_RULE, cwd=os.path.join(BRANCHREPO, "docs"),
+   carries="archive/", lacks=("design-only",))
+sh("push: a --delete of a design file whose archive holds its tip, run from a subfolder of the repo, allows",
+   VCS + " push origin --delete design-archived", "allow", cwd=os.path.join(BRANCHREPO, "docs"))
+sh("branch: a design file with no readable default branch asks on -D, run from a subfolder of the repo",
+   VCS + " branch -D orphan-design", "ask", ARCHIVE_RULE, cwd=os.path.join(BRANCHNOBASE, "docs"))
+sh("branch: a design file origin holds at its tip allows -D, run from a subfolder of the repo",
+   VCS + " branch -D design-only", "allow", cwd=os.path.join(BRANCHREPO, "docs"))
+# A CHAINED PAIR IS JUDGED AS ONE CALL. The push check reads each segment alone. Each segment sees the other
+# name as the tip's archive holder and allows, while the whole call removes both holders and must deny. The
+# controls add a third origin ref at the tip, design-chain-kept, so the same calls allow.
+sh("push: a chained delete of a branch and its archive at one design tip, with no other holder, denies",
+   VCS + " push origin --delete design-chain && " + VCS + " push origin --delete archive/design-chain",
+   "deny", ARCHIVE_RULE, cwd=BRANCHREPO, carries="archive/", lacks=("design-chain",))
+sh("push: a ';' chained delete of a branch and its archive at one design tip, with no other holder, denies",
+   VCS + " push origin --delete design-chain ; " + VCS + " push origin --delete archive/design-chain",
+   "deny", ARCHIVE_RULE, cwd=BRANCHREPO, carries="archive/", lacks=("design-chain",))
+sh("push: a chained delete of a branch and its archive at one design tip, where a third origin ref holds it, allows",
+   VCS + " push origin --delete design-chain-held && " + VCS + " push origin --delete archive/design-chain-held",
+   "allow", cwd=BRANCHREPO)
+sh("push: a ';' chained delete of a branch and its archive at one design tip, where a third origin ref holds it, allows",
+   VCS + " push origin --delete design-chain-held ; " + VCS + " push origin --delete archive/design-chain-held",
+   "allow", cwd=BRANCHREPO)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
