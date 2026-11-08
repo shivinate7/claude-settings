@@ -1,6 +1,0 @@
-# A session with no lease can drive a leased phone
-
-- **What.** A simulator MCP tap, `hinge` or `simctl ui` on an already-booted phone passes no guard. The simulator rules in hooks/guard.py judge boots, and the MCP control tool only when its action is `launch` of a shut-down device (`simulator-boot-lease`). No rule judges a drive. Incident, 2026-11-07 11:55 CST: the Home review of PR 547 (the Home light tile review, lane `home-lane-app-feel-core`) drove Duo 1 during a Degen run (sim-test pid 32870, then hold pid 37130). It folded the phone, switched it to dark and tapped twice. Both results are suspect, and the review lost 7 tries. The reuse lease (on branch `claude/sim-lease-gaps`) shows the holder in `sim-lease status`, but it does not refuse a drive. The mistake: a session drives a phone another session holds. The harm: both sessions' results are suspect, and tries are lost.
-- **Where.** hooks/guard.py, the simulator rules. The MCP branch judges only `action == "launch"`.
-- **Decision.** none. Nearest: `sim-test-is-the-one-boot-path` (ruling 5, the lease rule, covers an MCP launch only).
-- **Retire.** `hooks/test_guard_sim_drive.py` passes: a tap, `hinge` or `simctl ui` on a booted phone is refused while a live lease for that phone belongs to another session, and allowed for the holder.
