@@ -79,7 +79,8 @@ from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash l
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 7 s on this repo's 118 suites) before it reads unknown
-PREAMBLE_DONE = "echo ci-job-preamble-done"  # the line preamble_marked adds right before a CI step's first suite line
+PREAMBLE_MARK = "ci-job-preamble-done"
+PREAMBLE_DONE = "echo; echo " + PREAMBLE_MARK  # the line preamble_marked adds right before a CI step's first suite line; the bare echo ends a preamble line that has no newline, so the mark lands at line start
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -553,7 +554,7 @@ def main(argv):
                         pass  # reader gone: keep reading, keep the step's verdict
             rc = proc.returncode
             gone = missing_in_log(log, start, script)
-            preamble_ran = not marked or bool(re.search(r"(?m)^%s\r?$" % PREAMBLE_DONE.split(" ", 1)[1], log_text(log, start)))
+            preamble_ran = not marked or bool(re.search(r"(?m)^%s\r?$" % PREAMBLE_MARK, log_text(log, start)))
             unstarted, only = could_not_start(log, start) if known_action(step) == "code-check" else ([], False)
         finally:
             os.remove(script)
