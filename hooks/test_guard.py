@@ -3206,6 +3206,43 @@ sh("reset: naming a path allows in the worktree", VCS + " reset -- f.txt", "allo
 sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.txt", "allow",
    cwd=GITWT)
 
+# THE PATH RESET AND DISCARD RULING. Three verdicts, pinned in the three trees:
+#   A. A reset that names no discard flag keeps the work tree, so it allows everywhere.
+#   B. A reset with --hard, --merge or --keep keeps today's verdict, path form included: deny in the
+#      shared checkout, ask in a linked worktree, allow and noted in an agent-owned worktree.
+#   C. A work-tree discard (checkout -- ., checkout -q -- .) takes the same three verdicts. The restore
+#      form of C is above, with its own rows for the shared checkout and the hand-made worktree.
+# The forms name f.txt, which _build_gitmain leaves tracked and dirty in all four trees. A path the
+# fixture lacks would read as an empty subject and pass for the wrong reason.
+RULING_RESET_FORMS = ["reset HEAD -- f.txt", "reset -- f.txt", "reset -q HEAD f.txt", "reset f.txt"]
+RULING_DISCARD_FORMS = ["reset --hard HEAD -- f.txt", "reset --merge HEAD -- f.txt",
+                        "reset --keep HEAD -- f.txt", "checkout -- .", "checkout -q -- ."]
+for _form in RULING_RESET_FORMS:
+    sh("reset ruling A: %s allows in the shared checkout" % _form, VCS + " " + _form, "allow", cwd=GITMAIN)
+    if _form != "reset -- f.txt":  # the same row, in the hand-made worktree, is the one above
+        sh("reset ruling A: %s allows in the hand-made worktree" % _form, VCS + " " + _form, "allow",
+           cwd=GITWT)
+    sh("reset ruling A: %s allows in an agent-owned worktree" % _form, VCS + " " + _form, "allow",
+       cwd=AGENTWT)
+for _form in RULING_DISCARD_FORMS:
+    sh("reset ruling B and C: %s denies in the shared checkout" % _form, VCS + " " + _form, "deny",
+       "shared-tree", cwd=GITMAIN)
+    sh("reset ruling B and C: %s asks in the hand-made worktree" % _form, VCS + " " + _form, "ask",
+       "shared-tree", cwd=GITWT)
+# The agent-owned rows of B and C are not plain allows. Each is allowed AND logged once as noted/shared-tree, and
+# an allow prints nothing, so only the log helper proves the note. Those checks register at the foot of this file.
+AGENT_NOTED_RULING = [
+    ("log: reset --hard HEAD -- f.txt is allowed and noted in an agent-owned worktree",
+     VCS + " reset --hard HEAD -- f.txt"),
+    ("log: reset --merge HEAD -- f.txt is allowed and noted in an agent-owned worktree",
+     VCS + " reset --merge HEAD -- f.txt"),
+    ("log: reset --keep HEAD -- f.txt is allowed and noted in an agent-owned worktree",
+     VCS + " reset --keep HEAD -- f.txt"),
+    ("log: checkout -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -- ."),
+    ("log: checkout -q -- . is allowed and noted in an agent-owned worktree", VCS + " checkout -q -- ."),
+    ("log: restore . is allowed and noted in an agent-owned worktree", VCS + " restore ."),
+]
+
 # THE OWNER'S EXACT COMMAND, carrying a redirect and a pipe into `tail`. `tail -10` is not a
 # follow, so it must not trip the live-stream rule either. Both stacks are empty, so the allow
 # here proves the redirect and the pipe are read, not that the act is safe: the SUBJSTASH rows
@@ -14006,6 +14043,11 @@ LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
 LOG_FAMILY[UNREAD_NOGIT_LABEL] = "shared-tree"
 LOG_CHECKS_EXTRA.append((UNREAD_STATUS_LABEL, unread_lone_operand_status_case))
 LOG_FAMILY[UNREAD_STATUS_LABEL] = "shared-tree"
+# The agent-owned noted rows of the reset and restore ruling. agent_worktree_noted_case is defined far below,
+# so each label stores a lambda that calls it when the check runs, not when this file loads.
+for _label, _command in AGENT_NOTED_RULING:
+    LOG_CHECKS_EXTRA.append((_label, lambda command=_command: agent_worktree_noted_case(command)))
+    LOG_FAMILY[_label] = "shared-tree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
