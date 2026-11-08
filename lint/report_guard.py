@@ -1669,11 +1669,13 @@ CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|ed
 CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _ADVERB, re.I)
 _CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
+_BACK = r"(?:sent|came|gave|given|comes|sends|gives|come)\s+back"  # "sent back 403": a status the call answered with
+# An HTTP status: a 4xx or 5xx that no hyphen joins and no unit follows ("450 files" and "a 450-line diff" are sizes).
+_STATUS = r"[45]\d\d\b(?![-\w])(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)"
 CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b" + _CHECK_WORD + r"\b|\bexit(?: code)? [1-9]"
-    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a)\s+(?:a\s+)?"
-    r"|(?:[(:,;—–]|\s-{1,2})\s*)[45]\d\d\b(?![-\w])"
-    r"(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)",
+    r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a|" + _BACK + r")\s+(?:a\s+)?"
+    r"|(?:[(:,;—–]|\s-{1,2})\s*)" + _STATUS,
     re.I)
 # With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
 # words or more with a verb (is, was, not, rejected ...), read only after the phrase: in parentheses, after a colon, a
@@ -1958,30 +1960,53 @@ def _script_tries(tokens):
     return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
 
 
-def _gh_target(verb, args):
-    """The target of a `gh pr <verb>` call: the PR number or URL wherever it sits among the flags, else the first plain
-    argument. A create names no PR, so its target is its --head branch, else its --title, else empty."""
+def _gh_target(verb, args, branch=""):
+    """The target of a `gh pr <verb>` call. A create names no PR, so its target is its --head branch, else `branch` (the
+    branch the same command checked out). Any other verb names its PR by number or URL wherever it sits among the flags,
+    else by its first plain argument; a URL names its number, and a number is qualified by its --repo, so a PR of another
+    repo is another target. A call that names no target is keyed by its own arguments, tagged so they match no named
+    target: an identical retry is the same call, and a call with other arguments is not. A call with no arguments has
+    the empty target ''."""
+    flags = {"--head": "head", "-H": "head", "--repo": "repo", "-R": "repo"}
+    named, plain = {}, []
+    for k, token in enumerate(args):
+        name, _, value = token.partition("=")
+        if name in flags:
+            named.setdefault(flags[name], value or (args[k + 1] if k + 1 < len(args) else ""))
+        elif token.startswith("-") or k and args[k - 1] in flags:
+            continue
+        else:
+            plain.append(token)
+    own = "args " + " ".join(args) if args else ""
     if verb == ["create"]:
-        flags = {"--head": "head", "-H": "head", "--title": "title", "-t": "title"}
-        named = {}
-        for k, token in enumerate(args):
-            name, _, value = token.partition("=")
-            if name in flags:
-                named.setdefault(flags[name], value or (args[k + 1] if k + 1 < len(args) else ""))
-        return named.get("head") or named.get("title") or ""
-    for token in args:
+        return named.get("head") or branch or own
+    for token in plain:
         if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
             url = re.search(r"/pull/(\d+)", token)
-            return url.group(1) if url else token.lstrip("#")  # a PR's URL and its number are one target
-    return next((t for t in args if not t.startswith("-")), "")
+            number = url.group(1) if url else token.lstrip("#")  # a PR's URL and its number are one target
+            return (named["repo"] + "#" if named.get("repo") and not url else "") + number
+    return (named["repo"] + "#" if named.get("repo") else "") + plain[0] if plain else own
 
 
-def _segment_tries(segment):
+def _checked_out(segment):
+    """The branch a `git checkout` or `git switch` in `segment` moves to, else ''."""
+    for subcommand, args in guard.git_calls(segment):
+        if subcommand in ("checkout", "switch"):
+            for k, arg in enumerate(args):
+                if arg in ("-b", "-B", "-c", "-C"):
+                    return args[k + 1] if k + 1 < len(args) else ""
+            return next((a for a in args if not a.startswith("-")), "")
+    return ""
+
+
+def _segment_tries(segment, branch=""):
     """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
     name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
     whose name holds an act word (_script_tries). The key is the
     program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
-    a failure of the same call. A segment with --dry-run is no try."""
+    a failure of the same call. A gh pr call that names no target is keyed by its own arguments (_gh_target);
+    `branch` is the branch an earlier segment of the same command checked out, the target of a create with no --head.
+    A segment with --dry-run is no try."""
     tokens = guard.segment_tokens(segment) or segment.split()
     if "--dry-run" in tokens:
         return set()
@@ -1989,7 +2014,7 @@ def _segment_tries(segment):
     rest = guard.gh_call_of(segment)
     if rest is not None:
         pr = rest[:1] == ["pr"]
-        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), _gh_target(rest[1:2], rest[2:]) if pr else " ".join(rest[1:2]))
+        key = ("gh " + " ".join(rest[:2] if pr else rest[:1]), _gh_target(rest[1:2], rest[2:], branch) if pr else " ".join(rest[1:2]))
         tries.add((GITHUB_REACH, key))
         if pr and rest[1:2]:
             tries.add((CANNOT_GH_PR_ACTS.get(rest[1], ""), key))
@@ -2044,8 +2069,10 @@ def _call_tries(use, text):
         command = given.get("command")
         tries = set()
         if isinstance(command, str):
+            branch = ""
             for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
-                tries |= _segment_tries(segment)
+                tries |= _segment_tries(segment, branch)
+                branch = _checked_out(segment) or branch
         return tries
     if _is_relay(use):
         return {(act, ("relay", use.get("id"))) for act in _text_acts(text)}
@@ -2056,7 +2083,8 @@ def _call_tries(use, text):
 def failed_tries(records, refused=(), recovered=None):
     """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
     is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A later call
-    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target); a relay's
+    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target). A gh pr
+    act verb (CANNOT_GH_PR_ACTS) with no arguments has the empty target, which is no identity and cancels nothing; a relay's
     text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
     failed try. When `recovered` is a set, each act whose failure a later call cancelled is added to it."""
     uses, tries = {}, {}
@@ -2077,6 +2105,8 @@ def failed_tries(records, refused=(), recovered=None):
                     tries.setdefault(act, set()).add(key)
             elif not _is_relay(use):
                 for act, key in found:
+                    if not key[1] and key[0].startswith("gh pr ") and key[0][6:] in CANNOT_GH_PR_ACTS:
+                        continue  # an act verb of gh pr with no arguments has no identity (empty key): it cancels nothing
                     if key in tries.get(act, ()) and recovered is not None:
                         recovered.add(act)
                     tries.get(act, set()).discard(key)
@@ -2132,15 +2162,33 @@ def _names_check(sentence, tail):
         for m in CANNOT_CHECK_RE.finditer(head))
 
 
+# The act a sentence's own words are about: the verb of a table act, a PR act's verb only beside the PR word. github-reach
+# has no prose word: a sentence about GitHub is about every act.
+CANNOT_PROSE_ACTS = (
+    ("push", re.compile(r"\bpush(?:ed|es|ing)?\b", re.I)),
+    ("pr-merge", re.compile(r"\bmerg(?:e|es|ed|ing)\b", re.I)),
+    ("pr-open", re.compile(r"\b(?:open(?:ed|ing|s)?|creat(?:e|es|ed|ing)|rais(?:e|es|ed|ing)|fil(?:e|es|ed|ing)|submit\w*)\b", re.I)),
+    ("pr-edit", re.compile(r"\b(?:clos(?:e|es|ed|ing)|comment\w*|edit\w*|updat(?:e|es|ed|ing)|mark(?:s|ed|ing)?)\b", re.I)),
+)
+
+
+def _prose_acts(prose):
+    """The table acts the words of `prose` (a sentence without its code spans) are about; a PR act needs the PR word."""
+    return {act for act, rx in CANNOT_PROSE_ACTS
+            if rx.search(prose) and (act in ("push", "pr-merge") or CANNOT_PR_RE.search(prose))}
+
+
 def _prior_names_check(prior, act):
     """True when the sentence before a claim of `act` names a check of that act: a check word (CANNOT_CHECK_RE) outside
-    code spans, or a code span that names a route of `act`, in a sentence that names no route of another act. A route of
-    another act ("`gh pr create` returned 403") is the check of that act, and a span of another command ("`ls` printed a
-    list") names no check."""
+    code spans, in a sentence that is not about another act alone ("The push failed." checks no merge), or a code span that
+    names a route of `act`, in a sentence that names no route of another act. A route of another act ("`gh pr create`
+    returned 403") is the check of that act, and a span of another command ("`ls` printed a list") names no check."""
     acts = _text_acts(prior)
     if acts and act not in acts:
         return False
-    return bool(CANNOT_CHECK_RE.search(CODE_SPAN.sub(" ", prior))) or any(
+    prose = CODE_SPAN.sub(" ", prior)
+    about = _prose_acts(prose)
+    return bool(CANNOT_CHECK_RE.search(prose)) and (not about or act in about or act == GITHUB_REACH) or any(
         act in _text_acts(span.group(2)) for span in CODE_SPAN.finditer(prior))
 
 
