@@ -1,0 +1,11 @@
+{
+  "title": "A fix check on a replacement PR with an identical tree may name the replaced PR's newest record",
+  "why": "merge --fix-check needs an earlier record on the same PR, so a replacement PR with an identical tree (the remedy for a refused force push, or for check_red_run on a pushed commit) re-runs a whole chain. Today #2139 and #2140 (lane notes-fix-page, replacing #1581 and #2021) need six reviews of unchanged code (coordinator, 10:29 CST Nov 8).",
+  "note": "Filed 10:31 CST Nov 8 from the coordinator; a gap fix under item 410 a, merge-tool topic, its own lane, which the coordinator starts. Fix: the fix check on the new PR may name the replaced PR's newest record, and the tool proves the empty tree diff itself. Related, not the same: record-replacement-pr-rounds (ready, #1773), which carries the rounds owed.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 734,
+  "updatedAt": "2026-11-08T10:31:00-06:00"
+}
