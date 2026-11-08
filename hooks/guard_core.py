@@ -968,7 +968,8 @@ def _runs_written_file(text: str, headers, bodies=()) -> bool:
 
 # The commands that only read or print, so a body that holds nothing else runs no file. A command word outside
 # this list, other than a literal script file a heredoc wrote, may run a file.
-KNOWN_READERS = frozenset({"echo", "printf", "cat", "grep", "head", "tail", "wc", "ls", "test", "[", "true", "false", ":"})
+KNOWN_READERS = frozenset({"echo", "printf", "cat", "grep", "head", "tail", "wc", "ls", "test", "[", "]", "true", "false",
+                           ":"})
 _REDIRECT = re.compile(r"\d*(?:>>?|<<?<?|&>>?|>&|<&)(.*)", re.DOTALL)
 _UNRESOLVED_WORD = re.compile(r"[$`*?\[{~\\]")   # a variable, a substitution, a glob, a brace or a home path
 
@@ -1005,10 +1006,10 @@ def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
         words.pop(0)
     if not words:
         return True
+    if words[0] in KNOWN_READERS:   # before the unresolved test, since `[` reads as a glob character there
+        return True
     if _UNRESOLVED_WORD.search(words[0]):
         return False
-    if words[0] in KNOWN_READERS:
-        return True
     script = words[0] if len(words) == 1 else _run_script_arg(words)
     return script is not None and not _UNRESOLVED_WORD.search(script) \
         and sources.get(_plain_words([script])[0]) is not None
@@ -1017,6 +1018,27 @@ def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
 def _body_runs_nothing_unseen(body: str, sources) -> bool:
     """True when every segment of the shell BODY passes `_segment_runs_nothing_unseen`."""
     return all(_segment_runs_nothing_unseen(segment, sources) for segment in split_segments(body, []))
+
+
+def _script_runs(text: str):
+    """(interpreter word, script file) for each python, node, perl or ruby in TEXT that runs a script file. The
+    walk is `_written_file_use`'s; that one also judges shells and wrappers, so it does not yield these pairs."""
+    for stages in _pipeline_stages(text):
+        for words in stages:
+            for at, word in enumerate(words):
+                script = interpreter_script(words[at:]) if _RUNNER(word.rsplit("/", 1)[-1]) else None
+                if script not in (None, PROGRAM_NOT_A_FILE):
+                    yield word, words[at + script]
+
+
+def _script_body_runs_nothing(text: str, header: str, sources) -> bool:
+    """True when every interpreter in TEXT that runs HEADER's file as its script reads a source the guard can
+    see and that runs nothing (`script_source_is_text`). Such a source may reach a written file through a name
+    no word shows (`glob`, `listdir`, `readdirSync`, `exec(open(f).read())`), so one that can run anything keeps
+    every body."""
+    names = set(_plain_words(_WRITE_TARGET.findall(header)))
+    return all(sources.get(name) is not None and script_source_is_text(word, sources[name])
+               for word, name in _script_runs(text) if name in names)
 
 
 def _kept_closure(kept: set, bodies) -> set:
@@ -1040,14 +1062,20 @@ def _kept_headers(text: str, bodies) -> set:
     not data. A body is dropped only when the guard can see that nothing runs it: every kept shell body must
     run only known readers or a literal script file a heredoc wrote (`_body_runs_nothing_unseen`), else every
     body stays, as the top-level run does (`_written_file_use`). The test runs on the closed set, so a chained
-    script's body is read too. A kept body an interpreter runs as its script file is not shell text and is
-    left to the closure."""
+    script's body is read too. A kept body an interpreter runs as its script file is not shell text: it must
+    run nothing (`_script_body_runs_nothing`), else every body stays."""
     first = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
     kept = _kept_closure(first, bodies)
     sources = heredoc_sources(bodies)
-    if not all(_body_runs_nothing_unseen(body, sources) for _, body, header in bodies
-               if header in kept and _written_file_use(text, [header], bodies) != "script"):
-        return {header for _, _, header in bodies}
+    for _, body, header in bodies:
+        if header not in kept:
+            continue
+        if _written_file_use(text, [header], bodies) == "script":
+            seen = _script_body_runs_nothing(text, header, sources)
+        else:
+            seen = _body_runs_nothing_unseen(body, sources)
+        if not seen:
+            return {header for _, _, header in bodies}
     return kept
 
 
