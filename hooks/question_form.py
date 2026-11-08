@@ -1386,15 +1386,25 @@ RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 # The one home of an owner marker: text that names the owner as its source. Only text holding one is a ruling the
 # judge may cite (decision question-form): a step note that holds an incident, or a recommended pick the owner has
 # not answered, names him in passing and gives no ruling. Forms read from the records and step notes:
-# `Owner, 2026-10-21`, `Ruling (owner, Nov 9 14:20 CST)`, `(shiv, page item 9, a)`, `Owner, page item 150, pick a`,
-# `owner picked a`. A passing mention does not match: "the owner's review", "the owner has not answered", "co-owner".
+# `Owner, <date>`, `Owner 17:02 CST:`, `the owner's 12:27 CST ruling`, `Ruling (owner, Nov 9 14:20 CST)`,
+# `(shiv, page item 9, a)`, `Owner, page item 150, pick a`, `owner picked a`, `Owner go, Nov 1`, `shiv approved
+# <date>`, `Your ruling Oct 21:`. A sentence is no ruling when it opens with Incident, Gripe, Deferred, Note,
+# Caution or "not a(n)", when its parenthesis is `(owner note ...)` or `(shiv's caution ...)`, or when "not an" comes
+# right before the owner's name. Those name the owner without his answer. A passing mention does not match either: "the owner's
+# review", "the owner has not answered", "co-owner".
 _WHO = r"(?:owner|shiv)"
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+_CLOCK = r"\d{1,2}:\d{2}"
+_NOT_A_RULING_LEAD = r"(?:incident|gripe|deferred|note|caution|not\s+an?)"
 OWNER_RULING_RE = re.compile(
-    r"\(\s*" + _WHO + r"(?=[\s,:)'])"
+    r"\A(?!\W*" + _NOT_A_RULING_LEAD + r"\b).*?(?:"
+    r"\(\s*" + _WHO + r"(?:'s)?(?=[\s,:)])(?!\s+(?:note|caution)\b)"
     r"|(?<![\w'-])" + _WHO + r"\s*,\s*(?:\d|chat\b|" + _MONTH + r"\s+\d)"
     r"|(?<![\w'-])" + _WHO + r"(?:\s*,)?\s+(?:page\s+)?item\s+\d"
-    r"|(?<![\w'-])owner\s+(?:ruling|picked|pick|chose|ruled|answered|decided)\b", re.I)
+    r"|(?<![\w'-])" + _WHO + r"(?:'s)?\s+" + _CLOCK +
+    r"|(?<!not an )(?<!not a )(?<![\w'-])" + _WHO +
+    r"\s+(?:ruling|picked|pick|chose|ruled|answered|decided|go|pressed|approved|said)\b"
+    r"|(?<![\w'-])your\s+ruling\b)", re.I | re.S)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
@@ -1432,8 +1442,8 @@ def _ruling_text(body) -> str:
 
 def _record_index(root, folder, unknown, label, seen):
     """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record or
-    folder that cannot be read adds an unreadable source to `unknown`. No owner-marker test here: 92 of the 188
-    decisions on main name no owner in their ruling, so a marker test would drop real rulings."""
+    folder that cannot be read adds an unreadable source to `unknown`. No owner-marker test here: a decision or debt record is a ruling by its kind, whether or not its text names the
+    owner. Only a step note needs a marker (_step_rulings)."""
     path = os.path.join(root, "docs", folder)
     if not os.path.isdir(path):
         return False, []
