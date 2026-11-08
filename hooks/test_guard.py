@@ -422,6 +422,11 @@ PICKED = os.path.join(ROOT, "pickconflict")  # a cherry-pick stopped on a produc
 REBASING = os.path.join(ROOT, "rebaseconflict")  # a rebase stopped on a product conflict
 OTHER = os.path.join(ROOT, "otherplain")  # a plain checkout with no merge, holding the same product path as MIXED
 MIXEDLINK = os.path.join(ROOT, "mixedlinked")  # a merge in progress in a linked worktree, as a lane runs (.git is a file)
+PICKSTALE = os.path.join(ROOT, "pickstale")  # a cherry-pick stopped on a product conflict, with a stale MERGE_HEAD in its git dir
+REVERTSTALE = os.path.join(ROOT, "revertstale")  # a revert stopped on a product conflict (REVERT_HEAD set), with a stale MERGE_HEAD
+REBASESTALE = os.path.join(ROOT, "rebasestale")  # a rebase stopped on a product conflict, with a stale MERGE_HEAD in its git dir
+MIXEDBAD = os.path.join(ROOT, "mixedbadindex")  # a merge in progress whose index file is junk: rev-parse answers, ls-files fails
+MIXEDSLASH = os.path.join(ROOT, "mixedslash")  # a merge in progress, and a root file literally named src\app.py (POSIX only)
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
@@ -1692,40 +1697,93 @@ def _build_mixed_linked():
     _build_merge_fixture(MIXEDLINK, resolve_all=False, linked=True)
 
 
-def _build_picked():
-    """A cherry-pick of `feature` that conflicts on src/app.py: CHERRY_PICK_HEAD is set, MERGE_HEAD is not."""
-    make_repo(PICKED, {"src/app.py": "base\n"})
-    _must(PICKED, "checkout", "-q", "-b", "feature")
-    write(os.path.join(PICKED, "src/app.py"), "feature\n")
-    _must(PICKED, "add", "-A")
-    _must(PICKED, *IDENT, "commit", "-q", "-m", "feature change")
-    _must(PICKED, "checkout", "-q", "main")
-    write(os.path.join(PICKED, "src/app.py"), "main\n")
-    _must(PICKED, "add", "-A")
-    _must(PICKED, *IDENT, "commit", "-q", "-m", "main change")
-    run_vcs(PICKED, *IDENT, "cherry-pick", "feature")
-    _require_conflict(PICKED, "src/app.py", ref="CHERRY_PICK_HEAD")
-    if run_vcs(PICKED, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0:
-        sys.exit("fixture setup failed: the cherry-pick in %r also set MERGE_HEAD" % PICKED)
+def _check_merge_head(where, stale):
+    """`stale` leaves a MERGE_HEAD that names HEAD, as a merge that was never cleared can. Otherwise git must
+    report no MERGE_HEAD, so the fixture is the operation it names and nothing more."""
+    if stale:
+        write(os.path.join(where, ".git", "MERGE_HEAD"), run_vcs(where, "rev-parse", "HEAD").stdout.strip() + "\n")
+    present = run_vcs(where, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0
+    if present != stale:
+        sys.exit("fixture setup failed: MERGE_HEAD is %s in %r, not %s"
+                 % ("set" if present else "absent", where, "set" if stale else "absent"))
 
 
-def _build_rebasing():
-    """A rebase of `feature` onto `main` that stops on src/app.py. A rebase sets no MERGE_HEAD."""
-    make_repo(REBASING, {"src/app.py": "base\n"})
-    _must(REBASING, "checkout", "-q", "-b", "feature")
-    write(os.path.join(REBASING, "src/app.py"), "feature\n")
-    _must(REBASING, "add", "-A")
-    _must(REBASING, *IDENT, "commit", "-q", "-m", "feature change")
-    _must(REBASING, "checkout", "-q", "main")
-    write(os.path.join(REBASING, "src/app.py"), "main\n")
-    _must(REBASING, "add", "-A")
-    _must(REBASING, *IDENT, "commit", "-q", "-m", "main change")
-    _must(REBASING, "checkout", "-q", "feature")
-    run_vcs(REBASING, *IDENT, "rebase", "main")
-    if _unmerged(REBASING) != ["src/app.py"]:
-        sys.exit("fixture setup failed: the rebase in %r left %r unmerged" % (REBASING, _unmerged(REBASING)))
-    if run_vcs(REBASING, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0:
-        sys.exit("fixture setup failed: the rebase in %r set MERGE_HEAD" % REBASING)
+def _build_picked(where=PICKED, stale_merge_head=False):
+    """A cherry-pick of `feature` that conflicts on src/app.py: CHERRY_PICK_HEAD is set. MERGE_HEAD is not,
+    unless `stale_merge_head` leaves one behind."""
+    make_repo(where, {"src/app.py": "base\n"})
+    _must(where, "checkout", "-q", "-b", "feature")
+    write(os.path.join(where, "src/app.py"), "feature\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(where, "checkout", "-q", "main")
+    write(os.path.join(where, "src/app.py"), "main\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "main change")
+    run_vcs(where, *IDENT, "cherry-pick", "feature")
+    _require_conflict(where, "src/app.py", ref="CHERRY_PICK_HEAD")
+    _check_merge_head(where, stale_merge_head)
+
+
+def _build_picked_stale():
+    _build_picked(PICKSTALE, stale_merge_head=True)
+
+
+def _build_reverting_stale():
+    """A revert of the `feature` commit on main that conflicts on src/app.py: REVERT_HEAD is set, and a stale
+    MERGE_HEAD is left beside it."""
+    make_repo(REVERTSTALE, {"src/app.py": "base\n"})
+    write(os.path.join(REVERTSTALE, "src/app.py"), "feature\n")
+    _must(REVERTSTALE, "add", "-A")
+    _must(REVERTSTALE, *IDENT, "commit", "-q", "-m", "feature change")
+    write(os.path.join(REVERTSTALE, "src/app.py"), "main\n")
+    _must(REVERTSTALE, "add", "-A")
+    _must(REVERTSTALE, *IDENT, "commit", "-q", "-m", "main change")
+    run_vcs(REVERTSTALE, *IDENT, "revert", "--no-edit", "HEAD~1")
+    _require_conflict(REVERTSTALE, "src/app.py", ref="REVERT_HEAD")
+    _check_merge_head(REVERTSTALE, stale=True)
+
+
+def _build_rebasing(where=REBASING, stale_merge_head=False):
+    """A rebase of `feature` onto `main` that stops on src/app.py. A rebase sets no MERGE_HEAD, unless
+    `stale_merge_head` leaves one beside its rebase-merge folder."""
+    make_repo(where, {"src/app.py": "base\n"})
+    _must(where, "checkout", "-q", "-b", "feature")
+    write(os.path.join(where, "src/app.py"), "feature\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(where, "checkout", "-q", "main")
+    write(os.path.join(where, "src/app.py"), "main\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "main change")
+    _must(where, "checkout", "-q", "feature")
+    run_vcs(where, *IDENT, "rebase", "main")
+    if _unmerged(where) != ["src/app.py"]:
+        sys.exit("fixture setup failed: the rebase in %r left %r unmerged" % (where, _unmerged(where)))
+    if stale_merge_head and not os.path.isdir(os.path.join(where, ".git", "rebase-merge")):
+        sys.exit("fixture setup failed: the rebase in %r left no rebase-merge folder" % where)
+    _check_merge_head(where, stale_merge_head)
+
+
+def _build_rebasing_stale():
+    _build_rebasing(REBASESTALE, stale_merge_head=True)
+
+
+def _build_mixed_bad_index():
+    """A merge in progress whose index file is junk. `rev-parse` still reads MERGE_HEAD, and `ls-files -u` fails."""
+    _build_merge_fixture(MIXEDBAD, resolve_all=False)
+    write(os.path.join(MIXEDBAD, ".git", "index"), "junk, not an index\n")
+    if run_vcs(MIXEDBAD, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0:
+        sys.exit("fixture setup failed: MERGE_HEAD does not resolve in %r with a junk index" % MIXEDBAD)
+    if run_vcs(MIXEDBAD, "ls-files", "-u", "-z").returncode == 0:
+        sys.exit("fixture setup failed: ls-files still reads the junk index in %r" % MIXEDBAD)
+
+
+def _build_mixed_slash():
+    """A merge in progress, and on POSIX a root file literally named src\\app.py: a backslash is a name character there."""
+    _build_merge_fixture(MIXEDSLASH, resolve_all=False)
+    if os.name != "nt":
+        write(os.path.join(MIXEDSLASH, "src\\app.py"), "a root file, not the unmerged product file\n")
 
 
 def _build_other():
@@ -2321,9 +2379,14 @@ lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([MIXED], _build_mixed)
 lazy_fixture([RESOLVED], _build_resolved)
 lazy_fixture([PICKED], _build_picked)
+lazy_fixture([PICKSTALE], _build_picked_stale)
+lazy_fixture([REVERTSTALE], _build_reverting_stale)
 lazy_fixture([REBASING], _build_rebasing)
+lazy_fixture([REBASESTALE], _build_rebasing_stale)
 lazy_fixture([OTHER], _build_other)
 lazy_fixture([MIXEDLINK, MIXEDLINK + "-main"], _build_mixed_linked)
+lazy_fixture([MIXEDBAD], _build_mixed_bad_index)
+lazy_fixture([MIXEDSLASH], _build_mixed_slash)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
@@ -13224,6 +13287,31 @@ if os.name != "nt":   # the blind git is a POSIX stand-in (make_blind_git), as i
     add("test-author: Edit of an unmerged product file mid-merge is refused when git cannot read the index",
         "deny", rule=TA, tool="Edit", file_path=os.path.join(MIXED, "src", "app.py"), carries=MERGE_CARRIES,
         env_path=GITBLIND, **_author_at(MIXED))
+# A stale MERGE_HEAD beside a cherry-pick, a revert or a rebase does not make their conflict a merge's: the carve-out
+# is for a merge, so the operation the conflict came from decides, and the stale ref does not.
+add("test-author: Edit of a conflicted product file in a cherry-pick with a stale MERGE_HEAD is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(PICKSTALE, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(PICKSTALE))
+add("test-author: Edit of a conflicted product file in a revert with a stale MERGE_HEAD is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(REVERTSTALE, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(REVERTSTALE))
+add("test-author: Edit of a conflicted product file in a rebase with a stale MERGE_HEAD is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(REBASESTALE, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(REBASESTALE))
+# A merge whose index cannot be listed is not a merge with unmerged paths. `rev-parse` reads MERGE_HEAD here and
+# `ls-files -u` fails, so the failure branch of the carve-out must refuse.
+add("test-author: Edit of an unmerged product file is refused when ls-files fails under a merge", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(MIXEDBAD, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(MIXEDBAD))
+# On POSIX a backslash is a name character, so a root file named src\app.py is not the unmerged src/app.py, and the
+# carve-out must not read the two as one path.
+if os.name == "nt":
+    skip_case("test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged",
+              "Windows reads a backslash as a path separator, so no root file can hold that name")
+else:
+    add("test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged", "deny",
+        rule=TA, tool="Edit", file_path=os.path.join(MIXEDSLASH, "src\\app.py"), carries=MERGE_CARRIES,
+        **_author_at(MIXEDSLASH))
 
 # ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
 # A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
