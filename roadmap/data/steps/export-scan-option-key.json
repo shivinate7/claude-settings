@@ -1,11 +1,11 @@
 {
   "title": "The export scan passes a plain option key in a mockup's script",
   "why": "export_page.py's credential-name shape refused a q_max mockup for `key: 'icon-compact'` and `key: 'tight-compact'`, plain option keys (triage, page item 403, 00:20 CST Nov 8). A false alarm teaches the reader to scroll past the scan.",
-  "note": "Fix: the letters-only branch of credential-name skips a value of lower-case words joined by hyphens; red test first on `key: 'icon-compact'`, and a real secret still refuses. Queue fix, so the item 384 hold lets it start (coordinator, 00:14 CST Nov 8; owner 13:20 CST Nov 7, a found gap gets a fix). Title by triage. Filed 00:16 CST Nov 8. Lane session_013NEJL2A4zgwDKTvUq4Vaai started (coordinator, 00:16 CST Nov 8). Built as #1819, with runner 8, merging after #1641 (lane, 01:06 CST Nov 8). Follow-ups in step export-scan-key-followups. A stray worktree .claude/worktrees/agent-a792ff23fa7fe0382-red holds an uncommitted copy of the test file; the guard refused its removal, so the janitor sweep takes it.",
+  "note": "Fix: the letters-only branch of credential-name skips a value of lower-case words joined by hyphens; red test first on `key: 'icon-compact'`, and a real secret still refuses. Queue fix, so the item 384 hold lets it start (coordinator, 00:14 CST Nov 8; owner 13:20 CST Nov 7, a found gap gets a fix). Title by triage. Filed 00:16 CST Nov 8. Lane session_013NEJL2A4zgwDKTvUq4Vaai started (coordinator, 00:16 CST Nov 8). Built as #1819, with runner 8, merging after #1641 (lane, 01:06 CST Nov 8). Follow-ups in step export-scan-key-followups. A stray worktree .claude/worktrees/agent-a792ff23fa7fe0382-red holds an uncommitted copy of the test file; the guard refused its removal, so the janitor sweep takes it. Sighting 10:44 CST Nov 8: export_page.py refused the Cockpit export with 5 credential-name finds, all `key: 'icon-compact'` and `key: 'tight-compact'` in the q_max Past Rates mockup (item 428, page version 105). The waiting/ copy on the roadmap branch stays at 30dba7963 until this lands.",
   "phase": "now",
   "status": "ready",
   "order": 546,
   "owner": "triage",
   "lane": "session_013NEJL2A4zgwDKTvUq4Vaai",
-  "updatedAt": "2026-11-08T01:07:00-06:00"
+  "updatedAt": "2026-11-08T10:44:00-06:00"
 }
