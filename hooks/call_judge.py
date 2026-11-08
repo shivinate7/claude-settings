@@ -145,6 +145,7 @@ VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "fi
 # A wh-word asks only in a sentence that ends in "?" and comes before the actor: "Which check will fail?" asks, while
 # in a statement such as "The check which fails will refuse it." the wh-word is a relative and the claim stands.
 VERDICT_WH_WORDS = ("which", "what")
+SHORT_QUESTION_WORDS = 6  # a question this short or shorter, after a wh-clause, finishes that clause's question
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
     "not run it. Run the check first, and name the file in the sentence (outside any cite) so the run backs it, or add a "
@@ -586,7 +587,7 @@ def split_clause(prefix):
 
 def is_ask(prefix, question=False):
     """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word ("Verify the check
-    will pass it", "whether the check will refuse it"), `question` (the sentence ends in "?") and a wh-word sits before
+    will pass it", "whether the check will refuse it"), `question` (a "?" ends the sentence's question) and a wh-word sits before
     the actor ("Which check will fail?"), or a label "Unknown:" opens it."""
     head, clause = split_clause(prefix)
     return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None \
@@ -611,18 +612,29 @@ def actor_after_by(rest):
     return bool(by) and has_subject(_CLAUSE_END.split(rest[by.end():])[0].split()[:3])
 
 
-def is_verdict_claim(sentence):
+def opens_wh_question(sentence, following):
+    """True when `sentence` opens with a wh-word and a check word ("Which check will fail.") and `following`, the next
+    sentence, is itself a short question ("Do you know?"): one question that a full stop split in two."""
+    words = sentence.split()
+    opener = _WH_WORDS.match(_bare(words[0])) if words else None
+    return bool(opener) and len(words) > 1 and has_subject(words[1:2]) \
+        and following.rstrip().endswith("?") and len(following.split()) <= SHORT_QUESTION_WORDS
+
+
+def is_verdict_claim(sentence, following=""):
     """A forecast about a check's verdict, read as a sentence: a forecast word, then a verdict verb that acts on a
     send, a change or a PR (or a passive verb), whose actor is a check. A subject word elsewhere in the sentence, as in
-    "I will block it until the check is green", is no actor. Needs lint/ on sys.path."""
+    "I will block it until the check is green", is no actor. `following` is the next sentence, which may finish a
+    question that this one starts. Needs lint/ on sys.path."""
     sentence = _straight(sentence)
-    question = sentence.rstrip().endswith("?")
+    split_question = opens_wh_question(sentence, _straight(following))
     for modal in _FORECAST.finditer(sentence):
         verb = _PREDICATE.match(sentence, modal.end())
         if not verb:
             continue
         prefix = sentence[:modal.start()]
-        if is_ask(prefix, question):
+        # A "?" after the forecast word ends the question that holds it, whatever closing mark or quote follows.
+        if is_ask(prefix, "?" in sentence[modal.end():] or split_question):
             continue
         if actor_after_by(sentence[verb.end():]) if verb.group("passive") else actor_before(prefix):
             return True
@@ -658,8 +670,12 @@ def verdict_claims(message):
     if not _has_word(message, VERDICT_FORECAST_WORDS) \
             or not (_has_word(message, VERDICT_WORDS + VERDICT_PASSIVE_WORDS) or _LET_ANY.search(message)):
         return []
-    return [sentence for unit in prose_units(message) for sentence in SENTENCE_END.split(blank_mentions(unit))
-            if is_verdict_claim(sentence)]
+    claims = []
+    for unit in prose_units(message):
+        sentences = SENTENCE_END.split(blank_mentions(unit))
+        claims += [sentence for index, sentence in enumerate(sentences)
+                   if is_verdict_claim(sentence, sentences[index + 1] if index + 1 < len(sentences) else "")]
+    return claims
 
 
 def blank_mentions(unit):
