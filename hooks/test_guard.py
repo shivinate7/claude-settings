@@ -27266,6 +27266,39 @@ role_model_refuse("role-model: granted round 4 on sonnet, but the brief reads Ro
            "sonnet", "Round 5 of 5. Re-check the diff.\n" + GRANT_CITE)
 role_opus_refuse("role-model: granted round 4 on opus with a valid Grant line is denied under agent-model-cap",
            "reviewer", "opus", GRANT_ROUND_4 + "\n" + GRANT_CITE)
+# The Rounds paragraph of agents/reviewer.md is the text a granted fourth round reads. Each clause is matched on
+# its words within one sentence, not on the whole paragraph, so a reword that keeps those words still passes.
+GRANTED_CLAUSES = (
+    ("a granted round's brief opens with Round 4 of 4",
+     (r"\bbrief (?:opens|starts|begins)\b.*\bround 4 of 4\b",)),
+    ("round 4 is then the last round", (r"\bround 4 is (?:then )?the (?:last|final) round\b",)),
+    ("round 4, not round 3, holds the net-value lines",
+     (r"\bround 4\b", r"\bnot round 3\b", r"\bholds\b", r"\bnet-value lines\b")),
+)
+
+
+def granted_clauses_case():
+    """The Rounds paragraph states the three clauses a granted fourth round depends on."""
+    with open(os.path.join(REPO, "agents", "reviewer.md"), encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("Rounds. ")), None)
+    if start is None:  # no paragraph, so no clause can be read from it
+        return False, "agents/reviewer.md has no Rounds paragraph"
+    para = []
+    for line in lines[start:]:
+        if not line.strip():
+            break
+        para.append(line)
+    sentences = " ".join(" ".join(para).replace("`", "").lower().split()).split(". ")
+    for words, needles in GRANTED_CLAUSES:
+        if not any(all(re.search(needle, sentence) for needle in needles) for sentence in sentences):
+            return False, "the Rounds paragraph lacks the clause: %s" % words
+    return True, "the Rounds paragraph states the three granted-round clauses"
+
+
+FIXTURELESS_CHECKS.add(granted_clauses_case)  # reads one repo file and builds no fixture
+LOG_CHECKS_EXTRA.append(("role-model: the Rounds paragraph states the granted fourth-round clauses",
+                         granted_clauses_case))
 role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
 role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
