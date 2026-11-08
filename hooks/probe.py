@@ -13,11 +13,14 @@ Run `hooks/probe.py` in a claude-settings worktree to judge that branch's guard.
 
 The verdict is for a call from the main session. The probe drops agent_id, agent_type and
 session_id from a stdin payload, and writes one stderr note that names each field it drops. So
-builder-test-edit, test-author-scope and the commit and push diff checks are not judged. They
-need agent_id.
+no check that needs agent_id is judged. Some of them are builder-test-edit, test-author-scope,
+the commit and push diff checks, worktree-home and the red-run folder exemption. This list may
+not be complete.
 
-`--cwd` sets the folder the call runs in. With no `--cwd`, the folder is the one you run the
-probe from. In a reviewer's own worktree, `git reset --hard origin/main` reads allow. In a
+A `noted` verdict allows the call and writes a log line. The probe prints it as plain `allow`.
+
+`--cwd` sets the folder the call runs in. The probe makes a relative `--cwd` absolute. With no
+`--cwd`, the folder is the one you run the probe from. In a reviewer's own worktree, `git reset --hard origin/main` reads allow. In a
 folder outside any checkout, it reads deny shared-tree.
 
 With `--command` or `--command-file`, the tool must be one of the guard's shell tools
@@ -46,7 +49,8 @@ GUARD = os.path.join(HERE, "guard.py")
 TIMEOUT_SECONDS = 120
 # The payload fields that tie a call to a session or an agent. The verdict is for a main-session call.
 SESSION_FIELDS = ("agent_id", "agent_type", "session_id")
-# session_id_of in guard_shared_tree.py falls back to these when the payload has no session_id.
+# The outer session's ids. guard_shared_tree.session_id_of reads the first when the payload has no
+# session_id. override.py reads the second for the Opus spawn step.
 SESSION_ENV = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID")
 
 
@@ -145,11 +149,15 @@ def probe(payload):
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = config_dir
         env["PYTHONDONTWRITEBYTECODE"] = "1"  # the guard's imports must not write __pycache__ beside hooks/
-        # The guard reads the session id from the payload, else from these env vars, and the id changes
-        # verdicts such as a call from the session's own scratchpad. Drop both, so the outer session cannot.
+        # The outer session must not change the verdict. session_id_of falls back to CLAUDE_CODE_SESSION_ID,
+        # and override.py reads CLAUDE_CODE_REMOTE_SESSION_ID for the Opus spawn step. Drop both.
         for name in SESSION_ENV:
             env.pop(name, None)
         cwd = payload.get("cwd")
+        if isinstance(cwd, str) and cwd:
+            # The guard reads cwd as given, so a relative path would name a folder under the guard's own cwd.
+            cwd = os.path.abspath(cwd)
+            payload = dict(payload, cwd=cwd)
         run_cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None
         try:
             result = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
