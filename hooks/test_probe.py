@@ -597,6 +597,16 @@ def dropped_session_fields_are_noted():
     return problems
 
 
+# A stub guard that refuses with the cwd it judged as its reason: the payload's, else its own working folder.
+CWD_STUB = (
+    "import json, os, sys\n"
+    "payload = json.load(sys.stdin)\n"
+    "reason = 'cwd-seen: ' + str(payload.get('cwd') or os.getcwd())\n"
+    "out = {'permissionDecision': 'deny', 'permissionDecisionReason': reason}\n"
+    "print(json.dumps({'hookSpecificOutput': out}))\n"
+)
+
+
 @case
 def relative_cwd_is_judged_as_the_absolute_folder():
     """Probe: a relative --cwd gives the guard the same folder as the absolute path, so the verdict is the same."""
@@ -606,14 +616,7 @@ def relative_cwd_is_judged_as_the_absolute_folder():
     os.makedirs(sub)
     probe_copy = os.path.join(folder, "probe.py")
     shutil.copyfile(PROBE, probe_copy)
-    # The stub refuses with the cwd it was handed as its reason, so the verdict shows which folder the guard judged.
-    write(os.path.join(folder, "guard.py"), (
-        "import json, sys\n"
-        "payload = json.load(sys.stdin)\n"
-        "reason = 'cwd-seen: ' + str(payload.get('cwd'))\n"
-        "out = {'permissionDecision': 'deny', 'permissionDecisionReason': reason}\n"
-        "print(json.dumps({'hookSpecificOutput': out}))\n"
-    ).encode("utf-8"))
+    write(os.path.join(folder, "guard.py"), CWD_STUB.encode("utf-8"))
     # Scope first: the absolute folder gives the verdict naming that folder.
     rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", sub], script=probe_copy, run_in=folder)
     bad = scope(rc, out, err)
@@ -662,6 +665,53 @@ def config_overlap_is_noted():
         problems += expect("frozen-path" in notes[0] and "override" in notes[0],
                            "the note does not name frozen-path and override")
     return problems + expect(out3 == out2, "verdict %r, want the baseline's %r" % (out3[:60], out2[:60]))
+
+
+@case
+def flag_run_without_cwd_judges_the_folder_it_runs_from():
+    """Probe: with no --cwd, the guard judges the folder the probe runs from, as the absolute path would."""
+    base = os.path.realpath(new_dir())
+    tool_dir = os.path.join(base, "tool")
+    work = os.path.join(base, "work")
+    os.makedirs(tool_dir)
+    os.makedirs(work)
+    probe_copy = os.path.join(tool_dir, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    write(os.path.join(tool_dir, "guard.py"), CWD_STUB.encode("utf-8"))
+    # Scope first: the absolute folder names that folder.
+    rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", work], script=probe_copy, run_in=base)
+    bad = scope(rc, out, err)
+    if bad:
+        return ["control, absolute cwd: " + bad[0]]
+    if out != "deny cwd-seen: %s\n" % work:
+        return ["control, absolute cwd: printed %r, want the folder named" % out[:80]]
+    rc2, out2, err2 = probe(["--tool", "Bash", "--command", HARMLESS], script=probe_copy, run_in=work)
+    bad = scope(rc2, out2, err2)
+    if bad:
+        return ["no --cwd: " + bad[0]]
+    return expect(out2 == out, "no --cwd gives %r, want the absolute run's %r" % (out2[:80], out[:80]))
+
+
+ASK_STUB = (
+    "import json, sys\n"
+    "json.load(sys.stdin)\n"
+    "out = {'permissionDecision': 'ask', 'permissionDecisionReason': 'stub-ask: a stub asks'}\n"
+    "print(json.dumps({'hookSpecificOutput': out}))\n"
+)
+
+
+@case
+def ask_verdict_is_printed_as_asked():
+    """Probe: a guard's ask prints as `ask <rule>: <reason>`, never as allow."""
+    folder = os.path.realpath(new_dir())
+    probe_copy = os.path.join(folder, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    write(os.path.join(folder, "guard.py"), ASK_STUB.encode("utf-8"))
+    rc, out, err = probe(["--tool", "Bash", "--command", HARMLESS, "--cwd", folder], script=probe_copy)
+    bad = scope(rc, out, err)
+    if bad:
+        return bad
+    return expect(out == "ask stub-ask: a stub asks\n", "printed %r, want the guard's ask line" % out[:80])
 
 
 if __name__ == "__main__":
