@@ -27,3 +27,5 @@ No new process: the skill reads the records and `lint/layout.json` in the check 
 ## Safety holes, named
 
 Debt: `js-layout-reader` (the skill reads the layout in JS, and skips `legacy-repos`).
+
+Kind: process
