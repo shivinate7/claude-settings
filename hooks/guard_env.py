@@ -7,8 +7,8 @@ import fnmatch
 import re
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, FIND_EXEC_ACTIONS, INTERPRETER_HEREDOC, REDIRECT,
+    SHELL_HEREDOC, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
     is_powershell, norm, split_segments,
 )
 
@@ -86,12 +86,15 @@ ENV_INLINE_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)(?:=.*)?$")
 ENV_EXISTENCE_COMMANDS = ("ls", "test", "[", "[[")
 
 # `find` tests that take a name pattern, and the actions that act on a match. A pattern after one of
-# those tests lists the path and reads no contents, as `ls` does, unless the segment also holds an
-# action that runs a command, deletes, or writes the match list to a file.
+# those tests lists the file's name and reads no contents, as `ls` does, when the segment holds no
+# action that runs a command, deletes, or writes the match list to a file, and its output goes to the
+# terminal, a file, a message, or a filter that runs no command (`ENV_FIND_FILTERS`). A substitution
+# or a pipe into any other command hands the names to a command that may read them.
 ENV_FIND_NAME_TESTS = (
     "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex")
-ENV_FIND_ACTIONS = (
-    "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
+ENV_FIND_ACTIONS = FIND_EXEC_ACTIONS + ("-delete", "-fprint", "-fprint0", "-fprintf", "-fls")
+# Commands that read a pipe and run nothing and open no file named by it.
+ENV_FIND_FILTERS = ("wc", "sort", "uniq", "head", "tail", "cut", "tr", "nl")
 
 # Commands that only print their own arguments. An env name among the arguments is TEXT, printed to
 # stdout or written to a file that is NOT an environment file (`echo <name> > .worktreeinclude`),
@@ -434,8 +437,10 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 # ACCEPTED LIMITS, each named so nobody trusts this layer past them:
 #   - a brace or variable split (`.env{,.x}`, `.e$Xnv`) cannot be read statically;
 #   - a dot glob such as `cat .*` or `tar .*` refuses, on purpose, as it sweeps in `.env`;
-#   - `find -name '.env*'` lists paths and is allowed, as `ls` is; `find .env -print` is judged
-#     as a name word and refuses;
+#   - `find -name '.env*'` lists names and is allowed, as `ls` is, while its output goes to the
+#     terminal, a file or a filter that runs no command (`ENV_FIND_FILTERS`); a substitution or
+#     a pipe into any other command refuses. `find .env -print` is judged as a name word and
+#     refuses;
 #   - a relay split across two separate tool calls (write the name to a file in one, read the file
 #     in the next) cannot be seen by a per-command guard;
 #   - the relay check matches the literal path, so another spelling of the same file (`./f`, or
@@ -1222,6 +1227,14 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     return False
 
 
+def _pipe_sink(pieces, at: int) -> str:
+    """The command that reads the pipe the piece `at` closes, else "" (none found)."""
+    if at + 1 >= len(pieces):
+        return ""
+    parts = _env_parts(pieces[at + 1])
+    return _env_words(parts[0])[2] if parts else ""
+
+
 def _env_flat(cmd: str, text_ok: bool = False):
     """The segment rules over one text whose substitutions are already cut out."""
     ends = []
@@ -1295,9 +1308,12 @@ def _env_flat(cmd: str, text_ok: bool = False):
                     continue  # the name is data, and no contents are read or written
                 if command in ENV_EXISTENCE_COMMANDS:
                     continue  # asking whether the file is there reads none of it
-                if (command == "find" and previous in ENV_FIND_NAME_TESTS
-                        and not any(w in ENV_FIND_ACTIONS for w in words)):
-                    continue  # a name test lists the path, as ls does
+                # `text_ok` is false for a substitution that is not a message value: its output is an
+                # argument of the command around it. A pipe must end in a filter, not a runner.
+                if (command == "find" and previous in ENV_FIND_NAME_TESTS and text_ok
+                        and not any(w in ENV_FIND_ACTIONS for w in words)
+                        and (not piped or _pipe_sink(pieces, at) in ENV_FIND_FILTERS)):
+                    continue  # a name test lists the name, as ls does
                 actor = "'%s'" % command if command else "this command"
                 return (ENV_CONTENTS_REASON,
                         "%s would read, write or commit the contents of '%s'" % (actor, named))
