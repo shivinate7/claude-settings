@@ -1319,8 +1319,29 @@ def _resume_worktree(spawn, role, isolation_pin):
     return isolation in RESUME_ISOLATIONS
 
 
-def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False, isolation_pin=None):
-    """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a spawn
+def _workflow_resume_hit(reader, tool, transcript, target, isolation_pin):
+    """resume_finished_hit's verdict for a name no main-transcript spawn holds: a Workflow agent of the run journals
+    beside the transcript, or nothing. The caller maps a raise to the unparsed ask."""
+    found = reader.workflow_agent(transcript, target)
+    if found is None:
+        return "", "", "", ""
+    state, agent_type = found
+    if state == reader.RUNNING:
+        return "", "", "", ""
+    if state == reader.FINISHED and agent_type:
+        if agent_type not in RECORD_REVIEWER_ROLES and not _resume_worktree({}, agent_type, isolation_pin):
+            return "", "", "", ""
+        model = RESUME_MODEL_CLAUSE if agent_type in RECORD_REVIEWER_ROLES else ""
+        return ("deny", RESUME_REASON % {"role": agent_type, "model": model},
+                "%s to a finished %s" % (tool, agent_type), "")
+    if agent_type and agent_type not in RECORD_REVIEWER_ROLES and not _resume_worktree({}, agent_type, isolation_pin):
+        return "", "", "", ""
+    role = agent_type or "agent"
+    return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
+
+
+def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=None):
+    """(decision, reason, matched, note): "deny" when this built-in SendMessage, from the main session or from a subagent, names a spawn
     that has finished and ran in a worktree (any role: its worktree is gone), or is a reviewer or
     design-reviewer. A spawn ran in a worktree when its effective isolation is in RESUME_ISOLATIONS: the Agent input's
     `isolation` when it is set (a value in another case reads as no worktree), else `isolation_pin(role)`, the role
@@ -1329,14 +1350,19 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
     the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
     ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
-    to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, a running spawn and a
-    call with an agent_id pass.
+    to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, and a running spawn pass.
+    A call with an agent_id is judged as the main session's is, against the parent's transcript (its `transcript_path`).
+    A name no spawn in the transcript holds is then looked up as a Workflow agent (_transcript.workflow_agent: the
+    agentId or the label in the run's journal beside the transcript). Its role is its meta agentType and its isolation
+    is the role file's pin. It is refused when finished and a reviewer, a design-reviewer, or a role that pins a worktree
+    or remote; a running one passes; a finished one with no meta file, or of unknown state, asks.
     `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
     be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
     (it asks). The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one transcript
-    read per judged send, shared with review_record_hit (_main_records), no subprocess, no network."""
+    read per judged send, shared with review_record_hit (_main_records), and, only when no spawn holds the name, one
+    directory listing and one read per journal in the transcript's own workflows folder. No subprocess, no network."""
     target = tool_input.get("to") if isinstance(tool_input, dict) else None
-    if agent or tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
+    if tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
         return "", "", "", ""
     if not transcript:
         return "", "", "", RESUME_UNREAD_NOTE
@@ -1356,7 +1382,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
                   and use.get("id") not in failed]
         named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
         if not named:
-            return "", "", "", ""
+            return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)
         spawn = named[-1]["input"]
         role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
         if role not in RECORD_REVIEWER_ROLES and not _resume_worktree(spawn, role, isolation_pin):

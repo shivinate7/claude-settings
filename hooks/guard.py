@@ -128,7 +128,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
   resume-finished-reviewer
-                       deny. A built-in `SendMessage` from a call with no `agent_id` whose `to` names an Agent or Task
+                       deny. A built-in `SendMessage`, from the main session or from a subagent (a payload with `agent_id`, judged
+                       against the parent's transcript), whose `to` names an Agent or Task
                        spawn that has finished and ran in a worktree (any role), so its worktree is gone and a
                        resume runs with no tree. A spawn ran in a worktree when its `isolation` input is `worktree`
                        or `remote`, or, with no input, when its role file in agents/ pins one of them
@@ -141,8 +142,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        is stripped before matching. A state the read cannot place asks, and so does a parsed
                        transcript record with the wrong shape (noted as `resume-finished-reviewer-unparsed`); a
                        line that is not JSON is dropped by the reader and does not ask. A send to `main`, a
-                       name with no spawn, a running spawn, a finished spawn with no worktree that is not a
-                       reviewer, and a send with an agent_id pass. A missing or unreadable
+                       name with no spawn or Workflow agent, a running spawn, and a finished spawn with no worktree that is not a
+                       reviewer pass. A name no spawn holds is looked up as a Workflow agent (`_transcript.workflow_agent`:
+                       its agentId or label in the run journal under the transcript's own `subagents/workflows/`), whose
+                       role is its meta agentType: finished and a reviewer, or a role that pins a worktree, is refused;
+                       finished with no meta file asks. A missing or unreadable
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
                        fresh agent of the same role (named in it) and pass it the prior report. One transcript read per judged send, shared with
                        review-record-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
@@ -4947,7 +4951,7 @@ def judge(payload) -> None:
 
     # A SendMessage to a spawn that has finished and ran in a worktree, or to a finished reviewer (rule resume-finished-reviewer).
     resume_decision, resume_reason, resume_matched, resume_note = resume_finished_hit(
-        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")),
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
         lambda role: role_isolation_pin(pointer_checkout(), role))
     if resume_note:
         record(tool, "noted", resume_note, tool)

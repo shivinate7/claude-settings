@@ -506,3 +506,59 @@ def agent_state(records, tool_use_id, tag):
             if res.get("tool_use_id") in stops and agent in stopped_ids(res.get("content")):
                 return FINISHED
     return UNKNOWN if unclear else RUNNING
+
+
+# ---- the finish of a Workflow agent: it has no Agent or Task spawn in the transcript. Its run's journal, beside the
+# transcript at <transcript minus .jsonl>/subagents/workflows/<runId>/journal.jsonl, holds a `started` line (agentId,
+# label) and, once it finishes, a `result` line. Its role is `agentType` in agent-<agentId>.meta.json beside it.
+WORKFLOWS_DIR = os.path.join("subagents", "workflows")
+_AGENT_ID = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _journal_agent_type(run_dir, agent_id):
+    """The agentType in the agent's meta file, or None when the file is missing, unreadable or names no role."""
+    if not _AGENT_ID.fullmatch(agent_id):
+        return None
+    try:
+        with open(os.path.join(run_dir, "agent-%s.meta.json" % agent_id), encoding="utf-8") as f:
+            kind = json.load(f).get("agentType")
+    except Exception:
+        return None
+    return kind.strip() if isinstance(kind, str) and kind.strip() else None
+
+
+def workflow_agent(transcript, target):
+    """(state, agent_type) for the Workflow agent that `target` names by its agentId or its started line's label, or
+    None when no journal beside `transcript` names it. The latest started line that matches wins: a later line in a
+    journal, and a run whose journal was written later. state is RUNNING (a started line, no result line for that id),
+    FINISHED (a result line), or UNKNOWN when a journal in the folder exists but cannot be read and none names the
+    target. agent_type is the meta file's agentType, or None. Reads only that transcript's own workflows folder, and
+    only when called: one directory listing and one read per journal."""
+    root = os.path.join(os.path.splitext(transcript)[0], WORKFLOWS_DIR)
+    try:
+        runs = [entry for entry in os.scandir(root) if entry.is_dir()]
+    except OSError:
+        return None
+    journals = []
+    for entry in runs:
+        path = os.path.join(entry.path, "journal.jsonl")
+        try:
+            journals.append((os.stat(path).st_mtime_ns, entry.name, entry.path, path))
+        except OSError:
+            continue
+    best, unreadable = None, False
+    for _mtime, _name, run_dir, path in sorted(journals):
+        try:
+            records = read_transcript(path)
+        except OSError:
+            unreadable = True
+            continue
+        results = {rec.get("agentId") for rec in records if rec.get("type") == "result"}
+        for rec in records:
+            agent_id = rec.get("agentId")
+            if (rec.get("type") == "started" and isinstance(agent_id, str) and agent_id
+                    and target in (agent_id, rec.get("label"))):
+                best = (FINISHED if agent_id in results else RUNNING, _journal_agent_type(run_dir, agent_id))
+    if best is None and unreadable:
+        return UNKNOWN, None
+    return best
