@@ -344,7 +344,7 @@ def case_press_link_label_is_a_string():
     # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
     # the page beside it does not save the press.
     pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
-    # The option names PR #374, so a link must reach that page: with no number in the text any link passes.
+    # The option names the pr URL's number, so a link must reach that page: with no number in the text any link passes.
     base = copy.deepcopy(ITEM92["options"])
     base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
 
