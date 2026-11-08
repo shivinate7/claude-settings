@@ -790,17 +790,17 @@ def _context_nudge(payload):
     return None
 
 
-# --- Owner waits (decision precompact-handoff, the owner-waits section) -----------------------
+# --- Owner waits (item 14 of decision precompact-handoff) -------------------------------------
 # A coordinator's handoff keeps every item waiting on the owner in this session. The Stop nudge
 # blocks when the section is missing or empty, or when a refused act with no later success is not
-# named in it. Cost per Stop of a session that never held the coordinator tag text: one raw read
-# of the transcript (it stops at the first line holding the tag text), no JSON parse. A
-# coordinator's Stop adds one parse of the transcript and one read of the handoff. No file is
-# written, no process started.
+# named in it. Cost per Stop with a handoff, when no transcript line holds the coordinator tag text
+# in any case: one raw read of the transcript, no JSON parse. A cloud session's SessionStart output
+# holds that text, so its raw read passes and each such Stop adds one parse of the transcript and
+# one read of the handoff. No file is written, no process started.
 OWNER_HEADING = "Waiting on the owner in this session"
 COORDINATOR_TAG = "cs-build:coordinator"
 OWNER_NAMED_MAX = 5  # the newest unanswered refusals the section must name
-OWNER_NAME_CHARS = 60
+OWNER_LABEL_CHARS = 60  # a longer label keeps its head and tail
 _OWNER_HEAD = re.compile(r"^##[ \t]+%s[ \t]*$" % re.escape(OWNER_HEADING), re.I | re.M)
 _ANY_HEAD = re.compile(r"^#{1,2}[ \t]")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
@@ -810,25 +810,35 @@ def _squash(text):
     return " ".join(str(text).split())
 
 
+def _short(text):
+    """A label's text: `text`, or its head and tail when it is longer than OWNER_LABEL_CHARS."""
+    if len(text) <= OWNER_LABEL_CHARS:
+        return text
+    tail = OWNER_LABEL_CHARS // 3
+    return "%s...%s" % (text[:OWNER_LABEL_CHARS - tail - 3], text[-tail:])
+
+
 def _call_name(name, inp):
-    """(answer key, identifier, label) of a tool call. The identifier is the text a handoff line would
-    hold to name the act: a command's first line, a path or url, else the tool name. The key tells acts
-    apart: the tool and its whole command, path or url; for a tool with none, the tool and its input
-    without `description`. A refused merge of PR 12 is then not answered by a success for PR 13."""
+    """(answer key, identifier, label) of a tool call. The key tells acts apart: the tool and its whole
+    command, path or url; for a tool with none, the tool and its input without `description`. A refused
+    merge of PR 12 is then not answered by a success for PR 13. The identifier is the text a handoff
+    line must hold to name the act: the whole first line of the command, or the path or url, squashed;
+    else the tool name. The label shows the identifier, cut to its head and tail when long."""
     inp = inp if isinstance(inp, dict) else {}
     for field in ("command", "file_path", "path", "url"):
         value = inp.get(field)
         if isinstance(value, str) and value.strip():
-            ident = _squash(value.strip().splitlines()[0])[:OWNER_NAME_CHARS]
-            return (name, value.strip()), ident, "%s `%s`" % (name, ident)
+            ident = _squash(value.strip().splitlines()[0])
+            return (name, value.strip()), ident, "%s `%s`" % (name, _short(ident))
     rest = {k: v for k, v in inp.items() if k != "description"}
     return (name, json.dumps(rest, sort_keys=True, default=str)), name, name
 
 
 def _transcript_has_tag(transcript_path):
-    """Whether any line of the transcript holds the coordinator tag text. A raw read, no parse."""
+    """Whether any line of the transcript holds the coordinator tag text, in any case. A raw read, no
+    parse. own_session.tag_name compares tags stripped and casefolded."""
     with open(transcript_path, "r", encoding="utf-8") as f:
-        return any(COORDINATOR_TAG in line for line in f)
+        return any(COORDINATOR_TAG in line.casefold() for line in f)
 
 
 def owner_waits_scan(transcript_path, own_id):
@@ -850,7 +860,8 @@ def owner_waits_scan(transcript_path, own_id):
                 continue
             if not isinstance(entry, dict) or entry.get("isSidechain") is True:
                 continue
-            content = (entry.get("message") or {}).get("content")
+            message = entry.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
             if not isinstance(content, list):
                 continue
             for block in content:
