@@ -7,10 +7,16 @@ Lists the tests whose verdict can move with the real clock: a fixed wait, a boun
 a time limit, or a read of the real date. Decision test-practices P5 covers all four: no fixed
 sleep, a synthetic clock for a verdict that depends on elapsed time, a hang guard allowed, and a
 date read counted as a real clock. The tool fixes none, and it writes nothing. Each finding has one category:
-- sleep: a real wait in a test file.
+- sleep: a real wait in a test file. Not a poll interval: a `sleep` in a Python loop that has both a
+  condition and a cap is a wait-cap. A condition is a while-test term other than a bare `True` and a
+  clock comparison, or an `if` in the body that returns, breaks, raises or fails and tests something
+  other than a clock. A cap is a clock compared in the while test or in such an `if`, or
+  `range(<literal>)` in a `for`. A bare sleep, `while True` with no exit, a condition with no cap, a cap
+  with no condition and a sleep after the loop stay sleep.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). A hang guard
+- wait-cap: a fixed time bound on a wait for a condition or a child process, or the poll interval of such
+  a capped wait loop (a hang guard). A hang guard
   (test-cap or wait-cap) is allowed (decision test-practices P5): it
   is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
   the run, so it only stops a hang and never decides a verdict by speed.
@@ -667,6 +673,79 @@ def scan_python(text):
                 ids.update(id(x) for stmt in n.body for x in ast.walk(stmt))
         return ids
 
+    parents = {}
+    for n in ast.walk(tree):
+        for child in ast.iter_child_nodes(n):
+            parents[id(child)] = n
+
+    def terms_of(test):
+        """The terms of a loop or if test, with `and` and `or` flattened."""
+        if isinstance(test, ast.BoolOp):
+            return [t for v in test.values for t in terms_of(v)]
+        return [test]
+
+    def own_nodes(stmts):
+        """Every node under stmts, not entering a nested function, lambda or class."""
+        todo = list(stmts)
+        while todo:
+            node = todo.pop()
+            yield node
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    todo.append(child)
+
+    def exits(ifnode):
+        """True when the if's own branch returns, breaks, raises or fails the test."""
+        for n in own_nodes(ifnode.body):
+            if isinstance(n, (ast.Return, ast.Break, ast.Raise)):
+                return True
+            if isinstance(n, ast.Call) and (n.func.attr if isinstance(n.func, ast.Attribute)
+                                            else getattr(n.func, "id", "")) == "fail":
+                return True
+        return False
+
+    def poll_loop_of(call):
+        """The loop whose body holds this call directly in its own scope, or None."""
+        child, node = call, parents.get(id(call))
+        while node is not None and not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            if isinstance(node, (ast.While, ast.For, ast.AsyncFor)) and child in node.body:
+                return node
+            child, node = node, parents.get(id(node))
+        return None
+
+    def is_hang_guard_poll(call):
+        """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
+        wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
+        comparison, or an if in the body that exits and tests something other than a clock. A cap is a clock
+        comparison in the while test or in an exiting if, or `range(<literal>)` in a for."""
+        loop = poll_loop_of(call)
+        if loop is None:
+            return False
+        root = parents.get(id(loop))
+        while root is not None and not isinstance(root, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            root = parents.get(id(root))
+        tainted = scope_taint(root if root is not None else tree)
+
+        def clock_term(t):
+            return isinstance(t, ast.Compare) and holds_clock(t, tainted)
+
+        def always_true(t):
+            return isinstance(t, ast.Constant) and bool(t.value)
+
+        ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If) and exits(n)]
+        has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
+        cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
+        if isinstance(loop, ast.While):
+            terms = terms_of(loop.test)
+            has_cond = has_cond or any(not (clock_term(t) or always_true(t)) for t in terms)
+            cap = cap or any(clock_term(t) for t in terms)
+        else:
+            it = loop.iter
+            cap = cap or (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
+                          and bool(it.args) and not it.keywords and all(py_number(a) for a in it.args))
+        return has_cond and cap
+
     found = set()
     calendar_calls = []
     decorator_calls = {id(d) for n in ast.walk(tree)
@@ -678,7 +757,8 @@ def scan_python(text):
         if names & PY_SLEEPS:
             if not (isinstance(first, ast.Constant) and not isinstance(first.value, bool)
                     and isinstance(first.value, (int, float)) and first.value == 0):
-                found.add((call.lineno, "sleep"))  # sleep(0) is a yield, not a wait
+                # sleep(0) is a yield, not a wait. A poll interval of a capped wait loop is a hang guard.
+                found.add((call.lineno, "wait-cap" if is_hang_guard_poll(call) else "sleep"))
         zone_kws = {PY_CALENDAR_ZONE_KW[n] for n in names if n in PY_CALENDAR_ZONE_KW}
         if names & PY_CALENDAR_NOW or names & PY_CALENDAR_LOCAL_ZONE or (
                 not call.args and not call.keywords and names & PY_CALENDAR_NO_ARG) or (
