@@ -655,7 +655,7 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
 # `--prefix` and its short form `-C` are read (npm_prefix_flag): their folder is the one judged. A
-# workspace flag is read for `npm version` only (NPM_WORKSPACE_FLAGS).
+# workspace flag is read for `npm version` only (npm_workspace_mode).
 # The two spellings of `npm version`. The read-only list holds them, and a workspace flag turns them into a change.
 NPM_VERSION_WORDS = {"version", "verison"}
 # THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
@@ -693,8 +693,10 @@ NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-r
 NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
 NPM_ALIAS_WORDS = {"r"}
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
-# only rewrites package.json.
-NPM_WORKSPACE_FLAGS = {"-w", "-ws", "--ws"}
+# only rewrites package.json. The boolean ones are off when their value is the word `false`, attached with
+# `=` or as the next word. nopt takes only the literal words true and false as a boolean's value, so
+# `npm --ws ci` keeps `ci` as the subcommand.
+NPM_WORKSPACE_BOOL_FLAGS = {"-ws", "--ws", "--workspaces"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -779,6 +781,21 @@ def npm_prefix_flag(words, where: str) -> str:
     return os.path.join(where, value) if value else ""
 
 
+def npm_workspace_mode(words) -> bool:
+    """True when the option words turn on workspace mode: a `-w` or `--workspace` option, or a boolean
+    workspaces flag whose value is not the word `false` (NPM_WORKSPACE_BOOL_FLAGS)."""
+    for at, word in enumerate(words):
+        name, equals, value = word.partition("=")
+        if name in NPM_WORKSPACE_BOOL_FLAGS:
+            if not equals:
+                value = words[at + 1] if at + 1 < len(words) else ""
+            if value != "false":
+                return True
+        elif name == "-w" or name.startswith("--workspace"):
+            return True
+    return False
+
+
 def linked_nm_hit(segment: str, where: str) -> str:
     """Return the matched text when one segment runs a dependency install in `where`, or a
     recursive delete of what is inside a `node_modules`, and that `node_modules` is a link, else ''."""
@@ -798,9 +815,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 at += 1
             else:
                 word = words[at].lower()
-                version_in_workspace = word in NPM_VERSION_WORDS and any(
-                    flag.split("=")[0] in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace")
-                    for flag in words)
+                version_in_workspace = word in NPM_VERSION_WORDS and npm_workspace_mode(words)
                 # `audit` rewrites the install when `fix` follows it, after any flag.
                 if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
