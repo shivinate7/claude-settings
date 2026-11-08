@@ -584,6 +584,43 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+def _sed_script_words(raw) -> set:
+    """Indexes in `raw` of a sed segment's script words: each `-e` / `--expression` value (joined or not),
+    else the first operand when no `-e` or `-f` is given. A script is no file; every other operand is."""
+    start = resolve_command(tuple(raw))
+    if start is None or _name(raw[start]) != "sed":
+        return set()
+    scripts, operands, has_script, skip, ended = set(), [], False, False, False
+    for index in range(start + 1, len(raw)):
+        word = _unquoted(raw[index])
+        if skip:                                   # the value of `-f`, `-l`, or a BSD `-i ''` suffix
+            skip = False
+        elif ended or word == "-" or not word.startswith("-"):
+            operands.append(index)
+        elif word == "--":
+            ended = True
+        elif word.startswith("--"):
+            name, joined = word.partition("=")[0], "=" in word
+            has_script |= name in ("--expression", "--file")
+            if name == "--expression":
+                scripts.add(index + (0 if joined else 1))
+            skip = name in ("--expression", "--file", "--line-length") and not joined
+        else:                                      # a cluster of short options; `-i` takes the rest as a suffix
+            for at, letter in enumerate(word[1:], 1):
+                if letter == "i":
+                    skip = word == "-i" and index + 1 < len(raw) and not _unquoted(raw[index + 1])
+                    break
+                if letter in "efl":
+                    has_script |= letter in "ef"
+                    if letter == "e":
+                        scripts.add(index if word[at + 1:] else index + 1)
+                    skip = at + 1 == len(word)
+                    break
+    if not has_script and operands:
+        scripts.add(operands[0])
+    return scripts
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                      command_position=False, predicate_command=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
@@ -615,7 +652,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown = [], []
+        words, shown, script = [], [], set()
+        script_at = _sed_script_words(raw) if command_position else set()
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -626,13 +664,15 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 shown.append("dup")
             else:
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                if index in script_at:
+                    script.update(range(len(words), len(words) + len(pieces)))
                 words.extend(pieces)
                 shown.extend(pieces)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for word in words:
-            if word.startswith("-") or REDIRECT.fullmatch(word):
+        for number_of, word in enumerate(words):
+            if word.startswith("-") or REDIRECT.fullmatch(word) or number_of in script:
                 continue
             if not word or word in (">", ">>"):
                 continue
