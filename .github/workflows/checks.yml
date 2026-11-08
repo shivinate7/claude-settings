@@ -296,6 +296,9 @@ jobs:
       - name: Wait-until helper fixture suite
         run: python3 lint/test_wait_until.py
 
+      - name: Now-central helper fixture suite
+        run: python3 lint/test_now_central.py
+
       - name: sim-lease fixture suite
         run: python3 lint/test_sim_lease.py
 
@@ -1028,6 +1031,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_wait_until.py
 
+      - name: Now-central helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_now_central.py
+
       - name: Unknown-read contract (guard + session_start)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
@@ -1640,6 +1647,10 @@ jobs:
       - name: Local time line fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_local_time.py
+
+      - name: Now-central helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_now_central.py
 
       - name: Stall watch stop suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}

@@ -3,6 +3,7 @@
 A Stop-hook checkpoint asks you to update the handoff while you still have full context.
 After a compaction, the reorient message asks again. Each time, rewrite the whole file.
 Never append to it.
+Read each time you write from `~/.claude/bin/now-central --full`, never from memory.
 
 ## 1. Read the prior handoff first
 
