@@ -3577,8 +3577,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
-    # 6c3. A git write after a cd that `;`, a newline or `||` joins (decision git-after-cd-joins-with-and,
-    # incident 2026-11-07): when the cd fails the write runs in the folder the shell stayed in. Placed
+    # 6c3. A git write after a cd that `;`, a newline or `||` joins (decision git-after-cd-joins-with-and):
+    # when the cd fails the write runs in the folder the shell stayed in. Placed
     # after conflict-markers, so a refusal that names the defect in the commit itself comes first.
     matched = "" if POWERSHELL_CALL[0] else git_after_cd_hit(stripped, cwd)
     if matched:

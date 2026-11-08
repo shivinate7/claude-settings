@@ -11334,7 +11334,6 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 # A write after a failed cd joined by `;` is refused in any cwd repo (decision git-after-cd-joins-with-and).
-# lane brief git-write-after-failed-cd (coordinator, 2026-11-07).
 sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
    "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
    cwd=CMK_CL, carries=("&&", "-C"))
