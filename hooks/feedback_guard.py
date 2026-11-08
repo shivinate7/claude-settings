@@ -102,8 +102,8 @@ a turn end in these cases:
     WAITING_COLLECTIONS, by `collection` or a `doc_id` or `path` prefix) to the waiting page
     (layout.is_waiting_page_url) whose tool_result is no error, and the newest such write is newer than the
     newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
-    shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
-    under --all. No commit on the folder at all counts as older. This session is the writer when the newest
+    shell run (Bash or PowerShell) of export_page.py printed a line `same`, or `<page id>: same`
+    under --all, anywhere in its output. No commit on the folder at all counts as older. This session is the writer when the newest
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
@@ -1172,8 +1172,8 @@ def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
     when this session is the page writer and the transcript holds a successful ArtifactData write of an
     exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
-    `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
+    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
+    `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
     `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
