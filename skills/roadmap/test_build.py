@@ -2286,6 +2286,50 @@ class DoneWithoutCheck(UpkeepFixture):
         self.assertEqual(entries, ["bad-control"],
                          "a negator in an earlier clause is read as negating green on main")
 
+    def test_a_green_on_main_claim_with_a_future_marker_is_listed_as_not_shown(self):
+        # Miss class: a sentence whose green-on-main claim has a future marker in the same sentence (will, expected,
+        # once, pending, or after ... merge, merges or lands) claims a check that is not green yet, even with a source.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "will-after-merge": self.done_step(note="Done check not yet met — will be green on main after the merge #5"),
+            "expected": self.done_step(note="Done check: not yet; green on main expected #5"),
+            "once-lands": self.done_step(note="Done check: X. Green on main once #12 lands."),
+            "pending": self.done_step(note="Done check pending: green on main #5."),
+            "after-merges": self.done_step(note="Done check: X. Green on main after the fix merges #12."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
+                                                            ("will-after-merge", "expected", "once-lands", "pending",
+                                                             "after-merges")]),
+                         "a green-on-main claim with a future marker in its sentence is shown green")
+
+    def test_a_green_on_main_claim_with_no_future_marker_is_not_listed(self):
+        # Control, green now: a present or past claim with a source is shown green. A future word in another
+        # sentence does not reach the green-on-main sentence.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "no-longer": self.done_step(note="Done check no longer red, green on main: #1"),
+            "colon-ref": self.done_step(note="Done check: X. Green on main: #1312."),
+            "merged-after": self.done_step(note="Done check green on main after fix #12 merged."),
+            "future-elsewhere": self.done_step(note="Done check: will fix later. Green on main: #5."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, ["bad-control"],
+                         "a green-on-main claim with no future marker in its sentence is listed as not shown")
+
+    def test_a_negator_after_a_dash_still_negates_green_on_main(self):
+        # Miss class: a dash breaks a clause, so the negator after it sits in the clause of `met on main`.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "dash-not": self.done_step(note="Done check — not met on main, see #7"),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "dash-not" + self.NOT_SHOWN]),
+                         "a negator after a dash is not read as negating met on main")
+
     def test_a_pr_word_or_pull_url_ref_shows_green_on_main(self):
         # The ref forms lint/report_guard.py DONE_REF_RE accepts: `PR <n>` and a /pull/<n> URL.
         self.commit_steps({
