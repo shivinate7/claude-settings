@@ -28,9 +28,9 @@ BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or ran
 on a model family that Done does not name for that role, or a named "role model" pair matches no
-spawn of that role anywhere in the transcript. A spawn's model is the run's own resolvedModel from
-its tool result, else the call's model, the agent pin or the env. A role word inside a code span
-counts as no role (`reports-done-names-models`), or when
+spawn of that role anywhere in the transcript (`reports-done-names-models`; a spawn's model is the
+run's own resolvedModel from its tool result, else the call's model, the agent pin or the env; a code
+span that holds a role word counts as no role, and a model word in a span still counts), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
 When the report is there, each of these blocks asks for only the corrected lines, never the report again.
 
@@ -547,7 +547,7 @@ MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # "design-reviewer" are matched whole, so they never read as "reviewer", and then dropped as untracked.
 _ROLE = r"(?<![\w-])(?:design[\s-]+reviewer|builder|reviewer|test-author|record-writer)(?![\w-])"
 ROLE_MODEL_RE = re.compile(
-    r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(haiku|sonnet|opus|fable)\b",
+    r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*`?(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
@@ -635,7 +635,8 @@ def done_models_problem(text, spawned, records=None):
     the Next label names is still running and is reported there, so its missing Done model is waived;
     Next's pairs are never judged. An earlier unknown spawn excuses nothing. A named role with no spawn
     anywhere is skipped. `records` defaults to the window, so `spawned` alone is judged by itself.
-    A role word inside a code span counts in neither Done nor Next (word_runs.mask_code_spans).
+    A code span that holds a role word counts in neither Done nor Next (word_runs.mask_code_spans); a span
+    that holds only a model word stays readable, so "builder `sonnet`" names its run.
     Cost: a window with no spawn returns at once. Otherwise one more spawn_models pass over records
     already in memory, resolvedModel included, and no transcript read. The agents/<role>.md pin read is
     cached per role, so each role's file is opened once per process.
@@ -644,9 +645,9 @@ def done_models_problem(text, spawned, records=None):
         return ""
     all_spawned = spawn_models(records) if records is not None else spawned
     block = block_text(text, keep_indent=True)
-    done = " ".join(mask_code_spans(item) for item in label_items(block, "Done"))
+    done = " ".join(mask_code_spans(item, ROLE_RE) for item in label_items(block, "Done"))
     running = {r.lower() for r in ROLE_RE.findall(
-        " ".join(mask_code_spans(item) for item in label_items(block, "Next")))}
+        " ".join(mask_code_spans(item, ROLE_RE) for item in label_items(block, "Next")))}
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles) if r.lower() in NAMED_ROLES}
     for role, model in sorted(named):
