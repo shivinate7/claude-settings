@@ -10408,6 +10408,27 @@ step_allow("a backticked batch runner id, Batch runner: `session_abc123`, passes
 step_allow("a lowercase batch runner label, batch runner: session_x8, passes", role_path("step-topic-lane"),
            ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nbatch runner: session_x8")
 
+# Allowed, the N2 pin (rule lane-one-topic: the other-label lookahead ends at a word boundary). `Triagey` is no Triage
+# label, so the gap holds none and the Coordinator id after it is read. Dropping that boundary makes this case go red.
+step_allow("a Coordinator id after Triagey, Coordinator Triagey session_C1, is allowed: Triagey is no Triage label",
+           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triagey session_C1" + TRIAGE_LINE + RUNNER_LINE)
+# Allowed, N1 (brief-role-title-holds-label): a quoted span and a parenthetical span in the gap are skipped, so another
+# role's label inside them is no label of the gap. Each case keeps the other two roles valid.
+step_allow("a Coordinator title holding a Triage label in quotes, session_A1, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + '\n- Coordinator: "cs coordinator, triage backup", session_A1' + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Triage id with a Batch runner label in parentheses, Triage (batch runner backup): session_T1, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + COORD_LINE + "\nTriage (batch runner backup): session_T1" + RUNNER_LINE)
+# Refused, N3 (brief-role-label-in-prose): a role word in prose, with an id after it on the same line, names no id for
+# that role. The prose words sit outside any quoted or parenthetical span, so the gap holds them and is refused.
+roles_refuse("a Triage word in prose, Triage the failing test in session_01Q., is refused: prose is no role id",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage the failing test in session_01Q." + RUNNER_LINE,
+             ["Triage"])
+roles_refuse("a Coordinator word in prose, Coordinator will merge session_C1, is refused: prose is no role id",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator will merge session_C1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+
 # Refused: a role id that is a placeholder, one with no digit. Each keeps the other two roles valid.
 roles_refuse("a triage id that is the placeholder session_TBD is refused",
              role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage: session_TBD" + RUNNER_LINE, ["Triage"])
