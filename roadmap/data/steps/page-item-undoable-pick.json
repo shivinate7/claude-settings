@@ -1,0 +1,11 @@
+{
+  "title": "Triage files no page item for a pick the session may take with no question",
+  "phase": "process",
+  "status": "todo",
+  "order": 677,
+  "owner": "triage",
+  "lane": "",
+  "why": "At 08:24 CST Nov 8 triage filed page item 423 (which widths bin/shoot shoots as touch). The cutoff can be undone, so the coordinator could take it with no question (rule parallelism-keep-going), and it withdrew the item at 08:22 CST. A needless page item spends the owner's attention.",
+  "note": "Fix: before a page write, triage asks whether the pick can be undone and serves the owner's goal; if so, it routes the pick to the coordinator and files nothing. Home: the waiting-page skill's writer steps, or the question judge (step page-question-judge). Done check: the skill names the test, and a red case where a question with a reversible pick and no widening option is flagged. Filed by triage 08:26 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:26:00-06:00"
+}
