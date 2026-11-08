@@ -2045,8 +2045,8 @@ def read_lanes(wt, base_ref, sha, own_out=None, default_ref=None):
     that merged the default branch: the default branch's new commit is on neither the base nor in any lane, and is no review tip). dropped: the tips whose every such
     merge is net-reverted on the batch: a "This reverts commit <sha>." message names it, and a revert of that revert
     undoes it, so an odd chain is a revert. The dropped-lane read is never cut at `default_ref`: a revert of a lane's merge that the default branch holds still drops that lane, so `dropped`
-    may name a tip that `tips` does not. The cut costs one extra local read, `git rev-list base..sha ^default_ref`, made only when `default_ref` is given and differs from the base; a default_ref
-    the clone does not hold cuts nothing. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
+    may name a tip that `tips` does not. The cut costs one extra local read, `git rev-list base..sha ^default_ref`, made only when `default_ref` is given and differs from the base, and one `ancestor()` call per
+    on-default parent of a merge (the lane-tip read already makes one per tip); a default_ref the clone does not hold cuts nothing. A read that fails raises. `own_out`, a list, receives the commits the pull request adds itself: the non-merge commits
     of base_ref..sha that no review tip holds and the default branch lacks. A pull request with tips and none of these is an integration pull request."""
     c, out = git(wt, "log", "--format=%H%x01%P%x01%B%x00", f"{base_ref}..{sha}")
     if c:
@@ -2586,12 +2586,17 @@ def refuse_bad_pr(info):
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
-def open_worktree(root, info, base):
-    """Fetch, check that the head is the one gh named, and make a detached worktree there."""
+def open_worktree(root, info, base, default=None):
+    """Fetch, check that the head is the one gh named, and make a detached worktree there. `default` (the default branch's name), given by the callers that
+    read lanes, is fetched too when the base is another branch: a stacked pull request's lane read cuts at origin/<default>, and a stale one reads the default
+    branch's newer commit as an unreviewed lane tip. One more fetch, for stacked pull requests only. A failed fetch of it is ignored and keeps the old
+    behaviour (a stale origin/<default> cuts less, so the refusals only grow)."""
     for ref in (base, info["branch"]):
         c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
         if c:
             raise Stop(f"git fetch origin {ref} failed: {out}")
+    if default and default != base:
+        git(root, "fetch", "-q", "origin", f"+refs/heads/{default}:refs/remotes/origin/{default}")
     got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
     if got != info["head"]:
         raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
@@ -2932,7 +2937,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         say(f"merge: #{n} is a draft. This is a preview only; --confirm on a draft is the records step, and it never merges.")
     base = info["base"]
     resumed = trailer = records = None
-    tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
+    tmp, wt = open_worktree(root, info, base, cfg["defaultBranch"])  # the same tree confirm checks
     try:
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
@@ -3082,7 +3087,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if busy:
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
-        tmp, wt = open_worktree(root, info, base)
+        tmp, wt = open_worktree(root, info, base, cfg["defaultBranch"])
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
         debt_check(wt, base_ref, host, info)
         tips, own = [], []
