@@ -48,12 +48,13 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
-# --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<ste-lint|code-check|zizmor>
+# --pinned is for merge's ready check: a step whose uses: is a remote `<owner>/claude-settings/actions/<code-check|zizmor>
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
 # copy. The tree is `git archive <sha>` of the whole repo, from the clone beside this file, else the pointer checkout
 # (hooks/guard_pointer.pointer_checkout); never a worktree on it. A sha the clone lacks is fetched once (`git fetch origin <sha>`,
-# read-only); a failed fetch, or a tree without the harness file, makes the step unknown (exit 2), never a pass. A ste-lint pin
-# runs the tree's own bin/ste-changed, whose root is that tree, so it sees no drift. A non-sha ref (@main) and a local uses: keep
+# read-only); a failed fetch, or a tree without the harness file, makes the step unknown (exit 2), never a pass. The ste-lint step
+# stays local under --pinned: the exported tree has no .git, so its bin/ste-changed could not see drift, and a stale ste-lint pin
+# must keep exiting 3 with its remedy. A non-sha ref (@main) and a local uses: keep
 # the local copy under --pinned, as does a run without it; --lint ignores --pinned. Cost: at most one fetch and one archive per
 # distinct sha per run, into a fresh temp dir that is deleted when the run ends. The pin's sha pattern: hooks/action_pin.py.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
@@ -217,7 +218,7 @@ INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
-SHA_PIN = pin_regex(("ste-lint", "code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
+SHA_PIN = pin_regex(("code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
@@ -406,11 +407,9 @@ def plan(step, pr, values, top, lint=False, pinned=False):
             if not path:
                 return "unknown", looked if pinned and SHA_PIN.fullmatch(uses(step)) else "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
-        ste_changed, why = pinned_file(step, os.path.join("bin", "ste-changed")) if pinned else (False, None)
-        if ste_changed is None:
-            return "unknown", why, None, None, None
-        # A --lint run passes with a stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
-        return "run", '"%s" "%s"' % (slashed(ste_changed or os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
+        # Always the local bin/ste-changed, even under --pinned: only a checkout with .git can see pin drift. A --lint run passes with a
+        # stale pin and says so (decision action-pins-follow-sessions); a --step or plain run still exits 3.
+        return "run", '"%s" "%s"' % (slashed(os.path.join(BIN, "ste-changed")), values["base"]), shell_argv(None), {PIN_NOTE_ENV: "1"} if lint else {}, None
     if step_key(step, "uses") is not None:
         return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
     cond = condition(step_key(step, "if"), pr)
