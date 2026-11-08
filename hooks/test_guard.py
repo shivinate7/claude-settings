@@ -10185,9 +10185,9 @@ bash_post("review-record: a record with no Head line is refused and names the fo
 bash_post("review-record: a record with a 39-digit Head is refused and names the form, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE, carries=FORM_TEXT)
 
-# THE NAMED LINE. A form refusal names the first line that broke the parse, as `line N: <text>`, the text cut to 80 characters
-# (merge/merge.py review_parse). A line after the CI line breaks the parse when it is not blank: a blank line is legal as the trailing
-# line, so the prose after it is the break. The two sighted bodies are copied verbatim from live comments, each a record with a blank
+# THE NAMED LINE. A form refusal names the earliest bad line, as `line N: <text>`, the text cut to 80 characters (merge/merge.py
+# review_parse). A missing field is bad where it was owed. A blank line is legal as the trailing line, so prose after the CI line is
+# bad only when it is not blank. The two sighted bodies are copied verbatim from live comments, each a record with a blank
 # line and a prose paragraph between its CI line and `---`. The copy in
 # merge/test_merge.py is the merge suite's own, since that suite calls the merge tool directly and cannot import this one.
 SIGHTED_1909_PROSE = ("Earlier chain (step fix-check-chain): round 1, reviewer haiku, FAILED at d4adf8811. That failure is answered by a532aa8c3. "
@@ -10210,12 +10210,20 @@ REVIEW_LONG_PROSE = review_record() + LONG_PROSE + "\n---\nGenerated with Claude
 REVIEW_BAD_KIND = review_form().review_body(REVIEW_PR, REVIEW_LIVE, "bogus", "yes", [(1, "reviewer", "claude-sonnet-5-5", "PASS")], "not owed")
 CI_LINE_TEXT = "CI: read live by merge --reviewed"
 
-# The sighted bodies are refused on a fresh post with the prose line named. A fresh post has no created time, so the Stamp is owed as well:
-# the structure is read first, so the prose line is named, as merge.review_parse reads it.
-mcp_post("review-record: a sighted body with prose after its CI line names the prose line, MCP add_issue_comment (first sighted body)",
-         SIGHTED_1909, "deny", rule=REVIEW_RULE, number=1909, carries=("line 10: " + SIGHTED_1909_PROSE[:80],))
-bash_post("review-record: a sighted body with prose after its CI line names the prose line, gh pr comment --body (second sighted body)",
-          "gh pr comment 1834 --body '%s'" % SIGHTED_1834, "deny", rule=REVIEW_RULE, carries=("line 12: " + SIGHTED_1834_PROSE[:80],))
+# The sighted bodies carry no Stamp line, and the Stamp was owed on the CI line, which comes before the prose: the earliest bad line is the CI
+# line, as merge.review_parse names it. A fresh post has no created time, so the Stamp is owed.
+mcp_post("review-record: a sighted body with no Stamp line names the CI line where the Stamp was owed, MCP add_issue_comment (first sighted body)",
+         SIGHTED_1909, "deny", rule=REVIEW_RULE, number=1909, carries=("line 8: " + CI_LINE_TEXT,))
+bash_post("review-record: a sighted body with no Stamp line names the CI line where the Stamp was owed, gh pr comment --body (second sighted body)",
+          "gh pr comment 1834 --body '%s'" % SIGHTED_1834, "deny", rule=REVIEW_RULE, carries=("line 10: " + CI_LINE_TEXT,))
+# The earliest bad line is named before the prose below it: a Round line that does not read, with prose after the CI line, names the Round line.
+REVIEW_ROUND_TYPO = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5", "PASS"), (2, "reviewer", "claude-sonnet-5-5", "PASS")]).replace(
+    "Round 2: reviewer, claude-sonnet-5-5, PASS", "Round 2: reviewer, claude-sonnet-5-5, PAS") + "Lane note.\n"
+mcp_post("review-record: a Round line that does not read is named before the prose after the CI line, MCP add_issue_comment", REVIEW_ROUND_TYPO,
+         "deny", rule=REVIEW_RULE, carries=("line 7: Round 2: reviewer, claude-sonnet-5-5, PAS",))
+# A control, green on the branch: an ESC byte in the prose is replaced in the reason, so the reason prints no raw escape.
+mcp_post("review-record: an ESC byte in prose after the CI line is replaced in the refusal, MCP add_issue_comment",
+         review_record() + "Lane \x1b[31mred note.\n", "deny", rule=REVIEW_RULE, carries=("line 10: Lane",), lacks=("\x1b",))
 mcp_post("review-record: prose between the CI line and --- names its line, MCP add_issue_comment", REVIEW_PROSE_FOOTED, "deny",
          rule=REVIEW_RULE, carries=("line 10: Lane note.",))
 bash_post("review-record: prose between the CI line and --- names its line, gh pr comment --body",

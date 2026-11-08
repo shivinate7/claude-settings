@@ -12712,6 +12712,13 @@ class ReviewFixBase(ReviewEnv):
         self.assertIn("does not parse", err, "the refusal does not say the newest earlier record does not parse:\n" + err)
         self.assertIn("line 10: Lane note.", err, "the refusal does not name the prose line of the newest earlier record:\n" + err)
 
+    def test_an_escape_byte_in_the_fix_check_refusal_does_not_print_raw(self):
+        # The refusal echoes the newest earlier record's bad line through the same home, so an ESC byte in it does not print raw
+        prose = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS) + "Lane \x1b[31mred note.\n"
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, prose)))
+        self.assert_refused(rc, out, err)
+        self.assertNotIn("\x1b", err, "an ESC byte printed raw in the --fix-check refusal:\n" + repr(err))
+
     def test_a_newest_earlier_record_typed_without_a_stamp_is_refused_as_the_base(self):
         # The newest earlier record was typed by hand, so it is not a record and names no reviewed head for the fix diff to start from
         typed = review_comment(1, 7, without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
@@ -13010,6 +13017,24 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertIn("bad: the newest record does not parse: line 10: Lane note.", list_line(self, out, 7))
+
+    def test_a_prose_line_in_the_reviewed_output_is_cut_to_eighty_characters(self):
+        # The echoed bad line is cut to 80 characters with a cut mark: the 300-character prose line prints its first 80 and none of the rest
+        prose = "P" * 80 + "Q" * 220
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + prose + "\n")]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertIn("P" * 80, line)
+        self.assertNotIn("Q", line, "the 300-character prose line is printed past its first 80 characters:\n" + line)
+
+    def test_an_escape_byte_in_the_reviewed_output_does_not_print_raw(self):
+        # An ESC byte is replaced in the echoed line, so the terminal reads no control sequence from the output
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + "Lane \x1b[31mred note.\n")]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("\x1b", out, "an ESC byte printed raw in merge --reviewed:\n" + repr(out))
+        self.assertIn("red note.", list_line(self, out, 7))
 
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
         if getattr(merge.Host, "review_comments", None) is None:
@@ -14035,9 +14060,9 @@ class ReviewCutover(ReviewEnv):
 
 
 # The bad line (decision pr-review-record). review_parse(text, created=None, cutover=None) -> (record or None, bad): `bad` is None when the record
-# parses, else (line_number, line_text) of the first line that broke the parse, 1-based in the comment body. The structure is read before the
-# Stamp: a record with prose after its CI line names that prose, even when it has no Stamp line either. A blank line is a legal trailing line,
-# so a blank line above prose is not the break; the prose is. Each case reaches review_parse through review_fn, so each fails by name while the
+# parses, else (line_number, line_text) of the earliest bad line, 1-based in the comment body. A missing field is bad at the line where it was owed:
+# the first line that is not the expected field. A body with no Stamp line therefore names its CI line, which comes before any prose below it.
+# A blank line is a legal trailing line, so a blank line above prose is not the break. Each case reaches review_parse through review_fn, so each fails by name while the
 # name is missing.
 
 SIGHTED_1909_PROSE = ("Earlier chain (step fix-check-chain): round 1, reviewer haiku, FAILED at d4adf8811. That failure is answered by a532aa8c3. "
@@ -14127,12 +14152,105 @@ class ReviewParseBadLine(unittest.TestCase):
         self.assertIsNone(rec, "a record with no Stamp line parsed when no created time is given:\n" + text)
         self.assertEqual(bad, (8, REVIEW_CI_LINE), "the CI line, where the Stamp was owed, is not named:\n" + text)
 
-    def test_a_sighted_body_names_its_prose_line_not_the_blank_line_above_it(self):
-        for body, want in ((SIGHTED_1909, (10, SIGHTED_1909_PROSE)), (SIGHTED_1834, (12, SIGHTED_1834_PROSE))):
-            with self.subTest(first_line=body.splitlines()[2]):
+    def test_a_sighted_body_names_the_ci_line_where_its_stamp_was_owed(self):
+        # The sighted bodies carry no Stamp line. The Stamp was owed on the line after Net value, which is the CI line, and that line comes
+        # before the prose below it, so the CI line is the earliest bad line.
+        for body, want in ((SIGHTED_1909, (8, REVIEW_CI_LINE)), (SIGHTED_1834, (10, REVIEW_CI_LINE))):
+            with self.subTest(pr_line=body.splitlines()[1]):
                 rec, bad = bad_parse(self, body)
-                self.assertIsNone(rec, "a sighted body with prose after its CI line parsed:\n" + body)
-                self.assertEqual(bad, want, "the sighted body does not name its prose line:\n" + body)
+                self.assertIsNone(rec, "a sighted body with no Stamp line parsed:\n" + body)
+                self.assertEqual(bad, want, "the sighted body does not name the CI line where its Stamp was owed:\n" + body)
+
+    def test_a_sighted_body_with_its_stamp_names_its_prose_line(self):
+        # The same sighted bodies with a Stamp line added above the CI line, computed over the lines above it. Only the Stamp line is new,
+        # so the prose after the CI line is the earliest bad line.
+        for body, want in ((SIGHTED_1909, (11, SIGHTED_1909_PROSE)), (SIGHTED_1834, (13, SIGHTED_1834_PROSE))):
+            with self.subTest(pr_line=body.splitlines()[1]):
+                lines = body.splitlines()
+                i = lines.index(REVIEW_CI_LINE)
+                lines.insert(i, "Stamp: " + review_fn(self, "review_stamp")(lines[:i]))
+                stamped = "\n".join(lines) + "\n"
+                rec, bad = bad_parse(self, stamped)
+                self.assertIsNone(rec, "a stamped sighted body with prose after its CI line parsed:\n" + stamped)
+                self.assertEqual(bad, want, "the stamped sighted body does not name its prose line:\n" + stamped)
+
+    def test_the_earliest_bad_line_is_named_before_the_prose_after_the_ci_line(self):
+        # A Round line that does not read, with prose after the CI line. The Round line is line 7, the earliest bad line, so it is named.
+        text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"))
+        body = replace_line(self, text, "Round 2: ", "Round 2: reviewer, sonnet, PAS") + "Lane note.\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a record with a bad Round line parsed:\n" + body)
+        self.assertEqual(bad, (7, "Round 2: reviewer, sonnet, PAS"), "the prose after the CI line was named, not the earlier Round line:\n" + body)
+
+    def test_a_rule_on_line_two_names_line_two_not_the_marker(self):
+        # A missing field is bad where it was owed: the cut at the rule leaves no PR line, so line 2, the first line that is not the PR field, is named
+        lines = record_text(rounds=REVIEW_PASS).splitlines()
+        body = "\n".join([lines[0], "---", *lines[1:]]) + "\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a record cut by a rule on line two parsed:\n" + body)
+        self.assertEqual(bad, (2, "---"), "the rule on line two is not named, or the marker is named instead:\n" + body)
+
+    def test_a_rule_where_the_stamp_was_owed_names_that_line(self):
+        # Two rounds, Net value on line 8, and a rule on line 9 where the Stamp was owed. The Stamp is the expected field after Net value, so
+        # the rule on line 9 is the first line that is not it, and it is named, not the Net value above it.
+        text = record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"))
+        lines = text.splitlines()
+        lines.insert(stamp_index(self, text), "---")
+        body = "\n".join(lines) + "\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a record cut by a rule where the Stamp was owed parsed:\n" + body)
+        self.assertEqual(bad, (9, "---"), "the line where the Stamp was owed is not named:\n" + body)
+
+    def test_a_six_line_body_missing_the_guard_field_names_line_five(self):
+        # A missing field is bad where it was owed: with no Guard or check line, line 5 is the first line that is not that field.
+        body = "\n".join([REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Net value: not owed", REVIEW_CI_LINE]) + "\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a six-line body with no Guard or check line parsed:\n" + body)
+        self.assertEqual(bad, (5, "Net value: not owed"), "the line where Guard or check was owed is not named:\n" + body)
+
+
+class ReviewEchoHome(unittest.TestCase):
+    """review_bad_text is the one home of the echoed bad line (decision pr-review-record). merge --reviewed and the --fix-check refusal print it,
+    and the guard's form refusal reads it through merge.review_bad_text. No caller cuts or cleans a bad line of its own. The scan is ast, so a
+    comment or a string names nothing."""
+
+    def called_in(self, path, func):
+        """-> the names called inside the def `func` of the module at `path`, or None when the module has no such def."""
+        with open(path, encoding="utf-8") as f:
+            tree = ast.parse(f.read(), filename=path)
+        defs = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func]
+        if not defs:
+            return None
+        names = set()
+        for d in defs:
+            for node in ast.walk(d):
+                if isinstance(node, ast.Call):
+                    callee = node.func
+                    names.add(callee.id if isinstance(callee, ast.Name) else getattr(callee, "attr", ""))
+        return names
+
+    def test_review_bad_text_is_defined_once_in_merge_py(self):
+        with open(os.path.join(HERE, "merge.py"), encoding="utf-8") as f:
+            defs = [node for node in ast.walk(ast.parse(f.read())) if isinstance(node, ast.FunctionDef) and node.name == "review_bad_text"]
+        self.assertEqual(len(defs), 1, "merge.py does not define review_bad_text once")
+
+    def test_reviewed_lines_and_the_fix_check_refusal_read_the_echo_through_review_bad_text(self):
+        for func in ("reviewed_lines", "main"):
+            with self.subTest(func=func):
+                called = self.called_in(os.path.join(HERE, "merge.py"), func)
+                self.assertIsNotNone(called, f"merge.py has no {func}")
+                self.assertIn("review_bad_text", called, f"merge.{func} prints a bad line without merge.review_bad_text")
+
+    def test_guard_unparsed_reads_the_echo_through_review_bad_text_and_cuts_nothing(self):
+        path = os.path.join(REPO_ROOT, "hooks", "guard_merge.py")
+        called = self.called_in(path, "_unparsed")
+        self.assertIsNotNone(called, "hooks/guard_merge.py has no _unparsed")
+        self.assertIn("review_bad_text", called, "_unparsed does not read the echo through merge.review_bad_text")
+        self.assertNotIn("cap_safe", called, "_unparsed cuts the echoed line itself, a second cut")
+        with open(path, encoding="utf-8") as f:
+            cuts = [node for node in ast.walk(ast.parse(f.read())) if isinstance(node, ast.Slice)
+                    and isinstance(node.upper, ast.Constant) and node.upper.value == 80]
+        self.assertFalse(cuts, "hooks/guard_merge.py cuts a text at 80 characters itself")
 
 
 class ReviewStampSince(unittest.TestCase):
