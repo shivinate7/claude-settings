@@ -841,6 +841,11 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     primary = primary_checkout(where)
     if not primary:
         return ""
+    if re.search(r"\$\{?PWD\}?", target):
+        # `$PWD` is the call's folder (after any `cd`), not the `-C` folder.
+        shell_pwd = dir_before_segment(segments, number, cwd, ends)
+        if shell_pwd:
+            target = re.sub(r"\$\{PWD\}|\$PWD\b", lambda _m: shell_pwd, target)
     import tempfile   # lazy: only a real worktree add reaches here
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
@@ -4259,6 +4264,9 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
 SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+# A lane's own `touch` or `make` writes files with no `>` and no word of MUTATING_COMMAND. They mark a lane
+# lived, so this variant adds them. MUTATING_COMMAND stays as is, since it also decides frozen-file verdicts.
+SESSION_LIVED_WRITE_HINT = re.compile(SHELL_WRITE_HINT.pattern + r"|\b(?:touch|make)\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
@@ -4507,8 +4515,21 @@ def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_
         except OSError:
             own_home = ""
 
+    def in_config_folder(target, at) -> bool:
+        """True when TARGET, as written, sits under the config folder. install.sh links the clone's
+        hooks, settings and skills into that folder, so the path is judged before any link resolves.
+        A `..` step is left to the resolved path: a lexical collapse could cross a link."""
+        expanded = guard_core._expanded(target, at)
+        if ".." in re.split(r"[\\/]", expanded):
+            return False
+        path = os.path.normcase(os.path.normpath(expanded))
+        root = os.path.normcase(os.path.normpath(guard_core.config_dir()))
+        return (path + os.sep).startswith(root + os.sep)
+
     def in_home_clone(target, at, verb=""):
         try:
+            if in_config_folder(target, at):
+                return False
             resolved = _resolved(target, at)
             if not has_agent and under_session_scratchpad(resolved, session_id):
                 return False
@@ -4715,7 +4736,7 @@ def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
             stripped = strip_heredoc_bodies(command)
             if "git" in stripped and session_home_git_hit(stripped, where, lambda at, _from: inside(at)):
                 return True
-            if not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)):
+            if not SESSION_LIVED_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)):
                 return False
             return (inside(os.path.realpath(where))
                     or any(inside(move) for move in _cd_targets(tool, command, where))
