@@ -106,7 +106,6 @@
 - handoff-pointer-swept-compact: another session's compact reorient in one directory can sweep a /clear pointer, so clear names the newest handoff (SessionStart hook)
 - handoff-pointers-age-out: pointers that have a handoff have no age rule; STALE_AGE is fixed at 30 days despite a raised cleanupPeriodDays (precompact_handoff.py)
 - handoff-wake-misses-ready-forms: gh pr re''ady skips the CI wake, and gh pr ready 2>&1 reads the redirect as the selector (hooks/ci_wake.py)
-- ci-scope-line5-too-long: line 5 of the CI scope script is about 140 characters (.github/scripts/ci-scope.sh)
 - ci-scope-pipe-regex-quotes: the pipe regex in mods_step_problems ignores quotes and comments (lint/test_ci_scope.py)
 - here-string-scan-quadratic: the PowerShell here-string match is quadratic on many unclosed openers; 20000 openers take 9 s (hooks/guard.py _HERE_STRING)
 - heredoc-indented-close: _split_heredocs closes on an indented EOF after .strip(); bash does not, so later text is read as commands (guard_core)
@@ -176,7 +175,6 @@
 - merge-text-allows-untested: test rows allowing grep and git log commands naming merge words have no branch that can fail (hooks/test_guard.py)
 - mod-check-name-edges: non-ASCII mod folder names come back quoted from git, and duplicate plugin names let an unbumped change pass (lint/check_mod_versions.py)
 - model-clip-unmeasured: prompt clips PROMPT_MAX_LEN and REPLY_MAX are unmeasured for token-dense text such as emoji or CJK (hooks judges)
-- mods-check-mjs-skipped: the mod test glob skips mods/plain-diff/check.mjs, so a red check.mjs passes CI (checks.yml)
 - mods-linux-proof-pending: mod tests ran on Windows and WSL only; first Linux CI run is the real proof (checks.yml)
 - mods-load-needs-new-session: a mod loads only in a session started after the change (marketplace load path)
 - mods-macos-untested: token-weather, desktop-statusline, plain-diff and session-board are untested on macOS (settings.json marketplace entry)
@@ -1233,7 +1231,7 @@
 - bash-refused-in-ci-wall-time: the Stop-hook refusal guard reported that the auto-mode classifier refused `Bash` in lane session ci-wall-time (2026-11-03, about 17:40 CST). The refusal is unseen. The lane's own Bash calls all succeeded, so the refused call was likely an agent's. Possibly a false alarm of the refusal guard. No owner question: decision auto-mode-owner-acts rules out a whole-tool allow.
 - agent-send-message-refused: an agent's mistaken `mcp__claude-code-remote__send_message` call was refused by the auto-mode classifier in lane ci-wall-time (2026-11-03). The refusal was correct. The refusal guard still demanded an owner ask: possible false alarm of that guard.
 - ci-hygiene-step16-env-override: ci-hygiene step 16 says "with no env override", but the Windows and macOS guard shards pin a `GUARD_SHARD` env. The wording should say no env that overrides the scope.
-- checks-macos-b-idle-runner: checks-macos-b starts an idle macOS runner on docs-only PRs. Its only `needs` is `scope`, and the scope flag gates its CI steps, not the job.
+- checks-macos-b-idle-runner: checks-macos-b starts an idle macOS runner on docs-only PRs. Its only `needs` is `scope`, and the scope flag gates its CI steps, not the job. A job-level `if` would skip a needed job and the rollup fails a skipped job (lint/test_windows_split.py forbids a scoped job-level `if`). Fix: none — owner decides
 - draft-guard-only-loose: lint/test_windows_split.py `draft_guard_only` (:522-536) accepts `<flag> || !draft` and `!draft && event_name != 'schedule'`, though its docstring says it reads no scope flag. Its five truth-table rows have no draft PR with the flag true, and no schedule event. Adding `("pull_request", "true", True, False)` closes the first form. Unlikely in normal work: either form in a job-level `if:` is a deliberate choice. Decision: none.
 - draft-house-form-untested: lint/test_windows_split.py, the job-level `if:` subTest near :835, tests only the bare `${{ !github.event.pull_request.draft }}` form as allowed. The house form `github.event_name != 'pull_request' || !github.event.pull_request.draft` (.github/workflows/checks.yml:42) is not tested as allowed there. Unlikely in normal work: a test gap only, no run changes. Decision: none.
 - bare-step-for-ci-step: comments use a bare `step` where they mean a CI step: checks.yml:505 (`Last step`), :507 (`The same step ends`), :749 (`moved steps`), :919 (`their steps`); lint/test_windows_split.py:34 (`step parser`), :69 (`its step's`), :872 (`a full step's`). Unlikely in normal work: comments only, no run changes. Decision: none.
