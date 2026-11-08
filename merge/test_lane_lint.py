@@ -500,6 +500,11 @@ class LaneLint(CiJobStub, tm.CloudSession):
         """The git calls that fetched with --unshallow."""
         return [argv for argv in argvs if "fetch" in argv and "--unshallow" in argv]
 
+    def break_unshallow_fetch(self):
+        """Make `git fetch --unshallow origin` fail: the configured fetch names a branch origin lacks, and the unshallow fetch reads that
+        refspec. The lint's own fetches name their refs on the command line, so they still reach origin."""
+        tm.sh(self.co, "git", "config", "remote.origin.fetch", "+refs/heads/gone:refs/remotes/origin/gone")
+
     def test_a_shallow_lane_checkout_is_unshallowed_before_the_lint_and_the_lint_passes(self):
         pin = self.make_shallow_lane()
         self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
@@ -513,9 +518,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_a_shallow_lane_whose_unshallow_fetch_fails_ends_unknown_and_lints_nothing(self):
         pin = self.make_shallow_lane()
         self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
-        # The configured fetch names a branch origin lacks. `git fetch --unshallow origin` reads that refspec and fails. The lint's own
-        # fetches name their refs on the command line, so they still reach origin.
-        tm.sh(self.co, "git", "config", "remote.origin.fetch", "+refs/heads/gone:refs/remotes/origin/gone")
+        self.break_unshallow_fetch()
         self.use_ci_job(PASSING, 0)
         with self.traced_git() as trace:
             rc, out = self.run_lane("--lane-lint", "7")
@@ -527,6 +530,20 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("git fetch --unshallow origin", out, "the refusal does not name the command to run: " + out)
         self.assertIn("couldn't find remote ref", out, "the refusal does not name git's error: " + out)
         self.assertEqual(self.lint_calls(), [], "ci-job ran after the unshallow fetch failed")
+
+    def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        self.break_unshallow_fetch()
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "the clone is shallow")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed unshallow fetch: " + out)
+        self.assertEqual(pass_lines(out), [], "a PASS line printed after the unshallow fetch failed: " + out)
+        self.assertIn("git fetch --unshallow origin", out, "the refusal does not name the command to run: " + out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran after the unshallow fetch failed")
+        # A plain Stop prints this line and a Liftable does not. lane_lint raises a Liftable for the lint unknowns that
+        # --lint-unknown-ok may lift, so this line pins the failed fetch as a plain Stop.
+        self.assertIn("No override lifts this refusal", out, "the refusal is a Liftable, which a flag may lift: " + out)
 
     def test_a_full_lane_checkout_runs_no_unshallow_fetch_and_the_lint_passes(self):
         pin = self.head("feat")
