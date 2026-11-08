@@ -2024,11 +2024,21 @@ MESSAGE_ROLE_AUTHOR_REASON = (
     "This message asks a test-author to change product code. Send product changes to a builder. "
     "(decision message-role-scope, a message to an agent stays inside its role)"
 )
+# `make` is an edit verb (`make the fix in X`); `make X green` and `make sure` are cleared by MESSAGE_GREEN and the check
+# in _message_edits.
 MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
-                      "drop", "re-point", "write"}
+                      "drop", "re-point", "write", "make"}
 # A verb that only looks at a path or runs it. The nearest verb before a path says whether the path is edited.
-MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "make", "see", "view", "open", "cat",
+MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "see", "view", "open", "cat",
                       "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
+# A path a read verb names can still be the object of a later `fix it`. A path a run verb names cannot.
+MESSAGE_RUN_VERBS = {"run", "rerun", "re-run", "execute", "check", "verify", "report", "grep"}
+# A word before a verb that turns it into a prohibition.
+MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
+# A path right after one of these is the target the edit must reach, and a path after one of the SPEC_NOUNS and `in`,
+# `of` or `from` is the spec it follows: neither is the object of the edit.
+MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisfies"}
+MESSAGE_SPEC_NOUNS = {"rule", "rules", "spec", "behaviour", "behavior"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
                            "one", "no", "any", "each", "every", "some"}
@@ -2058,7 +2068,7 @@ def _message_token(raw: str) -> str:
 
 def _message_path(raw: str) -> str:
     """The path a word names, else ''."""
-    tok = _message_token(raw)
+    tok = _message_token(raw).split("::", 1)[0]  # a test node id, `file.py::case`, names its file
     if not tok or "://" in tok or tok[0] in "-$#" or tok.lower() in ("e.g", "i.e"):
         return ""
     slashed = norm(tok)
@@ -2080,25 +2090,30 @@ def _message_words(clause: str):
 
 def _message_edits(words):
     """(governed, named) for one clause. `governed` is None when the clause has no edit verb, else the paths its edit verb
-    governs: those after the verb, else one that leads the clause. `named` is every path the clause names that no read
-    verb and no green goal takes."""
+    governs: those after the verb, else one that leads the clause. `named` is every path the clause names that a later
+    `fix it` may mean: not a path that goes green, one a run verb takes, or a target or spec path."""
     named, followed, led = [], [], []
-    edit_seen = actor_seen = False
-    verb_at, kind = -1, ""
+    edit_seen = actor_seen = negated = False
+    verb_at, kind, verb = -1, "", ""
     for at, (word, path) in enumerate(words):
         before = words[at - 1][0] if at else ""
-        if word in MESSAGE_EDIT_VERBS and before not in MESSAGE_NOT_VERB_BEFORE and not actor_seen:
-            verb_at, kind, edit_seen = at, "edit", True
+        ahead = words[at + 1][0] if at + 1 < len(words) else ""
+        if (word in MESSAGE_EDIT_VERBS and before not in MESSAGE_NOT_VERB_BEFORE and not actor_seen and not negated
+                and not (word == "make" and ahead in ("sure", "certain"))):
+            verb_at, kind, verb, edit_seen = at, "edit", word, True
         elif word in MESSAGE_READ_VERBS:
-            verb_at, kind = at, "read"
+            verb_at, kind, verb = at, "read", word
         actor_seen = actor_seen or word in MESSAGE_OTHER_ACTORS
-        if not path or any(w in MESSAGE_GREEN for w, _ in words[at + 1:at + 4]):
+        negated = negated or word in MESSAGE_NEGATIONS
+        if (not path or before in MESSAGE_TARGET_VERBS
+                or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _) in enumerate(words[at + 1:at + 4]))
+                or (before in ("in", "of", "from") and at > 1 and words[at - 2][0] in MESSAGE_SPEC_NOUNS)):
             continue
         if verb_at < 0:
             led.append(path)
         elif kind == "edit":
             followed.append(path)
-        else:
+        elif verb in MESSAGE_RUN_VERBS:
             continue
         named.append(path)
     return (followed or led if edit_seen else None), named
@@ -2106,8 +2121,8 @@ def _message_edits(words):
 
 def message_edit_paths(message: str):
     """Every path a message asks its receiver to edit. A path counts when an edit verb governs it: the path follows the
-    verb in its clause, or leads the clause, or the verb's clause names no path at all and the sentence right before
-    names it (`X.py ~683: ... . Replace it with ...`)."""
+    verb in its clause, or leads the clause, or the verb's clause names no path at all and an earlier clause of the
+    sentence (`Look at X, then fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`)."""
     text = MESSAGE_SPAN.sub(lambda m: m.group(1) if len(m.group(1).split()) == 1 else MESSAGE_SPAN_MASK,
                             MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message))
     hits, before = [], []
@@ -2120,7 +2135,7 @@ def message_edit_paths(message: str):
                 clauses[-1] += " and " + piece
             else:
                 clauses.append(piece)
-        named = []
+        named, earlier = [], []
         for clause in clauses:
             words = _message_words(clause)
             governed, seen = _message_edits(words)
@@ -2128,7 +2143,8 @@ def message_edit_paths(message: str):
             if governed:
                 hits += governed
             elif governed is not None and not any(path for _, path in words):
-                hits += before
+                hits += earlier or before
+            earlier = seen or earlier
         before = named
     return hits
 

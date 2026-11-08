@@ -18,12 +18,14 @@ This rule saves a wasted round. It does not stop an unseen test change. `role_wr
 
 ## What a message edits
 
-The verdict is per sentence. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write. The verb must govern a path:
+The verdict is per sentence. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, make (`make the fix in X`). The verb must govern a path:
 
 - the path follows the verb in the same clause, or leads the clause (`X.py: add a case`), or
-- the verb's clause names no path of its own and the sentence right before names the path. This is the incident form: "X.py ~683: ... . Replace it with ...".
+- the verb's clause names no path of its own, and an earlier clause of the same sentence names it (`Look at X, then fix it`), else the sentence right before does. The sentence form is the incident form: "X.py ~683: ... . Replace it with ...". A path that a read verb names carries, a path that a run verb names does not.
 
-A path is not governed when it is the object of run, read, check, show or make, when it goes green or passes, or when it sits inside a command (`python3 ...`, `verdict ...`, or a backtick span of several words). A clause ends at `;`, `then`, `so`, a sentence end, and an `and` before a word that is neither an edit verb, a determiner nor a path. A verb after a determiner (`the fix`) is a noun. A verb after another agent's name (`the builder will fix guard.py`) or after `I` or `we` is that agent's act, not the receiver's.
+A test node id (`X.py::case`) names its file.
+
+A prohibition is no order: `not`, `don't`, `never` or `without` earlier in the clause clears the verb. A path is not governed when it is the object of run, read, check or show, when it goes green or passes (`make X green`, `make X pass`), when it follows `to pass`, `to match` or `to satisfy` (the target), when it follows `the rule in` or another spec noun and `in`, `of` or `from` (the spec), or when it sits inside a command (`python3 ...`, `verdict ...`, or a backtick span of several words). A clause ends at `;`, `then`, `so`, a sentence end, and an `and` before a word that is neither an edit verb, a determiner nor a path. A verb after a determiner (`the fix`) is a noun. A verb after another agent's name (`the builder will fix guard.py`) or after `I` or `we` is that agent's act, not the receiver's.
 
 ## Accepted limits
 
@@ -32,7 +34,9 @@ The guard stops Claude's mistakes, not an attacker (`guard-guards-mistakes-only`
 - A message that names no path (`fix the failing case`) passes. The sender names the file in the incident form and in most messages; the builder's own write guards stay behind it.
 - A path built in a way the reader does not see (a glob, a variable, `the file above`) passes.
 - A verb outside the list (`touch`, `tweak`, `patch`) passes.
-- A carry from the sentence before reaches one sentence back only. A path two sentences back is not read.
+- A carry reaches the nearest earlier clause of the sentence, else one sentence back. A path two sentences back is not read. `Run X. Fix the failure` carries nothing, because X was run, though the failure may sit in X.
+- `Fix guard.py. Add a note to your report.`, sent to a test-author, is refused: the verb's clause names no path, so it takes guard.py from the sentence before.
+- `Make sure X ...` is no edit, but a prohibition worded another way (`avoid changing X`, `leave X alone`) is not read as one.
 - A word with no slash is a path only with a known file extension. A path with a slash and an unknown extension counts.
 - A message that names another agent, or `I` or `we`, before the verb passes. `Ask the builder to fix guard.py` is a hand-off and is right to pass. `The builder should also edit tests/x.py`, sent to a builder, is a miss.
 - A test-author's workflow edit passes, and a path outside every repository passes (as in `role_write_hit`).
