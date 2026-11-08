@@ -17,8 +17,8 @@ step sha-hex-followups). Process-only.
 Check: `lint/test_ci_scope.py` walks the imports from `merge/merge.py` to closure and fails when a file in
 it lacks the merge flag. It fails loudly, naming the file and the load, on a load it cannot resolve: a
 package-qualified import, or a by-path load built at run time. A path built from a parameter is no load,
-since its callers name the file. A by-path load through a constant named in `ALLOWED_CONSTANT_LOADS` takes
-that constant's value as its path. Code: `.github/scripts/ci-scope.sh`.
+since its callers name the file. A by-path load through `MERGE_TOOL_REL` or `_GUARD_PATH` reads its path from
+that constant; `_GUARD_PATH` holds an environment override, so it adds no file. Code: `.github/scripts/ci-scope.sh`.
 
 ## Cost
 
