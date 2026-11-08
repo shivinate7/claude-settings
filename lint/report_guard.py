@@ -1550,13 +1550,17 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
+# A failed or failing word followed by to, with, a colon or a paren names an outage ("failed to fetch", "failed: connection
+# refused"), not a red check.
+_FAIL_END = r"(?!\s+(?:to|with)\b|\s*[:(])"
 _BLOCKER_TAIL = (
-    r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|failing|running|pending|in\s+progress)"
-    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed|fail(?:ed|s)(?!\s+to\s+(?:connect|start|run|load|reach)\b)")
+    r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|running|pending|in\s+progress|failing%s)" % _FAIL_END
+    + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed"
+    r"|(?:ha(?:s|ve)\s+)?fail(?:ed|s)" + _FAIL_END)
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
-    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
+    (("pr-merge",), r"(?<![\w.])(?:CI|(?<!health )(?<!health-)(?<!connectivity )(?<!tool )(?<!server )(?<!connector )(?<!MCP )checks?|(?:the\s+)?batch(?:\s+run)?)\s+(?:%s)"
      % _BLOCKER_TAIL),
     (("pr-merge",), r"(?<![\w.])review\s+is\s+pending"),
     (("pr-merge",), r"(?<![\w.])(?:hold|freeze)\s+is\s+on|\bunder\s+(?:the\s+)?(?:hold|freeze)\b"),
@@ -1606,9 +1610,12 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
+    # After open, an and or or before the PR ends the object: "open the CI logs and PR" opens the logs. After the other
+    # verbs, the PR is made with the rest: "create the branch and PR" claims.
     ("pr-open", re.compile(
-        r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-])|(?:and|or)\s+%s\b)\S+){0,4}?\s+%s\b"
-        % (_PREPOSITION, _PR, _PR), re.I)),
+        r"^open\b(?:\s+(?!(?:%s)(?![\w-])|(?:and|or)\s+%s\b)\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR, _PR), re.I)),
+    ("pr-open", re.compile(
+        r"^(?:create|make|raise|file|submit)\b(?:\s+(?!(?:%s)(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
