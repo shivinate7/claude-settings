@@ -7779,6 +7779,13 @@ archive_tip("a delete, with the holding archive ref last of three, is silent",
             VCS + " push origin --delete zq-amend", "allow", ARCHMANY, silent=True)
 archive_tip("an archive push, with the holding archive ref last of three, is silent",
             VCS + " push origin zq-amend:archive/zq-amend", "allow", ARCHMANY, silent=True)
+# Falsifier: the deleted branch's own archive ref is the only ref that holds its tip. A delete of that
+# branch loses the only copy, so its own ref must not count as a holder.
+archive_tip("a delete of an archive branch whose only holder is its own ref is refused",
+            VCS + " push origin --delete archive/zq-b", "deny", ARCHMANY)
+# Control: archive/zq-a is the default base, so its tip is already on origin/main and the delete is silent.
+archive_tip("a delete of an archive branch already on the default base is silent",
+            VCS + " push origin --delete archive/zq-a", "allow", ARCHMANY, silent=True)
 # The remote tip is an ancestor of origin/main, and no archive ref exists: only the default-base arm allows it.
 archive_tip("a delete of a remote tip already on the default base is silent",
             VCS + " push origin --delete zq-merged", "allow", ARCHMERGED, silent=True)
