@@ -790,22 +790,88 @@ def turn_commands(transcript_path):
 
 
 # The programs that execute a file given as an argument. A read (cat, grep, sed, git show, python3 -c) is not one: it
-# names the file and runs nothing, so it backs no forecast about the file.
+# names the file and runs nothing, so it backs no forecast about the file. A versioned name (python3.12) is its base.
 RUN_COMMANDS = frozenset({"python3", "python", "node", "bash", "sh", "pytest"})
 COMMAND_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+# Programs that run the command after them. The words they take before it are skipped: an option, its value where it
+# has one, and for `timeout` the duration. `verdict`, `time` and `nohup` take none.
+WRAPPER_COMMANDS = frozenset({"verdict", "timeout", "env", "time", "nice", "nohup"})
+WRAPPER_VALUE_OPTIONS = frozenset({"-s", "-k", "-u", "-n", "-C", "--signal", "--kill-after", "--unset", "--adjustment"})
+# Shells run the string after `-c` as a command line; `-n` only parses the script.
+SHELL_RUNNERS = frozenset({"bash", "sh"})
+# Interpreters whose `-c` / `-e` string is code, not a file. `python3 -m` runs a module, so only pytest is a run.
+CODE_STRING_FLAGS = frozenset({"-c", "-e"})
+PYTHON_VALUE_FLAGS = frozenset({"-W", "-X"})
 
 
 def runs_file(command, name):
     """True when a Bash `command` runs the file `name`: a runner from RUN_COMMANDS (or `python3 -m pytest`) with the file
-    as an argument, a `verdict` wrapper around one, or the file path as the command. Each `&&`, `||`, `;` or `|` part is
-    read alone, and a line shlex cannot parse is no run."""
+    as an argument, a wrapper (WRAPPER_COMMANDS, `uv run`) around one, a `bash -c` string that does, or the file path as
+    the command. Each `&&`, `||`, `;` or `|` part is read alone, and a line shlex cannot parse is no run. A check that
+    runs nothing from the file (`bash -n`, `python3 -m py_compile`) is no run."""
     import shlex
 
     def is_file(word):
         word = word.split("::")[0]
         return word == name or word.endswith("/" + name)
 
-    for line in command.splitlines():
+    def strip_wrappers(part):
+        while part:
+            head = os.path.basename(part[0])
+            if re.match(r"\w+=", part[0]):
+                part = part[1:]
+            elif head in WRAPPER_COMMANDS:
+                rest = part[1:]
+                while rest and rest[0].startswith("-"):
+                    rest = rest[2:] if rest[0] in WRAPPER_VALUE_OPTIONS else rest[1:]
+                if head == "timeout":
+                    rest = rest[1:]
+                part = rest
+            elif head == "uv" and part[1:2] == ["run"]:
+                part = part[2:]
+                while part and part[0].startswith("-"):
+                    part = part[1:]
+            else:
+                break
+        return part
+
+    def part_runs(part):
+        part = strip_wrappers(part)
+        if not part:
+            return False
+        if is_file(part[0]):
+            return True
+        runner = re.sub(r"^(python)[\d.]+$", r"\1", os.path.basename(part[0]))
+        if runner not in RUN_COMMANDS:
+            return False
+        args, index, pytest_run = part[1:], 0, runner == "pytest"
+        while index < len(args):
+            word = args[index]
+            if runner in SHELL_RUNNERS and re.match(r"-[^-]*c", word):
+                return index + 1 < len(args) and runs_file(args[index + 1], name)
+            if runner in SHELL_RUNNERS and re.match(r"-[^-]*n", word):
+                return False
+            if pytest_run:
+                if word == "-c":
+                    index += 2
+                    continue
+            elif word in CODE_STRING_FLAGS:
+                return False
+            if runner == "python" and word == "-m":
+                if args[index + 1:index + 2] != ["pytest"]:
+                    return False
+                pytest_run = True
+                index += 2
+                continue
+            if runner == "python" and word in PYTHON_VALUE_FLAGS:
+                index += 2
+                continue
+            if is_file(word):
+                return True
+            index += 1
+        return False
+
+    for line in command.replace("\\\n", "").splitlines():
         try:
             lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
             lexer.whitespace_split = True
@@ -820,25 +886,8 @@ def runs_file(command, name):
             else:
                 part.append(word)
         parts.append(part)
-        for part in parts:
-            while part and (re.match(r"\w+=", part[0]) or os.path.basename(part[0]) == "verdict"):
-                part = part[1:]
-            if not part:
-                continue
-            if is_file(part[0]):
-                return True
-            args = part[1:]
-            if os.path.basename(part[0]) not in RUN_COMMANDS:
-                continue
-            if args[:1] == ["-m"]:
-                if args[1:2] != ["pytest"]:
-                    continue
-                args = args[2:]
-            for word in args:
-                if word in ("-c", "-e"):
-                    break
-                if is_file(word):
-                    return True
+        if any(part_runs(part) for part in parts):
+            return True
     return False
 
 
