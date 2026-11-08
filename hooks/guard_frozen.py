@@ -629,6 +629,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 # part of it. A quoted word ends in its quote, so it is never cut here.
                 word = word.rstrip(")`") or word
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
+                # holds a backtick substitution ends its path word with one.
+                pieces = [piece.rstrip("`") or piece for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
         text = " ".join(shown)
