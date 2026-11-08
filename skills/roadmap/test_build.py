@@ -1428,6 +1428,7 @@ class ReadyNotStarted(UpkeepFixture):
 
     def test_steps_unknown_prints_one_unknown_ready_line(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertIn(code, (0, None), out)
         self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
@@ -2308,6 +2309,16 @@ class SingleBranchOrigin(Fixture):
         code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
         self.assertNotIn(code, (0, None), "the build exited 0 with origin's record branch unread:\n" + out)
         self.assertFalse(self.out.exists(), "a block was written though origin's record branch was not read")
+
+    def test_unreachable_origin_with_no_record_branch_exits_nonzero_and_writes_no_block(self):
+        _, clone = self.clone_origin("gone", "main")
+        self.assert_single_branch(clone)
+        missing = pathlib.Path(self.tmp.name) / "missing.git"
+        git(clone, "remote", "set-url", "origin", str(missing))
+        self.assertFalse(missing.exists(), "the origin path exists, so origin is reachable")
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though origin could not be asked:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though origin could not be asked")
 
 
 class MockupFiles(UpkeepFixture):
