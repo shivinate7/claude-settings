@@ -15014,6 +15014,63 @@ class ReviewFixChainCap(ReviewChainFixture):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {self.HEAD_C[:9]} done: ")
 
+class ReviewFixHiddenByCopy(ReviewChainFixture):
+    """A plain copy of a record's Round lines must not hide that record's fix check. The write step reads only the newest earlier record, and a copy
+    carries no fix line, so the refusal has to look through the copy to the record it repeats. EARLIER holds the rounds, NEWEST holds the same rounds with
+    a fix check from EARLIER, and a plain copy of NEWEST's rounds follows at NEWEST. A record whose Round lines change is not a copy, so a fix check from
+    it is written; the listing reads a fix check PASS at a later head as clearing only a fix check that is not WIDE."""
+
+    ROUND_1 = REVIEW_PASS  # a record whose first round passed
+    ROUND_1_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS")
+    FAIL_IN_ROUND_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, FAIL")  # a FAIL fix check counts as round 2, so the record after it carries that line
+
+    def hidden(self, verdict):
+        """Pull request 7's three records before the new fix check: EARLIER's record, then NEWEST's record with a fix check of `verdict` from EARLIER,
+        then a plain copy of NEWEST's rounds at NEWEST, which hides that fix line from a read of the newest record alone."""
+        return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.ROUND_1)),
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1, fix=(fix_check_line(verdict=verdict, head=self.EARLIER),))),
+                review_comment(3, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1)))
+
+    def test_a_wide_fix_check_is_not_hidden_by_a_plain_copy_of_its_record(self):
+        # the copy carries no fix line, so the newest record reads clean; the WIDE on the record it copies must still refuse the fix check
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("WIDE"), rounds=round_args(self.ROUND_1))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn("WIDE", err, "the refusal does not name the WIDE fix check the copy hides:\n" + err)
+
+    def test_a_fail_fix_check_is_not_hidden_by_a_plain_copy_of_its_record(self):
+        # control, green on the old code: a record with round 1 alone sits below the round a FAIL fix check counts as, so the round floor refuses it
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("FAIL"), rounds=round_args(self.ROUND_1))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        # the record fills the FAIL's round, so the floor passes it and only the FAIL on the record the copy repeats can refuse the fix check
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("FAIL"), rounds=round_args(self.FAIL_IN_ROUND_2))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertRegex(err, r"\bFAIL\b", "the refusal does not name the FAIL fix check the copy hides:\n" + err)
+
+    def test_a_fix_pass_after_a_copied_wide_fix_check_reads_not_done(self):
+        # control, green on the old code: at NEWEST nothing passes the WIDE, so the listing reads the pull request as open
+        comments = self.hidden("WIDE")
+        host, rc, out, err = self.listing([batch_pull(7, self.NEWEST)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {self.NEWEST[:9]} open: ", "control: the WIDE does not hold the listing open:\n" + out)
+        # the fix check PASS at LIVE is one the write step refuses; a WIDE needs a new lane at round 1, so the listing must not read it as cleared
+        comments += (review_comment(4, 7, record_text(head=self.LIVE, rounds=self.ROUND_1, fix=(fix_check_line(verdict="PASS", head=self.NEWEST),))),)
+        host, rc, out, err = self.listing([batch_pull(7, self.LIVE)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotRegex(list_line(self, out, 7), r" done: ",
+                            "a fix check PASS after a WIDE fix check reads done; a WIDE needs a new lane at round 1:\n" + out)
+
+    def test_a_fix_check_after_a_record_that_changes_the_round_lines_is_written(self):
+        # control, green on the old code: the record after the WIDE changes its Round lines, so it is not a copy and a fix check from it is written
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.ROUND_1)),
+                    review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1, fix=(fix_check_line(verdict="WIDE", head=self.EARLIER),))),
+                    review_comment(3, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1_2)))
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.ROUND_1_2))
+        self.assertEqual(rc, 0, "a fix check after a record that changes the Round lines was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
