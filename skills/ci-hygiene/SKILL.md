@@ -62,7 +62,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the join. The one exception: a head whose merge base holds main's newest lint
    change and that edits no path a lint step reads skips that run, and `merge --build-batch` says so. A red
-   lane does not join. The batch runner builds the batch with
+   lane does not join. A lane whose record's findings are not filed does not join (decision `pr-review-record`). The batch runner builds the batch with
    `~/.claude/bin/merge --build-batch [--push <new branch>]`: it joins each PR with a done review record, in PR order. A PR with a held, parked or
    replaced label stays out. A stack joins whole or not at all. It lints each PR in parallel and posts
    `Lint: red <head> <steps>` on a red one. Before it marks the integration PR
