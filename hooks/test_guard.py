@@ -7485,6 +7485,40 @@ sh("push: nested quote, python -c prints a sentence naming a forced push, allows
    r'python3 -c "print(\"use ' + VCS + r' push --force\")"', "allow", cwd=PUSHFEAT)
 sh("push: nested quote control, bash -c runs a forced push to main, still asks",
    'bash -c "' + VCS + ' push -f origin main"', "ask", "force-push", cwd=PUSHFEAT)
+# RUN, NOT PRINTED. An escaped-quote pair that a call runs is a command, whatever the call is named: a
+# module alias, a from-import, a shlex.split argument, a variable. Each denies on a forced push.
+sh("push: nested quote, subprocess.run takes a shlex.split of a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run(shlex.split(\"' + VCS + r' push -f origin x\"))"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, an aliased subprocess call runs a forced push, denies",
+   r'python3 -c "import subprocess as sp; sp.run(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, a from-import check_call runs a forced push, denies",
+   r'python3 -c "from subprocess import check_call; check_call(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote, a variable holding a forced push that os.system runs, denies",
+   r'python3 -c "cmd=\"' + VCS + r' push -f origin x\"; import os; os.system(cmd)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# RUN PINS. Each of these runs its string argument and denies today. The first three calls are named by the
+# runner list, so a list cut to os.system alone turns each one red. The bash -c eval pin is held by the
+# script reader in guard_core, which no runner cut reaches.
+sh("push: nested quote pin, subprocess.run with shell=True runs a forced push, denies",
+   r'python3 -c "import subprocess; subprocess.run(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, Popen with shell=True runs a forced push, denies",
+   r'python3 -c "from subprocess import Popen; Popen(\"' + VCS + r' push -f origin x\", shell=True)"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, os.popen runs a forced push, denies",
+   r'python3 -c "import os; os.popen(\"' + VCS + r' push -f origin x\")"',
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("push: nested quote pin, bash -c eval runs a forced push, denies",
+   r'bash -c "eval \"' + VCS + r' push -f origin x\""', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+# PRINTED ALLOWS, by printer name. printf and console.log print their string, so each allows, even inside
+# bash -c or node -e.
+sh("push: nested quote, bash -c printf prints a forced push, allows",
+   r'bash -c "printf \"%s\" \"' + VCS + r' push -f\""', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, node -e console.log prints a forced push, allows",
+   r'node -e "console.log(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
 # after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
