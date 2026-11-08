@@ -102,6 +102,8 @@ API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
+# Two hundred random-looking letters: a digit after them sits at offset 200, past a lookahead of 20 characters.
+LETTERS_200 = LETTERS_16 * 12 + "xKqPzLmR"
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
 # A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
 # scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
@@ -298,6 +300,10 @@ RED = [
     ("password none then a function word and a word with a trailing mark and a digit",
      "password: none for " + "hunter2!", "hunter2!"),
     ("password none then a function word and a symbol inside a word", "password: none for " + "hunter&co", "hunter&co"),
+    # VALUE_LOOKAHEAD_MAX pin: a value whose digit sits past the first 20 characters is refused only at the full cap.
+    ("api_key of 200 random letters then a digit", "api_key: " + LETTERS_200 + "7", LETTERS_200 + "7"),
+    # Control for the pin above: the same 200 letters with no digit are refused by the letters-only branch at any cap.
+    ("api_key of 200 random letters with no digit", "api_key: " + LETTERS_200, LETTERS_200),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
