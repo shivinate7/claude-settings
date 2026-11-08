@@ -7,7 +7,9 @@ Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. Source: the brief. The wai
 - Each PR carries a review record.
 - The batch runner finds reviewed, green PRs itself.
 - No merge message.
-- Owner, 2026-11-08 06:08 CST, waiting-page item 396 a: the builder-probe fix (step `builder-probe-false-alarm`) gets a fourth review round. That grant covers only that change (rule `outcomes-grant-covers-named-act`). The coordinator's brief for step `record-granted-round` lets the record hold a granted round.
+- Owner, 2026-11-08 06:08 CST, item 396 a: a fourth review round for the builder-probe fix (step `builder-probe-false-alarm`).
+
+Source: `waiting/items/builder-probe-round-4.json` on the roadmap branch. That grant covers only that change (rule `outcomes-grant-covers-named-act`). The coordinator's brief for step `record-granted-round` lets the record hold a granted round.
 
 ## The incident
 
@@ -25,7 +27,7 @@ PR: #<n>
 Head: <40-hex sha>
 Kind: normal|delete-only|docs-only
 Guard or check: yes|no
-Grant: item <n> <letter>, owner, <YYYY-MM-DD HH:MM CST|CDT>
+Grant: #<n>, item <n> <letter>, owner, <YYYY-MM-DD HH:MM CST|CDT>
 Round <n>: <reviewer|design-reviewer>, <model>, <PASS|FAIL|PARTIAL>
 Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL>
 Net value: not owed|zero|positive|negative
@@ -35,7 +37,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after the final round (round 3, or 4 with a `Grant` line) it keeps the net value that round gave; with no round recorded it reads open.
-- The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
+- The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is `#<pr>, ` and a cite. The `#<pr>` must be the record's own PR, so a copied grant binds to no other PR. The cite is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. `--grant` with another PR than the positional one is a usage error. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed or out of place, or round numbers skip. Nor is it one when a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
