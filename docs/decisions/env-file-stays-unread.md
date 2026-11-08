@@ -20,7 +20,61 @@ Read form. The guard does not judge Read. It returns early for Read and Grep. Th
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Known false alarms: two notes remain open in `guard_env.py`, and both are refused on main as well. `env-cwd-prose-false-alarm`: `echo "(cwd=.envs)"` and `python3 -c "print('x (cwd=.envs):')"` are refused though they only print text. `jq-lone-word-false-alarm`: a lone `jq .envs`, `jq --arg k v .environment f.json`, `jq --indent 2 .envs f.json`, `yq -o json .envs f.yaml` and `cat f | jq .environment` are refused though the program word is text. The guard allows `ag -f` and `ack -f` (a boolean flag), and the values of `grep --exclude` and `--exclude-dir`. It also allows the values of `rg -t` and `-T`, a `jq`, `gojq` or `yq` program word such as `.envs`, and `mkdir` on an env-prefixed folder. It refuses `cd` and `pushd` into such a folder, because the shell keeps its folder between calls. In each allowed form the env name is a pattern, a glob that excludes, a type name, a program or a folder name, and never a file that is read. With a hidden flag, ag reads dotfiles, so the guard judges its file regex. The hidden flags are `--hidden` and `-u` (`--unrestricted`). The regex comes from `-G` or `--file-search-regex`. The guard reads the regex as the shell gives it to ag, in bash or PowerShell (a PowerShell single quote keeps its backslashes). It tries the regex, bare and with a `./` prefix, on `.env`, `.envrc`, `.env.local`, `.env.production`, `.env.development`, `.env.test` and `.env.staging` (`ENV_SAMPLE_NAMES`). It also tries the names the regex could pick, built from its parse tree, with and without the leading dot. So `\.env\.prod$` and `env\.prod$` are refused. So is `\.env[A-Z]*\.md$`, whose empty repeat picks `.env.md`. A regex that matches one of them is refused. A POSIX class such as `[[:alpha:]]` or `[[:^alpha:]]` is first written out as ranges. A regex with too many shapes is read again, with each repeat at its least count and each class or dot offering one letter. So `.*a.*b.*c.*d.*e.*f` is judged by the names it can pick. A regex is refused too when it does not compile or holds an unknown POSIX class. So is one that still has too many shapes in that form. Accepted limit: a regex with no `.env` prefix of its own (`prod$`) is judged on the sample names only. Reading `\.py$` as every name it could pick would refuse every extension filter. Without a hidden flag, ag skips dotfiles, so its file regex is not judged. With a hidden flag, `rg` and `ag` reach each env file in a folder they walk, whatever its name. A recursive grep (`-r`, `-R`, `-d recurse`, `--recursive`, or `rgrep`, also as `egrep` and `fgrep`) reaches them without a flag. The guard refuses the search when a path word is a folder that holds an env file on disk. It refuses too when no path is named, because the working folder is walked. For `rg` and `ag` a pipe or `<` into the search clears that case, and for grep it does not. A folder with none stays allowed, and so does `rg --files`, which lists names and reads nothing. A grep `--exclude`, `--include` or `--exclude-dir` glob that skips the env file clears the search. The grep refusal names `--exclude` and `--exclude-dir` as the remedy, with no file name, since the printed reason names no file. The walk is `_env_walk`. It expands a glob in a path word against the working folder, as the shell does (no dotfile). It does not resolve a variable, follow a `cd`, read a `-g '!...'` exclusion or an ignore file other than the checkout's own, or judge a heredoc body. For `rg` and `ag` with no flag that turns the ignore rules off, a file or folder that the checkout ignores (git's own list, read once per walk) is not read. It does not count, and the walk does not enter an ignored folder. `grep -r` reads them, so for grep they count. The ignore rules are off with `-u` (any count), `--no-ignore` and its variants, and for ag `-U` and `-a`. A tracked file is not ignored. rg `-u` alone drops the ignore rules and reads no dotfile; `-uu`, `-uuu` and a repeated `-u` read them. The walk stops at 50000 entries, `node_modules` included, and refuses with a reason that says the folder is too large to check, not that it holds an env file. `git grep` reads its first plain word as a pattern, as `grep` does, so an env name in it is text. A path after it stays judged. For rg with a hidden flag, `-T` excludes only a type and the search still reaches the env file, so a pattern or a path that names one is refused. With `-t`, only a path that names one is refused. A `jq`, `gojq` or `yq` program word is skipped only when a file word follows it, and `-C` and other switches do not swallow that file word. It still refuses `git add` and `cat` on such a folder, on purpose: the guard cannot tell a folder from a file, and a file inside may hold the secrets. `--include`, `-g`, `--glob` and `--exclude-from` stay judged, since each can name the file.
+Known false alarms: two open notes in the debt notes. Both hold at this head. Main: code read, not probed.
+
+- Note `env-cwd-prose-false-alarm` (printed text read as a variable): `echo "(cwd=.envs)"` and `python3 -c "print('x (cwd=.envs):')"` are refused. The guard reads `(cwd=.envs)` as a shell variable that holds an env path.
+- Note `jq-lone-word-false-alarm` (a lone program word): `jq .envs` and `cat f | jq .environment` are refused. A lone word may be the file, so the guard judges it.
+- Note `jq-lone-word-false-alarm` (a value flag before the program word): `jq --arg k v .environment f.json`, `jq --indent 2 .envs f.json` and `yq -o json .envs f.yaml` are refused. The guard does not know that `--arg`, `--indent` and yq's `-o` take a value. So the value is read as the program word, and the real one is judged.
+
+Allowed forms:
+
+- `ag -f` and `ack -f` are boolean flags. They name no pattern file.
+- The values of `grep --exclude` and `--exclude-dir`, and of `rg -t` and `-T`.
+- A `jq`, `gojq` or `yq` program word, when a file word follows it. A switch such as `-C` does not hide that file word.
+- `mkdir` on an env-prefixed folder, such as `mkdir .envs`, reads no contents.
+- `cd` and `pushd` into such a folder are refused. The shell keeps its folder between calls.
+- `git add` and `cat` on such a folder are refused. The guard cannot tell a folder from a file.
+- In each allowed form, the env name is a pattern, an excluding glob, a type name, a program or a folder name. It is never a file that is read.
+
+ag regex:
+
+- Without a hidden flag, ag skips dotfiles, so its file regex is not judged.
+- With a hidden flag, the guard judges the regex from `-G` or `--file-search-regex`. `-p` names an ignore-pattern file, judged as a path.
+- The guard reads the regex as the shell gives it to ag, in bash or PowerShell. A PowerShell single quote keeps its backslashes.
+- The guard tries the regex, bare and with a `./` prefix, on `.env`, `.envrc`, `.env.local`, `.env.production`, `.env.development`, `.env.test` and `.env.staging` (`ENV_SAMPLE_NAMES`).
+- It also tries the names the regex could pick, built from its parse tree, with and without the leading dot. A regex that matches one is refused. Examples: `\.env\.prod$`, `env\.prod$`, and `\.env[A-Z]*\.md$`, whose empty repeat picks `.env.md`.
+- A POSIX class such as `[[:alpha:]]` or `[[:^alpha:]]` is first written out as ranges.
+- A regex with too many shapes is read again in a lean form. Each repeat takes its least count, and each class or dot offers one letter. So `.*a.*b.*c.*d.*e.*f` is judged by the names it can pick.
+- A regex is refused when it does not compile, holds an unknown POSIX class, or still has too many shapes in the lean form.
+
+Folder walk:
+
+- With a hidden flag, rg and ag reach each env file in a folder they walk, whatever its name. The hidden flags are `--hidden`, rg's `-.`, and `-u` (`--unrestricted`). ag needs one `-u`. rg needs two.
+- rg also walks for a positive `-g` or `--iglob` glob that could name an env file, even with no hidden flag. Such a glob overrides the ignore rules.
+- A recursive grep reaches them with no flag. `grep`, `egrep` and `fgrep` recurse with `-r`, `-R`, `-d recurse`, `--directories=recurse`, `--recursive` or `--dereference-recursive`. `rgrep` always recurses.
+- The guard refuses a search when a path word is a folder that holds an env file on disk. It also refuses when no path is named, because the working folder is walked.
+- For rg and ag, a pipe or `<` into the search clears the no-path case. For grep it does not.
+- A folder with no env file stays allowed. So does `rg --files`, which lists names and reads nothing.
+- Grep decides each file by its last matching `--include` or `--exclude` glob, so an exclude before an include re-includes the env file. An exclude glob or `--exclude-dir` that skips the env file clears the search. The refusal names `--exclude` and `--exclude-dir` as the remedy, and prints no file name.
+- `--include`, `-g`, `--glob` and `--exclude-from` stay judged, since each can name the file.
+- The walk is `_env_walk`. It expands a glob in a path word as the shell does, with no dotfile match. A path word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is the working folder.
+- For rg and ag with no flag that turns the ignore rules off, an ignored file or folder is not read or counted. The walk does not enter an ignored folder. The list is git's own, read once per walk. grep reads ignored files, so they count for grep.
+- The ignore rules are off with `-u` (any count), `--no-ignore` and its variants. For ag, `-U`, `-a`, `--skip-vcs-ignores` and `--all-types` also turn them off. A tracked file is never ignored.
+- The walk stops at 50000 entries, `node_modules` included. It then refuses with a reason that says the folder is too large to check, never that it holds an env file.
+- `git grep` reads its first plain word as a pattern, so an env name in it is text. A path after it stays judged.
+- With a hidden flag, rg `-T` excludes only a type. The search still reaches the env file, so a pattern or a path that names one is refused. With `-t`, only a path that names one is refused.
+
+Known limits:
+
+- rg fails closed. An rg flag in neither of its flag tables might take a value, so the guard may walk the working folder too.
+- ag and grep do not fail closed. An unknown flag there is read as a switch, so the walk can miss a folder the search reads.
+- An rg `!` glob is not read.
+- A brace list in a path word, as in `rg --hidden K {a,b}`, is not expanded.
+- A `cd` earlier in the command is not followed. Other variables and substitutions in a path word are not resolved.
+- A search in a heredoc body is not walked.
+- The walk sees a search behind a subshell paren, `command`, `env` or `nice`. A search behind `sudo`, `xargs` or `env -C` is not walked.
+- An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.
+- Accepted limit: a regex with no `.env` prefix of its own, such as `prod$`, is judged on the sample names only. Rewriting `\.py$` as the names it could pick would refuse every extension filter.
 
 Why: the user's own secrets must not enter the session. `.envrc` is in the scope for the same reason. The guard stops Claude's mistakes, not an attacker's form (`guard-guards-mistakes-only`, a guard stops mistakes, not an attacker).
 
