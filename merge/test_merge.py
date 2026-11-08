@@ -13134,6 +13134,12 @@ class ReviewedList(ReviewEnv):
     # ---- a record with no Findings line, written at or after the owner's cut-off, reads not done: its act is the lane's cause, at the lane round
     # age limit. The ledger reads created_at, so these cases run at LEGACY_LATE_NOW, after the cut-off. A record before it keeps the legacy verdict.
 
+    def test_the_findings_cutoff_is_at_or_after_the_owners_ruling(self):
+        # the floor: the owner's ruling is 04:25:00Z on Nov 8 (owner item 386 b). An earlier cut-off would read the records written before the ruling as not done.
+        ruling = datetime(2026, 11, 8, 4, 25, 0, tzinfo=timezone.utc).timestamp()
+        self.assertGreaterEqual(merge.FINDINGS_REQUIRED_FROM, ruling,
+                                "FINDINGS_REQUIRED_FROM is before the owner's ruling (item 386 b), so records written before it would read not done")
+
     def late_record(self, cid, n, created, **kw):
         """The review record of pull request n, written at `created`: a passed round, and no Findings line unless `kw` gives one."""
         return review_comment(cid, n, record_text(n=n, rounds=REVIEW_PASS, **kw), created=created)
@@ -13177,6 +13183,18 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older, newer], now=LEGACY_LATE_NOW, files=files, count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.unfiled_line(out, LEGACY_CAUSE, "5h")
+
+    def test_a_no_findings_line_record_after_the_cutoff_with_a_red_lint_reads_lane_lint_red(self):
+        # scope first: the record alone reads the cause. The red lint line for its head is then read ahead of the cause, as the ledger reads a red head first.
+        record = self.late_record(1, 7, created_text(cutoff(3600)))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record], now=LEGACY_LATE_NOW)
+        self.assertEqual(rc, 0, out + err)
+        self.unfiled_line(out, LEGACY_CAUSE, "5h")
+        lint = review_comment(2, 7, f"Lint: red {REVIEW_HEAD} check invariants, lint prose\n", created=created_text(cutoff(7200)))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [record, lint], now=LEGACY_LATE_NOW)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane lint red: check invariants, lint prose 4h",
+                         "a red lint line on a post-cut-off record with no Findings line did not read ahead of the missing-Findings cause:\n" + out)
 
     def test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once(self):
         host, out = self.this_pr([pull_file("docs/debts/missing-cache.md", additions=12)])
