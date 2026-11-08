@@ -2107,6 +2107,27 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: a ref other than archive/design-main-held holds "
                  "its tip, so main's copy would not be the only other holder")
 
+    # design-pair's tip is held by two archive branches and by no other ref. archive/design-pair-b is a
+    # second push of the same tip under a new name, so a delete of both names leaves the tip with no holder.
+    pair_rel = design + "/pair.html"
+    design_branch("design-pair-a", pair_rel, "held by two archives and nothing else\n", archive_only=True)
+    pair_tip = rev("origin/archive/design-pair-a")
+    pair_b = run_vcs(BRANCHREPO, "push", "-q", "origin", pair_tip + ":refs/heads/archive/design-pair-b")
+    if pair_b.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-pair-b failed. stderr: %s"
+                 % pair_b.stderr.strip())
+    if holders("origin/archive/design-pair-a") != {"refs/remotes/origin/archive/design-pair-a",
+                                                    "refs/remotes/origin/archive/design-pair-b"}:
+        sys.exit("fixture setup failed in build_fixtures: a ref other than the two design-pair archives holds "
+                 "design-pair's tip, so the pair would not be the only copy")
+    if rev("origin/archive/design-pair-b") != pair_tip:
+        sys.exit("fixture setup failed in build_fixtures: archive/design-pair-b is not design-pair's tip")
+    if run_vcs(BRANCHREPO, "ls-remote", "origin", "refs/heads/design-pair-a").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin holds a branch named design-pair-a")
+    if listed("origin/main", pair_rel):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds design-pair's mockup, so the "
+                 "file would not be a design file main lacks")
+
     # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
     # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
     run_vcs(BRANCHREPO, "tag", "v1.0", "main")
@@ -3799,6 +3820,14 @@ sh("push: a --delete of an archive branch whose tip another origin branch also h
    VCS + " push origin --delete archive/design-twin", "allow", cwd=BRANCHREPO)
 sh("push: a --delete of an archive branch whose design file main already holds, with no other holder, allows",
    VCS + " push origin --delete archive/design-main-held", "allow", cwd=BRANCHREPO)
+# TWO ARCHIVES, ONE TIP, NO OTHER HOLDER. A push that deletes both names removes both holders, and a ref a
+# push deletes is no holder of its own tip, so the pair's delete denies. Deleting one name leaves the other
+# archive as holder, so that delete allows.
+sh("push: a --delete of two archive branches at one design tip with no other holder, denies",
+   VCS + " push origin --delete archive/design-pair-a archive/design-pair-b", "deny", ARCHIVE_RULE,
+   cwd=BRANCHREPO, carries="archive/", lacks=("design-pair",))
+sh("push: a --delete of one of two archive branches at one design tip allows, the other still holds it",
+   VCS + " push origin --delete archive/design-pair-a", "allow", cwd=BRANCHREPO)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
