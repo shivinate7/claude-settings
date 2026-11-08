@@ -166,8 +166,8 @@ TODO_STATUS = ("todo", "ready")
 KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
 TOP = 5
 # ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
-# row ships: the 42 done steps updated Nov 7-8 carry no `Done check green on main:` line, so an earlier cutoff
-# would list all 42 at launch.
+# row ships: the 44 done steps updated Nov 7-8 CST (measured on origin/roadmap) carry no `Done check green on main:`
+# line, so an earlier cutoff would list all 44 at launch.
 DONE_CHECK_SINCE = "2026-11-10T06:00:00Z"
 DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
 # The whole phrase a close writes to show its Done check green; DONE_REF_RE then reads the ref after it.
@@ -1323,18 +1323,15 @@ def shown_green(text):
 
 def done_without_check(steps):
     """Entries for each done step updated on or after DONE_CHECK_SINCE that does not show its Done check green on main."""
-    since = datetime.datetime.fromisoformat(DONE_CHECK_SINCE.replace("Z", "+00:00"))
+    since = zoned_time(DONE_CHECK_SINCE)
     out = []
     for k, d in sorted(steps.items()):
         if d.get("status") != "done":
             continue
-        try:
-            at = datetime.datetime.fromisoformat(d["updatedAt"].replace("Z", "+00:00"))
-        except (KeyError, AttributeError, ValueError):
+        at = zoned_time(d.get("updatedAt"))
+        if at is None:
             out.append("%s (updatedAt unreadable)" % k)
             continue
-        if at.tzinfo is None:
-            at = at.replace(tzinfo=datetime.timezone.utc)
         if at < since:
             continue
         texts = [v for v in (d.get(key) for key in MOCKUP_TEXT) if isinstance(v, str)]

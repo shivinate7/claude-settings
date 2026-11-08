@@ -42,7 +42,7 @@ except Exception as _err:  # hooks/ missing or broken: the role is unread, so ma
 
 REFUTER = re.compile(r"(?:\*\*Refuter:\*\*|Refuter:)(.*)")
 ROLE = re.compile(r"[\s*]*([\w-]+)")  # the first word after the colon, past spaces and any `**`
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")  # CommonMark: a backtick fence's info string holds no backtick
 
 
 class Unknown(Exception):
