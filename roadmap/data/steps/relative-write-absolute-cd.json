@@ -1,11 +1,11 @@
 {
   "title": "An agent's relative write after an absolute cd out of its home is not refused",
   "why": "A false alarm: after `cd <scratchpad> && mkdir x`, the relative-write guard on #1984 refuses the mkdir though it lands where the cd named (debt docs/debts/relative-write-absolute-cd.md on #1984 head 3745935cc).",
-  "note": "Filed 10:46 CST Nov 8 from lane guard-relative-write-escape; coordinator granted 10:43 CST. Doing: a test-author writes the red rows on branch relative-write-absolute-cd (Merge after: #1984).",
+  "note": "Filed 10:46 CST Nov 8 from lane guard-relative-write-escape; coordinator granted 10:43 CST. Doing: a test-author writes the red rows on branch relative-write-absolute-cd (Merge after: #1984). Lane 11:02 CST Nov 8: review round 1 at 97390338b.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKzJxDxuXzuwNe7fhYn",
   "status": "doing",
   "order": 740,
-  "updatedAt": "2026-11-08T10:46:00-06:00"
+  "updatedAt": "2026-11-08T11:03:00-06:00"
 }
