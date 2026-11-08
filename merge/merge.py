@@ -14,13 +14,14 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          A head that carries a `Batch: red <head> <job>` comment for itself, or merges a lane tip that does, or holds a batch head (a commit
-                          that holds lane merges since the base) that does, is refused in the preview and in a ready PR's --confirm, before any claim or push,
-                          and no flag lifts it. A line on a lane head binds that exact head: a fix pushed on top of it is a new head and merges. An unreadable
-                          lane list, open-pull list or comment list refuses too. A draft's --confirm is the records step: it does not run this check and pushes
-                          the records page, so only the draft's preview shows the refusal. Cost: one read of the repo's issue comments, since the older of the
-                          oldest open PR (the ledger's window) and the oldest commit checked, and one open-pull list read; one log over base..head and
-                          one read_lanes (a log and a merge-base per lane) for the head and for each chain commit that carries a line.
+                          A head that carries a `Batch: red <head> <job>` comment for itself, or merges a lane tip that does, or holds a commit of base..head
+                          that carries an integration line (`Batch: red integration <head> <job>`), is refused in the preview and in a ready PR's --confirm,
+                          before any claim or push, and no flag lifts it. A lane's line binds that exact head: a fix pushed on top of it is a new head and
+                          merges. An integration line binds every head that holds its commit. An unreadable commit list, lane list, open-pull list or comment
+                          list refuses too. A draft's --confirm is the records step: it does not run this check and pushes the records page, so only the
+                          draft's preview shows the refusal. Cost: one read of the repo's issue comments, since the older of the oldest open PR (the ledger's
+                          window) and the oldest commit of base..head, and one open-pull list read; one log over base..head and one read_lanes (a log and a
+                          merge-base per lane) for the head.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -70,7 +71,7 @@
                           integration PR's number) reads PR's newest run, takes its failing jobs less all-jobs-passed and less any job that is red
                           on the base too, finds the lanes of its batch (its merge commits) whose changed files hit a suite of a failing job (that
                           job's own suites, not the others'), and drops each with its dependents (a stacked PR, a `Merge after #n`
-                          PR): with --push, one `Batch: red <head> <jobs>` comment on each, and one on the integration PR itself (so a later merge of that
+                          PR): with --push, one `Batch: red <head> <jobs>` comment on each, and one marked `Batch: red integration <head> <jobs>` on the integration PR itself (so a later merge of that
                           batch is refused, even when a hit lane has no open PR); without --push, nothing is posted and each line is printed as
                           `would post on #n: <line>`. Then a rebuild from the base by merges, never a revert, from the
                           batch's other lanes alone. No lane hit: nothing is dropped, posted or built, the jobs (and those red on the base) are named and the exit is 1. --on
@@ -3040,15 +3041,15 @@ def units_of(info, bases):
 
 def drop_comment(n, sha, why, jobs, int_n):
     """-> the body of the `Batch: red <head> <jobs>` comment for pull request n at `sha` (jobs: a list of job names). The one text record_drops posts
-    and a drop without --push prints. The integration pull request int_n gets the line for itself: a rebuild without the dropped lanes clears it, and
-    no lane of its own is to be fixed there."""
+    and a drop without --push prints. The integration pull request int_n gets the marked line (batch_red_first_line) for itself: it binds every head
+    that holds the integration head, a rebuild without the dropped lanes clears it, and no lane of its own is to be fixed there."""
     if n == int_n:
         about = [f"`merge --build-batch --drop-red {int_n}` found this batch red ({why}).",
                  "A rebuild without the dropped lanes clears it: run `merge --build-batch --push <new branch>`, open its pull request, and merge that one."]
     else:
         about = [f"`merge --build-batch --drop-red {int_n}` dropped this head from the red batch #{int_n} ({why}).",
                  "Fix it in its own lane and push: a new head makes this line stale, and the lane joins the next batch."]
-    return "\n".join([f"{BATCH_RED_WORD} {sha} {', '.join(jobs)}", "", *about]) + "\n"
+    return "\n".join([batch_red_first_line(sha, jobs, n == int_n), "", *about]) + "\n"
 
 def record_drops(h, heads, int_n):
     """Post one comment on each pull request of `heads` (number -> (live head, why it is dropped, [jobs])): the drop_comment line, which pr_acts reads
@@ -3077,8 +3078,8 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
     `drop_red` (--drop-red PR) splits a red batch: PR is the integration pull request whose newest run ran red (red_jobs: the failing jobs, less the
     required aggregate, and less each job that is red on the base too: the base would fail it as well). The lanes of its batch come from its merge
     commits (read_lanes); a lane whose changed files hit a suite of a failing job (hit_suites narrowed to that job, no log is read) is dropped with its
-    dependents (red_drop). With --push each dropped PR gets one `Batch: red <head> <jobs>` comment (record_drops), as does the integration PR itself
-    (a hit lane with no open PR is still in its tree, so a later merge of it is refused); without --push nothing is posted and each line is printed as
+    dependents (red_drop). With --push each dropped PR gets one `Batch: red <head> <jobs>` comment (record_drops), and the integration PR itself the
+    marked `Batch: red integration <head> <jobs>` (a hit lane with no open PR is still in its tree, so a later merge of it is refused); without --push nothing is posted and each line is printed as
     `would post on #n: <line>`. The batch is rebuilt from the base by merges, never a revert, from the batch's own other lanes alone (a lane that
     joined the candidates since waits for the next batch). It is built only to a new --push branch. When no lane is hit it drops, posts and builds
     nothing, names the jobs (and those red on the base) on stderr and returns 1. A failed read, a run still going, a base that cannot be read and a
@@ -3458,57 +3459,58 @@ def open_pr_window(pulls, *also):
     request opened is in all three. A row with no created_at adds no time, and no time at all reads from the epoch: more comments, never fewer."""
     return min([d.get("created_at") for d in pulls if d.get("created_at")] + [t for t in also if t] or ["1970-01-01T00:00:00Z"])
 
+def batch_red_first_line(sha, jobs, integration=False):
+    """-> the first line of a `Batch: red` comment for head `sha` (jobs: a list of job names). The one home of the line's build, beside batch_red_lines,
+    its parse. A lane's line is `Batch: red <head> <jobs>`; the integration pull request's is marked: `Batch: red integration <head> <jobs>`."""
+    return f"{BATCH_RED_WORD} {BATCH_RED_INTEGRATION + ' ' if integration else ''}{sha} {', '.join(jobs)}"
+
 def batch_red_lines(comments):
-    """-> {head sha: job} of the `Batch: red <head> <job>` lines in `comments`, a line being the whole first line of a comment. The newest line
-    of a head wins. The one home of the line's parse for the refusal and the drop."""
+    """-> {head sha: (job, marked)} of the `Batch: red` lines in `comments`, a line being the whole first line of a comment. `marked` is True for the
+    integration pull request's form (batch_red_first_line). The newest line of a head wins. The one home of the line's parse for the refusal and the drop."""
     red = {}
     for c in comments:
-        m = BATCH_RED.fullmatch(((c.get("body") or "").splitlines() or [""])[0])
-        if m:
-            red[m.group(1)] = m.group(2)
+        first = ((c.get("body") or "").splitlines() or [""])[0]
+        for pattern, marked in ((BATCH_RED, False), (BATCH_RED_MARKED, True)):
+            m = pattern.fullmatch(first)
+            if m:
+                red[m.group(1)] = (m.group(2), marked)
     return red
 
 def range_commits(wt, base_ref, head):
-    """-> ({sha: commit time in seconds} of every commit of base_ref..head, the first-parent chain from head, newest first). One `git log`. A failed
-    or malformed read raises ValueError."""
-    c, out = git(wt, "log", "--format=%H %ct %P", f"{base_ref}..{head}")
+    """-> {sha: commit time in seconds} of every commit of base_ref..head, through every parent of each merge. One `git log`. A failed or malformed
+    read raises ValueError."""
+    c, out = git(wt, "log", "--format=%H %ct", f"{base_ref}..{head}")
     if c:
         raise ValueError("git log failed: " + (out.splitlines() or ["?"])[-1])
-    times, first = {}, {}
+    times = {}
     for line in out.splitlines():
-        sha, when, *parents = line.split()
-        times[sha], first[sha] = int(when), (parents or [None])[0]
-    chain, sha = [], head
-    while sha in times:
-        chain.append(sha)
-        sha = first[sha]
-    return times, chain
+        sha, when = line.split()
+        times[sha] = int(when)
+    return times
 
 def refuse_batch_red(host, wt, base_ref, info):
-    """A `Batch: red <head> <job>` comment says the batch at <head> ran red and its lane was dropped. Two kinds of line, told apart by what the
-    named head is: a line on a lane head (a head that holds no lane merge since the base) binds that exact head, because a new head makes the line
-    stale, so a fix pushed on top of a dropped lane head is not refused. A line on a batch head (a head that holds lane merges since the base, as
-    the integration pull request's head does) binds every head whose first-parent chain holds that commit: a batch built on a split batch holds
-    that batch's own head there, and a stacked pull request holds its base's head. So the merged head is refused when it, or a lane tip it merges
-    (read_lanes, the second parents of the merges), carries a line, or when a commit on its first-parent chain since the base is a batch head that
-    carries one. No reason flag lifts it, because only a rebuild without the lane clears the red.
-    The comments are read since the older of two times, for every head: the oldest open pull request (open_pr_window, the ledger's window) and
-    the oldest commit time among the commits checked, so the line of a lane whose pull request has closed or reopened is in it. A lane's line can
-    be older than this pull request. A pull request with no known open time reads from the epoch. Every failed read refuses with a plain Stop (unknown is red), an OSError and a timeout of git among them:
-    the lane list, the open-pull list, the comments and the lane read of a chain commit, so no reason flag lifts an unreadable one.
-    Cost: one comment list read and one open-pull list read per preview or confirm, one `git log` over base..head, one more `git log` and a
-    merge-base per lane (read_lanes) of the head, and the same read_lanes cost for each chain commit that carries a line. No file, timer or log."""
+    """A `Batch: red` comment says the batch at <head> ran red. Two forms of line, told apart by their mark (batch_red_first_line), not by the shape of
+    the head. A lane's line, `Batch: red <head> <job>`, binds that exact head (the merged head and each lane tip it merges, read_lanes), because a new
+    head makes the line stale, so a fix pushed on top of a dropped lane head is not refused, even when that head merged a sibling lane. The integration
+    pull request's line, `Batch: red integration <head> <job>`, binds every commit of base..head: a batch built on a split batch holds that batch's
+    own head through a lane or a first parent, and a stacked pull request holds its base's head. No reason flag lifts either, because only a rebuild
+    without the lane clears the red.
+    The comments are read since the older of two times: the oldest open pull request (open_pr_window, the ledger's window) and the oldest commit time
+    in base..head, so the line of a lane whose pull request has closed or reopened is in it. A lane's line can be older than this pull request. A pull
+    request with no known open time reads from the epoch. Every failed read refuses with a plain Stop (unknown is red), an OSError and a timeout of
+    git among them: the commit list, the lane list, the open-pull list and the comments, so no reason flag lifts an unreadable one.
+    Cost: one comment list read and one open-pull list read per preview or confirm, one `git log` over base..head, and one more `git log` and a
+    merge-base per lane (read_lanes) of the head. No file, timer or log."""
     def unknown(what):
         return Stop(f"{what}, so whether this tree holds a commit with a `{BATCH_RED_WORD}` line is unknown. Nothing was claimed or pushed. {READ_CITE}")
     try:
-        times, chain = range_commits(wt, base_ref, info["head"])
+        times = range_commits(wt, base_ref, info["head"])
         lanes = read_lanes(wt, base_ref, info["head"])[0]
     except (ValueError, OSError, subprocess.TimeoutExpired) as e:
         raise unknown(f"the commits of {info['head'][:9]} cannot be read ({type(e).__name__}: {e})")
     exact = {info["head"], *lanes}
-    heads = exact | set(chain)
     try:
-        oldest = min((times[x] for x in heads if x in times), default=None)
+        oldest = min(times.values(), default=None)
         since = open_pr_window(host.pages("pulls", fields={"state": "open"}),
                                info.get("created") or "1970-01-01T00:00:00Z", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(oldest)) if oldest is not None else None)
     except Stop as e:
@@ -3521,17 +3523,10 @@ def refuse_batch_red(host, wt, base_ref, info):
         lines = batch_red_lines(comments_since(host, since))
     except (OSError, subprocess.TimeoutExpired) as e:
         raise unknown(f"the comments cannot be read ({type(e).__name__}: {e})")
-    red = {sha: job for sha, job in lines.items() if sha in exact}
-    for sha, job in lines.items():
-        if sha in chain and sha not in exact:  # a lane head on the chain is not bound by its line: only a batch head is
-            try:
-                if read_lanes(wt, base_ref, sha)[0]:
-                    red[sha] = job
-            except (ValueError, OSError, subprocess.TimeoutExpired) as e:
-                raise unknown(f"the lanes of {sha[:9]} cannot be read ({type(e).__name__}: {e})")
+    red = {sha: job for sha, (job, marked) in lines.items() if sha in exact or (marked and sha in times)}
     if red:
         raise Dropped("the batch ran red: " + "; ".join(f"{sha[:9]} ({job})" for sha, job in sorted(red.items())) + " carries a `" + BATCH_RED_WORD
-                      + " <head> <job>` line, and this tree still holds that commit.\n"
+                      + "` line, and this tree still holds that commit.\n"
                       f"Instead, rebuild the batch without the lane: run `merge --build-batch --push <new branch>`, open its pull request, and merge that one. {BATCH_RED_CITE}")
 
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
@@ -3998,9 +3993,11 @@ PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720,
 AGE_KEY = {"batch run": "batch", "lane lint red": "lane round", "lane batch red": "lane round"}  # next-act kind -> its PR_STATE_AGE_HOURS key, where the key is not the kind's own name
 LINT_RED_WORD = "Lint: red"  # the first line of the comment `merge --build-batch` posts on a lint-red head: `Lint: red <40-hex head> <steps>`. build_batch writes it, pr_acts reads it
 LINT_RED = re.compile(rf"{LINT_RED_WORD} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
-BATCH_RED_WORD = "Batch: red"  # the first line of the comment on a lane dropped from a red batch: `Batch: red <40-hex head> <job>`. pr_acts and refuse_batch_red read it
+BATCH_RED_WORD = "Batch: red"  # the first line of the comment on a lane dropped from a red batch: `Batch: red <40-hex head> <job>`, or the marked form on the integration pull request. pr_acts and refuse_batch_red read it
+BATCH_RED_INTEGRATION = "integration"  # the marker in the integration pull request's line: `Batch: red integration <40-hex head> <job>`
 BATCH_RED = re.compile(rf"{BATCH_RED_WORD} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
-RED_LINES = (("lane lint red", LINT_RED), ("lane batch red", BATCH_RED))  # the red lines pr_acts reads, as (next-act kind, pattern)
+BATCH_RED_MARKED = re.compile(rf"{BATCH_RED_WORD} {BATCH_RED_INTEGRATION} ({REVIEW_SHA}) (\S.*?)\s*", re.ASCII)
+RED_LINES = (("lane lint red", LINT_RED), ("lane batch red", BATCH_RED), ("lane batch red", BATCH_RED_MARKED))  # the red lines pr_acts reads, as (next-act kind, pattern)
 HOLD_LABELS = ("held", "parked", "replaced", BATCH_LABEL)  # the labels that stand in for a review record; all but the BATCH_LABEL also need a Waits on line
 WAITS_ON_LINE = "Waits on:"
 
