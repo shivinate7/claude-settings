@@ -13725,6 +13725,30 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
+    def test_unreviewed_head_stacked_pr_on_a_lane_branch_owes_no_record_for_a_new_main_commit(self):  # case 13
+        # the stacked pull request is based on lane1, not main, and merged main's new commit m into itself: m is on main and in no lane's history,
+        # so it is not a lane tip of the stack. Its own head has a done record, and no lane tip is merged into it
+        o = self.other
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "agent/stack", lane1)
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/main into agent/stack", m)
+        put(os.path.join(o, "agent-stack.txt"), "stack\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "agent/stack: own commit"); sh(o, "git", "push", "-q", "origin", "agent/stack")
+        stack = sh(o, "git", "rev-parse", "HEAD")
+        host = self.batch_host({}, [round_check_comment(1, 7, stack, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the own head's done record is the only one
+        host.branch, host.base = "agent/stack", "agent/lane1"
+        host.pulls = [{**batch_pull(7, stack, base="agent/lane1"), "head": {"ref": "agent/stack", "sha": stack}}]
+        self.assertEqual(self.history_exit(m, "origin/main"), 0, "the new main commit is not on origin/main")
+        self.assertEqual(self.history_exit(m, "origin/agent/lane1"), 1, "the new main commit is in the history of the stacked base, so it is not new to it")
+        self.assertEqual(self.history_exit(m, stack), 0, "the new main commit is not in the history of the stacked head")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"tip {m[:9]}", out, "the round-3 check counts main's new commit as a lane tip of the stacked pull request:\n" + out)
+        self.assert_allowed(rc, out, host)
+
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
 # report names each line the model judges stale or unbacked. A model error or timeout reads UNKNOWN. Nothing it says
