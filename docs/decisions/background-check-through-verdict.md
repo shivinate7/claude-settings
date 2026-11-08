@@ -27,6 +27,8 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
+- The guard-set lists (the install.sh copy loop, the install.ps1 copy and set loops, and the ci-scope.sh case) name every flat module a guard file imports at load or in a function body. `override.py` (the owner override) and `_nowindow.py` (the no-window child start) joined the earlier ones. A missing `override.py` drops the owner-override lift. `guard.py` imports `_nowindow.py` with no fallback, so a missing copy fails the no-window start. The lists keep the guard set whole when the flat landing fails or lands late. The check `guardset4` (it enforces these lists) derives the required set from the imports of `guard.py` and each `guard_*.py` outside a try block, so a new import needs no edit to it. A module a guard file imports only in a try block is not required by the check (coordinator request, 2026-11-08 02:23 CST).
+
 ## The incident
 
 Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8`. Its verdict was lost.
@@ -35,7 +37,7 @@ Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/
 - `verdict` avoids this: it writes a heartbeat to the beat file, so the watch sees no stall, and it keeps the full log in its own file.
 - The harm holds without that cause. `tail` holds all output until the command ends, then keeps 8 lines. A job that ends early, or is read early, shows nothing.
 
-The coordinator asked for the three forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST on 2026-11-07, is "a gap gets a fix, not a note".
+The coordinator asked for the three forms at 00:34 CST on 2026-11-08. The owner's rule, ruled at 13:20 CST on 2026-11-07, is "a gap gets a fix, not a note". Its home is being written in PR #1516 (the Fix-line form).
 
 ## Why a named roster
 
