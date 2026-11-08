@@ -466,7 +466,9 @@ PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", 
             "Backup", "Checkpoint", "Compare", "Compress", "Convert", "ConvertFrom", "ConvertTo", "Dismount", "Edit",
             "Expand", "Export", "Group", "Import", "Initialize", "Limit", "Merge", "Mount", "Out", "Publish", "Restore",
             "Save", "Sync", "Unpublish", "Update",
-            "Approve", "Assert", "Build", "Complete", "Confirm", "Deny", "Deploy", "Disable", "Enable", "Install",  # glossary-ok: Deny is a Get-Verb verb, not a refusal
+            "Approve", "Assert", "Build", "Complete", "Confirm",
+            "Deny",  # glossary-ok: Deny is a Get-Verb verb, not a refusal
+            "Deploy", "Disable", "Enable", "Install",
             "Invoke", "Register", "Request", "Restart", "Resume", "Start", "Stop", "Submit", "Suspend", "Uninstall",
             "Unregister", "Wait",
             "Debug", "Measure", "Ping", "Repair", "Resolve", "Test", "Trace",
