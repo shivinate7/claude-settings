@@ -1550,8 +1550,8 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # the phrase's sentence part, before or after it. A bare blocker state skips the claim when a join ties it to the claim
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
-# A failing word followed by to, with, a colon or a paren names an outage ("failing to start"), not a red check.
-_FAIL_END = r"(?!\s+(?:to|with)\b|\s*[:(])"
+# A failing word followed by to names an outage ("failing to start"), not a red check.
+_FAIL_END = r"(?!\s+to\b)"
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|running|pending|in\s+progress|failing%s)" % _FAIL_END
     + r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
