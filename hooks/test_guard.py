@@ -12559,6 +12559,12 @@ add("cap: a Write of ../settings.json from a checkout's hooks folder, marked by 
 sh("cap: a sed -i of an opus model onto ../settings.json from a checkout's hooks folder, marked by .git, asks",
    "sed -i 's/" + CAP_KEY + "=sonnet/" + CAP_KEY + "=" + OPUS + "/' ../settings.json",
    "ask", "agent-model-cap", cwd=CHECK_HOOKS, carries=(CAP_KEY + " = " + OPUS,))
+# A LEADING `cd` MOVES THE FOLDER A RELATIVE TARGET RESOLVES FROM (cap-cd-relative). Run from a folder outside the checkout,
+# `cd <checkout>/hooks && sed -i ... ../settings.json` writes the checkout's root settings file. The shell judges the
+# target from the folder the `cd` reached, so the cap change asks. A `cd` is no second command (ask-alone), so the call asks once.
+sh("cap: a cd into a checkout's hooks folder, then a sed -i of an opus model onto ../settings.json, from a folder outside the checkout, asks",
+   "cd " + CHECK_HOOKS + " && sed -i 's/" + CAP_KEY + "=sonnet/" + CAP_KEY + "=" + OPUS + "/' ../settings.json",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY + " = " + OPUS,))
 # THE INSTALL SCRIPT MARKS A SETTINGS PLACE. A folder with the install script and no `.git` is an export. A local
 # install from it links ~/.claude/settings.json to its settings.json (install.sh, install.ps1), so a cap write to
 # `../settings.json` from its hooks folder asks, as it does from a checkout.
