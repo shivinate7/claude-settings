@@ -1,11 +1,11 @@
 {
   "title": "question_form finds its install folder through shared_names.install_root alone, and the use_hooks_home lookup goes",
   "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 16:58 CST Nov 8; Merge after: #2321 (step hooks-home-lookups). shared_names.install_root(HERE) already finds lint/ from a stamped guard.d/<id>/ copy, so question_form's use_hooks_home call and its told-folder lookup install_path are a second lookup for one job (rule building-one-home-per-capability). #2321 keeps both, with the reason in its record: a builder tried the merge there and the mutant survived (its diff is in that lane's scratchpad, qfmut-b7e1/f2.diff). Fix: remove the use_hooks_home call in guard.py and its refusal path; make install_path use install_root; swap the mutant \"copy is not told its install folder\" in hooks/mutate_guard.py for one on install_root, and update its test mention; rewrite decision install-hooks-whole lines 13 and 17. A test-author goes before the builder.",
-  "note": "",
+  "note": "Wording fixes from the #2321 reviews (lane 17:09 CST Nov 8), for the same record lines: (a) the override.py bullet in decision install-hooks-whole says a copy's override read fails and \"the refusal stands with no override lifted\"; wrong, since override.take already lifted the refusal from a copy on the base, and #2321 fixes only the owner-text lookup (_text_of). (b) The _print_crash_deny text says the guard \"refuses every call, Bash and PowerShell too\"; the question_form path refuses only ArtifactData and Artifact-publish calls. (c) Record line 13 should say \"the PreToolUse guard does not reach decision_watch\"; the local_time, override, call_judge path reaches it lazily.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 842,
-  "updatedAt": "2026-11-08T16:59:00-06:00"
+  "updatedAt": "2026-11-08T17:09:00-06:00"
 }

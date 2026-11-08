@@ -1,11 +1,11 @@
 {
   "title": "Hook modules find lint/ through one hooks-home lookup, and their fail-open paths refuse",
   "why": "Lane bg-tail-loses-verdict, 16:00 CST Nov 8, from round-3 or later reviews; queued follow-up the lane starts when its wait ends. Started 15:51 CST, branch hooks-home-lookups off #2301. Four modules find lint/ from their own folder; the closure walk stops at lint/; reread_check Stop, pre-read and post-compact modes allow when ph is None; page checks allow on an unreadable layout; partial-module load checks; question_form import failure fails open; a use_hooks_home mutant.",
-  "note": "",
+  "note": "#2321 passed round 3 (sonnet), net value positive, and is handed to runner 8 (lane 17:09 CST Nov 8).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85)",
-  "status": "doing",
+  "status": "ready",
   "order": 833,
-  "updatedAt": "2026-11-08T16:01:00-06:00"
+  "updatedAt": "2026-11-08T17:09:00-06:00"
 }
