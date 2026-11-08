@@ -792,7 +792,7 @@ CARRY_LINES = (
 # `pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
 # A PR with no `#` is no source, and the word beside it (git, page, digest) does not rescue it (see
-# item_names_source): "PR 978", "PR978", "PR-978", "PR: 978", "PR number 978", "PR no. 978", "PRs 978", "pull 978",
+# item_names_source): "PR 97", "PR97", "PR-97", "PR: 97", "PR number 97", "PR no. 97", "PRs 97", "pull 97",
 # "pull request 978", "pull requests 978".
 SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
