@@ -28,8 +28,9 @@ Every doc is scanned, as parsed JSON, before the first write: each string value,
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
 Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP host too. A file that is not UTF-8 is
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
-words such as "token budget" or "password manager" pass. So do a password word with a
-placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
+words such as "token budget" or "password manager" pass. So do a password word with a placeholder, a mask or a plain
+word as its value and only blanks or plain prose (a function word, then letter words) after it on its line,
+`PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
@@ -85,16 +86,17 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
-# Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
-# from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
-# Everyday words that end in `key`. A `key` that ends one of them as a whole word is no key word, so `monkey: Banana12345`
-# passes. The stem must start the word (string start or a non-letter before it): `commonKey` and `returnKey` hold the
-# stems `mon` and `turn` but are credential names. Any other `key`, `secret`, `token` or `cookie` in a name counts.
+# Everyday words that end in `key`. A lookbehind on the letters before `key` in each (`mon`, `whis`) makes a `key`
+# right after them no key word, so `monkey: Banana12345` passes. The stem must start the word (string start or a
+# non-letter before it): `commonKey` and `returnKey` hold the stems `mon` and `turn` but are credential names. Any
+# other `key`, `secret`, `token` or `cookie` in a name counts, however it is glued to the word before it.
 EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
 KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
 # The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
 # end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
 VALUE_LOOKAHEAD_MAX = 256
+# Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
+# from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
@@ -153,17 +155,20 @@ SECRET_SHAPES = (
     ("address", re.compile(
         r"(?<![A-Za-z0-9])[A-Z][A-Za-z.]*(?:[ \t][A-Z][A-Za-z.]*)*,[ \t]*(?:" + STATE_CODES + r")[ \t]+\d{5}(?:-\d{4})?(?!\d)")),
 )
-# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path. Each
-# must be the whole rest of its line, after one pair of wrapping quotes or brackets and trailing `.,;` are taken off:
-# a word after it on the same line may be the secret (`none hunter2`). Anything else is refused.
+# A value after a password word that names no secret: a word, a mask, a template placeholder or (after PWD) a path,
+# after trailing `.,;`, a closing backtick, a `)` or `]` that closes a wrapper opened before the match, and one pair of
+# wrapping quotes or brackets are taken off (bare_value). Only blanks or plain prose (PROSE_REST)
+# may follow it on its line: another word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
     r"<[A-Za-z_ -]+>|\$\{[A-Z][A-Z_]*\}|\{\{[A-Z][A-Z_]*\}\}|\$[A-Z][A-Z_]*|%[A-Z][A-Z_]*%")
 REST_OF_LINE = re.compile(r"[^\r\n]*")  # the text after a password value, up to its line end
-# Prose after a value: a function word first, then only letter words. A digit, a symbol or a word glued to the value
-# (`none hunter2`, `none, hunter2`) is not prose, and a value must not hide a secret after a plain word.
+# Prose after a value: a function word first, then only letter words. A digit, a symbol or a word that is no function
+# word right after the value (`none hunter2`, `none, hunter2`) is not prose, and a value must not hide a secret after a
+# plain word. A `,` `;` or `.` that the value takes (`none,`) never reaches the separator test below, so
+# `password: none, then swordfish` passes: the rest is a function word then letter words.
 PROSE_FUNCTION_WORDS = ("a", "an", "the", "for", "to", "in", "on", "at", "of", "by", "with", "from", "as", "if", "when",
                         "while", "until", "unless", "and", "or", "but", "is", "are", "since", "because", "so", "then")
 PROSE_REST = re.compile(
