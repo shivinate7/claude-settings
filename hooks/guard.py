@@ -1756,7 +1756,6 @@ def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
 
 WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
 WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
-WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
 def workflow_command_tests(command: str) -> set:
@@ -1782,6 +1781,7 @@ def workflow_command_tests(command: str) -> set:
 
 def workflow_run_commands(text: str):
     """The command lines of every `run:` in `text`: an inline value, or each line of a block scalar."""
+    steps = _lint_module("workflow_steps")
     commands, block = [], None
     for line in text.splitlines():
         if block is not None:
@@ -1789,11 +1789,13 @@ def workflow_run_commands(text: str):
                 commands.append(line.strip())
                 continue
             block = None
-        opened = WORKFLOW_RUN_BLOCK.match(line)
-        if opened:
-            block = len(opened.group(1)) + (2 if line.lstrip().startswith("- ") else 0)
-        elif WORKFLOW_RUN_PREFIX.match(line):
-            commands.append(WORKFLOW_RUN_PREFIX.sub("", line, count=1))
+        if WORKFLOW_RUN_PREFIX.match(line):
+            value = WORKFLOW_RUN_PREFIX.sub("", line, count=1)
+            # lint/workflow_steps.py decides what a block header is: a comment after it is no script.
+            if steps.BLOCK_HEADER.fullmatch(steps.drop_comment(value.strip())):
+                block = len(line) - len(line.lstrip()) + (2 if line.lstrip().startswith("- ") else 0)
+            else:
+                commands.append(value)
     return commands
 
 
@@ -2643,13 +2645,18 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
-def _layout_module():
-    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+def _lint_module(name):
+    """The lint/ module `name`, imported from the lint folder beside this file's folder. The one home of the
+    import. An import that fails raises: the judge's crash handler logs it as guard-crash, never a silent allow."""
     lint = os.path.join(_HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    import layout
-    return layout
+    return importlib.import_module(name)
+
+
+def _layout_module():
+    """lint/layout.py."""
+    return _lint_module("layout")
 
 
 def record_branch_of(root):
