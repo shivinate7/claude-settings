@@ -14365,6 +14365,15 @@ sh("builder-test: shell, cd tests; sed -i on src/app.py with $! captured, is ref
 sh("builder-test: shell, cd tests && sleep 1 & echo $!, then sed -i on tests/test_a.py, is refused "
    "[follow_cd control]", "cd tests && sleep 1 & echo $!; sed -i s/a/b/ tests/test_a.py", "deny", rule=BT,
    carries=("test-author",), **DR)
+# F1. A cd inside a backgrounded list applies to the later segments of that list, so the write after it lands in
+# tests and a builder is refused. `& echo $!` passes detached-launch, so the write reaches this reader. The write
+# into src is the control: the same list, judged in src, is allowed.
+sh("builder-test: shell, cd tests && echo x > helper.js &, then $! captured, is refused [follow_cd red]",
+   "cd tests && echo x > helper.js & echo $!", "deny", rule=BT, carries=("test-author",), **DR)
+sh("builder-test: shell, (cd tests && echo x > helper.js) &, then $! captured, is refused [follow_cd red]",
+   "(cd tests && echo x > helper.js) & echo $!", "deny", rule=BT, carries=("test-author",), **DR)
+sh("builder-test: shell, cd src && echo x > app.py &, then $! captured, is allowed [follow_cd control]",
+   "cd src && echo x > app.py & echo $!", "allow", **DR)
 # A listing that prints tracked paths is read by its pathspecs. A redirect word is no pathspec, and a
 # glob pathspec is matched against the tracked tree (DOTROOT holds tests/test_a.py).
 for _name, _command in (
