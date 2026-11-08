@@ -13453,8 +13453,9 @@ class ReviewedList(ReviewEnv):
 # assertion is the old behaviour, so the old code fails it for the named cause: the constant is read only after that assertion.
 SEND_BACK_NOW = 1794153600  # 2026-11-08T16:00:00Z, the clock every send-back case reads at
 SEND_BACK_HOUR = 3600  # seconds
-LANE_ID = "01SendBackLaneQm7x"  # the lane session a pull request body names as https://claude.ai/code/session_<id>
-LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/session_{LANE_ID}\n"
+LANE_ID = "01SendBackLaneQm7x"  # the id of the lane session a pull request body names as https://claude.ai/code/session_<id>
+LANE_SESSION = f"session_{LANE_ID}"  # the token a send back line prints for it, whole
+LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/{LANE_SESSION}\n"
 
 def utc_before(seconds):
     """The ISO time `seconds` before the send-back clock, as the pull list's created_at gives it."""
@@ -13465,11 +13466,8 @@ def aged_pull(n, sha, seconds, draft=True, body=LANE_BODY):
     return batch_pull(n, sha, draft=draft, created_at=utc_before(seconds), body=body)
 
 def read_at(host, now):
-    """-> reviewed_read's lines at the clock `now` (epoch seconds). A reviewed_read with no clock parameter is the read before the age rule, which
-    gives the same lines at any clock, so it runs without one."""
-    if "now" in inspect.signature(merge.reviewed_read).parameters:
-        return merge.reviewed_read(host, now=now)[0]
-    return merge.reviewed_read(host)[0]
+    """-> reviewed_read's lines at the clock `now` (epoch seconds)."""
+    return merge.reviewed_read(host, now=now)[0]
 
 def assert_off_the_list(test, lines, n):
     """Pull request n is on the read (scope first), and no line still lists it as before: neither its state line nor the `no record:` line."""
@@ -13478,11 +13476,11 @@ def assert_off_the_list(test, lines, n):
     still = [l for l in lines if l.startswith(f"#{n} ") or (l.startswith("no record:") and re.search(rf"#{n}\b", l))]
     test.assertEqual(still, [], "#%d still prints its old line:\n%s" % (n, out))
 
-def send_back_line(test, lines, n, reason, sid=LANE_ID):
-    """The one send back line of pull request n: it names `sid` (the bare session id, or `no session`), then `reason` (a regex) in brackets."""
+def send_back_line(test, lines, n, reason, token=LANE_SESSION):
+    """The one send back line of pull request n: it names `token` (the whole `session_<id>`, or `no session`), then `reason` (a regex) in brackets."""
     hits = [l for l in lines if l.startswith(f"{merge.REVIEW_SEND_BACK}#{n} ")]
     test.assertEqual(len(hits), 1, "want one send back line for #%d:\n%s" % (n, "\n".join(lines)))
-    test.assertRegex(hits[0], rf"^{re.escape(merge.REVIEW_SEND_BACK)}#{n} (?:session_)?{re.escape(sid)} \({reason}\)$")
+    test.assertRegex(hits[0], rf"^{re.escape(merge.REVIEW_SEND_BACK)}#{n} {re.escape(token)} \({reason}\)$")
     return hits[0]
 
 class ReviewedSendBack(ReviewEnv):
@@ -13507,7 +13505,7 @@ class ReviewedSendBack(ReviewEnv):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + "A note after the CI line.\n")]
         lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
         assert_off_the_list(self, lines, 7)
-        send_back_line(self, lines, 7, r"bad: .*(last line|CI line)")
+        send_back_line(self, lines, 7, r"bad: .*CI line.*")
 
     def test_other_malformed_records_are_sent_back_as_bad(self):
         forms = {"the PR number is another pull request's": record_text(n=8, rounds=REVIEW_PASS),
@@ -13523,7 +13521,7 @@ class ReviewedSendBack(ReviewEnv):
     def test_a_draft_whose_body_names_no_session_says_no_session(self):
         lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR, body="Change summary.\n")])
         assert_off_the_list(self, lines, 7)
-        send_back_line(self, lines, 7, "no record", sid="no session")
+        send_back_line(self, lines, 7, "no record", token="no session")
 
     def test_the_last_session_url_in_the_body_names_the_lane(self):
         body = f"Change summary.\n\nhttps://claude.ai/code/session_01OldLaneSession0000\n\nhttps://claude.ai/code/session_{LANE_ID}\n"
@@ -13561,6 +13559,45 @@ class ReviewedSendBack(ReviewEnv):
 
     def test_a_draft_exactly_12_hours_old_is_not_sent_back(self):
         self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 12 * SEND_BACK_HOUR)]), ["no record: #7"])
+
+
+def good_record_text():
+    """A well-formed record: a normal pull request, one passing round, Net value not owed."""
+    return merge.review_body(7, REVIEW_HEAD, "normal", "no", [(1, "reviewer", "sonnet", "PASS")], "not owed")
+
+def parse_malformed_forms():
+    """The record texts the walk refuses for a syntax reason, keyed by the rule each breaks: the CI line is not last, a round verdict is not in the
+    list, the net value is not in the list, and the head is not 40 hex. A record for another pull request parses, so reviewed_read refuses it, not the walk."""
+    return {"prose after the CI line": record_text(rounds=REVIEW_PASS) + "A note after the CI line.\n",
+            "a round verdict is not PASS, FAIL or PARTIAL": record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)),
+            "a net value is not in the list": record_text(net="sometimes"),
+            "a head is not 40 hex": record_text(head=REVIEW_HEAD[:39])}
+
+class ReviewParseError(ReviewEnv):
+    """`review_parse_error` is None for a well-formed record and one line naming the first rule the text breaks otherwise. It is the walk that
+    parse_review reads, so the two agree on every text."""
+
+    def test_a_good_record_has_no_parse_error(self):
+        self.assertIsNone(review_fn(self, "review_parse_error")(good_record_text()))
+
+    def test_each_malformed_form_has_a_one_line_parse_error(self):
+        for form, text in parse_malformed_forms().items():
+            with self.subTest(form=form):
+                err = review_fn(self, "review_parse_error")(text)
+                self.assertIsInstance(err, str, f"{form}: no parse error")
+                self.assertTrue(err and "\n" not in err, f"{form}: the parse error is not one line:\n{err}")
+
+    def test_the_prose_form_names_the_ci_line(self):
+        err = review_fn(self, "review_parse_error")(parse_malformed_forms()["prose after the CI line"])
+        self.assertRegex(err, "CI line")
+
+    def test_parse_review_is_none_exactly_when_the_parse_error_is_set(self):
+        texts = {"a good record": good_record_text(), **parse_malformed_forms()}
+        for form, text in texts.items():
+            with self.subTest(form=form):
+                refused = merge.parse_review(text) is None
+                self.assertEqual(refused, review_fn(self, "review_parse_error")(text) is not None,
+                                 f"parse_review and review_parse_error disagree on {form}")
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
