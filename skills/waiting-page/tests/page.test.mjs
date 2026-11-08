@@ -7940,3 +7940,78 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// ---------------------------------------------------------------- the recommended option, and the answer's label
+// `recommended` is a key, or a list of keys on a multi item, that the page stars. The star falls back to `pick` for an
+// old item. The star and the stood line say "Recommended". Each saved decision answer carries `label` beside `choice`:
+// "A: <option label>" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key.
+
+test("the star sits on the recommended option, not on the pick", async (t) => {
+  const it = mk("rec-star", 40, { recommended: "b", pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the recommended option b");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star still sits on the pick a");
+});
+
+test("an old item with no recommended stars its pick", async (t) => {
+  const it = mk("old-pick", 41, { pick: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.locator(`label[for="o-${it.id}-b"] .pick`).count(), 1, "the star is not on the pick b of an old item");
+  assert.equal(await page.locator(`label[for="o-${it.id}-a"] .pick`).count(), 0, "the star sits on a with no recommended");
+});
+
+test("the star is named Recommended in its label and its tooltip", async (t) => {
+  const page = await open(t); if (!page) return;
+  const star = page.locator(`label[for="o-${DECISION.id}-a"] .pick .spark`);
+  assert.equal(await star.getAttribute("aria-label"), "Recommended", "the star's label is not Recommended");
+  assert.equal(await star.getAttribute("title"), "Recommended", "the star's tooltip is not Recommended");
+});
+
+test("a stood pick says The recommended option goes with your next Send.", async (t) => {
+  const it = mk("stood-rec", 42, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(".ready").textContent(), "The recommended option goes with your next Send.");
+});
+
+test("an item that names recommended draws no field warning", async (t) => {
+  const it = mk("rec-field", 43, { recommended: "b" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal((await card(page, it).textContent()).includes("Which field"), false, "the card warns a field the page does not draw");
+});
+
+test("a pick-one answer carries its label, A: Red, beside its choice", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the choice is no longer the key");
+  assert.ok(typeof a.label === "string", "the answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^a: Red$/i);
+});
+
+test("a none answer carries the label none of these, and its choice stays none", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addNote(page, DECISION, "Green please");
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "none");
+  assert.ok(typeof a.label === "string", "the none answer has no label: " + JSON.stringify(a));
+  assert.match(a.label, /^none of these$/i);
+});
+
+test("a multi answer carries a list of labels, one per tick, beside its list of keys", async (t) => {
+  const it = multi("label-multi", 44);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 3);
+  await takePick(page, it);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "c"], "the multi choice is no longer the list of keys");
+  assert.ok(Array.isArray(a.label), "the multi answer has no list of labels: " + JSON.stringify(a));
+  assert.equal(a.label.length, 2);
+  assert.match(a.label[0], /^a: Red$/i);
+  assert.match(a.label[1], /^c: Green$/i);
+});
