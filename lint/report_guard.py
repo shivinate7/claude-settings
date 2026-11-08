@@ -1619,10 +1619,10 @@ CANNOT_RE = re.compile(
     _NOT_NAME + "(?:%s)(?![\\w-])" % "|".join(_clause.form_pattern(form) for form in _clause.CANNOT_FORMS),
     re.I)
 # The words just before the phrase must hold the writer's own subject (_clause.own_subject), or the phrase opens its clause.
-# Any other subject (it, the guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about
-# this session. A conditional or a negator just before the phrase (_clause.conditional, _clause.negated_near) is no claim.
-# A passive act whose clause says where it runs ("can't be merged from here") is a claim whatever its subject.
-CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\b", re.I)
+# Any other subject (it, the guard, the lane, the session, a builder in this session, a draft PR) is another party, so the
+# sentence is no claim about this session. A conditional or a negator just before the phrase (_clause.conditional,
+# _clause.negated_near) is no claim. A passive act whose clause says where it runs ("can't be merged from here",
+# _clause.FROM_HERE_RE) is a claim whatever its subject.
 # After the phrase: a doubt, a promise or a wait is no claim. "be" skips only before these words: "can't be merged" claims.
 CANNOT_SKIP_NEXT_RE = re.compile(
     r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
@@ -1634,9 +1634,11 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # clause: before it, ending at a semicolon, a colon, a dash, or a comma with so ("CI is red, so I can't merge."); after
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
 # A failing word followed by to and a verb of _clause.OUTAGE_VERBS (start, connect, respond, authenticate, clone ...) names an
-# outage ("failing to start"), not a red check ("because CI is failing to go green" skips). A comma join needs the state
-# right before the comma, so "CI is failing to go green, so I cannot merge" blocks with no try: a true block. A checks noun
-# after a noun of _clause.OUTAGE_NOUNS (connection, network, auth, proxy, health ...) is an outage too.
+# outage ("failing to start"), not a red check ("because CI is failing to go green" skips). A sentence that ties a red
+# state to its claim by a so comma or by because is no claim: "CI is red, so I can't merge." and "Because CI is red I cannot
+# merge." skip. A no-try "cannot" without that join blocks: "CI is red so I cannot merge." (no comma) and "CI is failing to
+# go green, so I cannot merge." (the state is not right before the comma). A checks noun after a noun of
+# _clause.OUTAGE_NOUNS (connection, network, auth, proxy, health ...) is an outage too.
 _FAIL_END = r"(?!\s+to\s+(?:%s)\b)" % "|".join(_clause.OUTAGE_VERBS)  # the verbs have one home, lint/_clause.py
 _CI_CHECKS = "".join("(?<!%s )" % noun for noun in _clause.OUTAGE_NOUNS) + "checks?"
 _BLOCKER_TAIL = (
@@ -1755,8 +1757,7 @@ CANNOT_RELAY_FAIL_RE = re.compile(r"\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push)\b")
 # Before the phrase, a bare check word with the writer as subject names no call: "I tried; I cannot push." names no check,
-# while "the push failed, so I could not push" does.
-CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _clause.ADVERB_PATTERN, re.I)  # any -ly adverb too
+# while "the push failed, so I could not push" does (_clause.check_word_counts).
 _CHECK_WORD = "(?:%s)" % "|".join(_clause.CHECK_WORDS)  # the words have one home, lint/_clause.py
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
 _BACK = _clause.BACK_PATTERN  # "sent back 403": a status the call answered with; the words have one home, lint/_clause.py
@@ -1862,7 +1863,7 @@ def _claim(body, mask, hit, floor, scan):
             _clause.veil(after, mask[hit.end():end])):  # "until" in a code span waits on nothing
         return None
     if not _clause.own_subject(before) and not (
-            after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
+            after.lstrip().lower().startswith("be ") and _clause.FROM_HERE_RE.search(after)):
         return None
     left = mask.rfind(";", 0, hit.start()) + 1  # the sentence part between the semicolons around the phrase
     right = mask.find(";", hit.end())
@@ -2250,19 +2251,25 @@ def _head(sentence, tail):
     return sentence[:len(sentence) - len(tail.rstrip())]
 
 
-def _names_a_call(text):
+def _names_a_call(text, writer_counts=False):
     """True when `text` holds a check (CANNOT_CHECK_RE) that names a call. A bare check word (CANNOT_CHECK_WORD_RE) counts
-    only when the writer is not its subject (CANNOT_WRITER_RE): "I tried" names no call. The one home of that test."""
-    return any(not (CANNOT_CHECK_WORD_RE.fullmatch(m.group()) and CANNOT_WRITER_RE.search(text[:m.start()]))
-               for m in CANNOT_CHECK_RE.finditer(text))
+    only when it lies outside a claim phrase ("blocked from" is the claim, not its check) and _clause.check_word_counts
+    accepts it: the writer as its subject names no call ("I tried"), unless `writer_counts`, and a speech word needs a
+    tool, hook, check, command or remote as its subject. The one home of that test."""
+    phrases = [hit.span() for hit in CANNOT_RE.finditer(_mask(text))]
+    return any(not CANNOT_CHECK_WORD_RE.fullmatch(m.group()) or (
+        _clause.check_word_counts(text[:m.start()], m.group(), writer_counts)
+        and not any(a <= m.start() < b for a, b in phrases))
+        for m in CANNOT_CHECK_RE.finditer(text))
 
 
 def _names_check(sentence, tail):
     """True when `sentence` names its check (CANNOT_CHECK_RE), read with its emphasis marks removed (_strip_emphasis). In
-    `tail`, the text after the phrase, any form counts. Before the phrase, a bare check word counts only when the writer is
-    not its subject (_names_a_call)."""
+    `tail`, the text after the phrase, any form counts but a bare check word that the phrase holds or that a speech word
+    with no tool, hook, check, command or remote as its subject makes. Before the phrase, a bare check word counts only when the
+    writer is not its subject (_names_a_call)."""
     head = _strip_emphasis(_head(sentence, tail))[0]
-    return bool(CANNOT_CHECK_RE.search(_strip_emphasis(tail)[0])) or _names_a_call(head)
+    return _names_a_call(_strip_emphasis(tail)[0], writer_counts=True) or _names_a_call(head)
 
 
 # The act a sentence's own words are about: the verb of a table act, a PR act's verb only beside the PR word. github-reach
