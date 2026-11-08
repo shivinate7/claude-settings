@@ -137,23 +137,84 @@ ENV_ADVICE = (
     "A listing and a test for existence are allowed."
 )
 
-# Runners that start a child command. Their option words that take the next word as a value, by
-# runner family. DESIGN: the uv, docker and npm scans read an option off the list as a possible
-# value owner (`_child_starts`), so a missing value flag costs a false alarm at most; only the node
-# scan keeps a closed list. pnpm's `-r` and `-w` are bools there, so the pnpm walk drops them from
-# the list. `-c` of npm is the child, so it is never a value flag.
+# Runners that start a child command. Per runner, the options that take the next word as a value
+# and the options that take none, each read from the tool's own help. DESIGN: a flag in neither
+# list may be either, so `_child_starts` reads it both ways (a false alarm at most); every `--no-*`
+# flag is a bool unless the value list names it. Only the node scan keeps a closed list, in
+# `_first_positional`. `-c` of npm and pnpm is the child's shell string, so it is in neither list.
 ENV_NPM_RUNNERS = tuple(c for c in ENV_LOADER_COMMANDS if c.startswith(("npm", "npx", "pnpm")))
-_CONTAINER_FLAGS = (
-    "-e", "--env", "--name", "-v", "--volume", "-p", "--publish", "-w", "--workdir", "--network",
-    "--net", "-u", "--user", "-f", "--file", "--project-name", "--profile", "--mount", "--label",
-    "--hostname", "--platform", "-m", "--memory", "--gpus", "--restart", "--cpus", "--add-host",
-)
 ENV_CHILD_VALUE_FLAGS = {
     "node": ENV_RUNNER_VALUE_FLAGS,
-    "npm": ENV_RUNNER_VALUE_FLAGS + ("-w", "--workspace", "-p", "--package", "--prefix"),
-    "uv": ENV_RUNNER_VALUE_FLAGS + (
-        "--with", "-p", "--python", "--project", "--directory", "--package", "--group"),
-    "docker": ENV_RUNNER_VALUE_FLAGS + _CONTAINER_FLAGS,
+    # `npm exec --help`, plus npm's own config options that most often precede the child.
+    "npm": (
+        "--env-file", "-w", "--workspace", "-p", "--package", "--prefix", "--loglevel", "--registry",
+        "--cache", "--userconfig", "--node-options", "--script-shell", "--color"),
+    # `pnpm help exec` and `pnpm help dlx`.
+    "pnpm": (
+        "--env-file", "-C", "--dir", "--loglevel", "--resume-from", "--workspace-concurrency",
+        "--reporter", "-F", "--filter", "--filter-prod", "--test-pattern",
+        "--changed-files-ignore-pattern", "--package", "--allow-build"),
+    # `bun x --help`.
+    "bun": (
+        "--env-file", "-p", "--package", "--cwd", "--minimum-release-age", "--registry", "--ca",
+        "--cafile"),
+    # `uv run --help`.
+    "uv": (
+        "--env-file", "--extra", "--no-extra", "--group", "--no-group", "--only-group",
+        "--no-editable-package", "-w", "--with", "--with-editable", "--with-requirements",
+        "--package", "--python-platform", "--index", "--default-index", "-i", "--index-url",
+        "--extra-index-url", "-f", "--find-links", "--index-strategy", "--keyring-provider", "-P",
+        "--upgrade-package", "--upgrade-group", "--resolution", "--prerelease", "--fork-strategy",
+        "--exclude-newer", "--exclude-newer-package", "--no-sources-package", "--reinstall-package",
+        "--link-mode", "-C", "--config-setting", "--config-settings-package",
+        "--no-build-isolation-package", "--no-build-package", "--no-binary-package", "--cache-dir",
+        "--refresh-package", "-p", "--python", "--color", "--allow-insecure-host", "--directory",
+        "--project", "--config-file"),
+    # `docker run --help`, which `docker container run`, `podman run` and `exec` share (`exec` takes
+    # a subset), and `docker compose`'s global `-f`, `--file`, `--project-name` and `--profile`.
+    "docker": (
+        "--add-host", "--annotation", "-a", "--attach", "--blkio-weight", "--blkio-weight-device",
+        "--cap-add", "--cap-drop", "--cgroup-parent", "--cgroupns", "--cidfile", "--cpu-count",
+        "--cpu-percent", "--cpu-period", "--cpu-quota", "--cpu-rt-period", "--cpu-rt-runtime", "-c",
+        "--cpu-shares", "--cpus", "--cpuset-cpus", "--cpuset-mems", "--detach-keys", "--device",
+        "--device-cgroup-rule", "--device-read-bps", "--device-read-iops", "--device-write-bps",
+        "--device-write-iops", "--dns", "--dns-option", "--dns-search", "--domainname",
+        "--entrypoint", "-e", "--env", "--env-file", "--expose", "--gpus", "--group-add",
+        "--health-cmd", "--health-interval", "--health-retries", "--health-start-interval",
+        "--health-start-period", "--health-timeout", "-h", "--hostname", "--io-maxbandwidth",
+        "--io-maxiops", "--ip", "--ip6", "--ipc", "--isolation", "-l", "--label", "--label-file",
+        "--link", "--link-local-ip", "--log-driver", "--log-opt", "--mac-address", "-m", "--memory",
+        "--memory-reservation", "--memory-swap", "--memory-swappiness", "--mount", "--name",
+        "--network", "--net", "--network-alias", "--oom-score-adj", "--pid", "--pids-limit",
+        "--platform", "-p", "--publish", "--pull", "--restart", "--runtime", "--security-opt",
+        "--shm-size", "--stop-signal", "--stop-timeout", "--storage-opt", "--sysctl", "--tmpfs",
+        "--ulimit", "--umask", "-u", "--user", "--userns", "--uts", "-v", "--volume",
+        "--volume-driver", "--volumes-from", "-w", "--workdir", "-f", "--file", "--project-name",
+        "--profile"),
+}
+ENV_CHILD_BOOL_FLAGS = {
+    "npm": (
+        "-y", "--yes", "-q", "--quiet", "-s", "--silent", "-f", "--force", "-g", "--global",
+        "--verbose", "--offline", "--prefer-offline", "--prefer-online", "--ignore-scripts",
+        "--json", "--dry-run", "--foreground-scripts", "-ws", "--ws", "--workspaces",
+        "--include-workspace-root", "--fund", "--audit", "--no"),
+    "pnpm": (
+        "-r", "--recursive", "-w", "--workspace-root", "-s", "--silent", "--stream", "--parallel",
+        "--aggregate-output", "--report-summary", "--use-stderr", "--fail-if-no-match", "--color"),
+    "bun": ("--bun", "--no-install", "--trust", "--ignore-scripts", "--verbose", "--silent"),
+    "uv": (
+        "--all-extras", "--no-dev", "--no-default-groups", "--all-groups", "-m", "--module",
+        "--only-dev", "--dev", "--no-editable", "--exact", "--no-env-file", "--isolated", "--active",
+        "--no-sync", "--locked", "--frozen", "-s", "--script", "--gui-script", "--all-packages",
+        "--no-project", "--no-index", "-U", "--upgrade", "--no-sources", "--reinstall",
+        "--compile-bytecode", "--no-build-isolation", "--no-build", "--no-binary", "-n",
+        "--no-cache", "--refresh", "--managed-python", "--no-managed-python",
+        "--no-python-downloads", "--system-certs", "--offline", "--no-progress", "--no-config",
+        "-q", "--quiet", "-v", "--verbose", "--help"),
+    "docker": (
+        "-d", "--detach", "-i", "--interactive", "-t", "--tty", "-P", "--publish-all", "-q",
+        "--quiet", "--privileged", "--init", "--read-only", "--rm", "--sig-proxy",
+        "--oom-kill-disable", "--use-api-socket", "--help"),
 }
 ENV_SHELL_C_FLAG = re.compile(r"^-[A-Za-z]*c[A-Za-z]*$")
 ENV_PRINT_PROGRAMS = ("env", "env.exe", "printenv", "printenv.exe")
@@ -751,8 +812,6 @@ def _first_positional(words, i: int, flags) -> int:
     return min(i, len(words))
 
 
-
-
 def _shell_string_prints(text: str, depth: int = 0) -> bool:
     """A shell string (`sh -c "<s>"`, `npm exec -c "<s>"`) is judged segment by segment, the way the
     parent shell form reads a command: `_env_flat` is its one reader of a file name. A segment
@@ -799,34 +858,46 @@ def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
     return _runner_inline_code(words, at, name, fed)
 
 
-# Options known to take no value. An unlisted option is read as a possible value owner, and these
-# are the common ones that are not, so `docker run --rm myimage serve env` has one start, not two.
-ENV_CHILD_BOOL_FLAG = re.compile(
-    r"^(-[ditqy]+|-v+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
-    r"|offline|all-extras|quiet|verbose|yes|active|reinstall|upgrade|refresh|dev|all-packages|sig-proxy|exact|all-groups|silent|stream|no-[a-z-]+))$")
+def _is_bool_flag(word: str, runner: str) -> bool:
+    """True when `word` is a flag of the runner that takes no value: one in its bool list, a
+    `--no-*` flag, or a cluster of short bools such as `-it`."""
+    bools = ENV_CHILD_BOOL_FLAGS[runner]
+    if word in bools:
+        return True
+    if word.startswith("--"):
+        return word.startswith("--no-")
+    return len(word) > 1 and all("-" + c in bools for c in word[1:])
 
 
-def _may_own_value(word: str) -> bool:
+def _owns_literal(words, i: int, runner: str) -> bool:
+    """True when words[i] is a bool flag of npm or pnpm and the next word is exactly `true` or
+    `false`: nopt reads that word as the flag's own value, so it is not the child."""
+    return (runner in ("npm", "pnpm") and i + 1 < len(words) and words[i + 1] in ("true", "false")
+            and _is_bool_flag(words[i], runner))
+
+
+def _may_own_value(word: str, runner: str) -> bool:
     """True when an option word that is not in the runner's value-flag list may still own the next
     word: it has no `=`, is not `--` and is not a known bool flag."""
     return (word.startswith("-") and word != "--" and "=" not in word
-            and not ENV_CHILD_BOOL_FLAG.match(word))
+            and not _is_bool_flag(word, runner))
 
 
-def _child_starts(words, i: int, flags):
+def _child_starts(words, i: int, runner: str):
     """The indexes from `i` where a child command may start, past the runner's options. An option
-    in `flags` owns the next word. Each positional word is a start. When it sits right after an
-    unlisted option it may be that option's value, so the scan goes on past every option, listed,
-    bool or unlisted, to the next positional word, which is a start too: `--cap-add X --pull always
-    alpine env` starts at `X`, `always` and `alpine`. A positional word that follows no unlisted
-    option ends the scan, so a program's own arguments (`docker run --rm myimage serve env`,
-    `uv run -q pytest -k env`, `uv run --exact pytest -k env`) are not starts. A start that is no
-    child costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
-    runners, except a start that is `env` or `printenv`. One false alarm stays: after an option
-    that is neither listed nor in `ENV_CHILD_BOOL_FLAG`, `env` or `printenv` right after the
-    program word or after the program's own option is a start (`uv run --foo pytest env` has
-    starts `pytest` and `env`; so does `uv run --foo pytest -k env`).
+    in the runner's value list owns the next word, and one in its bool list owns none, except that
+    an npm or pnpm bool owns a next word that is exactly `true` or `false`. Each
+    positional word is a start. When it sits right after an option in neither list it may be that
+    option's value, so the scan goes on past every option to the next positional word, which is a
+    start too: `--foo X --bar always alpine env` starts at `X`, `always` and `alpine`. A positional
+    word that follows no such option ends the scan, so a program's own arguments
+    (`docker run --rm myimage serve env`, `uv run -q pytest -k env`) are never starts. FEWEST FALSE
+    ALARMS: a start that is no child costs nothing, since `_child_prints` reads only env, printenv,
+    shells, python and inline runners. One false alarm stays: an option in neither list before a
+    program, then `env` or `printenv` as the program's first word or after its own option
+    (`uv run --foo pytest env` has starts `pytest` and `env`).
     `--` ends the runner's options, so the word after it is the one start."""
+    flags = ENV_CHILD_VALUE_FLAGS[runner]
     while i < len(words):
         word = words[i]
         if word == "--":
@@ -836,10 +907,10 @@ def _child_starts(words, i: int, flags):
         if word in flags:
             i += 2
         elif word.startswith("-"):
-            i += 1
+            i += 2 if _owns_literal(words, i, runner) else 1
         else:
             yield i
-            if not (i and _may_own_value(words[i - 1])):
+            if not (i and _may_own_value(words[i - 1], runner)):
                 return
             i += 1
 
@@ -848,8 +919,7 @@ def _container_child_prints(words, at: int, fed: bool) -> bool:
     """words[at] is `run` or `exec`. The child is the `--entrypoint` program with the words after
     the image, or just the words after the image or container word. Each start that `_child_starts`
     finds is tried as the image."""
-    flags = ENV_CHILD_VALUE_FLAGS["docker"] + ("--entrypoint",)
-    starts = list(_child_starts(words, at + 1, flags))
+    starts = list(_child_starts(words, at + 1, "docker"))
     entry = ""
     for i in range(at + 1, starts[-1] if starts else len(words)):
         if words[i] == "--entrypoint" and i + 1 < len(words):
@@ -871,22 +941,21 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
         at = _first_positional(words, position + 1, flags)
         if at >= len(words):
             return False
-        if name.startswith("bun") and words[at] == "x":  # bun's `x` is the npx form
-            return any(_child_prints(words, c, fed)
-                       for c in _child_starts(words, at + 1, ENV_CHILD_VALUE_FLAGS["npm"]))
+        if name.startswith("bun") and words[at].strip("'\"") == "x":  # bun's `x` is the npx form, `./x` is not
+            return any(_child_prints(words, c, fed) for c in _child_starts(words, at + 1, "bun"))
         if _base(words[at]) not in ENV_NPM_RUNNERS:
             return False
         position, name = at, _base(words[at])
     if name in ENV_NPM_RUNNERS:
-        flags = ENV_CHILD_VALUE_FLAGS["npm"]
-        if name.startswith("pnpm"):  # pnpm's -r and -w are bools, not node's --require or npm's --workspace
-            flags = tuple(f for f in flags if f not in ("-r", "-w"))
-        exec_at = position if name.startswith("npx") else -1  # npx's child follows its options
+        pnpm = name.startswith("pnpm")
+        runner = "pnpm" if pnpm else "npm"  # pnpm's -r and -w are bools, npm's -w takes a value
+        flags = ENV_CHILD_VALUE_FLAGS[runner]
+        exec_at = position if name.startswith("npx") else -1  # npx's child is its first word
         i = position + 1
 
         def child_prints() -> bool:
             return exec_at >= 0 and any(
-                _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
+                _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, runner))
 
         while i < len(words):
             word = words[i]
@@ -900,27 +969,25 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
             if word in flags:
                 i += 2
             elif word.startswith("-"):
-                i += 1
-            elif not name.startswith("npx") and word in ("exec", "x", "dlx"):
+                i += 2 if _owns_literal(words, i, runner) else 1
+            elif not name.startswith("npx") and (word in ("exec", "x") or (pnpm and word == "dlx")):
                 exec_at = i  # `x` may be an option value, so it never ends the walk
                 i += 1
-            elif _may_own_value(words[i - 1]):  # may be an unlisted option's value
+            elif _may_own_value(words[i - 1], runner):  # may be an unlisted option's value
                 i += 1
             else:
                 break
         return child_prints()
     if name.startswith("uv"):
-        flags = ENV_CHILD_VALUE_FLAGS["uv"]
         return any(
             words[at] == "run" and any(_child_prints(words, c, fed)
-                                       for c in _child_starts(words, at + 1, flags))
-            for at in _child_starts(words, position + 1, flags))
+                                       for c in _child_starts(words, at + 1, "uv"))
+            for at in _child_starts(words, position + 1, "uv"))
     if name.startswith(("docker", "podman")):
-        flags = ENV_CHILD_VALUE_FLAGS["docker"]
-        for at in _child_starts(words, position + 1, flags):
-            if words[at] == "compose":
+        for at in _child_starts(words, position + 1, "docker"):
+            if words[at] in ("compose", "container"):  # `container run` is `run`
                 return any(words[c] in ("run", "exec") and _container_child_prints(words, c, fed)
-                           for c in _child_starts(words, at + 1, flags))
+                           for c in _child_starts(words, at + 1, "docker"))
             if words[at] in ("run", "exec"):
                 return _container_child_prints(words, at, fed)
     return False

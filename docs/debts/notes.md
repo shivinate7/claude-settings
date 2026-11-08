@@ -49,6 +49,8 @@
 - dw-notice-lead-space-lost: the decision-watch log folds whitespace, losing leading whitespace of a notice; no notice starts with whitespace today (mods/decision-watch)
 - dw-slash-cache-hit-reads-clean: a repeat /dw after a FLAG prints 'nothing to say' like a clean turn; Stops seen is capped at 500 (mods/decision-watch)
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
+- env-child-printer-forms: a runner's shell string allows spaced `{ env; }`, `( env )`, `! env`, `if …; then env; fi`, `export -p`, `set` and `cat /proc/self/environ` (hooks/guard_env.py _shell_string_prints). Fix: none — Claude prints with a bare env or printenv. Until: 2026-11-21
+- env-child-unlisted-flag: a runner flag in neither its value list nor its bool list (a new or rare flag) is read both ways, so `uv run --foo pytest env` and `pnpm exec --foo jest -c env` deny (hooks/guard_env.py _child_starts). Fix: none — the lists come from each tool's help. A flag the help does not name cannot be known. The both-ways reading keeps the deny that a missed value flag would lose. Until: 2026-11-21
 - env-child-printer-forms: a runner's shell string allows spaced `{ env; }`, `( env )`, `! env`, `if …; then env; fi`, `export -p`, `set` and `cat /proc/self/environ` (hooks/guard_env.py _shell_string_prints). Fix: none — unmeasured whether Claude prints through these forms. Until: 2026-11-21
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
