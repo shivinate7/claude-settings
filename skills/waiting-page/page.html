@@ -1823,6 +1823,16 @@ function releaseSent() {
 // the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
 // `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
 // It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
+// A Send can shrink the page (the sent card leaves the open list and the Answered section starts closed), and the browser then clamps the scroll up the page, which moves every card in view.
+// A pad at the page's end keeps the old scroll reachable, so the render can put it back. It gives back only what the scroll no longer needs, on each scroll, so nothing in view moves as it goes.
+const viewPad = document.body.appendChild(Object.assign(document.createElement("div"), { id: "viewpad", ariaHidden: "true" }));
+const fitPad = (y) => { const nat = document.documentElement.scrollHeight - viewPad.offsetHeight; viewPad.style.height = Math.max(0, Math.ceil(y + innerHeight - nat)) + "px"; };
+function keepScroll(y) {
+  if (Math.abs(scrollY - y) <= 0.5) return;
+  fitPad(y);
+  window.scrollTo(scrollX, y);
+}
+addEventListener("scroll", () => { if (viewPad.offsetHeight) fitPad(scrollY); }, { passive: true });
 function holdView(ids, back) {
   const tops = new Map(), none = Object.assign(() => {}, { tops });
   if (SENT_MOVE !== "sink") return none;
@@ -1838,7 +1848,9 @@ function holdView(ids, back) {
     if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
   }
   if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  const y0 = scrollY;
   return Object.assign(() => {
+    keepScroll(y0);
     const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
     const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
     if (Math.abs(d) > 0.5) window.scrollBy(0, d);
