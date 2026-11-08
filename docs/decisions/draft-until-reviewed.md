@@ -16,14 +16,21 @@ Why: a draft run that arrives while a ready run is in progress cancels it, and a
 Limits:
 
 - A shell-run heredoc body is read whole. An unquoted body's `$(` is read, because bash runs it while writing the file.
-- A quoted body that python, perl, ruby or node runs is not read as shell lines. A bare `gh pr create` line in it is allowed.
-- A quoted interpreter body with any backtick is read whole, split at each backtick. A body with none is not read.
-- A body that python alone runs adds no text, even with a backtick: python runs no shell from a span.
+- A quoted body that python, perl, ruby or node runs is not read as shell lines. A bare `gh pr create` line in a body with no backtick is allowed.
+- A quoted perl, ruby or node body with any backtick is read whole, split at each backtick. A body with none is not read.
+- A body that python alone runs adds no text, even with a backtick. Python can still hand text to a shell through `os.system`, which the guard does not read.
+- A body piped into a shell (`python3 - <<'EOF' | sh`) is read only when the body itself holds the words as shell text. A body that only prints them is allowed, as on main.
 - Each body is judged by its own stage of the header line, or for a written file by the stages that run it.
+- Words decide who runs a body, never a path. A file named `python/t.pl` that perl runs is read, and a written file's own name is no runner.
 - Perl and ruby run a backtick span as a shell. Node does so through `execSync` and the like.
 - The guard pairs no backticks, so a lone backtick in a string cannot hide a real span.
-- A false alarm exists: a perl, ruby or node body that holds a backtick and the words `gh pr create` anywhere is refused.
-- The impeccable rule shares this read. A wrapper word (`env python3 f`, `sudo python3 f`), `./f` or an unknown runner word keeps the body read.
+- A false alarm exists: a backtick span in a perl, ruby or node body that runs nothing is refused. A perl print of a string holding a span is one.
+- The impeccable rule shares this read.
+- A written file run through a known wrapper word (`env python3 f`, `sudo python3 f`) or as `./f` keeps its body read.
+- A body fed to python on stdin stays python's, even behind a known wrapper word.
+- A runner word the guard does not know in front of python (`stdbuf -o0 python3 f.py`) leaves the body python's, so it is allowed.
+- A runner word outside the guard's interpreter list (ash, nodejs, perl5.36) is not known, so `python3 f.py && ash f.py` is allowed.
+- An unknown runner drops the body, as on main, for a non-.sh file name and for stdin. A .sh name stays read, so `mysh f.sh` is refused.
 - A PowerShell here-string that `iex`, `Invoke-Expression`, `pwsh` or `[scriptblock]::Create` runs is read as shell lines. One given to `Set-Content` is allowed. One held in a variable is not read, even when a later line runs the variable (`$b = @"..."@` then `iex $b` or `$b | iex`); main allows it too.
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
