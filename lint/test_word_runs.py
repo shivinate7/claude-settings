@@ -130,6 +130,71 @@ class TopLevelIndentedBlockTests(unittest.TestCase):
                             "the prose after a list-item fence is read as part of the fence's unit")
 
 
+def masked(text):
+    """word_runs.mask_code_spans of `text`. The name is checked first, so a missing name fails with its own message."""
+    if not hasattr(word_runs, "mask_code_spans"):
+        raise AssertionError("word_runs has no mask_code_spans")
+    return word_runs.mask_code_spans(text)
+
+
+def assert_same_shape(case, text, expected, cause):
+    """mask_code_spans(text) matches `expected` with each mask character read as a space. A claim about where a span
+    sits does not depend on the mask character; the NUL case holds that."""
+    case.assertEqual(masked(text).replace("\0", " "), expected.replace("\0", " "), cause)
+
+
+class MaskCodeSpansTests(unittest.TestCase):
+    """mask_code_spans, the masker of inline code for a reader that keeps line and word positions (the report guard's
+    model-name check). A span becomes NUL characters, so a reader never reads a word inside it."""
+
+    def test_a_lone_backtick_masks_nothing(self):
+        for text in ("Done ` alone, with no closer.", "Don't stop ` here."):
+            with self.subTest(text=text):
+                self.assertEqual(masked(text), text, "a lone backtick opened a span")
+
+    def test_a_comment_opener_inside_a_span_is_masked_with_it(self):
+        for opener in ("/*", "//", "#"):
+            with self.subTest(opener=opener):
+                span = "`a %s b`" % opener
+                assert_same_shape(self, "x %s y" % span, "x " + "\0" * len(span) + " y",
+                                  "a %r inside a span was not masked with its span" % opener)
+        # Control: the same openers outside a span are plain text and stay as they are.
+        for text, expected in (("a // b `c` d", "a // b " + "\0" * 3 + " d"),
+                               ("# Heading `x` here", "# Heading " + "\0" * 3 + " here"),
+                               ("a /* b `c` d", "a /* b " + "\0" * 3 + " d")):
+            with self.subTest(text=text):
+                assert_same_shape(self, text, expected, "text outside a span changed")
+
+    def test_a_multi_line_span_keeps_its_line_break(self):
+        assert_same_shape(self, "a `one\ntwo` b", "a " + "\0" * 4 + "\n" + "\0" * 4 + " b",
+                          "a span over two lines was not masked whole, with its line break kept")
+
+    def test_a_span_stops_at_a_blank_line(self):
+        # Control: the same span with no blank line between its halves is masked, so the blank line is what stops it.
+        assert_same_shape(self, "a `one\ntwo` b", "a " + "\0" * 4 + "\n" + "\0" * 4 + " b",
+                          "a span over two lines was not masked whole, with its line break kept")
+        for text in ("a `one\n\ntwo` b", "a `one\n  \ntwo` b"):
+            with self.subTest(text=text):
+                self.assertEqual(masked(text), text, "a span crossed a blank line")
+
+    def test_output_length_equals_input_length(self):
+        rows = ("", "plain text", "a `x` b", "`a\nb` and `c`", "Done (builder `x` sonnet), see `f` (D12).",
+                "a ` lone", "x <!-- c --> `y` // z", "`hold-unsafe-x` (net-value hold) and `/* open",
+                "ünï `cödé`")
+        for text in rows:
+            with self.subTest(text=text):
+                self.assertEqual(len(masked(text)), len(text), "the mask changed the length of the text")
+
+    def test_masked_characters_are_nul_never_spaces(self):
+        self.assertEqual(masked("builder `x` sonnet"), "builder " + "\0" * 3 + " sonnet",
+                         "a span is not masked as one NUL per character")
+        self.assertEqual(masked("builder `x y` sonnet"), "builder " + "\0" * 5 + " sonnet",
+                         "a space inside a span was not masked as a NUL")
+        runs = re.findall(r"[a-z]+|\0+", masked("builder `x` sonnet"))
+        self.assertEqual(runs, ["builder", "\0" * 3, "sonnet"],
+                         "the span does not stand between its two words as a run of its own")
+
+
 class FenceCallersTests(unittest.TestCase):
     def test_each_fence_caller_reads_its_rows_through_code_mask(self):
         # Not built yet: word_runs.code_mask is the claim the callers read through (R1). Each caller is one subtest.
