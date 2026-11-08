@@ -13642,14 +13642,19 @@ BUILDER_GREEN = [
                                        write(os.path.join(w, "latest_results.md"), "better\n"))),
     ("product-rename", _mv("src/app.py", "src/main.py")),
     ("product-delete", _rm("src/contest.py")),
-    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
-    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
+    # Each row keeps the base's owned parts (the test scripts and the `[tool.pytest*]` section), so it
+    # changes no owned part. The `ruff` row keeps its `test` line more than three lines above the flag,
+    # the window disables_tests reads.
+    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n"
+                              "[tool.pytest.ini_options]\nminversion = '7'\n")),
+    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": "jest"}}\n')),
     ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
-    ("ruff-ignore-script", _put("package.json", '{"name": "x", "scripts": {"lint": '
-                                '"ruff check --ignore E501"}}\n')),
+    ("ruff-ignore-script", _put("package.json", '{\n  "name": "x",\n  "scripts": {\n    "test": "jest",\n'
+                                '    "build": "tsc",\n    "clean": "rm -rf dist",\n'
+                                '    "typecheck": "tsc --noEmit",\n    "lint": "ruff check --ignore E501"\n  }\n}\n')),
     ("flake8-ignore-flag", _put("tox.ini", "[testenv:lint]\ncommands = flake8 --ignore=E203\n")),
-    ("ignore-scripts-flag", _put("package.json",
-                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts && jest"}}\n')),
+    ("ignore-scripts-flag", _put("package.json", '{"name": "x", "scripts": {"ci": '
+                                 '"npm ci --ignore-scripts && jest", "test": "jest"}}\n')),
     ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
     ("pyproject-non-pytest", _put("pyproject.toml",
                                   "[project]\nname = 'x'\ndependencies = ['y']\n"
