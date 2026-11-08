@@ -19,8 +19,8 @@ each `git push` call. Quoted text, heredocs and `git log --grep=--force` are not
 | Any forced push whose destination is the default branch | ask |
 | Any forced push whose destination cannot be resolved | ask |
 
-The remedy reads "retry with --force-with-lease=<branch>:<sha>", with the sha your own last push left, read from the reflog with
-`git log -g --grep-reflog='update by push' -1 --format=%H refs/remotes/<remote>/<branch>`, never a tip read after a fetch. It never names the target
+The remedy reads "retry with --force-with-lease=<branch>:<sha>", with the sha you recorded from `git rev-parse <branch>` right after your own last push, never a tip
+read after a fetch or from a reflog that worktrees share. It never names the target
 (`git-remedy-never-names-target`).
 
 - A deletion at the default branch asks. A deletion elsewhere is allowed.
