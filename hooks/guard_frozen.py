@@ -9,7 +9,8 @@ import re
 import guard_core
 from guard_core import (
     REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, norm, resolve_command, segment_tokens, split_segments,
+    code_paths, dir_before_segment, heredoc_code, inline_code, norm, resolve_command, segment_tokens,
+    split_segments,
 )
 from guard_env import _quoted_words
 
@@ -914,15 +915,64 @@ def _inline_scripts(command: str):
                 break
 
 
-def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def interpreter_write_hit(raw: str, cwd: str, predicate, modes=None) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
     `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    `modes` None reads the script by its own write calls (`_py_hit`, `_js_hit`). A tuple of modes
+    reads it with guard_core's `code_paths` instead and hits a string literal whose mode is in the
+    tuple (`FROZEN_CODE_MODES`).
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
+        if modes is not None:
+            return _code_literal_hit(raw, cwd, predicate, modes)
         return _interpreter_write_hit(raw, cwd, predicate)
     except Exception:
         return ""
+
+
+# The frozen rule refuses a literal the interpreter writes, and one whose use the reader cannot tell
+# ("unknown": a name handed to some other call, held in a variable, or built from parts). A read, an
+# existence check and a printed or compared string are never refused (decision frozen-path-resolves-shell-vars).
+FROZEN_CODE_MODES = ("write", "unknown")
+_CODE_WORDS = re.compile(r"py|node|bun|deno")
+
+
+def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
+    """The first string literal of the python and node code in `raw` that `predicate` accepts with a
+    mode in `modes`. Cost: no heredoc and no interpreter word in the command reads nothing; else one
+    tokenize per segment and one parse per script."""
+    if not _CODE_WORDS.search(raw):
+        return ""
+
+    def hit(code: str, language: str, where: str) -> str:
+        try:
+            literals = code_paths(code, language)
+        except ValueError:
+            return ""   # node code nested past JS_DEPTH: the reader names no path
+        return next((text.strip() for text, mode in literals
+                     if mode in modes and predicate(text.strip(), where)), "")
+
+    for _quote, body, language in heredoc_code(raw):
+        found = hit(body, language, cwd)
+        if found:
+            return found
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    for number, segment in enumerate(segments):
+        if not _CODE_WORDS.search(segment):
+            continue
+        tokens = segment_tokens(segment)
+        for code, language in inline_code(tokens) if tokens else ():
+            found = hit(code, language, dir_before_segment(segments, number, cwd, ends) or cwd)
+            if found:
+                return found
+    return ""
+
+
+def frozen_interpreter_hit(raw: str, cwd: str) -> str:
+    """Return the frozen path a python or node script in `raw` writes, else ''."""
+    return interpreter_write_hit(raw, cwd, is_frozen, FROZEN_CODE_MODES)
 
 
 def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:

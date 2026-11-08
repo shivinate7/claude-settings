@@ -389,7 +389,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_interpreter_hit, frozen_shell_hit,
+            interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -3586,7 +3587,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 7. A frozen path.
-    matched = frozen_shell_hit(stripped, cwd)
+    # The script a python or node heredoc body, -c or -e holds is read from the raw command.
+    matched = frozen_shell_hit(stripped, cwd) or frozen_interpreter_hit(raw, cwd)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
@@ -4756,6 +4758,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+                    or frozen_interpreter_hit(raw, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
