@@ -803,7 +803,7 @@ def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
 # are the common ones that are not, so `docker run --rm myimage serve env` has one start, not two.
 ENV_CHILD_BOOL_FLAG = re.compile(
     r"^(-[ditqy]+|-v+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
-    r"|offline|all-extras|quiet|verbose|yes|active|reinstall|upgrade|refresh|dev|all-packages|sig-proxy|no-[a-z-]+))$")
+    r"|offline|all-extras|quiet|verbose|yes|active|reinstall|upgrade|refresh|dev|all-packages|sig-proxy|exact|all-groups|silent|stream|no-[a-z-]+))$")
 
 
 def _may_own_value(word: str) -> bool:
@@ -820,11 +820,12 @@ def _child_starts(words, i: int, flags):
     bool or unlisted, to the next positional word, which is a start too: `--cap-add X --pull always
     alpine env` starts at `X`, `always` and `alpine`. A positional word that follows no unlisted
     option ends the scan, so a program's own arguments (`docker run --rm myimage serve env`,
-    `uv run -q pytest -k env`) are never starts. FEWEST FALSE ALARMS: a start that is no child
-    costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
-    runners. One false alarm stays: an unlisted bool before a program, then `env` or `printenv` as
-    the program's first word or after its own option (`uv run --exact pytest -k env` has starts
-    `pytest` and `env`; so does `uv run --foo pytest env`).
+    `uv run -q pytest -k env`, `uv run --exact pytest -k env`) are not starts. A start that is no
+    child costs nothing, since `_child_prints` reads only env, printenv, shells, python and inline
+    runners, except a start that is `env` or `printenv`. One false alarm stays: after an option
+    that is neither listed nor in `ENV_CHILD_BOOL_FLAG`, `env` or `printenv` right after the
+    program word or after the program's own option is a start (`uv run --foo pytest env` has
+    starts `pytest` and `env`; so does `uv run --foo pytest -k env`).
     `--` ends the runner's options, so the word after it is the one start."""
     while i < len(words):
         word = words[i]
@@ -870,7 +871,7 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
         at = _first_positional(words, position + 1, flags)
         if at >= len(words):
             return False
-        if name.startswith("bun") and _base(words[at]) == "x":  # bun's `x` is the npx form
+        if name.startswith("bun") and words[at] == "x":  # bun's `x` is the npx form
             return any(_child_prints(words, c, fed)
                        for c in _child_starts(words, at + 1, ENV_CHILD_VALUE_FLAGS["npm"]))
         if _base(words[at]) not in ENV_NPM_RUNNERS:
