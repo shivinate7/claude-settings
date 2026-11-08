@@ -17,6 +17,7 @@ sys.path.insert(0, HERE)
 import merge  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
+import merge_options  # noqa: E402  the one home of the long option names the guard reads (hooks/merge_options.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -9544,6 +9545,14 @@ class MergeImport(unittest.TestCase):
         put(os.path.join(root, "lint", "hook_catalog.py"), "RECORDS_PAGE = missing_name\n")
         r = subprocess.run([sys.executable, tool, "7", "--confirm"], cwd=root, capture_output=True, text=True)
         self.assert_one_clear_line(r, "NameError")
+
+class ParserOptions(unittest.TestCase):
+    """The parser's long options and MERGE_OPTIONS, which the guard reads to name a prefix, are one list. Adding an option to
+    one and not the other fails here."""
+    def test_the_parser_long_options_are_the_merge_options(self):
+        parser = merge.build_parser()
+        long_options = {s for action in parser._actions for s in action.option_strings if s.startswith("--")}
+        self.assertEqual(long_options, set(merge_options.MERGE_OPTIONS))
 
 class RecordsPageHome(unittest.TestCase):
     """The records page path has one home, lint/hook_catalog.py. merge.py imports it and holds no copy."""
