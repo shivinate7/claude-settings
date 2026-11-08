@@ -3069,6 +3069,32 @@ test("the Ask seen stamp moves when the tab hides with a fresh answer in view: c
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with a fresh answer in view did not stamp the asks as seen");
 });
 
+// A newer answer to a row the owner has already seen. Its data-new key is new, so it is unseen: the row's earlier key does not carry over.
+// The answers list still overlaps the fold, with the row below it, so the hide must not stamp past the newer answer.
+test("a newer answer to a row already seen, listed below the fold, does not move the Ask seen stamp when the tab hides", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FRESH_OLD.id]: FRESH_OLD } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  await page.locator(`#row-${FRESH_OLD.id}`).scrollIntoViewIfNeeded();
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), true, "the row is not in view, so the owner has not seen it");
+  await page.waitForFunction((k) => [...askSeenNew].some((s) => s.startsWith(k)), FRESH_OLD.id);
+  await scrollTopTo(page, "#askList", TAB_SHORT.height - 40);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), false, "the row is in view, so this case cannot show a newer answer below the fold");
+  // A newer answer to the same row lands while the tab is still visible. Its time is before the hide.
+  const NEWER = { ...FRESH_OLD, reply: "Answer 2 on the same older thread.", answered: "2026-10-31T05:00:00Z" };
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), NEWER);
+  await page.waitForFunction((k) => /Answer 2 on the same older thread/.test(document.getElementById("row-" + k).textContent), FRESH_OLD.id);
+  assert.equal(await listOnScreen(page), true, "the newer answer moved the answers list off screen, so this case cannot show a hide that stamps");
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), false, "the newer answer brought the row into view, so this case cannot show an answer below the fold");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id} .newmark`).count(), 1, "the newer answer has no New answer mark, so it is not a new answer");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab with a newer answer below the fold moved the Ask seen stamp past it");
+  await page.evaluate((asks) => localStorage.setItem("__stub.asks", JSON.stringify(asks)), { ...TAB_ASKS(), [FRESH_OLD.id]: NEWER });
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id} .newmark`).count(), 1, "the newer answer lost its New answer mark at the next load: the hide stamped it as seen");
+});
+
 // A New answer row the owner saw, then scrolled above the fold while the answers list stays on screen. The row was read, so the hide stamps.
 // NARROW is a 300 px wide screen.
 const SEEN_ROW = { id: "ask-seen-row", text: "New row the owner scrolls past", at: "2026-10-30T12:00:00Z", owner: "triage", answered: "2026-10-31T03:00:00Z", reply: "The reply the owner reads." };
@@ -3115,6 +3141,19 @@ test("a folded thread's fresh reply answer below the fold does not move the Ask 
   await page.reload();
   await shownBox(page, "Seen answer 1");
   assert.equal(await page.locator(`#row-${FOLD_ROOT.id} .newmark`).count(), 1, "the folded reply's answer has no New answer mark at the next load: the hide stamped it as seen");
+});
+
+// The control for the refusal above: a folded reply's fresh answer in view at the hide does move the stamp, so the refusal is not a stamp that never moves.
+test("the Ask seen stamp moves when the tab hides with a folded thread's fresh reply answer in view: control", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id}.folded`).count(), 1, "the thread is not folded at load, so this case cannot show a folded reply's answer");
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), FOLD_REPLY_ANSWERED);
+  await page.waitForFunction((s) => /Answer from/.test(document.querySelector(s) ? document.querySelector(s).textContent : ""), `#row-${FOLD_ROOT.id} .fwait`);
+  await page.locator(`#row-${FOLD_ROOT.id} .fwait`).scrollIntoViewIfNeeded();
+  assert.equal(await foldNoticeOnScreen(page, FOLD_ROOT.id), true, "the folded reply's answer is not in view, so this case cannot show a hide that stamps");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with a folded reply's answer in view did not stamp the asks as seen");
 });
 
 // The restore's pageshow is still queued when the tab hides. The page's record of visibility is the one from before the restore, so the
