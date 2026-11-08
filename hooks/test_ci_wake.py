@@ -77,9 +77,10 @@ with its own -R or --repo (any spelling gh takes), else a PR URL selector's repo
 fixture's `cwd_repo`. An entry with no
 `repo` answers every call. `workflows` is the `gh workflow list` answer (one active `checks` workflow
 when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
-"garbage") fails that one call and no other.
+"garbage") fails that one call and no other. The fixture key `list_error_from` N makes every `run list`
+from the Nth call of the case on exit 1 (HTTP 403), so a re-list can be refused after a judged run.
 
-Draft run, then the real run (debt ci-wake-lists-runs-once): `gh pr create --draft` makes a run
+Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
 once waits on the draft run, reads it as skipped, and prints "CI red ...: workflow checks"
 (judge_runs' "skipped, no job ran") before the real run shows. The cases below use these rules:
@@ -89,8 +90,13 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
+- After the first judged run, the hook re-lists the head once at once. A run visible at that re-list is
+  judged too. Every later list is 30 s or more after the one before it, so a stream of new runs costs
+  one list per 30 s.
 
 Repo rules, each pinned by a case below:
+- A GH_REPO set in the command (`export GH_REPO=o/r`, `$env:GH_REPO = ...`) names the repo of the hook's
+  own gh calls, as a command prefix does.
 - Every gh call of a watch passes the PR's repo as -R, the same one each time. A watch that reads runs
   from the folder's repo finds none, and says "no run yet" for a PR whose CI passed.
 - A repo with no active workflow starts no watch: no output, exit 0, no run read. The hook asks
@@ -337,6 +343,9 @@ def main(args):
     if obj == "run" and verb == "list":
         commit = flag(args, "--commit")
         n = lists_of()
+        if fx.get("list_error_from") and n >= fx["list_error_from"]:   # the lists from that call on are refused
+            sys.stderr.write("HTTP 403: Forbidden\n")
+            return 1
         hits = [r for r in fx["runs"] if here(r, args, fx) and (commit is None or r["headSha"].startswith(commit))
                 and r.get("appears_at_list", 1) <= n]
         sys.stdout.write(json.dumps([view(r, True, n) for r in hits]) + "\n")
@@ -705,11 +714,11 @@ def expect_no_gh(label, res):
 
 def expect_watch(label, res, ids):
     """The status reads, as ids: one read per run for a run that is completed at its first read, and
-    one more id per read for a run still in progress (in_progress_reads). The run list is read once
-    (no polling), and there is no `gh run watch`."""
-    check("%s: status reads are %s, runs listed once, no run watch" % (label, ids),
+    one more id per read for a run still in progress (in_progress_reads). The run list is read at most
+    twice (no polling): one list, then the at-once re-list after the first judged run. No `gh run watch`."""
+    check("%s: status reads are %s, runs listed at most twice, no run watch" % (label, ids),
           sorted(watched(res)) == sorted(ids) and run_watches(res) == []
-          and count(res, "run", "list") <= 1, why(res))
+          and count(res, "run", "list") <= 2, why(res))
 
 
 def guard_silent(label, command, scen=None, tool=bash):
@@ -890,6 +899,76 @@ def case_draft_run_ending_skipped_is_no_run_yet():
     expect_verdict(label, res, "unknown")
     check("%s: wakes near its deadline (3.5 s to 15 s)" % label, 3.5 <= res.elapsed < 15, why(res))
     check("%s: run list read at most twice" % label, count(res, "run", "list") <= 2, why(res))
+
+
+def case_run_visible_at_the_at_once_relist_is_judged():
+    """The first real run is judged, and wait_for re-lists at once. A run visible at that re-list is judged
+    too: a hook that returns after the first judged run never reads it, and says green while it goes on. The
+    control lists both runs at the first list, and passes either way. The red row shows the second run (a
+    different workflow name, so judge_runs keeps both) only at the second list, the at-once re-list after the
+    first run has ended. FAST_SLEEP_LAUNCHER: the pauses cost 0.05 s."""
+    fast = dict(launcher=FAST_SLEEP_LAUNCHER, extra={"CI_WAKE_DEADLINE": "15"})
+    ready = bash("gh pr ready 12")
+    together = run(932, "codeql", "failure", [job("scan", "failure")])
+    later = run(932, "codeql", "failure", [job("scan", "failure")], appears_at_list=2,
+                unfinished_to_list=2, in_progress_reads=1)
+    res = run_hook(ready, fixture(READY, [GREEN, together]), **fast)
+    label = "two real runs listed together, the second failed (control)"
+    expect_verdict(label, res, "red", names_in=["scan"], names_out=["lint", "unit"])
+    check("%s: reads the second run (932)" % label, "932" in watched(res), why(res))
+    res = run_hook(ready, fixture(READY, [GREEN, later]), **fast)
+    label = "second real run listed at the second list, after the first ended"
+    check("%s: reads the second run (932) and lists again" % label,
+          "932" in watched(res) and count(res, "run", "list") >= 2, why(res))
+    expect_verdict(label, res, "red", names_in=["scan"], names_out=["lint", "unit"])
+
+
+def case_the_at_once_relist_judges_the_newest_run_of_a_name():
+    """The at-once re-list can show a newer run of the same name as a run already judged. judge_runs keeps the
+    first run of each name in list order, which is newest first, so the newer run must be judged in place of the
+    green one. Control: both runs listed at the first list, newest first, judge red. Red row: the newer run
+    shows only at the re-list, after the green run was judged, and the verdict must still be red."""
+    ok = run(100, "CI", "success", [job("lint", "success"), job("unit", "success")])
+    late_fail = run(101, "CI", "failure", [job("unit", "failure")], appears_at_list=2,
+                    unfinished_to_list=2, in_progress_reads=1)
+    together = run(101, "CI", "failure", [job("unit", "failure")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [together, ok]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE},
+                   launcher=FAST_SLEEP_LAUNCHER)
+    expect_verdict("both CI runs listed at once, the newer one failed (control)", res, "red",
+                   names_in=["unit"], names_out=["lint"])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [late_fail, ok]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE},
+                   launcher=FAST_SLEEP_LAUNCHER)
+    label = "newer CI run shows only at the at-once re-list, after the green run was judged"
+    check("%s: reads the newer run (101)" % label, "101" in watched(res), why(res))
+    expect_verdict(label, res, "red")
+
+
+def case_failed_re_list_keeps_the_judged_verdict():
+    """A red run is judged, and then the at-once re-list is refused (HTTP 403). The judged run is the answer:
+    the hook says red with its failing jobs, not `CI unknown`. Control: the same run with no refusal."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("red run, no refusal (control)", res, "red", names_in=["unit", "e2e"], names_out=["lint"])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [RED], list_error_from=2),
+                   extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "red run judged, then the at-once re-list is refused"
+    check("%s: reads run 902 and lists twice" % label, "902" in watched(res) and count(res, "run", "list") == 2,
+          why(res))
+    expect_verdict(label, res, "red", names_in=["unit", "e2e"], names_out=["lint"])
+
+
+def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
+    """A stream: each list shows one more run that ended. wait_for re-lists once at once after the first
+    judged run; from then on each list is 30 s or more after the one before it, so the stream costs one gh
+    list per 30 s, not one per run at +0 s. Only the pace is checked: a run first shown after the re-list is
+    not judged here."""
+    stream = [run(940 + k, "checks", "success", [job("unit", "success")], appears_at_list=k + 1)
+              for k in range(12)]
+    raised, clock, calls, deadline = wait_for_on_fakes(stream, 3600)
+    times = list_times(calls)
+    detail = wait_detail(raised, clock, calls, deadline)
+    check("stream of 12 runs, one per list: no exception", raised is None, detail)
+    check("stream of 12 runs, one per list: lists are 30 s or more apart after the at-once re-list, "
+          "%d lists" % len(times), lists_paced(calls, deadline, stream), detail)
 
 
 # watch_run, in process, on fakes (decision ci-wait-reads-run-status). No gh runs and no wait is real.
@@ -1225,10 +1304,34 @@ def list_times(calls):
     return [t for t, a in calls if a[:2] == ["run", "list"]]
 
 
-def lists_paced(times, deadline, gap=30):
-    """Each list is `gap` s or more after the one before it. The one list made at the deadline,
-    after the last pause was cut short, is the only exception."""
-    return all(b - a >= gap or abs(b - deadline) < 1e-6 for a, b in zip(times, times[1:]))
+def judged_read(args, runs):
+    """True for the jobs read (`run view <id> --json ...,jobs`) of a run that ran: the judgement that
+    wait_for makes before it lists again."""
+    if args[:2] != ["run", "view"] or "jobs" not in " ".join(args[3:]):
+        return False
+    hits = [r for r in runs if str(r["databaseId"]) == args[2]]
+    return bool(hits) and hits[0]["conclusion"] not in (None, "skipped")
+
+
+AT_ONCE = 1   # s: a list this close after a judged jobs read is the at-once re-list
+
+
+def lists_paced(calls, deadline, runs, gap=30):
+    """The pace of wait_for's lists. One list may come at once (within AT_ONCE s of a judged jobs read): the
+    re-list after the first judged run, once per wait. That list is the reference for the next one. Every
+    other list is `gap` s or more after the list before it. The list made at the deadline, after the last
+    pause was cut short, is the one other exception."""
+    last, judged_at, used, paced = None, None, False, True
+    for t, a in calls:
+        if judged_read(a, runs):
+            judged_at = t
+        elif a[:2] == ["run", "list"]:
+            if not used and judged_at is not None and t - judged_at <= AT_ONCE:
+                used = True
+            elif last is not None and not (t - last >= gap or abs(t - deadline) < 1e-6):
+                paced = False
+            last, judged_at = t, None
+    return paced
 
 
 def wait_detail(raised, clock, calls, deadline):
@@ -1241,12 +1344,13 @@ def case_wait_for_lists_again_until_a_real_run_shows():
     """wait_for: the real run (922) shows at list 3, after a draft run listed skipped. wait_for lists
     again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
     label = "wait_for, draft run skipped, real run at the third list"
-    raised, clock, calls, deadline = wait_for_on_fakes(
-        [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)], 3600)
+    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)]
+    raised, clock, calls, deadline = wait_for_on_fakes(runs, 3600)
     times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: lists 3 times or more, the first at once" % label, len(times) >= 3 and times[0] == T0, detail)
-    check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+    check("%s: lists 30 s or more apart, but one re-list at once after the judged run" % label,
+          lists_paced(calls, deadline, runs), detail)
     check("%s: reads the real run (922)" % label,
           any(a[:3] == ["run", "view", "922"] for _, a in calls), detail)
 
@@ -1262,7 +1366,8 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
         check("%s: ends at the deadline, not before it and not past it" % label,
               abs(clock.now - deadline) < 1e-6, detail)
         check("%s: no list after the deadline" % label, all(t <= deadline + 1e-6 for t in times), detail)
-        check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+        check("%s: lists 30 s or more apart (no judged run, so no re-list at once)" % label,
+              lists_paced(calls, deadline, [DRAFT_DONE]), detail)
         if budget == 100:
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
@@ -1286,6 +1391,33 @@ def case_wait_for_lists_back_off_like_the_status_reads():
           before == baseline[:len(before)] and len(before) >= 9, detail)
     check("%s: the gaps grow to 90 s or more, never past %d s" % (label, BACKOFF_CAP),
           gaps != [] and 90 <= max(gaps) <= BACKOFF_CAP + 1e-6, detail)
+
+
+def case_lists_paced_takes_one_at_once_relist_per_wait():
+    """The pace check itself, on fixed call lists (no gh, no clock). One list may come at once after a judged
+    jobs read; a skipped read between the judged read and that list does not change it (probe: a judged,
+    skipped, at-once order is no pace break). A second at-once list, or a list at once after the first, is
+    a pace break."""
+    listed = ["run", "list", "--commit", SHA]
+    judged = ["run", "view", "930", "--json", "databaseId,name,status,conclusion,jobs"]
+    skipped = ["run", "view", "931", "--json", "databaseId,name,status,conclusion,jobs"]
+    probe_runs = [run(930, "checks", "success", [job("unit", "success")]),
+                  run(931, "checks", "skipped", [job("unit", "skipped")])]
+    rows = (
+        ("judged, skipped, at-once list, then 30 s", True,
+         [(0, listed), (30, listed), (30, judged), (30, skipped), (30, listed), (60, listed)]),
+        ("at-once list after a judged read, then 30 s", True,
+         [(0, listed), (0, judged), (0, listed), (30, listed)]),
+        ("second at-once list after the first", False,
+         [(0, listed), (0, judged), (0, listed), (0, judged), (0, listed)]),
+        ("at-once list after the first one was used", False,
+         [(0, listed), (30, listed), (30, judged), (30, listed), (30, judged), (30, listed)]),
+        ("two lists 10 s apart", False, [(0, listed), (10, listed)]),
+    )
+    for label, want, calls in rows:
+        got = lists_paced(calls, 3600, probe_runs)
+        check("lists_paced, %s: %s" % (label, "paced" if want else "a pace break"), got == want,
+              "got %r" % got)
 
 
 # The watch names the PR's repo on every gh call and gives that repo's verdict. The rows put the PR in
@@ -1437,6 +1569,82 @@ def case_folder_without_workflows_still_watches_the_pr_repo():
     expect_watch(label, res, ["902"])
 
 
+def case_exported_gh_repo_names_the_pr_repo():
+    """The hook reads GH_REPO only as a prefix of the `gh pr ready` command. `export GH_REPO=o/r` (bash) and
+    `$env:GH_REPO = "o/r"` (PowerShell) set it for gh in the shell, not for the hook. The hook's own gh calls
+    then go to the folder's repo, which holds no PR here, and it says nothing. Controls: the prefix form, and
+    a GH_REPO already in the hook's own environment (gh reads it for every call). Both controls pass either way."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    rows = (
+        ("GH_REPO prefix (control)", bash("GH_REPO=%s gh pr ready 214" % REPO_APP), {}),
+        ("GH_REPO in the hook's environment (control)", bash("gh pr ready 214"), {"GH_REPO": REPO_APP}),
+        ("export GH_REPO, bash", bash("export GH_REPO=%s && gh pr ready 214" % REPO_APP), {}),
+        ("$env:GH_REPO, PowerShell", powershell('$env:GH_REPO = "%s"; gh pr ready 214' % REPO_APP), {}),
+    )
+    for label, payload, env in rows:
+        res = run_hook(payload, fx, extra=dict({"CI_WAKE_DEADLINE": VERDICT_DEADLINE}, **env))
+        check("%s: the watch reads run 901 in %s" % (label, REPO_APP), "901" in watched(res), why(res))
+        expect_verdict(label, res, "green")
+
+
+def case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder():
+    """A GH_REPO the hook cannot expand (`$repo`, `$REPO`, `$(x)`, a backtick) names no repo, so the hook's own
+    gh calls go to the folder's repo, as with no GH_REPO. `$null` clears it, and so does `Remove-Item Env:GH_REPO`
+    after a set. `unset OTHER` leaves GH_REPO set (control). The folder holds one open PR in the fallback rows, so a
+    wrong repo finds nothing. Scope first (the PR read's path), then the verdict."""
+    home = fixture([pr(214, repo=REPO_HOME)], [in_repo(GREEN, REPO_HOME)], cwd_repo=REPO_HOME,
+                   workflows=[wf(repo=REPO_HOME)])
+    app = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                  workflows=[wf(repo=REPO_APP)])
+    folder, app_path = "repos/{owner}/{repo}/pulls/214", "repos/%s/pulls/214" % REPO_APP
+    rows = (
+        ("$env:GH_REPO = $repo", powershell('$env:GH_REPO = $repo; gh pr ready 214'), home, folder),
+        ("export GH_REPO=$REPO", bash("export GH_REPO=$REPO && gh pr ready 214"), home, folder),
+        ("export GH_REPO=$(x)", bash("export GH_REPO=$(x) && gh pr ready 214"), home, folder),
+        ("export GH_REPO=`x`", bash("export GH_REPO=`x` && gh pr ready 214"), home, folder),
+        ("$env:GH_REPO = $null", powershell('$env:GH_REPO = $null; gh pr ready 214'), home, folder),
+        ("$env:GH_REPO set, then Remove-Item Env:GH_REPO",
+         powershell('$env:GH_REPO = "%s"; Remove-Item Env:GH_REPO; gh pr ready 214' % REPO_APP), home, folder),
+        ("export GH_REPO, then unset OTHER (control: stays set)",
+         bash("export GH_REPO=%s && unset OTHER && gh pr ready 214" % REPO_APP), app, app_path),
+    )
+    for label, payload, fx, path in rows:
+        res = run_hook(payload, fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        where = "the folder's repo" if path == folder else REPO_APP
+        check("%s: the PR read goes to %s" % (label, where), api_reads(res)[:1] == [path],
+              "%r; %s" % (api_reads(res), why(res)))
+        expect_verdict(label, res, "green")
+        expect_watch(label, res, ["901"])
+
+
+def case_exported_gh_repo_is_cleared_by_unset_and_empty_export():
+    """An exported GH_REPO lasts until the command clears it. `unset GH_REPO` and `export GH_REPO=` (empty)
+    clear it, so the hook's own gh calls go to the folder's repo, which holds no PR here, and it says nothing.
+    The PowerShell form `${env:GH_REPO} = "o/r"` sets it, as `$env:GH_REPO = ...` does."""
+    fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
+                 workflows=[wf(repo=REPO_APP)])
+    rows = (
+        ("export GH_REPO, then unset GH_REPO", bash("export GH_REPO=%s && unset GH_REPO && gh pr ready 214"
+                                                    % REPO_APP), "clear"),
+        ("export GH_REPO, then export GH_REPO= (empty)", bash("export GH_REPO=%s && export GH_REPO= && gh pr ready 214"
+                                                              % REPO_APP), "clear"),
+        ("${env:GH_REPO} = o/r, PowerShell", powershell('${env:GH_REPO} = "%s"; gh pr ready 214' % REPO_APP), "set"),
+    )
+    for label, payload, want in rows:
+        res = run_hook(payload, fx, extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        if want == "clear":
+            check("%s: the PR read names no repo (the folder's)" % label,
+                  api_reads(res)[:1] == ["repos/{owner}/{repo}/pulls/214"], "%r; %s" % (api_reads(res), why(res)))
+            expect_silent(label, res)
+            expect_no_watch(label, res)
+        else:
+            check("%s: the PR read names %s" % (label, REPO_APP),
+                  api_reads(res)[:1] == ["repos/%s/pulls/214" % REPO_APP], "%r; %s" % (api_reads(res), why(res)))
+            expect_verdict(label, res, "green")
+            expect_watch(label, res, ["901"])
+
+
 def api_reads(res):
     """The words after `api` of every `gh api` call (path, then fields), in order."""
     return [" ".join(c[1:]) for c in map(GH.strip_repo, res.calls) if c[:1] == ["api"] and len(c) > 1]
@@ -1514,6 +1722,25 @@ def case_empty_selector_without_a_branch_is_unknown():
     check("empty selector on a detached HEAD: no PR read", api_reads(res) == [], why(res))
 
 
+def case_hash_number_selector_reads_the_number_route():
+    """read_pr must strip a `#` before it tests the selector for digits. Without that, a quoted "#12" takes
+    the branch route (head=owner:#12), finds no PR, and starts no watch. The selector is quoted on purpose:
+    an unquoted `#` starts a shell comment, so neither the hook nor gh sees a selector there. Each row checks
+    the route first, then the verdict. `gh pr ready 12` is the control."""
+    rows = (
+        ("gh pr ready 12 (control)", "gh pr ready 12", READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
+        ('gh pr ready "#12"', 'gh pr ready "#12"', READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
+        ('gh pr ready "#12" -R o/r', 'gh pr ready "#12" -R %s' % REPO_APP, [pr(12, repo=REPO_APP)],
+         [in_repo(GREEN, REPO_APP)], "repos/%s/pulls/12" % REPO_APP),
+    )
+    for label, command, prs, runs, path in rows:
+        res = run_hook(bash(command), fixture(prs, runs), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+        check("%s: reads the PR by number, %s" % (label, path), api_reads(res)[:1] == [path],
+              "%r; %s" % (api_reads(res), why(res)))
+        expect_verdict(label, res, "green")
+        expect_watch(label, res, ["901"])
+
+
 def load_module():
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
@@ -1571,8 +1798,8 @@ def main():
           why(res))
     check("gh pr ready 12 && gh pr ready 13: reads the status of runs 901 and 911, one each, no run watch",
           sorted(watched(res)) == ["901", "911"] and run_watches(res) == [], why(res))
-    check("gh pr ready 12 && gh pr ready 13: run list read at most twice",
-          count(res, "run", "list") <= 2, why(res))
+    check("gh pr ready 12 && gh pr ready 13: run list read at most four times (one list and one re-list per PR)",
+          count(res, "run", "list") <= 4, why(res))
 
     # A push starts no watch, in any form, and makes no gh call.
     for command in PUSH_FORMS:
@@ -1730,14 +1957,19 @@ def main():
     case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads()
     case_watch_run_completed_wakes_on_the_next_read()
 
-    # A draft run that skips, then the real run (debt ci-wake-lists-runs-once).
+    # A draft run that skips, then the real run.
     case_draft_run_then_real_run()
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
     case_draft_run_ending_skipped_is_no_run_yet()
+    case_run_visible_at_the_at_once_relist_is_judged()
+    case_the_at_once_relist_judges_the_newest_run_of_a_name()
+    case_failed_re_list_keeps_the_judged_verdict()
+    case_new_runs_on_every_list_are_paced_after_the_at_once_relist()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
     case_wait_for_lists_back_off_like_the_status_reads()
+    case_lists_paced_takes_one_at_once_relist_per_wait()
 
     # The repo flag, the no-CI repo, the real alert, and a failed workflow read.
     case_wrong_repo_every_gh_call_names_the_pr_repo()
@@ -1751,12 +1983,16 @@ def main():
     case_attached_short_repo_flag_pins_pr_repo_on_later_calls()
     case_equals_short_repo_flag_pins_pr_repo_on_later_calls()
     case_folder_without_workflows_still_watches_the_pr_repo()
+    case_exported_gh_repo_names_the_pr_repo()
+    case_exported_gh_repo_is_cleared_by_unset_and_empty_export()
+    case_gh_repo_values_the_hook_cannot_read_fall_back_to_the_folder()
 
     # The PR read is REST: the proxy refuses GraphQL.
     case_pr_read_is_rest_for_every_selector()
     case_draft_and_missing_pr_start_no_watch_by_rest()
     case_empty_selector_without_a_branch_is_unknown()
     case_read_pr_maps_rest_fields()
+    case_hash_number_selector_reads_the_number_route()
 
     print()
     print("%d checks, %d failed" % (COUNT[0], len(FAILS)))
