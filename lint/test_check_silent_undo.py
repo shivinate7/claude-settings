@@ -525,6 +525,27 @@ class PrBodyEscape(unittest.TestCase):
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 
+class BodyProse(unittest.TestCase):
+    """The strip of a PR body that the reader runs (body_prose). A lone backtick in one paragraph must not open a code span
+    that runs across the blank line to the next paragraph, so a comment between two such backticks is still dropped, with
+    LF or CRLF line endings."""
+
+    BODY = "Use ` in paragraph one.\n\nSecond paragraph <!-- x --> keeps going.\n\nUse ` in paragraph three.\n"
+
+    def assert_comment_dropped(self, body):
+        prose = C.body_prose(body)
+        # Scope first: both paragraphs come through the strip, so the comment is judged in a body the strip ran over.
+        self.assertIn("Use ` in paragraph one.", prose)
+        self.assertIn("Use ` in paragraph three.", prose)
+        self.assertNotIn("<!-- x -->", prose, "the comment survived the strip: %r" % prose)
+
+    def test_comment_between_two_lone_backticks_is_dropped_with_lf(self):  # control
+        self.assert_comment_dropped(self.BODY)
+
+    def test_comment_between_two_lone_backticks_is_dropped_with_crlf(self):
+        self.assert_comment_dropped(self.BODY.replace("\n", "\r\n"))
+
+
 class Debt19(unittest.TestCase):
     """The three shapes that walked past the banchi revert guard: age, re-wording, a widened hunk."""
 

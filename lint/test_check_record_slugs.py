@@ -1173,6 +1173,24 @@ class RecordSlugsTests(unittest.TestCase):
     def test_cost_on_the_next_bullet_is_not_the_fix_lines_cost(self):
         self.body_case("- n: Fix: none -- slow and", "- m: takes 3 ms", BODY_COMMIT, causes=["a commit"])
 
+    def test_fix_none_then_a_period_then_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none. takes 3 ms", causes=["a cost"])
+
+    def test_fix_none_then_a_comma_then_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none, takes 3 ms", causes=["a cost"])
+
+    def test_fix_none_then_a_single_hyphen_then_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none - takes 3 ms", causes=["a cost"])
+
+    def test_fix_none_then_an_ellipsis_then_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none … takes 3 ms", causes=["a cost"])
+
+    def test_fix_none_then_a_semicolon_then_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none; takes 3 ms", causes=["a cost"])
+
+    def test_bold_fix_label_with_the_colon_outside_the_bold_is_refused(self):  # control: this form is read already
+        self.body_case("- n: **Fix**: none -- 3 ms", causes=["a cost"])
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
