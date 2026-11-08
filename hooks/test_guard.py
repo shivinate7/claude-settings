@@ -5687,6 +5687,15 @@ sh("check-tail: verdict on a lint, then ; git commit, is allowed",
    "verdict python3 lint/ste_lint.py docs/x.md; git commit -m m", "allow", cwd=NOGIT)
 sh("check-tail: lint then && git commit, with no pipe, is allowed",
    "python3 lint/ste_lint.py docs/x.md && git commit -m m", "allow", cwd=NOGIT)
+# A lint piped to tail is refused before a commit or push, also through uv run and a versioned python. An
+# echo after the pipe names neither a commit nor a push, so that call is allowed.
+sh("check-tail: uv run lint script piped to tail, then ; git commit, is refused",
+   "uv run lint/ste_lint.py docs/x.md | tail -2; git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3.11 lint script piped to tail, then && git push, is refused",
+   "python3.11 lint/ste_lint.py docs/x.md 2>&1 | tail -2 && git push origin HEAD:b", "deny",
+   "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then ; echo done, is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2; echo done", "allow", cwd=NOGIT)
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
@@ -5724,6 +5733,18 @@ sh("check-tail: a $(pwd) script path with no space piped to tail in the foregrou
 # Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
 sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
    "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+# A redirect word between the interpreter and the script is read as the script operand, which hides the
+# merge script from the check. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: python3 -u with a 2>&1 redirect before the script, piped to tail, is refused",
+   "python3 -u 2>&1 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a 2>/dev/null redirect before the script, piped to head, is refused",
+   "python3 2>/dev/null merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: a nested substitution and a one-token backtick name the merge script, so each is refused too.
+sh("check-tail: a nested $(dirname $(git rev-parse)) script path piped to tail is refused",
+   "python3 $(dirname $(git rev-parse --show-toplevel))/x/merge/merge.py --lane-lint 7 | tail -3",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a one-token backtick script path piped to tail is refused",
+   "python3 `pwd`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
 
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
