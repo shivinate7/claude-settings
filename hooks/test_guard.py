@@ -28327,6 +28327,25 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 2 of 3 
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 – FAIL line, en dash, pinned",
            "Check the floor fix.\nRound 1 – FAIL\nFiles: hooks/guard.py.")
 
+# A verdict line pasted from a report that names no round must refuse, since a later reviewer reads that verdict as its
+# own. Each row is one line Claude saw, quoted with its source. The FAIL line is the first line of a reviewer agent's
+# report in a lane session, 2026-11-08 08:27 CST. The PASS line is a reviewer report, 2026-11-08 07:51 CST.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: FAIL line that names no round, on haiku",
+           "Check the floor fix.\nDone: FAIL, round not named in brief, claude-haiku-5-5\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: PASS line that names no round, on haiku",
+           "Check the floor fix.\nDone: PASS, round not named in brief, claude-haiku-5-5\nFiles: hooks/guard.py.")
+
+# The verdict ask a brief carries, here as the brief's own first line. It must pass, or a fix check cries wolf. Its
+# source is the orchestrator's brief for this step, which quotes it. An earlier row in this family holds the same words
+# after a task line, so this row pins the opening line of a brief.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose first line is a Done: line that asks for a verdict",
+          "Done: read the diff, then give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
+
+# The builder report line the orchestrator's brief for this step quotes, commit 2318769a1. It refuses at the start head,
+# since a reviewer brief then holds a builder's report, so it is pinned as refused and not as allowed.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief opening with a builder Done: BUILT line, a commit named",
+           "Done: BUILT. Commit 2318769a1 on vlp-r2-build, not pushed.\nFiles: hooks/guard.py.")
+
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
              "model": "haiku"}
