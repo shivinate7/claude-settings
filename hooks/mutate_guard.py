@@ -693,11 +693,11 @@ MUTATIONS = [
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
     # Added: rules guard.py grew after the prior mutation run.
     ("live-stream: never refuse a live stream",
-     '    for segment in split_segments(stripped):\n'
+     '    for segment in (part for text in texts for part in split_segments(text)):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if matched:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
-     '    for segment in split_segments(stripped):\n'
+     '    for segment in (part for text in texts for part in split_segments(text)):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
@@ -2026,9 +2026,13 @@ MUTATIONS = [
      "guard", 'rm-var: a loop deletes under an unguarded variable'),
     # ---- substitution reads (debt guard-substitution-in-token): a command inside `$( )` is judged.
     ("substitution: judge_shell reads only the outer text, so a reset inside a dollar paren passes",
-     '    texts = [stripped, *substitution_commands(raw, stripped)]\n',
-     '    texts = [stripped]\n',
+     '    shared_texts = substitution_commands(raw, stripped, outer=True)\n',
+     '    shared_texts = [stripped]\n',
      "guard", "substitution: shared tree, an assignment from a dollar paren denies"),
+    ("substitution: _push_calls reads no substitution text, so a push to the record branch inside one passes",
+     '    inner += substitution_commands(segment, segment)   # the shell runs each `$( )` and backtick text\n',
+     '',
+     "guard", "a lane's push to roadmap in a dollar paren assignment is refused"),
     # ---- hand-made-worktree (decision lanes-start-in-tool-worktrees): one mutant per branch.
     ("hand-made-worktree: the judge_shell loop never asks, so no hand-made tree is refused",
      '            matched = hand_made_worktree_hit(segments, number, cwd, ends)\n',
