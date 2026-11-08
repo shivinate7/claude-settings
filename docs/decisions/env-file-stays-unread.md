@@ -62,6 +62,9 @@ Folder walk:
 - For rg and ag with no flag that turns the ignore rules off, an ignored file or folder is not read or counted. The walk does not enter an ignored folder. The list is git's own, read once per walk. grep reads ignored files, so they count for grep.
 - The ignore rules are off with `-u` (any count), `--no-ignore` and its variants. For ag, `-U`, `-a`, `--skip-vcs-ignores` and `--all-types` also turn them off. A tracked file is never ignored.
 - The walk stops at 50000 entries, `node_modules` included. It then refuses with a reason that says the folder is too large to check, never that it holds an env file.
+- A folder is always walked, and an env file that an include glob picks is refused at any folder size, whatever its suffix: `--include='*.yaml'` picks an env file that ends `.yaml`. The glob decides only the cap. Past it, a glob that no sample env file name matches, such as `*.py`, is allowed, and any other include glob is refused as too large to check. An rg `-t` type past the cap is refused. The sample-name test is `_glob_could_name_env`, the one home of the question.
+- A `cd` after `&&` or `||` might not run, so the search is judged in the folder before it and the folder after it. A search in a command substitution runs where the segment that holds it runs, so `cd D && x=$(rg --hidden K)` is judged in D.
+- `bash -c -- 'STRING'` runs the string after the `--`, as `bash -c 'STRING'` does.
 - `git grep` reads its first plain word as a pattern, so an env name in it is text. A path after it stays judged.
 - With a hidden flag, rg `-T` excludes only a type. The search still reaches the env file, so a pattern or a path that names one is refused. With `-t`, only a path that names one is refused.
 
@@ -71,9 +74,9 @@ Known limits:
 - ag and grep do not fail closed. An unknown flag there is read as a switch, so the walk can miss a folder the search reads.
 - An rg `!` glob is not read.
 - A brace sequence, such as `{a..c}`, is not expanded.
-- A literal `cd <dir>` earlier in the command is followed, so the search is judged in the folder it runs in. A `cd` the guard cannot resolve (a variable, `popd`, a folder that does not exist) leaves the walk at the starting folder. Other variables and substitutions in a path word are not resolved.
+- A literal `cd <dir>` earlier in the command is followed, so the search is judged in the folder it runs in. A `cd` the guard cannot resolve (a variable, `popd`, a folder that does not exist) leaves the walk at the starting folder. Other variables and substitutions in a path word are not resolved. A search that runs only when its conditional `cd` ran (`test -d D && cd D && rg K`) is judged in the folder before the `cd` too, so a start folder with an env file refuses it. Only the all-run, all-skipped and each-one-skipped cases are tried when several `cd` are conditional.
 - A string that `bash -c`, `sh -c` or `eval` runs is walked as a command of its own. `zsh`, `dash`, `ksh` and `bash` with a script file are not looked into.
-- Accepted limit: an rg `-g` or `--iglob` glob, or a grep `--include` glob, that matches none of the sample env file names, such as `*.py`, clears the walk, so a folder past the cap is not refused. A name with an env stem and a `.py` suffix would match that glob and is read. An rg `-t` type is always walked.
+- Accepted limit: past the cap, an rg `-g` or `--iglob` glob, or a grep `--include` glob, that matches none of the sample env file names, such as `*.py`, is allowed. A name with an env stem and a `.py` suffix would match that glob and is read, out of the walk's sight. Under the cap the walk sees it.
 - A search in a heredoc body is not walked.
 - The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env` (with `--` too) or `nice` (with any form of its adjustment flag). A search behind `sudo`, `xargs` or `env -C` is not walked.
 - An ignore file other than the checkout's own is not read. So a search of a folder with an env file is refused, even when such a file skips it.

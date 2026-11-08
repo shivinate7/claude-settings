@@ -12,7 +12,8 @@ import warnings
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _git, _split_heredocs,
-    _without_message_values, dir_before_segment, is_powershell, norm, segment_tokens, split_segments,
+    _segment_cd_move, _without_message_values, dir_before_segment, is_powershell, norm, segment_tokens,
+    split_segments,
 )
 
 
@@ -280,7 +281,8 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False,
+                   places=None):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
@@ -297,19 +299,39 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 
     An unquoted `#` at a word start is a comment to the end of the line: its text stays in the
     text around it, and opens no quote and no substitution. A heredoc body has no comments.
+
+    `places`, when a list, is filled with one (parent, offset) per text, in step with the texts:
+    the index of the text that holds this one, and where its placeholder starts in that text (-1
+    and 0 for the command itself). A parent comes after its children, so the walk can read the
+    folder of each text from its parent's (`_env_walk`).
     """
     escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
         return [], True
     done = []
     # a frame: [pieces of its text, open quote, paren depth, it is a message value, its open
-    # quote holds a message value]
-    stack = [[[], "", 0, False, False]]
+    # quote holds a message value, (pieces counted, their length), (child index, offset) of each
+    # child, where its placeholder starts in its parent]
+    stack = [[[], "", 0, False, False, [0, 0], [], 0]]
     i, n = 0, len(cmd)
 
+    def length(frame):
+        """The length of the text a frame holds so far, counting each piece once."""
+        seen = frame[5]
+        for piece in frame[0][seen[0]:]:
+            seen[1] += len(piece)
+        seen[0] = len(frame[0])
+        return seen[1]
+
     def close():
-        pieces, _, _, message, _ = stack.pop()
-        done.append(("".join(pieces), message))
+        frame = stack.pop()
+        done.append(("".join(frame[0]), frame[3]))
+        if places is not None:
+            for child, offset in frame[6]:
+                places[child] = (len(done) - 1, offset)
+            places.append((-1, 0))
+            if stack:
+                stack[-1][6].append((len(done) - 1, frame[7]))
 
     def opens_message(pieces):
         """True when a `"` opened now is the value of a message flag of a commit or a PR."""
@@ -350,9 +372,15 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             j = i + 1
             while j < n and cmd[j] != "`":
                 j += 2 if cmd[j] == "\\" else 1
-            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1)
+            inner_places = [] if places is not None else None
+            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1,
+                                         places=inner_places)
             if deep:
                 return [], True
+            if places is not None:
+                places.extend((parent + len(done) if parent >= 0 else -1, offset)
+                              for parent, offset in inner_places)
+                frame[6].append((len(done) + len(inner) - 1, length(frame)))
             done.extend(inner)
             pieces.append("`x`")
             i = j + 1
@@ -361,8 +389,9 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             if len(stack) + depth > ENV_MAX_DEPTH:
                 return [], True
             message = quote == '"' and frame[4]
+            offset = length(frame)
             pieces.append("x")
-            stack.append([[], "", 0, message, False])
+            stack.append([[], "", 0, message, False, [0, 0], [], offset])
             i += 2
             continue
         elif quote == "" and len(stack) > 1 and char == "(":
@@ -422,8 +451,19 @@ ENV_GLOB = re.compile(r"[?*\[]")
 ENV_GLOB_PART = re.compile(r"\[[!^]?([^\]])[^\]]*\]|\?|\*")
 
 
-def _glob_could_name_env(word: str) -> bool:
-    if any(fnmatch.fnmatchcase(name, word) for name in (".env", ".env.x", ".envrc")):
+def _glob_could_name_env(word: str, fold: bool = False, by_path: bool = False) -> bool:
+    """True when the glob `word` could match the name of an env file. The glob is tried on the
+    sample names (`ENV_SAMPLE_NAMES`, and `.env.x`), and each of its parts is filled in as the shortest
+    and a one letter match. `fold` reads the glob without case. With `by_path` the glob is a search
+    flag's, so a `/` in it is a folder in front of the name, which can be any folder: only the last
+    part is judged, and a glob that ends in `/` picks every file under a folder."""
+    if by_path:
+        word = word.rpartition("/")[2]
+        if not word:
+            return True
+    if fold:
+        word = word.lower()
+    if any(fnmatch.fnmatchcase(name, word) for name in ENV_SAMPLE_NAMES + (ENV_PREFIX + ".x",)):
         return True
     for fill in ("", "x"):
         sample = ENV_GLOB_PART.sub(
@@ -496,7 +536,8 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, cwd: s
     that walks a folder (`_env_walk`); with none, that check is skipped.
     """
     cmd = _plain_escaped_quotes(cmd)
-    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
+    places = []
+    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc, places=places)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
     if subs_only:
@@ -510,7 +551,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, cwd: s
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
-    refusal = _env_walk(texts, cwd) if cwd else ("", "")
+    refusal = _env_walk(texts, cwd, places=places) if cwd else ("", "")
     if refusal[0]:
         return refusal
     return _env_relay(texts)
@@ -1325,20 +1366,16 @@ def _pwd_rest(word: str, pwd_text: bool):
     return None if found is None else (found.group(1) or "")
 
 
-def _glob_could_pick_env(glob: str, fold: bool) -> bool:
-    """True when `glob` matches a sample env file name (`ENV_SAMPLE_NAMES`). A glob with a `/` is
-    judged by its last part, as the folder in front of it can be any folder. A glob that ends in `/`
-    picks every file under a folder."""
-    tail = glob.rpartition("/")[2]
-    return not tail or any(_glob_picks(name, name, tail, fold, by_name=True) for name in ENV_SAMPLE_NAMES)
-
-
 def _rules_skip_env(rules) -> bool:
-    """True when the search reads no env file by its glob rules (grep's, or rg's include rules). The
-    first rule is an include, so a file that no rule matches is not read, and no include glob could
-    pick an env file name. With no rule, or a first rule that excludes, a file no rule matches is read."""
+    """True when no sample env name could be read by the glob rules (grep's, or rg's include rules):
+    the first rule is an include, so a file that no rule matches is not read, and no include glob
+    could name an env file (`_glob_could_name_env`). With no rule, or a first rule that excludes, a
+    file no rule matches is read. Only the cap reads this: a folder past the cap cannot be walked, so
+    such a glob clears the refusal as too large to check. A folder under the cap is always walked,
+    because an env file with a suffix a glob picks (`.yaml`) is not a sample name."""
     return bool(rules) and rules[0][0] == "include" and not any(
-        kind == "include" and _glob_could_pick_env(glob, fold) for kind, glob, fold, _ in rules)
+        kind == "include" and _glob_could_name_env(glob, fold, by_path=True)
+        for kind, glob, fold, _ in rules)
 
 
 # The shell commands that run a string as a command of their own.
@@ -1356,7 +1393,9 @@ def _shell_string(words, position: int, command: str) -> str:
     run, i = False, position + 1
     while i < len(words):
         word = _flag_word(words[i])
-        if word in ("-", "--", "+") or not word.startswith(("-", "+")):
+        if word == "--":   # the options end here, and the next word is the string
+            return _shell_value(words[i + 1]) if run and i + 1 < len(words) else ""
+        if word in ("-", "+") or not word.startswith(("-", "+")):
             return _shell_value(words[i]) if run else ""
         long_option = word.startswith("--")
         run = run or (word[0] == "-" and not long_option and "c" in word)
@@ -1364,7 +1403,49 @@ def _shell_string(words, position: int, command: str) -> str:
     return ""
 
 
-def _env_walk(texts, cwd: str, depth: int = 0):
+# Stands in the text around a substitution, to find the segment that holds it (`_text_folders`).
+ENV_PLACE_MARK = "\ue000"
+
+
+def _folders_at(pieces, number: int, bases, ends):
+    """The folders the shell may be in when `pieces[number]` runs, started from each folder in `bases`
+    (`dir_before_segment`, which falls back to the base when it cannot tell). A `cd` after `&&` or `||`
+    might not run, so the segment is judged with each such `cd` run and skipped: all run, all skipped,
+    and each one skipped alone. A combination of two skipped is not tried, and a search that only runs
+    when its `cd` ran (`test -d D && cd D && rg K`) is judged in the folder before it too."""
+    conditional = [at for at in range(1, number) if at <= len(ends) and ends[at - 1] in ("&&", "||")
+                   and (tokens := segment_tokens(pieces[at])) and _segment_cd_move(tokens) is not None]
+    variants = [list(pieces)]
+    for skipped in ([conditional] + [[at] for at in conditional] if conditional else []):
+        variants.append([":" if at in skipped else piece for at, piece in enumerate(pieces)])
+    found = []
+    for base in bases:
+        for variant in variants:
+            folder = dir_before_segment(variant, number, base, ends) or base
+            if folder not in found:
+                found.append(folder)
+    return found
+
+
+def _text_folders(texts, cwd, places):
+    """The folders each text of `_substitutions` may run in, one list per text. The command itself runs
+    in `cwd` (a folder, or a list of them). A substitution runs where the segment that holds it runs, so a
+    `cd` earlier in that command moves it too: `cd D && x=$(rg --hidden K)` searches D. A parent comes
+    after its children, so the texts are read from the last. A text whose place cannot be found in its
+    parent keeps the parent's folders."""
+    folders = [[cwd] if isinstance(cwd, str) else list(cwd)] * len(texts)
+    for child in range(len(texts) - 2, -1, -1):
+        parent, offset = places[child]
+        text = texts[parent][0]
+        ends = []
+        pieces = split_segments(text[:offset] + ENV_PLACE_MARK + text[offset:], ends)
+        number = next((at for at, piece in enumerate(pieces) if ENV_PLACE_MARK in piece), None)
+        folders[child] = folders[parent] if number is None else _folders_at(
+            pieces, number, folders[parent], ends)
+    return folders
+
+
+def _env_walk(texts, cwd, depth: int = 0, places=None):
     """Return (reason, log) when `rg` or `ag` with a hidden flag, `rg` with a positive glob, or a
     recursive grep, walks a folder that holds an env file on disk. The
     folder is each path word that is a folder, or the folder the command runs in when no path is
@@ -1373,7 +1454,10 @@ def _env_walk(texts, cwd: str, depth: int = 0):
 
     The folder the command runs in is `cwd`, moved by each literal `cd <dir>` earlier in the command
     (`dir_before_segment`). A `cd` the guard cannot resolve (a variable, `popd`, a folder that does
-    not exist) leaves the search at `cwd`.
+    not exist) leaves the search at `cwd`. A `cd` after `&&` or `||` might not run, so the search is
+    walked in both folders (`_folders_at`). A search in a command substitution runs where the segment
+    that holds it runs (`_text_folders`, from `places`), so `cd D && x=$(rg --hidden K)` walks D.
+    `cwd` is a folder, or a list of them for a string that a conditional `cd` may run in.
 
     The search is found behind a subshell paren, a brace group, `command`, `env` and `nice`
     (`_env_words`). A string that `bash -c`, `sh -c` or `eval` runs is a command of its own: it is cut
@@ -1387,9 +1471,11 @@ def _env_walk(texts, cwd: str, depth: int = 0):
     `-g` or `--iglob` glob picks the files read, and reads a file that is hidden or ignored too. A glob
     with a `/` matches the path from that folder (`_glob_anchor`). With no hidden flag, rg reads only
     the dotfiles a glob picks. An rg `-t` type picks by its globs, and a type the guard does not list
-    picks every file. When no include glob (rg `-g` or `--iglob`, grep `--include`) matches a sample
-    env file name (`_rules_skip_env`), the search reads no env file, so the folder is not walked and
-    its size is no reason to refuse. A search with an rg `-t` type is always walked. For rg and ag with no flag that turns the ignore rules off, a file or folder
+    picks every file. A folder is always walked, and an env file that an include glob picks is refused
+    at any folder size, whatever its suffix (`--include='*.yaml'` picks one that ends .yaml). Only the
+    cap reads the glob: past it, when no include glob (rg `-g` or `--iglob`, grep `--include`) could
+    match a sample env file name (`_rules_skip_env`), the search is allowed, and otherwise it is refused
+    as too large to check. A search with an rg `-t` type past the cap is refused. For rg and ag with no flag that turns the ignore rules off, a file or folder
     that the checkout ignores is not read, so it is skipped (`_ignored_paths`, one call, made only
     when the first walk found a file or ran past the cap). An ignored folder that a positive glob
     picks is entered, as rg enters it.
@@ -1401,15 +1487,18 @@ def _env_walk(texts, cwd: str, depth: int = 0):
     ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, any other
     wrapper (`sudo`, `xargs`, `env -C`) or shell (`zsh`, `dash`, `ksh`, `bash` with a script file) is
     not looked through, a search in the body of a heredoc is not walked, an rg `!` glob is not read,
-    a brace sequence (`{a..c}`) is not expanded, a glob that no sample name matches (`*.py`) clears
-    the walk though a name with an env stem and a `.py` suffix would match it, and an ignore file
-    other than the checkout's own that skips the file is not read, so such a search of a folder with
-    an env file is refused.
+    a brace sequence (`{a..c}`) is not expanded, past the cap a glob that no sample name matches
+    (`*.py`) is allowed though a name with an env stem and a `.py` suffix would match it, a `cd` that
+    only one of two chained commands needs is judged in both folders, and an ignore file other than
+    the checkout's own that skips the file is not read, so such a search of a folder with an env file
+    is refused.
     """
     if depth > ENV_MAX_DEPTH:
         return ENV_DEPTH_REASON, "shell strings nested past %d levels" % ENV_MAX_DEPTH
     pwd_text = any(text.strip() in ("pwd", "pwd -P", "pwd -L") for text, _ in texts[:-1])
-    for text, _ in texts:
+    text_folders = _text_folders(texts, cwd, places) if places and len(places) == len(texts) else [
+        [cwd] if isinstance(cwd, str) else list(cwd)] * len(texts)
+    for index, (text, _) in enumerate(texts):
         ends = []
         pieces = split_segments(text, ends)
         for number, piece in enumerate(pieces):
@@ -1420,12 +1509,14 @@ def _env_walk(texts, cwd: str, depth: int = 0):
                     # The string keeps its newlines, each of which ends a command.
                     words, position, command = _env_words(segment, walk=True, keep_newlines=True)
                     inner = _shell_string(words, position, command)
-                    inner_texts, too_deep = _substitutions(inner) if inner else ([], False)
+                    inner_places = []
+                    inner_texts, too_deep = (_substitutions(inner, places=inner_places) if inner
+                                             else ([], False))
                     if too_deep:
                         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
                     if inner_texts:
-                        here = dir_before_segment(pieces, number, cwd, ends) or cwd
-                        refusal = _env_walk(inner_texts, here, depth + 1)
+                        here = _folders_at(pieces, number, text_folders[index], ends)
+                        refusal = _env_walk(inner_texts, here, depth + 1, inner_places)
                         if refusal[0]:
                             return refusal
                     continue
@@ -1449,42 +1540,44 @@ def _env_walk(texts, cwd: str, depth: int = 0):
                     rules, exclude_dir = _grep_globs(words, position)
                 else:
                     rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
-                # An rg type is always walked: its globs name a suffix, which an env stem can carry.
-                if (grep or not extras["types"]) and _rules_skip_env(rules):
-                    continue
-                here = dir_before_segment(pieces, number, cwd, ends) or cwd
-                paths = [i for i in plain if i not in skip and i != extras["pattern"]]
-                folders = []
-                for i in paths:
-                    word = re.sub(r"[\\\"']", "", words[i])
-                    rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
-                    if rest is not None:
-                        word = "." + rest
-                    elif re.search(r"[$`]", word):
-                        continue
-                    target = os.path.join(here, os.path.expanduser(word))
-                    # A quoted glob is no glob to the shell, so it is not expanded.
-                    expand = re.search(r"[*?\[]", word) and words[i] == word
-                    folders += [f for f in (glob.glob(target) if expand else [target])
-                                if os.path.isdir(f) and f not in folders]
-                if len(paths) <= extras["unknown"] and (
-                        grep or not ((fed and part == 0) or "<" in words)):
-                    folders += [here] * (here not in folders)
-                for folder in folders:
-                    anchor = _glob_anchor(folder, here)
-                    found = _env_file_in(folder, rules, exclude_dir, by_name=grep, anchor=anchor)
-                    if found and not grep and not no_ignore:
-                        found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder),
-                                             anchor=anchor)
-                    if found == ENV_TOO_LARGE:
-                        return (ENV_WALK_LARGE_REASON,
-                                "'%s' %s walks '%s', which is past the walk cap"
-                                % (command, "recursive" if grep else "with a hidden flag", folder))
-                    if found:
-                        return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
-                                "'%s' %s walks '%s', which holds '%s'"
-                                % (command, "recursive" if grep else "with a hidden flag", folder,
-                                   found))
+                # Past the cap an rg type is refused: its globs name a suffix, which an env stem can carry.
+                cap_clear = (grep or not extras["types"]) and _rules_skip_env(rules)
+                heres = _folders_at(pieces, number, text_folders[index], ends)
+                for here in heres:
+                    paths = [i for i in plain if i not in skip and i != extras["pattern"]]
+                    folders = []
+                    for i in paths:
+                        word = re.sub(r"[\\\"']", "", words[i])
+                        rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
+                        if rest is not None:
+                            word = "." + rest
+                        elif re.search(r"[$`]", word):
+                            continue
+                        target = os.path.join(here, os.path.expanduser(word))
+                        # A quoted glob is no glob to the shell, so it is not expanded.
+                        expand = re.search(r"[*?\[]", word) and words[i] == word
+                        folders += [f for f in (glob.glob(target) if expand else [target])
+                                    if os.path.isdir(f) and f not in folders]
+                    if len(paths) <= extras["unknown"] and (
+                            grep or not ((fed and part == 0) or "<" in words)):
+                        folders += [here] * (here not in folders)
+                    for folder in folders:
+                        anchor = _glob_anchor(folder, here)
+                        found = _env_file_in(folder, rules, exclude_dir, by_name=grep, anchor=anchor)
+                        if found and not grep and not no_ignore:
+                            found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder),
+                                                 anchor=anchor)
+                        if found == ENV_TOO_LARGE and cap_clear:
+                            continue
+                        if found == ENV_TOO_LARGE:
+                            return (ENV_WALK_LARGE_REASON,
+                                    "'%s' %s walks '%s', which is past the walk cap"
+                                    % (command, "recursive" if grep else "with a hidden flag", folder))
+                        if found:
+                            return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
+                                    "'%s' %s walks '%s', which holds '%s'"
+                                    % (command, "recursive" if grep else "with a hidden flag", folder,
+                                       found))
     return "", ""
 
 
