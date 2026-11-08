@@ -1945,8 +1945,7 @@ class CheckBudget(Copied):
 
 
     def test_control_export_checks_every_item_when_each_run_is_fast(self):
-        """Control: fast runs spend no budget, so all three items are checked and none is unknown. It holds on
-        1c9b1aed1 as well."""
+        """Control: fast runs spend no budget, so all three items are checked and none is unknown. It holds without the budget too."""
         clock, calls = self.Clock(), []
         with self.patched(clock, calls, tick=0.0):
             held, unknown = export_page.picture_checks(PAGE_FILE, {"items": self.pictured(), "answers": {}})
@@ -1955,7 +1954,7 @@ class CheckBudget(Copied):
         self.assertEqual(held, [], "a passing run held an item: %r" % (held,))
 
     def test_control_check_mode_passes_every_item_when_each_run_is_fast(self):
-        """Control: --check with fast runs checks all three and prints `checks pass`, exit 0. It holds on 1c9b1aed1 as well."""
+        """Control: --check with fast runs checks all three and prints `checks pass`, exit 0. It holds without the budget too."""
         clock, calls = self.Clock(), []
         fetched = self.fetch(items=self.pictured())
         page = write_text(os.path.join(self.tmp.name, "page-budget-fast.html"), page_with_mockups(MOCKS_292))
@@ -2067,7 +2066,7 @@ class WaitingCollections(WaitingCollectionsRun):
 
     def test_control_a_queue_entry_with_items_only_runs_no_check_and_exits_0(self):
         """Control: the check is the waiting page's. A queue page whose collections list only items, with a plain item, is
-        exported with no check line. It holds on 1c9b1aed1 as well."""
+        exported with no check line. It holds without the budget too."""
         r, worktree = self.run_all(("items",), {"plain": item(1)}, role="queue-page", entry_id="queue02")
         self.assertTrue(os.path.isfile(os.path.join(worktree, "artifacts", "queue02", "items", "plain.json")),
                         "scope: the plain item is not in the queue copy. Output:\n" + shown(r))
