@@ -9992,7 +9992,8 @@ FAMILY = "lane-one-topic"
 # record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
 # Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
 # A brief that clears those checks is refused too when its text names no triage session or no batch runner: each is a
-# label (`Triage`, `Batch runner`), an optional number and gloss, a colon, then a session_ id, anywhere in the message.
+# label (`Triage`, `Batch runner`), an optional number and gloss, a colon, then a session_ id that holds a digit, anywhere
+# in the message. Markdown around the label, the colon or the id (bold, italic, backticks) is no reason to refuse.
 # Any other message passes, and so does a brief to a target that is no lane, with or without those ids. A marker brief
 # with no record of its target is refused. Only a marker brief reads the transcript: a message without the marker
 # passes unread.
@@ -10163,12 +10164,37 @@ step_allow("a triage id on the brief's first line passes", role_path("step-topic
            "Lane brief: icon-b. Topic: icons. Triage: session_abc123" + RUNNER_LINE)
 # Passes: the batch runner takes the same form, with a number. The triage id is present.
 step_allow("a batch runner id with a number, Batch runner 8: session_x, passes", role_path("step-topic-lane"),
-           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner 8: session_x")
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner 8: session_x8")
 # Passes: both ids present, on a lane with a topic and on an older lane judged by its step.
 step_allow("a brief with both the triage id and the batch runner id passes", role_path("step-topic-lane"),
            "Lane brief: icon-b. Topic: icons." + IDS_LINES)
 step_allow("an older lane's own step, with both ids, passes", role_path("step-old-lane"),
            "Lane brief: icon-a. Topic: icons." + IDS_LINES)
+# Refused: a placeholder id. An id holds at least one digit, so a session_ id made of letters alone is no id. Each case
+# keeps the other label's id valid, so a failure names the placeholder and nothing else.
+ids_refuse("a triage id that is the placeholder session_TBD is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_TBD" + RUNNER_LINE)
+ids_refuse("a triage id that is the placeholder session_XXXX is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_XXXX" + RUNNER_LINE)
+ids_refuse("a triage id that is the word session_id is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons.\nTriage: session_id" + RUNNER_LINE)
+ids_refuse("a batch runner id that is the word session_id is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_id")
+ids_refuse("a batch runner id that is the placeholder session_TBD is refused",
+           role_path("step-topic-lane"), "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: session_TBD")
+# Passes: markdown around the form, bold, italic or backticked. Each case keeps the other label's id valid.
+step_allow("a bold triage label, **Triage:** session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n**Triage:** session_abc123" + RUNNER_LINE)
+step_allow("an italic triage label, _Triage_: session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n_Triage_: session_abc123" + RUNNER_LINE)
+step_allow("a backticked triage id, Triage: `session_abc123`, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nTriage: `session_abc123`" + RUNNER_LINE)
+step_allow("a bold batch runner label, **Batch runner:** session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n**Batch runner:** session_abc123")
+step_allow("an italic batch runner label, _Batch runner_: session_abc123, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\n_Batch runner_: session_abc123")
+step_allow("a backticked batch runner id, Batch runner: `session_abc123`, passes", role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons." + TRIAGE_LINE + "\nBatch runner: `session_abc123`")
 
 
 # =========================================================================== 5d. cite by id
