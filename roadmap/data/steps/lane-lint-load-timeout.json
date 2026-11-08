@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint under load from other processes ends with a verdict, not unknown at the fixed 1200 s cap",
+  "phase": "guards",
+  "status": "todo",
+  "order": 695,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "`merge <pr> --lane-lint` ended \"unknown, ci-job did not finish in 1200 s\" twice, at 08:29 and 09:10 CST Nov 8, with load 10-22 on 4 cores from the lane's own test agents. LINT_SECONDS is a fixed 1200 (merge.py, near line 1507). Six reviewed PRs wait on a lint: #2020, #2028, #2021, #2048, #2037, #2069 (lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8, via the coordinator 09:10 CST Nov 8). A gap fix under item 410 a.",
+  "note": "Triage's check, 09:11 CST: not covered. lane-lint-parallel-cap (#1843, ready, lane session_013NEJKzstsLQzGsUXajpze5) caps lints at one slot per CPU but counts only lints, not other load. lane-lint-cloud-time-limit (doing, lane session_013NEJL1PUcS4Dxhd9Rr1sk2) cuts suites to picked ones, which shortens a lint but sets no load rule. lane-lint-before-push (lane session_013NEJL2RXfa7QBPNAXaXgp4) moves the lint before the push and does not touch the cap. Lane already in merge.py's lint code with work open: lane-lint-cloud-time-limit. Candidate fixes for the lane to measure: the slot count reads load, not only running lints, or the cap scales with measured load. Done check: a red test where a lint under a fake high load waits for a slot or gets a cap that fits, and ends with a verdict. Filed by triage 09:11 CST Nov 8.",
+  "updatedAt": "2026-11-08T09:11:00-06:00"
+}
