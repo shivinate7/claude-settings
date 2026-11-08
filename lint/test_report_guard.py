@@ -2682,9 +2682,10 @@ class SentenceSplitBoldTests(unittest.TestCase):
 class DoubleBacktickMaskTests(unittest.TestCase):
     """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
 
-    The mask pairs each backtick with the next one. A backtick inside a double-backtick span leaves
-    a stray one, which pairs with a later code span and hides the words between them. A double-
-    backtick span with no backtick inside pairs as two empty spans, so its text reads as prose.
+    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
+    backtick inside it does not hide the prose after it. They also guard that an unclosed
+    double-backtick run is literal text: it opens no span, so the prose before a later code span
+    is still linted, and that code span is still masked.
     """
 
     LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
