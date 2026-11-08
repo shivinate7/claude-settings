@@ -7308,12 +7308,14 @@ sh("delete: a heredoc body given to bash runs the delete", "bash <<EOF\nrm -rf .
 sh("delete: a lone apostrophe in a quoted heredoc body does not hide a delete after it",
    "cat <<'EOF' > notes.md\nit's the note\nEOF\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
 
-# A file whose name ends in `py` heads no interpreter: `cat > gen.py <<'EOF'` writes its body to the file, so a delete
-# or a forced push in the body runs nothing.
+# A file name ending in `py`, or a `py` folder, heads no interpreter: `cat > gen.py <<'EOF'` and
+# `cat > py/notes.md <<'EOF'` write their body to the file, so a delete or a forced push in the body runs nothing.
 sh("delete: a heredoc written to gen.py names a delete, deletes nothing",
    "cat > gen.py <<'EOF'\nrm -rf /\nEOF", "allow", cwd=NOGIT)
 sh("push: a heredoc written to gen.py names a forced push, pushes nothing",
    "cat > gen.py <<'EOF'\n" + VCS + " push --force origin main\nEOF", "allow", cwd=NOGIT)
+sh("delete: a heredoc written to py/notes.md names a delete, deletes nothing",
+   "cat > py/notes.md <<'EOF'\nrm -rf ./*\nEOF", "allow", cwd=NOGIT)
 
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
@@ -23362,6 +23364,10 @@ TS_TEXT = "console.log(1)\n"
 SPO_RUNNER_FORMS = (
     ("subst", "out=$(python3 F)", "probe2.py", PY_TEXT, "out=$(python3 %s)"),
     ("echo-subst", "echo $(python3 F)", "probe2.py", PY_TEXT, "echo $(python3 %s)"),
+    # A substitution in double quotes, and a `[` test that holds one, run the file the same as the unquoted form.
+    ("subst-quoted", 'out="$(python3 F)"', "probe2.py", PY_TEXT, 'out="$(python3 %s)"'),
+    ("echo-subst-quoted", 'echo "$(python3 F)"', "probe2.py", PY_TEXT, 'echo "$(python3 %s)"'),
+    ("test-subst", '[ "$(python3 F)" = ok ]', "probe2.py", PY_TEXT, '[ "$(python3 %s)" = ok ]'),
     ("subshell", "(python3 F)", "probe2.py", PY_TEXT, "(python3 %s)"),
     ("uv", "uv run F", "probe2.py", PY_TEXT, "uv run %s"),
     ("npx-tsx", "npx tsx F", "probe2.ts", TS_TEXT, "npx tsx %s"),
