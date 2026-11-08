@@ -1164,6 +1164,18 @@ def subshell_and_background_list_leave_the_main_shell_alone():
 
 
 @case
+def trailing_comment_on_a_cd_line_keeps_the_newline():
+    """27g. a `# comment` after a cd ends at the newline: the next line's commands are read, and their logs are placed"""
+    return read_rows_problems([
+        ("cd /x\nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),  # control: no comment
+        ("cd /x # go\nmake > a &\nmake2 > log2", ["/x/a", "/x/log2"], []),
+        ("cd /x # go\ncd /y\nmake > a", ["/y/a"], []),
+        ("cd /x # go\ntee t", ["/x/t"], []),
+        ("cd /x # go\nmake --log l", ["/x/l"], []),
+    ])
+
+
+@case
 def heredoc_cd_is_text():
     """27c. a cd in a heredoc body is text: the log stays as written and no path is unresolved"""
     return read_rows_problems([("cat <<'EOF'\ncd /y\nEOF\nmake > log", ["log"], [])])
