@@ -2965,6 +2965,8 @@ def relayed_head_holds(root, branch, relayed, live):
 
 HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
 
+BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
+
 def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
@@ -3623,6 +3625,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+        if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
+            raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")

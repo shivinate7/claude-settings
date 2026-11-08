@@ -38,10 +38,12 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
   opens or builds each batch the output names in that wake. It runs each `--confirm` as a background command,
   so one repo's CI wait never holds another repo's hand-offs.
-  It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
+  It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head
+  its CI ran on. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings
-  record `records-index-at-merge`). Then it runs `--confirm` again to merge. Batches overlap
+  record `records-index-at-merge`). Then it runs `--confirm --head <sha>` again to merge, with the head
+  the ready run ran on. Batches overlap
   (claude-settings record `no-merge-during-batch-ci`: no merge while a batch's CI runs). Once
   batch N's ready run starts, the batch runner builds batch N+1 on N's head at ready, as a PR on
   the same base, and runs it. N may merge while N+1's run goes on, because N+1's head contains
