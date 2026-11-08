@@ -11,7 +11,7 @@ inputs:
     required: false
     default: changed
   fail:
-    description: "'true' (default) fails the step at error severity. 'false' never fails, report only."
+    description: "'true' (default) fails the step at error severity. 'false' opts out of findings only: they are reported and never fail. An input the step could not read still fails it."
     required: false
     default: "true"
   paths:

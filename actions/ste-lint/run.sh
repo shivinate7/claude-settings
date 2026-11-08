@@ -49,12 +49,16 @@ else
   else
     RANGE="origin/$BASE...HEAD"
   fi
+  # Each diff runs in an assignment, not a process substitution: set -e does not see the exit of a
+  # process substitution, so a failing range (no merge base, a bad ref) would read as "no markdown changed".
+  RAW_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")"
+  FILE_LIST="$(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})"
   while IFS= read -r f; do
     [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
+  done <<< "$RAW_LIST"
   while IFS= read -r f; do
     [ -n "$f" ] && FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  done <<< "$FILE_LIST"
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
@@ -107,7 +111,21 @@ LOG_OUT="$(mktemp)"
 # a Python name bound at module level, that this range removed. Scope changed only. It runs before the
 # "no markdown changed" exit, so a code-only PR is checked. Its findings never go through the split
 # script below: every stale line is untouched by the range, and the split makes an untouched line
-# report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
+# report-only. FAIL=false prints them and zeroes the exit for findings only, as it does for the STE
+# findings. An unread input (UNKNOWN, a crash) stays red: decision ci-unknown-is-red.
+# stale_cites prints its verdict line last. With FAIL=false, a non-zero run counts as findings only
+# when that line starts 'stale-cites: FAIL'. Each run is judged alone, so one run's findings cannot
+# hide the other's UNKNOWN.
+stale_run_exit() {  # $1 the run's exit code, $2 the file holding its stdout
+  local last
+  last="$(tail -n 1 "$2")"
+  if [ "${FAIL:-true}" != "true" ] && [ "$1" -ne 0 ]; then
+    case "$last" in
+      "stale-cites: FAIL"*) echo 0; return ;;
+    esac
+  fi
+  echo "$1"
+}
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
   STALE_OUT="$(mktemp)"
@@ -116,6 +134,7 @@ if [ "$SCOPE" != "all" ]; then
   STALE_EXIT=$?
   set -e
   cat "$STALE_OUT"
+  STALE_EXIT="$(stale_run_exit "$STALE_EXIT" "$STALE_OUT")"
   # The report lines (anchors that changed, decisions whose Home is a changed file) join the step summary, in
   # a fence so a `*` or `_` in a path stays literal. They never change the exit.
   if grep -q '^stale-cites: report, ' "$STALE_OUT"; then
@@ -131,13 +150,15 @@ if [ "$SCOPE" != "all" ]; then
 fi
 # --tree (the tree-cites input) names stale cites on lines the range never touched, so it runs in both scopes.
 if [ "${TREE_CITES:-false}" = "true" ]; then
+  TREE_OUT="$(mktemp)"
   set +e
-  python3 "$STALE_CITES" --tree
+  python3 "$STALE_CITES" --tree > "$TREE_OUT"
   TREE_EXIT=$?
   set -e
+  cat "$TREE_OUT"
+  TREE_EXIT="$(stale_run_exit "$TREE_EXIT" "$TREE_OUT")"
   [ "$TREE_EXIT" -ne 0 ] && STALE_EXIT="$TREE_EXIT"
 fi
-[ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 
 if [ ${#FILES[@]} -eq 0 ]; then
   echo "ste-lint: no markdown changed"
@@ -192,7 +213,7 @@ with open(sys.argv[3], "w") as o:
 PYEOF
   python3 "$AUDIT_PY" "$JSON_OUT" "$EXCLUDED_COUNT" "$LOG_OUT" >> "$SUMMARY"
   cat "$LOG_OUT"
-  exit "$STALE_EXIT"  # 0 unless tree-cites found a stale cite
+  exit "$STALE_EXIT"  # 0 unless a stale_cites run found a stale cite (with fail true) or could not read an input
 fi
 
 # Decision 4: changed lines only. Build a map of file -> added line numbers from a
