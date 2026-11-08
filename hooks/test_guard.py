@@ -28419,6 +28419,15 @@ rbb_line_refuse("reviewer-brief-blind: refused: a bold format line, End your rep
 # a builder's report pasted into the brief, as the decision names it.
 rbb_line_refuse("reviewer-brief-blind: refused: a report with Done and Deviations lines, the refusal names the first label line at line 3",
                 "Check the floor fix.\nNo edits.\nDone: the floor fix is in.\nDeviations: none.\nFiles: hooks/guard.py.", 3)
+# An item with no report label is read at its own line, so a BUILT item at line 3 names line 3.
+rbb_line_refuse("reviewer-brief-blind: refused: a reviewer brief with a BUILT item at line 3, the refusal names line 3",
+                "Check the floor fix.\nRead the diff first.\nBUILT c1 the floor fix, tests green.\nFiles: hooks/guard.py.", 3)
+# The Workflow scan passes the line of a reviewer agent() prompt through, so a Prior verdict line at line 2 names line 2.
+add("reviewer-brief-blind: refused: a Workflow agent() reviewer whose prompt holds a Prior verdict: FAIL line at line 2, the refusal names line 2",
+    "deny", RBB, tool="Workflow",
+    script="const r = await agent(`Check the floor fix.\nPrior verdict: FAIL\nFiles: hooks/guard.py.`, "
+           "{agentType: 'reviewer', model: 'haiku'}); return r",
+    carries=("line 2",))
 
 
 # A refused line over 200 characters is named by its number, and its text is not echoed, so a 5 KB line cannot make the
