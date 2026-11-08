@@ -286,7 +286,7 @@ put() {
   return 1
 }
 # land_guard_set SRC DEST: the guard files, as one set (owner ruling 2026-10-15, install-set). Step 1
-# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py and ruling_home.py, which the guard imports,
+# writes every guard file, stamped with this run's id, and shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py and reply_judge.py, which the guard imports,
 # into DEST/guard.d/<id>/, where no guard reads it
 # yet. Step 2 replaces DEST/guard.py, the one landing that switches: a stamped guard.py loads
 # guard.d/<its id>/. Step 3 lands the flat guard_*.py. The folder of the set before this one stays;
@@ -295,7 +295,7 @@ land_guard_set() {
   gdir="`$2/guard.d/`$id"
   prev=`$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "`$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "`$gdir" || { failed=1; return 1; }
-  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/own_session.py "`$1"/precompact_handoff.py "`$1"/merge_options.py "`$1"/override.py "`$1"/_nowindow.py "`$1"/proc_env.py "`$1"/reread_check.py "`$1"/call_judge.py "`$1"/decision_watch.py "`$1"/feedback_guard.py "`$1"/local_time.py "`$1"/ruling_home.py; do
+  for gf in "`$1"/guard.py "`$1"/guard_*.py "`$1"/shared_names.py "`$1"/git_reads.py "`$1"/question_form.py "`$1"/own_session.py "`$1"/precompact_handoff.py "`$1"/merge_options.py "`$1"/override.py "`$1"/_nowindow.py "`$1"/proc_env.py "`$1"/reread_check.py "`$1"/call_judge.py "`$1"/decision_watch.py "`$1"/feedback_guard.py "`$1"/local_time.py "`$1"/ruling_home.py "`$1"/route_match.py "`$1"/reply_judge.py; do
     [ -f "`$gf" ] || continue
     put "`$gf" "`$gdir/`$(basename "`$gf")" || { rm -rf "`$gdir"; return 1; }
   done
@@ -747,8 +747,8 @@ function Test-LinksWork([string]$AnySrc) {
 function Install-GuardSet([string]$SrcDir, [string]$DestDir) {
     $names = @(Get-ChildItem -LiteralPath $SrcDir -File -ErrorAction SilentlyContinue | Where-Object { Test-StampTarget $_.Name })
     if ($names.Count -eq 0 -or (Test-LinksWork $names[0].FullName)) { return }
-    # shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py and ruling_home.py, which the guard imports, ride in the set unstamped (no stamp target).
-    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'own_session.py', 'precompact_handoff.py', 'merge_options.py', 'override.py', '_nowindow.py', 'proc_env.py', 'reread_check.py', 'call_judge.py', 'decision_watch.py', 'feedback_guard.py', 'local_time.py', 'ruling_home.py') {
+    # shared_names.py, git_reads.py, question_form.py, own_session.py, precompact_handoff.py, merge_options.py, override.py, _nowindow.py, proc_env.py, reread_check.py, call_judge.py, decision_watch.py, feedback_guard.py, local_time.py, ruling_home.py, route_match.py and reply_judge.py, which the guard imports, ride in the set unstamped (no stamp target).
+    foreach ($shared in 'shared_names.py', 'git_reads.py', 'question_form.py', 'own_session.py', 'precompact_handoff.py', 'merge_options.py', 'override.py', '_nowindow.py', 'proc_env.py', 'reread_check.py', 'call_judge.py', 'decision_watch.py', 'feedback_guard.py', 'local_time.py', 'ruling_home.py', 'route_match.py', 'reply_judge.py') {
         $names += @(Get-ChildItem -LiteralPath $SrcDir -File -Filter $shared -ErrorAction SilentlyContinue)
     }
     $script:GuardSetMode = $true

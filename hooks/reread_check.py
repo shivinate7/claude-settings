@@ -38,6 +38,14 @@ except Exception as e:
     ph = None
     sys.stderr.write("reread_check: cannot import precompact_handoff: %s\n" % e)
 
+# The names this file takes from precompact_handoff. A copy that imports but lacks one is as good as no copy
+# (decision install-hooks-whole): ph is None, and the guard's load check refuses it as guard-crash.
+PH_NAMES = ("same_dir", "handoff_path", "reread_flag_path")
+if ph is not None and any(not hasattr(ph, name) for name in PH_NAMES):
+    sys.stderr.write("reread_check: precompact_handoff lacks %s\n" % ", ".join(
+        name for name in PH_NAMES if not hasattr(ph, name)))
+    ph = None
+
 
 def names_handoff(file_path, session_id):
     return any(ph.same_dir(os.path.expanduser(file_path), want) for want in (

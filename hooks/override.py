@@ -280,7 +280,8 @@ def _file_role(roles):
 
 def _text_of(rec):
     """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
-    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    from shared_names import install_root  # stdlib only: the one home of the install root
+    lint = os.path.join(install_root(os.path.dirname(os.path.abspath(__file__))), "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript

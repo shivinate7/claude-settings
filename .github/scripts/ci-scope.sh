@@ -25,7 +25,7 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Guard and its installers' inputs: test_guard, the janitor suites and config_watch run guard.py.
       # guard_<family>.py modules are guard.py; guard_test_* is not (it falls to hooks/* below).
       hooks/guard_test_*) on="$on $R $Z $X code guard " ;;
-      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/git_reads.py|hooks/question_form.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/merge_options.py|hooks/override.py|hooks/_nowindow.py|hooks/proc_env.py|hooks/reread_check.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/ruling_home.py|hooks/route_match.py|hooks/reply_judge.py|hooks/mutate_shared.py) on="$on $W $R $Z $X code guard sweep " ;;
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;

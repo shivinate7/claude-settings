@@ -92,6 +92,16 @@ DATA_TOOL = "ArtifactData"
 STATE_DIR_NAME = "state"
 
 
+def install_root(folder: str) -> str:
+    """The install root, the folder that holds hooks/, lint/ and skills/ (decision install-hooks-whole). `folder` is a
+    module's own folder. Flat, that is hooks/ and the root is its parent. A stamped copy sits in hooks/guard.d/<id>/,
+    which has no lint/ beside it, so the root is three folders up. It reads the disk once, to find lint/."""
+    folder = os.path.abspath(folder)
+    flat = os.path.normpath(os.path.join(folder, os.pardir))
+    copy = os.path.normpath(os.path.join(folder, os.pardir, os.pardir, os.pardir))
+    return copy if not os.path.isdir(os.path.join(flat, "lint")) and os.path.isdir(os.path.join(copy, "lint")) else flat
+
+
 def config_dir() -> str:
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
         os.path.expanduser("~"), ".claude"

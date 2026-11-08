@@ -339,6 +339,20 @@ def _install_ids_differ():
     return len(ids) > 1
 
 
+def _print_crash_deny():
+    """Print the guard-crash refusal, the one text of it. It reads nothing from a guard module, so the load
+    failure below, which cannot trust one, prints it too."""
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": (
+            "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
+            "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
+            "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
+            "then retry. No override lifts this refusal, because the failed guard cannot check "
+            "the acts that no override lifts. "
+            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+
+
 _load_deadline = time.monotonic() + _LOAD_WAIT_SECONDS
 _loading = "guard_core"   # the module being loaded, for the fallback line below
 while True:
@@ -427,8 +441,12 @@ while True:
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
         _loading = "reread_check"
         import reread_check
-        if reread_check.ph is None:   # reread_check never raises on its sibling, so the guard reads the gap
-            raise ImportError("reread_check could not import precompact_handoff")
+        # reread_check never raises on its sibling, so the guard reads the gap: ph is None when the sibling is
+        # missing, will not import, or lacks a name in PH_NAMES. A reread_check with no unread_handoff is as bad.
+        if reread_check.ph is None:
+            raise ImportError("reread_check could not use precompact_handoff")
+        if not callable(getattr(reread_check, "unread_handoff", None)):
+            raise ImportError("reread_check has no unread_handoff")
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -470,15 +488,7 @@ while True:
         except Exception:
             stopping = False
         if not stopping:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    "guard-crash: the guard is missing a part and cannot judge this call, so it refuses "
-                    "every call, Bash and PowerShell too. Remedy: in your own terminal, not a Claude "
-                    "session, run install.sh from the claude-settings checkout (Windows: install.ps1), "
-                    "then retry. No override lifts this refusal, because the failed guard cannot check "
-                    "the acts that no override lifts. "
-                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))
+            _print_crash_deny()
         sys.exit(0)
 
 
@@ -2662,9 +2672,16 @@ def _layout_module():
 
 def _question_form_module():
     """hooks/question_form.py, told this file's folder, so a stamped copy in guard.d/<id>/ finds the install's
-    lint/ and skills/. The one home of the import."""
-    import question_form
-    question_form.use_hooks_home(_HERE)
+    lint/ and skills/. The one home of the import. A copy whose question_form will not import, or lacks
+    use_hooks_home, refuses the call as guard-crash (decision install-hooks-whole): the SystemExit passes the
+    `except Exception` of each page check, so none of them allows on it."""
+    try:
+        import question_form
+        question_form.use_hooks_home(_HERE)
+    except Exception as exc:
+        record("", "deny", "guard-crash", cap_safe("question_form: " + type(exc).__name__ + ": " + str(exc), 200))
+        _print_crash_deny()
+        sys.exit(0)
     return question_form
 
 

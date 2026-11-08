@@ -142,7 +142,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-LINT = os.path.join(HERE, "..", "lint")
+import shared_names  # noqa: E402  stdlib only: the one home of the install root
+
+LINT = os.path.join(shared_names.install_root(HERE), "lint")
 if LINT not in sys.path:
     sys.path.insert(0, LINT)
 
