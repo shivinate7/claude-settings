@@ -354,9 +354,9 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
-def _common_git_dir_from_files(cwd: str):
-    """The common directory of the checkout holding CWD, read from files alone, else None. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
+def _git_dirs_from_files(cwd: str):
+    """(git dir, common dir) of the checkout holding CWD, read from files alone, else None. A `.git`
+    folder is both; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
     one, so a linked worktree reads the clone's shared refs. No process is spawned. guard.py's
     `_git_common_dir` reads the same files from a known root, but guard.py imports this module, and
     this read must walk up from a cwd, so it cannot call that one."""
@@ -365,25 +365,64 @@ def _common_git_dir_from_files(cwd: str):
         dot = os.path.join(here, ".git")
         try:
             if os.path.isdir(dot):
-                return dot
+                return dot, dot
             if os.path.isfile(dot):
                 with open(dot, encoding="utf-8") as handle:
                     first = handle.readline(4096).strip()
                 if not first.startswith("gitdir:"):
                     return None
                 git_dir = os.path.join(here, first[len("gitdir:"):].strip())
+                common = git_dir
                 try:
                     with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
-                        git_dir = os.path.join(git_dir, handle.readline(4096).strip())
+                        common = os.path.join(git_dir, handle.readline(4096).strip())
                 except FileNotFoundError:
                     pass   # no commondir: a submodule's own dir is its common dir
-                return git_dir
+                return git_dir, common
         except (OSError, UnicodeDecodeError):
             return None
         parent = os.path.dirname(here)
         if parent == here:
             return None
         here = parent
+
+
+def _common_git_dir_from_files(cwd: str):
+    """The common directory of the checkout holding CWD (see `_git_dirs_from_files`), else None."""
+    dirs = _git_dirs_from_files(cwd)
+    return dirs[1] if dirs else None
+
+
+def _head_commit_from_files(cwd: str):
+    """The commit HEAD names in the checkout holding CWD, read from files alone, else None. None means a
+    layout this read does not know (reftable, a symbolic ref off `refs/`, a value that is not an object
+    id, any unreadable file), and the caller asks the VCS instead. No process is spawned."""
+    dirs = _git_dirs_from_files(cwd)
+    if not dirs or os.path.isdir(os.path.join(dirs[1], "reftable")):
+        return None
+    git_dir, common = dirs
+    try:
+        with open(os.path.join(git_dir, "HEAD"), encoding="utf-8") as handle:
+            head = handle.readline(512).strip()
+        if _OBJECT_ID.fullmatch(head):
+            return head   # a detached HEAD
+        if not head.startswith("ref: refs/"):
+            return None
+        ref = head[len("ref: "):]
+        for base in (git_dir, common):
+            path = os.path.join(base, *ref.split("/"))
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as handle:
+                    sha = handle.readline(256).strip()
+                return sha if _OBJECT_ID.fullmatch(sha) else None
+        with open(os.path.join(common, "packed-refs"), encoding="utf-8") as handle:
+            for line in handle:
+                sha, _, name = line.rstrip("\n").partition(" ")
+                if name == ref:
+                    return sha if _OBJECT_ID.fullmatch(sha) else None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
 
 
 def _remote_tips_from_files(cwd: str, remote: str):
@@ -468,12 +507,16 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
         if target.startswith("refs/") and not target.startswith("refs/heads/"):
             continue   # a tag or another ref, not a branch
         target = target.removeprefix("refs/heads/")
+        if target in DEFAULT_BRANCH_FALLBACK:
+            continue   # main and master are push-main's to ask about, never a new name
         if not target or target in tips or target.startswith("archive/"):
             continue
-        found = guard_core._git(cwd, "rev-parse", "--verify", "-q", source + "^{commit}")
-        if found is None or found.returncode != 0:
-            continue
-        sha = found.stdout.strip()
+        sha = _head_commit_from_files(cwd) if source in ("HEAD", "@") else None   # no spawn for HEAD
+        if sha is None:
+            found = guard_core._git(cwd, "rev-parse", "--verify", "-q", source + "^{commit}")
+            if found is None or found.returncode != 0:
+                continue
+            sha = found.stdout.strip()
         if sha not in tips.values() or sha in main_tips:
             continue
         # The branch's own name is no new name for its work: `lane:lane`, or `HEAD` while on `lane`.
