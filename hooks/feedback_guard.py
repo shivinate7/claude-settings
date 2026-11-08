@@ -884,8 +884,8 @@ def grant_problem(b, text, items):
     barred = any(it is not None and it[2] and it[1].startswith("[note]") and home_word(it[1]).startswith(ONCE_HOME)
                  for it in items) and STANDING.search(unfenced(text)) is not None
     if barred:
-        return ("the message at %s (%s) holds a grant word and has no home for it: a standing word bars a %s home,"
-                " so add %s" % (b["stamp"], head, ONCE_HOME, STANDING_HOMES))
+        return ("the message at %s (%s) holds a grant word and has no home for it."
+                " A standing word bars a %s home, so add %s." % (b["stamp"], head, ONCE_HOME, STANDING_HOMES))
     return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
