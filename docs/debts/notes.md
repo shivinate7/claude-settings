@@ -34,7 +34,6 @@
 - discards-output-slow-path: discards_output re-walks the segment once per redirect match; cost unmeasured (hooks/guard.py)
 - dropped-bloat-phrases-silent: 'in between', 'in terms of' and 'it would appear that' left BLOAT, so the lint no longer reports them even as a warning (lint/ste_lint.py)
 - drops-cite-forms-unchecked: git commit --trailer, a no-space Refs:decisions/a.md token, git merge -m and git tag -m are never cite-checked (hooks/guard.py)
-- drops-dot-slash-guard-lint: ./decisions/a.md after Drops-lines passes the guard but the lint's exact match refuses it (hooks/guard.py cited_record_path)
 - drops-mixed-paragraph-exempt: guard exempts a last paragraph mixing prose and the Drops-lines trailer; git does not read it as trailers, so the cite stays in history (hooks/guard.py)
 - drops-reads-msg-unlike-git: guard refuses a folded Drops-lines trailer and reads a --file=- body last, unlike git; false refusals only (hooks/guard.py)
 - drops-stdin-message-unread: a commit message from -F - stdin is never read, so a prose cite there passes (hooks/guard.py cited_record_path)
@@ -55,6 +54,7 @@
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
 - expired-delete-net-error-stops: the expired-lock delete in GhLock.acquire runs once, so a network error or rate limit stops the run with NetStop (merge/merge.py)
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
+- frozen-perl-switch-arg-ends-scan: `perl -I lib -pi -e ... <frozen>` and `ruby -r json -pi -e ... <frozen>` are allowed, because the in-place scan stops at the first switch argument (hooks/guard_frozen.py _perl_ruby_in_place). Main allows them too.
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
@@ -68,12 +68,9 @@
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
 - guard-audit-agent-stop-open: SubagentStop fails open on a missing guard module, on purpose, with one log line (hooks/guard.py)
 - guard-bash-c-silent-write: a silent git write inside bash -c '...' is allowed; the check reads only the outer command (hooks/guard.py)
-- guard-cd-walk-extra-reading: after an unclosed quote the second reading can hold a cd bash never runs, so a git write is judged in the wrong folder (guard_core _run_dir)
 - guard-env-read-grep: the env rule allows Read and Grep on env files; only the settings.json deny list refuses them (hooks/guard_env.py)
-- guard-first-c-reads-wrong-tree: rules other than discard take the first -C in a command, so a verdict can name the wrong checkout (guard_shared_tree.py)
 - guard-glob-three-tools: rule_audit, check_landed_dirs and mutate_shared each glob hooks/guard*.py; they cannot share a helper (lint/, hooks/)
 - guard-heredoc-os-system: a python heredoc body calling os.system("git stash") is allowed; the guard does not read python bodies (guard_core, guard.py)
-- guard-home-delete-literal: rm -rf /home/x and rd /s /q C:\Users\x are allowed; the delete rule guards only the session user's home (hooks/guard.py)
 - guard-interp-heredoc-lone-quote: a lone ' in an interpreter heredoc body makes a later cited commit run unjudged (guard)
 - guard-log-extra-ci: an edit to lint/guard_log_report.py selects extra CI suites that do not read guard.log (.github/workflows/checks.yml)
 - guard-log-install-skew: a six-field guard_core with an old decision_watch drops notes; only a partial copy splits them (guard_core, decision_watch)
@@ -104,7 +101,6 @@
 - handoff-wake-misses-ready-forms: gh pr re''ady skips the CI wake, and gh pr ready 2>&1 reads the redirect as the selector (hooks/ci_wake.py)
 - ci-scope-pipe-regex-quotes: the pipe regex in mods_step_problems ignores quotes and comments (lint/test_ci_scope.py)
 - here-string-scan-quadratic: the PowerShell here-string match is quadratic on many unclosed openers; 20000 openers take 9 s (hooks/guard.py _HERE_STRING)
-- heredoc-indented-close: _split_heredocs closes on an indented EOF after .strip(); bash does not, so later text is read as commands (guard_core)
 - heredoc-run-other-path: heredoc bodies run through a next-line pipe or other paths are read as text (guard_core, test_guard.py)
 - heredoc-script-then-run: a heredoc that writes a script the same command then runs is not read for the script body (guard_core, guard.py)
 - hold-own-safety-hole-unrecorded: no held change has yet shown the safety-hole record the review-cap rule describes (CLAUDE.md roles-review-cap-three)
@@ -140,7 +136,6 @@
 - janitor-loop-no-alias-skip: bin/claude-janitor keeps the old loop with no Store alias skip; it is a user command (bin/claude-janitor)
 - judgment-exits-debt-count: re-kinding an unmechanized rule to judgment takes it off the waiting list; only the 8-word reason floor and two pins stand in the way (lint/rule_audit.py)
 - kept-bloat-rows-unaudited: 97 kept BLOAT fix rows were not read against a corpus; how often a swap changes meaning is unmeasured (lint/ste_lint.py FIXABLE)
-- kill-guard-word-only: kill_hit reads only the command word; gtimeout 5 pkill -f node and watch pkill pass (hooks/guard_kill.py)
 - lane-slug-gh-m-flag-passes: gh pr create -m N20 is allowed, since -m in gh is not a message (lane-slug message readers)
 - lane-slug-header-count-shift: an unquoted <<word in an interpreter heredoc body or a case ) inside $( shifts the heredoc header count (guard_core heredoc_heads)
 - lane-slug-heredoc-untested: no test pins # in a string, a lone apostrophe in a comment or multi-line quoted text before a header; no mutant covers heredoc_heads (test_guard.py)
@@ -191,7 +186,6 @@
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
 - override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
-- perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
 - plain-diff-4mib-unconfirmed: the 4 MiB host output limit behind 'Diff truncated' is unconfirmed in code (mods/plain-diff register.mjs)
 - plain-diff-desktop-untested: the pane draw and turn-text match against real session messages are untested in the desktop app (mods/plain-diff)
@@ -204,6 +198,13 @@
 - plain-diff-secret-file-names: terraform.tfstate, .kube/config, wp-config.php and AuthKey_*.p8 are not caught by name (mods/plain-diff isSecretPath)
 - plain-diff-trimnote-regex: trimNote table-row regex is quadratic on absurd input and was not re-timed after round 3 (mods/plain-diff hooks/lib.mjs)
 - pointer-detach-false-alarm: the pointer guard refuses checkout --detach main though session_start counts that state as on main (hooks/guard_pointer.py)
+- pointer-failed-cd-and-refuses: from the pointer checkout, `cd missing && git switch x` is refused, though the switch never runs after the failed cd. Harmless: the command fails anyway (hooks/guard_core.py dir_before_segment).
+- pointer-new-worktree-cd-refuses: from the pointer checkout, `git worktree add X && cd X && git switch y` and the same after `git clone` are refused. X is missing at judge time, so the cd counts as failed and the shell stays in the pointer checkout. Fix: none — reading the made folder as entered let `mkdir sub && cd sub && git switch y` run in the pointer checkout. Run the switch in a second call (hooks/guard_core.py dir_before_segment).
+- pointer-head-heredoc-cd-moves: a `cd` line inside a kept heredoc body (bash, ssh or python) moves the folder rule 1b judges, so a switch after it reads that folder, not the pointer checkout (hooks/guard.py rule 1b reads `strip_heredoc_bodies`).
+- guard-cd-walk-extra-reading: rules other than pointer-head still judge a whole command in one folder, where the last cd wins (hooks/guard.py command_root at the shared-tree, merge and branch rules; hooks/guard_merge.py).
+- guard-first-c-reads-wrong-tree: rules other than pointer-head still take the first `-C` of the line for every call (hooks/guard_core.py _run_dir).
+- rm-home-glob-over-refuses: `rm -rf /root/*.tmp` and `rm -rf /home/x/*.log` are refused, because the glob's parent is a home folder; `rm -rf ~/*.tmp` is allowed (hooks/guard_rm_var.py _rm_target_bad).
+- heredoc-offsets-strip-close: `heredoc_offsets` still closes a body on a stripped line, while `_walk_heredocs` closes only on an exact line (hooks/guard.py heredoc_offsets).
 - ponytail-why-every-session: ponytail@ponytail is on in settings.json since PR #96 (ba7a11b3, Sep 22), and its SessionStart hook has printed "PONYTAIL MODE ACTIVE" since its first release (Jun 12), so neither is new. With no pin, every session took upstream releases: v5.0.0 rebuilt rules (Oct 8), v5.3.0 band and board hooks (Oct 16), v5.3.3 (Oct 29). Which change the owner saw is unknown. The owner's custom copies of its skills are in neither claude-settings nor claude-sharables git history; look in ~/.claude/skills and ~/.claude/backups/skills on each machine. Turned off Nov 1 (settings.json)
 - pr-checks-watch-unmeasured: gh pr checks --watch is allowed in background with unmeasured API cost; wrapped and captured gh run watch forms are unread (hooks/guard_stream.py)
 - printf-quote-walk-bandaid: walk_quotes reads a quote inside $( ) as the outer string's own; discards_output cuts and rereads to cover it (hooks/guard_core.py, hooks/guard.py)

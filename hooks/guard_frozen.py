@@ -238,6 +238,43 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# An in-place edit of the file a command names: `sed -i`, `perl -pi` / `perl -i.bak`, `ruby -i`. Perl and
+# ruby take `-i` inside a cluster of bare switches (`-pi`, `-ni`), so the letters before it are the bare ones.
+IN_PLACE_COMMANDS = ("sed", "perl", "ruby")
+IN_PLACE = r"\b(?:sed\b[^\n;|&]*-i\b|(?:perl|ruby)\b[^\n;|&]*\s-[0-9nplawsWtTuUcS]*i)[^\n;|&]*"
+_PERL_SWITCH_CLUSTER = re.compile(r"-[0-9nplawsWtTuUcS]*i")
+_PERL_SCRIPT_FLAG = re.compile(r"-[A-Za-z0-9]*[eE]$")
+
+
+def _perl_ruby_in_place(args) -> bool:
+    """True when the words after `perl` or `ruby` carry an in-place switch as a word of their own. The
+    word after an `-e` is that script, so a ` -i path` inside it is text, as is any word after the
+    script file: those are the program's arguments, not perl's."""
+    skip = False
+    for token in args:
+        if skip:
+            skip = False
+        elif not token.startswith("-") or token == "-":
+            return False
+        elif token.startswith("--"):
+            continue
+        elif _PERL_SWITCH_CLUSTER.match(token):
+            return True
+        elif _PERL_SCRIPT_FLAG.match(token):
+            skip = True
+    return False
+
+
+def _segment_in_place(raw):
+    """For a segment's quote-keeping words: whether its perl or ruby call carries an in-place switch,
+    or None when the command is neither (`sed` and the rest keep the text reading)."""
+    plain = [_unquoted(word) for word in raw]
+    index = resolve_command(tuple(plain))
+    if index is None or _name(raw[index]) not in ("perl", "ruby"):
+        return None
+    return _perl_ruby_in_place(plain[index + 1:])
+
+
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
@@ -257,7 +294,7 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), in_place=None) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -267,6 +304,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
     counting as a write to a path named in a comment.
+
+    `in_place` is False when the segment's perl or ruby has no in-place switch of its own, so a ` -i path`
+    in a script string reads as text (`_segment_in_place`).
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
@@ -274,12 +314,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return (command in IN_PLACE_COMMANDS and in_place is not False
+                and bool(re.search(IN_PLACE + target, cmd)))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return in_place is not False and bool(re.search(IN_PLACE + target, cmd))
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -689,12 +728,14 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        in_place = _segment_in_place(raw)
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(
+                    word, text, *(_segment_command(script) if command_position else ()), in_place=in_place):
                 return word
     return ""
 
@@ -720,7 +761,7 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 
 # ------------------------------------------------------------------ an interpreter's own writes
 #
-# A python or node script, run from a heredoc body or from `-c` / `-e`, writes a file the shell
+# A python, node, perl or ruby script, run from a heredoc body or from `-c` / `-e`, writes a file the shell
 # never names, so `_shell_write_hit` cannot see it. `interpreter_write_hit` reads the script itself.
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
@@ -732,6 +773,13 @@ _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
 _NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
 _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
+_PERL_RUBY_COMMAND = re.compile(r"^(?:perl|ruby)[\d.]*(?:\.exe)?$")
+_PERL_RUBY_E_FLAG = re.compile(r"^-[A-Za-z0-9]*[eE]$")   # `-e`, or a cluster that ends in it: `-pe`, `-0ne`
+_PERL_RUBY_E_TEXT = re.compile(r"\s-[A-Za-z0-9]*[eE]\b")
+
+
+def _has_inline_flag(text: str) -> bool:
+    return any(flag in text for flag in _INLINE_FLAG_WORDS) or bool(_PERL_RUBY_E_TEXT.search(text))
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
@@ -948,6 +996,90 @@ def _js_values(groups, env):
     return []
 
 
+# Perl and ruby are read for the TARGET of a write call, never for a path that sits anywhere beside one: a
+# body that reads a frozen file and writes a scratch file hits nothing. `_perl_ruby_masked` cuts the `#`
+# comments and swaps each string for a marker, so a write call or a `#` inside a string is text. The write
+# calls read: perl's `open` with a `>`, `>>` or `+<` mode (three-argument, or two-argument with the mode
+# in the path), ruby's `File.open` / `File.new` / `open` with a `w`, `a` or `r+` mode, `File.write`,
+# `File.binwrite`, `IO.write`, and the copy and rename calls, whose second operand is the one written. A
+# path held in a variable is read from the body's own `name = 'literal'` assignments.
+_PERL_RUBY_HEADER = re.compile(r"(?<![\w.-])(?:perl|ruby)[\d.]*(?:\.exe)?(?![\w.-])")
+_PR_OPERAND = r"(?:\x00\d+\x00|[$@]?[A-Za-z_]\w*)"
+_PR_PERL_OPEN = re.compile(
+    r"\bopen\s*\(?\s*(?:(?:my|our|local)\s+)?[$*\\]?\w+\s*,\s*\x00(\d+)\x00(?:\s*,\s*(" + _PR_OPERAND + "))?")
+_PR_RUBY_OPEN = re.compile(
+    r"\b(?:(?:File|IO)\s*\.\s*(?:open|new)|open)\s*\(?\s*(" + _PR_OPERAND + r")\s*,\s*\x00(\d+)\x00")
+_PR_ONE = re.compile(r"\b(?:File|IO)\s*\.\s*(?:write|binwrite)\s*\(?\s*(" + _PR_OPERAND + ")")
+_PR_TWO = re.compile(
+    r"\b(?:(?:File|FileUtils)\s*\.\s*)?(?:rename|copy|move|cp|cp_r|mv|copy_file|copy_entry)\s*\(?\s*"
+    + _PR_OPERAND + r"\s*,\s*(" + _PR_OPERAND + ")")
+_PR_ASSIGN = re.compile(r"\b(?:(?:my|our|local)\s+)?[$@]?([A-Za-z_]\w*)\s*=\s*\x00(\d+)\x00")
+_PR_PERL_WRITE_MODE = re.compile(r"\s*(?:\+[<>]|>>?)")
+_PR_RUBY_WRITE_MODE = re.compile(r"\s*(?:[wa]|r\+)")
+
+
+def _perl_ruby_masked(body: str):
+    """(code, strings): the body with each `#` comment cut and each quoted string swapped for
+    `\\x00N\\x00`, where `strings[N]` is its text. A quote that never closes is a lone character, so
+    the code after it is still read. A `#` after a `$` is perl's `$#array`, no comment."""
+    code, strings, at, end = [], [], 0, len(body)
+    while at < end:
+        char = body[at]
+        close = -1
+        if char in "'\"":
+            close = at + 1
+            while close < end and body[close] != char:
+                close += 2 if body[close] == "\\" else 1
+        if char in "'\"" and close < end:
+            strings.append(body[at + 1:close])
+            code.append("\x00%d\x00" % (len(strings) - 1))
+            at = close + 1
+        elif char == "#" and not (at and body[at - 1] == "$"):
+            while at < end and body[at] != "\n":
+                at += 1
+        else:
+            code.append(char)
+            at += 1
+    return "".join(code), strings
+
+
+def _perl_ruby_hit(body: str, cwd: str, predicate) -> str:
+    code, strings = _perl_ruby_masked(body)
+    names = {}
+    for match in _PR_ASSIGN.finditer(code):
+        names.setdefault(match.group(1), []).append(strings[int(match.group(2))])
+
+    def values(operand):
+        if operand is None:
+            return []
+        if operand.startswith("\x00"):
+            return [strings[int(operand.strip("\x00"))]]
+        return names.get(operand.lstrip("$@"), [])
+
+    def hit(paths):
+        return next((text for text in paths if text and predicate(text, cwd)), "")
+
+    for match in _PR_PERL_OPEN.finditer(code):
+        mode = strings[int(match.group(1))]
+        marks = _PR_PERL_WRITE_MODE.match(mode)
+        if marks:
+            inline = mode[marks.end():].strip()   # `open(F, ">path")`: the path rides in the mode string
+            found = hit([inline] if inline and not inline.startswith(":") else values(match.group(2)))
+            if found:
+                return found
+    for match in _PR_RUBY_OPEN.finditer(code):
+        if _PR_RUBY_WRITE_MODE.match(strings[int(match.group(2))]):
+            found = hit(values(match.group(1)))
+            if found:
+                return found
+    for pattern in (_PR_ONE, _PR_TWO):
+        for match in pattern.finditer(code):
+            found = hit(values(match.group(1)))
+            if found:
+                return found
+    return ""
+
+
 def _js_hit(body: str, cwd: str, predicate) -> str:
     env = {}
     for match in _JS_ASSIGN.finditer(body):
@@ -968,19 +1100,21 @@ def _inline_scripts(command: str):
     ends = []
     segments = split_segments(_strip_heredoc_bodies_unconditionally(command), ends)
     for number, segment in enumerate(segments):
-        if not any(flag in segment for flag in _INLINE_FLAG_WORDS):
+        if not _has_inline_flag(segment):
             continue
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
         if index is None:
             continue
         name = basename(tokens[index])
-        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
-        flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
+        kind = ("py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name)
+                else "pr" if _PERL_RUBY_COMMAND.match(name) else "")
+        flag = _PY_C_FLAG if kind == "py" else _PERL_RUBY_E_FLAG if kind == "pr" else _NODE_EVAL_FLAG
         for at in range(index + 1, len(tokens) - 1):
             if kind and flag.match(tokens[at]):
                 yield kind, str(tokens[at + 1]), number, segments, ends
-                break
+                if kind != "pr":
+                    break   # perl and ruby take several `-e` scripts, and run them all
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
@@ -1006,14 +1140,16 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
                     hit = _py_hit(body, cwd, predicate)
                 elif _NODE_HEADER.search(header):
                     hit = _js_hit(body, cwd, predicate)
+                elif _PERL_RUBY_HEADER.search(header):
+                    hit = _perl_ruby_hit(body, cwd, predicate)
                 else:
                     continue
                 if hit:
                     return hit
-    if any(flag in raw for flag in _INLINE_FLAG_WORDS):
+    if _has_inline_flag(raw):
         for kind, script, number, segments, ends in _inline_scripts(raw):
             at = dir_before_segment(segments, number, cwd, ends) or cwd
-            hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
+            hit = {"py": _py_hit, "pr": _perl_ruby_hit}.get(kind, _js_hit)(script, at, predicate)
             if hit:
                 return hit
     return ""

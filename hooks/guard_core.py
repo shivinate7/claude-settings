@@ -355,7 +355,8 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
-                    "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&"}
+                    "timeout", "gtimeout", "watch", "verdict", "python", "python3", "exec", "builtin",
+                    "!", "&"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
 # Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
 # needs no entry.
@@ -384,6 +385,8 @@ DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
 TIMEOUT_FLAGS_BARE = {"--preserve-status", "--foreground"}
 WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
+WRAPPER_VALUE_FLAGS["gtimeout"] = TIMEOUT_FLAGS_WITH_VALUE   # GNU timeout under Homebrew
+WRAPPER_VALUE_FLAGS["watch"] = {"-n", "--interval", "-q", "--equexit"}   # `watch -n 5 cmd` runs cmd
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -597,9 +600,9 @@ def _walk_wrappers(tokens):
         word, start = basename(tokens[index]), index
         index, flags = _wrapper_flags(word, tokens, index + 1)
         chain.append((word, tuple(flags)))
-        if word == "timeout" and not (index < end and DURATION.match(tokens[index])):
+        if word in ("timeout", "gtimeout") and not (index < end and DURATION.match(tokens[index])):
             return start, tuple(chain)
-        if word == "timeout":
+        if word in ("timeout", "gtimeout"):
             index += 1
         if word in ("python", "python3"):
             if not (index < end and basename(tokens[index]) == "verdict"):
@@ -700,14 +703,17 @@ def INTERPRETER_HEREDOC(text: str) -> bool:
 _HEAD_MARKS = re.compile(r"""['"(#<]""")
 
 
-def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False):
+def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False,
+                  dashes: "list | None" = None):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
     quotes and parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does:
     a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
     only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
     opens none. A mark read as text could show a header bash quotes, and drop a body bash runs.
-    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there)."""
+    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there). A caller that
+    passes `dashes` gets one flag per header appended: True for `<<-`, whose body may close on a
+    tab-indented delimiter."""
     if not quote and not _HEAD_MARKS.search(text):
         return [], ""   # no quote, paren, comment or `<` to read: nothing opens, nothing is open
     heads = []
@@ -742,6 +748,8 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy
             header = (_MAIN_HEADER if legacy else HEREDOC_HEADER).match(text, index)
             if header:
                 heads.append(header.groups() if legacy else heredoc_delimiter(header.group(1)))
+                if dashes is not None:
+                    dashes.append(header.group(0).startswith("<<-"))
                 index = header.end()
                 continue
         index += 1
@@ -778,11 +786,13 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         if kept_at is not None:
             kept_at.append(index)
         header_line = lines[index]
-        heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
+        dashes = []
+        heads, stack = heredoc_heads(header_line, stack, index < last, legacy, dashes)   # a later line holds a `'`
         index += 1
-        for quote, delimiter in heads:
+        for (quote, delimiter), dash in zip(heads, dashes):
             start = index
-            while index < len(lines) and lines[index].strip() != delimiter:
+            # bash closes on a line that is exactly the delimiter; `<<-` also strips leading tabs, never spaces
+            while index < len(lines) and (lines[index].lstrip("\t") if dash else lines[index]) != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
             if index < len(lines):
