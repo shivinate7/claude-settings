@@ -21,6 +21,7 @@ or when MUTATE_FULL=1 asks for it.
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
 """
+import ast
 import contextlib
 import io
 import os
@@ -243,13 +244,24 @@ def scaffold_sources(**extra):
     return sources
 
 
+def plain_import_names(path):
+    """The first dotted segment of each plain `import X` in the file at `path`, sorted. Read with
+    ast, so an import inside a function body counts too. A `from X import Y` line is not read."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+    return sorted({alias.name.split(".")[0] for node in ast.walk(tree)
+                   if isinstance(node, ast.Import) for alias in node.names})
+
+
 class BuildScaffoldSiblingTests(unittest.TestCase):
     """`build_scaffold` writes every guard module in `sources` (a key `guard_<name>` is
-    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file."""
+    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file.
+    It also lays down <scaffold>/lint with each lint module janitor/test_sweep.py imports."""
 
     def setUp(self):
-        self.scaffold = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.scaffold, True)
+        self.run = _test_temp.run_folder()
+        self.scaffold = os.path.join(self.run, "scaffold")
+        self.addCleanup(shutil.rmtree, self.run, True)
 
     def sources(self, **extra):
         return scaffold_sources(**extra)
@@ -277,6 +289,25 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
         # import, so every mutant reads killed for a cause that is not the mutation.
         mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
         self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "git_reads.py")))
+
+    def test_scaffold_lint_holds_every_lint_module_test_sweep_imports(self):
+        # test_sweep.py imports each lint module when it loads. A module the scaffold lacks kills the
+        # whole suite on import, so every mutant reads survived for a cause that is not the mutation.
+        imported = plain_import_names(mutate_sweep.SUITE)
+        lint_modules = [name for name in imported
+                        if os.path.isfile(os.path.join(mutate_sweep.REPO_ROOT, "lint", name + ".py"))]
+        self.assertIn("_test_git", lint_modules,
+                      "the ast read found no lint import in test_sweep.py, saw %r" % (imported,))
+        with open(mutate_sweep.SUITE, encoding="utf-8") as handle:
+            sources = self.sources(test_sweep=handle.read())
+        mutate_sweep.build_scaffold(self.scaffold, sources, "sweep", sources["sweep"])
+        self.assertTrue(os.path.isfile(os.path.join(self.scaffold, "lint", "_test_git.py")),
+                        "the scaffold lacks its control, lint/_test_git.py")
+        missing = [name for name in lint_modules
+                   if not os.path.isfile(os.path.join(self.scaffold, "lint", name + ".py"))]
+        if missing:
+            self.fail("scaffold lint/ lacks module(s) janitor/test_sweep.py imports: "
+                      + ", ".join(missing))
 
 
 class FakeRun:
