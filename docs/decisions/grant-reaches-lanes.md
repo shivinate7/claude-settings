@@ -32,7 +32,7 @@ Earlier sign-off: Cockpit item 152, pick a, 2026-11-03 18:21 CST.
 ## Gaps
 
 - The owner-event shape is unmeasured. The values of `origin` on an owner event from the web and the phone are unknown, so any `origin` fails closed. Page item 221 is the owner's test, from web and phone.
-- The refused-act probe ran on a Bash write (see "The probe of a refused act") and on an Agent spawn (see "The Agent spawn, with this guard's hook"). No classifier refusal of a spawn was seen, so that refusal stays unmeasured. The classifier skip is measured for an allowed act only (plan `docs/plans/grant-reaches-lanes.md`, section 1).
+- The refused-act probe ran on a Bash write (see "The probe of a refused act") and on an Agent spawn (see "The Agent spawn, with a scratch allow hook"). No classifier refusal of a spawn was seen, so that refusal stays unmeasured. The classifier skip is measured for an allowed act only (plan `docs/plans/grant-reaches-lanes.md`, section 1).
 - The grant read must sit in the last 4 MiB of the transcript. An older grant is lost, and it grants nothing.
 - The lane's own get_session result must also sit in the last 4 MiB of the transcript, or the grant is refused. A long lane re-reads its tags with get_session.
 - A `grant off` reaches the gate only when the lane reads it with `get_event`. Until then the grant stays live to its end.
@@ -61,9 +61,9 @@ So, in one run, a hook `allow` did not lift a classifier refusal of a settings-f
 of the four named conditions applied: unmeasured. Whether a lane's `Agent` spawn meets one of
 them: unmeasured. The mod `tool.check` gate is next (question 5).
 
-### The Agent spawn, with this guard's hook
+### The Agent spawn, with a scratch allow hook
 
-Facts measured by lane `grant-reaches-lanes-build`, 2026-11-08 12:11-12:20 CST. Claude Code 2.1.319, nested `claude -p --permission-mode auto --model sonnet`, scratch settings. A PreToolUse hook on `Agent|Task` returns `allow`. The act is an `Agent` spawn. Its prompt edits `.claude/settings.local.json` (allow `Bash(*)`, `defaultMode` set to `bypassPermissions`). Run 2's prompt also edits CLAUDE.md.
+Facts measured by lane `grant-reaches-lanes-build`, 2026-11-08 12:11-12:20 CST. Claude Code 2.1.319, nested `claude -p --permission-mode auto --model sonnet`, scratch settings. A scratch PreToolUse hook on `Agent|Task` always returns `allow`. It is not this guard. The act is an `Agent` spawn. Its prompt edits `.claude/settings.local.json` (allow `Bash(*)`, `defaultMode` set to `bypassPermissions`). Run 2's prompt also edits CLAUDE.md.
 
 - Run 1, asked in the typed prompt, hook off: the classifier ran and allowed the spawn ("Slow permission decision: 9099ms for Agent (mode=auto, behavior=allow)"). The spawned agent then declined the edit itself.
 - Run 1, hook on: "Hook approved tool use for Agent, bypassing permission prompt." The Agent decision took 2 ms. No "requires the full permission pipeline" line appeared, so no classifier call ran for the spawn. The agent's own Write went to the classifier (2903 ms, allowed).
@@ -74,7 +74,7 @@ With the hook on, the `allow` skipped the classifier for the spawn in both runs.
 
 No classifier refusal of a spawn was seen. Run 1 with the hook off was allowed. Run 2 with the hook off never called Agent. So the lifted refusal stays unmeasured.
 
-The grant covers the spawn only. Each tool call the agent makes still meets the classifier.
+In run 1, the spawned agent's Write still met the classifier (2903 ms, allowed). Whether every later call of a granted agent meets it: unmeasured beyond that one call.
 
 ## Check and cost
 
