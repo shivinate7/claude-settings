@@ -64,7 +64,7 @@ The worst case is 45 s: three git calls at 5 s, `ls-remote` at 5 s, and five `gh
 - With no origin, a commit URL of this repo is not judged. A payload with no `cwd` is not judged, with no notice.
 - A repo with a capital letter, marked only by `:` or `PR` (`Acme/Widgets: PR #5`), is judged against this repo and can refuse.
 - A PR list split across a line break is judged on its first line only.
-- A `#N` that follows a PR or pull word but means something else is judged as a PR (`PR merged, see #3`, `git pull origin main before #3`). Only a PR number that does not exist refuses.
+- A `#N` that follows a PR or pull word but means something else is judged as a PR (`PR merged, see #3`). Only a PR number that does not exist refuses.
 - A made-up PR whose gap breaks those limits passes (`PR for step 2 is #N`, `PR for this bug is #N`, a gap of 7 words). The limits keep issue and step numbers from refusing.
 - The sha forms that `agent-report-shas-resolve` skips are skipped here too: `key=<sha>`, a URL word (this repo's compare URLs included) and a line starting `index `.
 - Another repo's PR named with no `owner/repo` on its line is judged against this repo and can refuse.
