@@ -759,6 +759,24 @@ class Hook(unittest.TestCase):
         self.assertTrue(self.count_verdict(prompt, ["Blind designers: 2"], "a plain ASCII digit count"),
                         "a plain `Blind designers: 2` must count as a pass")
 
+    def test_plain_fullwidth_digit_count_passes(self):
+        # U+FF12 (fullwidth two) is a Unicode decimal digit, and int() reads it as 2, as main does. It must count, not be refused.
+        prompt = "Designer kind: informed\nBlind designers: ２\n\n" + DUO_BRIEF
+        self.assertTrue(self.count_verdict(prompt, ["Blind designers: ２"], "a plain fullwidth digit count"),
+                        "a plain `Blind designers: <fullwidth two>` must count as 2, as main reads it, but it was refused")
+
+    def test_marked_arabic_indic_digit_count_passes(self):
+        # U+0662 (Arabic-Indic two) is a Unicode decimal digit, and int() reads it as 2. On the marked path it must count.
+        prompt = "Designer kind: informed\n- Blind designers: ٢\n\n" + DUO_BRIEF
+        self.assertTrue(self.count_verdict(prompt, ["- Blind designers: ٢"], "a marked Arabic-Indic digit count"),
+                        "a marked `- Blind designers: <Arabic-Indic two>` must count as 2, as main reads it, but it was refused")
+
+    def test_plain_circled_digit_count_is_refused_not_a_crash(self):
+        # Green control. U+2460 (circled one) passes str.isdigit() but not isdecimal(), and int() raises on it. It reads as no count.
+        prompt = "Designer kind: informed\nBlind designers: ①\n\n" + DUO_BRIEF
+        self.assertFalse(self.count_verdict(prompt, ["Blind designers: ①"], "a plain circled digit count"),
+                         "a plain `Blind designers: <circled one>` must be refused as no count, but it passed")
+
     def test_fenced_bulleted_count_line_is_refused(self):
         # A count line inside a ``` fence is the pasted template, not the brief's count, so it never counts.
         self.assertCountRefused("Designer kind: informed\n\n```\n- Blind designers: 2\n```\n\n" + DUO_BRIEF,
