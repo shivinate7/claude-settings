@@ -663,7 +663,7 @@ class CostPinTests(unittest.TestCase):
         self.assert_found([count_row("round.md", text, CONTROL_NEEDLE)], counts=True)
 
     def test_pr_number_is_not_a_count(self):
-        # "PR 2152" and "PR #2152" name a pull request, not a count of work.
+        # "PR N" and "PR #N" name a pull request, not a count of work.
         text = self.decide("pr.md",
                            "- **Cost:** PR 2152 reads the list.\n"
                            "- **Cost:** PR #2152 reads the list.\n"
