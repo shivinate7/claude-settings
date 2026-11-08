@@ -12,7 +12,8 @@ cue), `pick-rail` (the 30-step rail chip, the narrow rule). The list under each 
 bar width, cells or runs, the narrowest drawn part, the paused mark, and the token contrasts.
 
 Measured today (the mockup's "Today" options, 30 steps): rail chip 58px at 390 (cells 0px, nothing drawn), rail chip
-97px at 1280 (1.3px), phase head 90px at 1280 (1.06px). There a paused ring fills its cell and paints solid
+97px at 1280 (1.3px), phase head 90px at 1280 (1.06px). The 97px is the mockup's layout, not the page's: the shipped
+rail chip at 1280 is 216.8px (5 equal columns, 7.2px a cell), so it draws cells. There a paused ring fills its cell and paints solid
 `--muted` beside a solid `--accent` done cell: 1.08 to 1.25:1. Now card and phase head at 390 are 5px a cell or more.
 
 ## Items
@@ -53,16 +54,20 @@ Measured today (the mockup's "Today" options, 30 steps): rail chip 58px at 390 (
 ## Builder changes, `skills/roadmap/page/index.html` (picks 1 and 4)
 
 - CSS: `.bar{position:relative}` added to `.bar`.
-- CSS: `.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2px)*1000),100%)}`.
-- CSS: `.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000),100%)}`.
-- CSS: `.bar>.runs>i{flex:var(--c) 1 0px;min-width:4px;height:100%}`.
+- CSS: `.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2.01px)*1000000),100%)}`.
+- CSS: `.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%)}`.
+- CSS: `.bar>.runs>i{flex:var(--c) 1 0px;min-width:min(4px,calc((100% - var(--k)*2px + 2px)/var(--k)));height:100%}`.
+- The switch is a step at W = 5px x steps - 2px: at or above it the cells draw (the 0.01px lead keeps them on at W = edge),
+  below it the runs layer is the full bar (the layout grid is 1/64px, so one step under makes the product 15625px or more).
+  A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
+- JS: `<b class="runs">` gets `style="--k:K"`, its run count (at least 1).
 - CSS: `.bar i.pzd{background:linear-gradient(var(--muted),var(--muted)) left bottom/100% 50% no-repeat;box-shadow:none}`, in place of the ring.
 - JS: `segs(c,n)` appends `<b class="runs">` holding one `<i class="KIND" style="--c:COUNT">` per kind with a count above 0, in
   the cell order, then `<i style="--c:TODO">`.
 - JS: each bar gets `--n`, its step count (at least 1): `renderNow` (merged with its `margin-top:7px`), `renderRail`, and
   the phase head bar in `renderPhase`.
 - Cost: one absolutely placed layer of at most 6 elements per bar. No ResizeObserver and no layout read: the switch is
-  the `clamp(... * 1000)` idiom the waiting page already uses.
+  the `clamp(... * 1000000)` step switch, the same text on the waiting page.
 
 ## Test check (geometry and tokens, not painted pixels)
 
@@ -70,6 +75,7 @@ With `barFixtureBlocked` and `STALLED_S3_P4`, at 390 and 1280, light and dark, f
 and the phase head bar:
 - Exactly one layer draws: the widest `.bar > i` is over 0px, or `.bar > .runs` is over 0px wide, never both.
 - Every drawn part (the cells, or `.runs > i`) is at least 3px wide.
+- At 5 x steps - 3, - 2.02, - 2 and - 1 px (30 and 13 steps) exactly one layer draws and it spans the bar.
 - In runs mode, the run classes read `["done","act","stl","pzd","blk",""]`.
 - The 58px chip at 390 and the 90px phase head at 1280 are in runs mode; the Now card is in cell mode.
 - The paused part has `background-size` `100% 50%`, `background-position` `0% 100%`, and `box-shadow` `none`.
@@ -87,6 +93,9 @@ nothing in either mockup; it reads the harness, not the screen in the frames.
   phase that goes to runs in any bar go to runs in all of them (JS, one layout read per render)?
 - Open: nothing on the screen teaches that a low cell means paused, as nothing taught the ring. The bar's `title` and
   the Now card words carry it.
+- The 4px floor of a run holds for every bar the pages draw. The narrowest is the 30-step rail chip, 39.4px at a 320px
+  viewport; k runs need 6k - 2px (34px for six, the most there are). Below 6k - 2px the floor gives way: each run takes
+  an equal share, so every run stays visible. The test pins only that each run shows at 1px or more (a 6-step bar, 20px).
 - Open: at the 4px floor a 1-step run reads larger than its share (4px of 58px for 1 of 30). The d/n count is exact.
 - Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 

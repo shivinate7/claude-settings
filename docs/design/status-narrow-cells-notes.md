@@ -10,9 +10,11 @@ Deep links: `#s=fixture|wide`, `&pz=low|ring|today`, `&nr=runs|count|today`, `&w
 rail chip, the narrow rule). The list under each frame is read from the drawn frame.
 
 Measured today (30 steps): rail chip 104.7px at 390 (1.55px a cell), phase head 110px at 1280 (1.72px). Every other
-bar is 4.3px a cell or more. Today a paused cell under 3px paints solid `--ink` (light) or `--ground` (dark). That
-reaches 3:1 against a done cell but sits near a to-do cell in shape: both are solid blocks. No solid colour reaches 3:1
-against both done and to do, since done to to do is only 4.9 to 5.7:1.
+bar is 4.3px a cell or more. At base bcaab2c62 a paused cell is a ring at every width: `background: transparent` and
+`box-shadow: inset 0 0 0 1.5px var(--muted)`, with no `::after`. Under 3px the ring fills its cell and reads as a solid
+`--muted` block beside a done cell. (The mockup's "Today" frame is 6a985d93d, which also paints a solid `--ink` or
+`--ground` under 3px through `.segbar i.pzd::after`; that is not the base.) No solid colour reaches 3:1 against both
+done and to do, since done to to do is only 4.9 to 5.7:1.
 
 ## Items
 
@@ -34,14 +36,14 @@ against both done and to do, since done to to do is only 4.9 to 5.7:1.
    half and the gaps leave a notch in the bar's top edge.
    Gain: shape, not colour. In dark, `--acc` and `--muted` are 1.02:1 apart, and the paused block still reads apart from
    the done block by its height. `--muted` on `--surface` is 6.47:1 light, 7.37:1 dark.
-   Loss: the ring is gone, and so is today's solid paint under 3px.
-   Departs from: `.segbar i.pzd` (the ring) and `.segbar i.pzd::after` (the solid paint), the pick in
+   Loss: the ring is gone, so a paused cell no longer has a hollow at any width.
+   Departs from: `.segbar i.pzd` (the ring) at bcaab2c62, the pick in
    `status-stalled-paused-notes.md` item 1. Owner grant: yes. Pick: yes.
 
 5. **Paused cue, option Ring, low when narrow.** The ring at 5px and wider, the low half under 5px. At 1280 the Now card
    (4.34px a cell) and rail chip (4.69px) fall under 5px, so one screen shows both shapes. Pick: no.
 
-6. **Paused cue, Today: ring, solid under 3px.** Pick: no.
+6. **Paused cue, Today: ring, solid under 3px.** The mockup's frame, drawn from 6a985d93d; base bcaab2c62 draws the ring alone. Pick: no.
 
 7. **Stalled hatch, checked.** At 1.55 to 1.72px today the stripes break into a red stub and a gap. Under Runs the
    stalled block (3 steps) is 4px or wider and shows whole stripes, light and dark. No change.
@@ -49,13 +51,17 @@ against both done and to do, since done to to do is only 4.9 to 5.7:1.
 ## Builder changes, `skills/waiting-page/page.html` (picks 1 and 4)
 
 - CSS: `.segbar` gets `position: relative`.
-- CSS: `.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2px) * 1000), 100%); }`.
-- CSS: `.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000), 100%); }`.
-- CSS: `.segbar > .runs > i { flex: var(--c) 1 0px; min-width: 4px; }`.
+- CSS: `.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.01px) * 1000000), 100%); }`.
+- CSS: `.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000000), 100%); }`.
+- CSS: `.segbar > .runs > i { flex: var(--c) 1 0px; min-width: min(4px, calc((100% - var(--k) * 2px + 2px) / var(--k))); }`.
+- The switch is a step at W = 5px x steps - 2px: at or above it the cells draw (the 0.01px lead keeps them on at W = edge),
+  below it the runs layer is the full bar (the layout grid is 1/64px, so one step under makes the product 15625px or more).
+  A x1000 factor left the runs layer (edge - W) x 1000px wide, and 0 at the edge, so nothing drew there.
 - CSS: `.segbar i.pzd { background: linear-gradient(var(--muted), var(--muted)) left bottom / 100% 50% no-repeat; }`, in place
-  of the ring. Delete `.segbar i.pzd::after` and its two dark-theme rules.
+  of the ring. Base bcaab2c62 has no `.segbar i.pzd::after`, so there is nothing to delete.
 - JS: `segs(c, n)` appends `<b class="runs">` holding one `<i class="KIND" style="--c:COUNT">` per kind with a count above
   0, in the cell order, then `<i style="--c:TODO">`.
+- JS: `<b class="runs">` gets `style="--k:K"`, its run count (at least 1).
 - JS: each `.segbar` gets `style="--n:N"` (at least 1): `renderNow`, `renderRail`, and the phase head.
 - Cost: one absolutely placed layer of at most 6 elements per bar. No ResizeObserver and no layout read.
 
@@ -64,6 +70,7 @@ against both done and to do, since done to to do is only 4.9 to 5.7:1.
 With `barsBlockedPage`, at 390 and 1280, light and dark, for the three bars in `BARS_W`:
 - Exactly one layer draws: the widest `.segbar > i` is over 0px, or `.segbar > .runs` is over 0px wide, never both.
 - Every drawn part is at least 3px wide.
+- At 5 x steps - 3, - 2.02, - 2 and - 1 px (30 and 13 steps) exactly one layer draws and it spans the bar.
 - In runs mode, the run classes read `["done","act","stl","pzd","blk",""]`.
 - The cleanup rail chip at 390 and the phase head at 1280 are in runs mode; the Now card is in cell mode.
 - The paused part has `background-size` `100% 50%`, `background-position` `0% 100%`, and no `::after` content.
@@ -82,6 +89,10 @@ nothing; it reads the harness, not the screen in the frames.
   together (JS, one layout read per render)?
 - Open: in dark the done block and the paused low cell share one colour (1.02:1). Height alone tells them apart; the
   in-progress and stalled blocks sit between them in the fixture, but a phase with neither puts them side by side.
+- The 4px floor of a run holds for every bar the pages draw. The narrowest is the 30-step rail chip, 39.4px at a 320px
+  viewport; k runs need 6k - 2px (34px for six, the most there are). Below 6k - 2px the floor gives way: each run takes
+  an equal share, so every run stays visible. The test pins only that each run
+  shows at 1px or more (a 6-step bar, 20px).
 - Open: at the 4px floor a 1-step run reads larger than its share. The d/n count is exact.
 - Fixed: none needed in the bars. The harness labels sit below the bars, so they cover no cell.
 

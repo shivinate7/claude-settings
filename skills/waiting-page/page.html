@@ -529,10 +529,10 @@ body.sheet-open { overflow: hidden; }
 .segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
 .segbar i.pzd { background: linear-gradient(var(--muted), var(--muted)) left bottom / 100% 50% no-repeat; }
 /* Narrow rule: a bar draws one cell per step while each cell gets 3px or more beside 2px gaps (width >= --n x 5px - 2px). Under that the cells
-   clamp to 0px and the .runs layer draws one block per kind, each 4px or wider. The clamp(... * 1000) is a width switch with no script. */
-.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2px) * 1000), 100%); }
-.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000), 100%); }
-.segbar > .runs > i { flex: var(--c) 1 0px; min-width: 4px; }
+   clamp to 0px and the .runs layer draws one block per kind, each 4px or wider. Each clamp(... * 1000000) is a step switch with no script: the layout grid is 1/64px, so one step under the edge makes the runs layer the full bar. At the edge the cells' 0.01px lead (under the 1/64px grid) keeps them on. */
+.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.01px) * 1000000), 100%); }
+.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000000), 100%); }
+.segbar > .runs > i { flex: var(--c) 1 0px; min-width: min(4px, calc((100% - var(--k) * 2px + 2px) / var(--k))); }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
@@ -3071,7 +3071,7 @@ const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == nul
 const segs = (c, n) => {
   const K = ["done", "act", "stl", "pzd", "blk"], todo = Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk);
   return K.map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(todo) + (n ? "" : "<i></i>")
-    + '<b class="runs">' + K.filter((k) => c[k] > 0).map((k) => `<i class="${k}" style="--c:${c[k]}"></i>`).join("") + (todo > 0 ? `<i style="--c:${todo}"></i>` : "") + "</b>";
+    + `<b class="runs" style="--k:${Math.max(1, K.filter((k) => c[k] > 0).length + (todo > 0 ? 1 : 0))}">` + K.filter((k) => c[k] > 0).map((k) => `<i class="${k}" style="--c:${c[k]}"></i>`).join("") + (todo > 0 ? `<i style="--c:${todo}"></i>` : "") + "</b>";
 };
 // The step count a bar's narrow rule reads, at least 1.
 const barN = (n) => Math.max(1, n);
