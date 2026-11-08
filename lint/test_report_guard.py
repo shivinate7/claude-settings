@@ -4983,6 +4983,55 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_guard_line_backticked_passes(self):
         self.assert_allowed(mg_report("The brief quoted `Guard: run it later` from the lane."))
 
+    # Round 2 (review findings). A guard label counts only at the start of a sentence: a line start after a bullet,
+    # blockquote mark or bold section label, or after . ; ! ?. A label is guard or guards then : — – - or --. A
+    # guard line's ref is read from its label to the line end, backticks kept: #N and PR N need 2+ digits, and a bare
+    # sha needs 7-40 hex with a digit and a letter a-f. The refusal names the section and never quotes the line.
+    # Green: a guard word that is not a label, and a label with a ref, pass.
+    def test_mg_green_guard_label_done_pr_then_mid_sentence_guard_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT #2046 — the push guard - refuses a dirty push"))
+
+    def test_mg_green_guard_label_next_mid_sentence_guard_passes(self):
+        self.assert_allowed(mg_report("none", nxt="> **Next** the report guard — it refuses the reply"))
+
+    def test_mg_green_guard_label_done_guard_after_dash_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT #1183 — guard: hooks/x.py refuses Y"))
+
+    def test_mg_green_guard_label_backticked_pr_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: built as `#2077`."))
+
+    def test_mg_green_guard_label_backticked_sha_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: built in `3c2d1d97f`."))
+
+    # Red: a label with no ref that counts (2+ digits for #N and PR N, a sha with a letter), or a plural or -- label.
+    def test_mg_red_guard_label_one_digit_issue_ref_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check before push (see list item #1)."))
+
+    def test_mg_red_guard_label_one_digit_pr_ref_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check, PR 3 of the plan."))
+
+    def test_mg_red_guard_label_double_dash_blocks(self):
+        self.assert_blocked(mg_report("Guard -- future briefs run the check before push."))
+
+    def test_mg_red_guard_label_plural_blocks(self):
+        self.assert_blocked(mg_report("Guards: future briefs run the check."))
+
+    def test_mg_red_guard_label_digits_are_not_a_sha_blocks(self):
+        self.assert_blocked(mg_report("Guard: future briefs run the check on 100000 lines."))
+
+    # Remedy: the refusal never quotes the guard line's text, and it names the section. One cause per test.
+    def test_mg_red_guard_label_refusal_does_not_quote_line_blocks(self):
+        out = self.verdict(mg_report("Guard: run the check before the push."))
+        self.assertIsNotNone(out, "no block: a guard line with no ref passed")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn(MG_RULE, out.get("reason", ""), "the block does not name the rule: %s" % out)
+        self.assertNotIn("run the check", out.get("reason", "").lower(), "the refusal quotes the guard line: %s" % out)
+
+    def test_mg_red_guard_label_refusal_names_section_blocks(self):
+        out = self.verdict(mg_report("Guard: run the check before the push."))
+        self.assertIsNotNone(out, "no block: a guard line with no ref passed")
+        self.assertIn("Deviations", out.get("reason", ""), "the refusal does not name the section: %s" % out)
+
 
 if __name__ == "__main__":
     unittest.main()
