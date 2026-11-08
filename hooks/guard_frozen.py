@@ -425,7 +425,12 @@ def _output_flag_value(command: str, word: str):
 
 
 def _output_targets(words):
-    """The files that the output flags in one segment's unquoted `words` name (`_output_flag_value`)."""
+    """The files that the output flags in one segment's unquoted `words` name (`_output_flag_value`). A command
+    word with a subshell paren glued to it (`(sort`) reads as the command. The text of a `sh -c` script is
+    read the same way, one command at a time."""
+    at = resolve_command(tuple(words))
+    if at is not None and words[at] != guard_core.GLUED_OPEN.sub("", words[at]):
+        words = [*words[:at], guard_core.GLUED_OPEN.sub("", words[at]), *words[at + 1:]]
     command, rest = _segment_command(words)
     if command == "git":
         subcommand = next((name for name in [word for word in rest if not word.startswith("-")][:2]
@@ -439,6 +444,10 @@ def _output_targets(words):
             targets.append(value)
         elif value == "" and at + 1 < len(rest):
             targets.append(rest[at + 1])
+    script = guard_core.inline_script(words)
+    for segment in split_segments(script) if script else ():
+        for part in _split_background(segment):
+            targets.extend(_output_targets([_unquoted(word) for word in _quoted_words(part, True)]))
     return targets
 
 
@@ -456,6 +465,23 @@ def _split_background(segment):
         start = at + 1
     parts.append(segment[start:])
     return [type(segment)(part) for part in parts]
+
+
+def _split_jobs(segments, ends):
+    """(segments, ends) with each segment cut at its lone `&` (`_split_background`), so `echo x&sed -i s/a/b/ P`
+    reads as two commands, as `echo x&&sed ...` already does. A part cut at a `&` ends with `&`; the last part
+    keeps the end of the segment it came from. A segment with no lone `&` stays as it is."""
+    cut, cut_ends = [], []
+    for at, segment in enumerate(segments):
+        end = ends[at] if at < len(ends) else ""
+        parts = [part for part in _split_background(segment) if part.strip()]
+        if len(parts) < 2:
+            cut.append(segment)
+            cut_ends.append(end)
+            continue
+        cut.extend(parts)
+        cut_ends.extend(["&"] * (len(parts) - 1) + [end])
+    return cut, cut_ends
 
 
 def _command_reads(command: str, args) -> bool:
@@ -566,13 +592,40 @@ def _kind(words, plain: str) -> str:
     return ""
 
 
-def _writes_a_file(words) -> bool:
-    """True when the segment redirects output onto a file, not a null device or a descriptor."""
+def _redirect_targets(words):
+    """The files the segment's `words` redirect output onto: no null device, no descriptor."""
+    targets = []
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
-            target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
-            if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target):
-                return True
+            target = words[index + 1].strip("'\"") if index + 1 < len(words) else ""
+            if target.lower() not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target.lower()):
+                targets.append(target)
+    return targets
+
+
+def _writes_a_file(words) -> bool:
+    """True when the segment redirects output onto a file, not a null device or a descriptor."""
+    return bool(_redirect_targets(words))
+
+
+def _stages_a_script(parsed, chain) -> bool:
+    """True when a segment of `chain` redirects its output into a file that another segment of the same call
+    runs: as its command word (`./stage.sh`) or as the file a shell reads (`sh stage.sh`, `source stage.sh`).
+    What a reader prints into that file is then a script, so its text is code, not data."""
+    staged = {os.path.normpath(_unquoted(target)) for at in chain for target in _redirect_targets(parsed[at])}
+    for at, words in enumerate(parsed):
+        if at in chain or not staged:
+            continue
+        tokens = [_unquoted(word) for word in words]
+        index = resolve_command(tuple(tokens))
+        if index is None:
+            continue
+        runner = guard_core.basename(tokens[index])
+        if os.path.normpath(tokens[index]) in staged:
+            return True
+        if (runner in guard_core.INLINE_SCRIPT_SHELLS or runner in (".", "source")) and any(
+                os.path.normpath(token) in staged for token in tokens[index + 1:]):
+            return True
     return False
 
 
@@ -1403,11 +1456,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
     """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     if fed:
-        segments, ends = fed
+        segments, ends = _split_jobs(*fed)
     else:
         cmd = _resolve_vars(cmd)
         ends = []
-        segments = split_segments(cmd, ends)
+        segments, ends = _split_jobs(split_segments(cmd, ends), ends)
         if copy_outer:
             segments = [_copy_outer(segment) for segment in segments]
     scans = [_scan(segment) for segment in segments]
@@ -1443,6 +1496,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
+        prints_escapes = bool(raw) and _name(raw[0]) in ("printf", "echo")
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -1457,6 +1511,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 if glued:   # `>&FILE` splits as `>` and `&FILE`: the `&` is part of the operator, FILE is the target
                     word = word[1:]
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                if prints_escapes:   # printf and echo -e read `\n` as a line break, so a path ends there
+                    pieces = [part for piece in pieces for part in re.split(r"\\[nrt]", piece) if part]
                 words.extend(pieces)
                 shown.extend(pieces)
                 kept = scripts[number][index]
@@ -1482,7 +1538,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                                         predicate_command)
                 if hit:
                     return _from_cwd(hit, at, cwd) if follow_cd else hit
-        reads_only = all(own[k] for k in _pipe_chain(number, ends, len(parsed)))
+        chain = _pipe_chain(number, ends, len(parsed))
+        reads_only = all(own[k] for k in chain) and not _stages_a_script(parsed, chain)
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
@@ -1658,11 +1715,18 @@ def _commands_run(raw):
     return _names_run([_unquoted(word) for word in raw])
 
 
+def _outside_single_quotes(word: str) -> str:
+    """`word` without the text inside its single quotes: a `$(` or a backtick there is text, but one in a
+    double-quoted or bare part of the same word, before or after a single-quoted part, is live."""
+    return "".join(char for _at, char, quote in guard_core.walk_quotes(word) if quote != "'")
+
+
 def _reads_only(raw):
     """True when every command the segment runs is a known reader (`_READERS`), so a quoted word that holds
     a space is data, not a script. Fails closed: an unlisted runner, a leading redirect, a function call, an
-    unreadable name, or a backtick, `$(` or glued `(` outside single quotes in any word is no reader."""
-    if any(word[:1] != "'" and re.search(r"`|\$\(|(?<![\w\\])\(", word) for word in raw):
+    unreadable name, or a backtick, `$(` or glued `(` outside single quotes in any word is no reader. A word
+    that starts with a single-quoted part is read the same way (`_outside_single_quotes`)."""
+    if any(re.search(r"`|\$\(|(?<![\w\\])\(", _outside_single_quotes(word)) for word in raw):
         return False
     runs = _commands_run(raw)
     return bool(runs) and runs <= _READERS
@@ -1697,16 +1761,33 @@ def _names_run(tokens):
     return found
 
 
+# Perl text that starts a command: `system`, `exec`, a backtick or `qx`, a pipe `open`, `eval`, `fork`, `syscall`.
+# A script with one of them is code that may run `sed -i`, so a spelling of it is no longer text.
+_PERL_RUNS_COMMANDS = re.compile(r"\b(?:system|exec|qx|open|eval|fork|syscall)\b|`")
+_PERL_SCRIPT_SWITCH = r"-[0-9aCcFlnpsStTuUvwW]*[eE]"
+
+
 def _perl_script_words(raw):
     """The indexes of the words of a `perl` segment that are a `-e` or `-E` script holding an in-place flag
     spelling (a word of it, as `_words_of` splits it): text, not a flag. `-pe` ends in `e`, so its next word is
-    its script; `-ie` is an in-place flag with the suffix `e`, so its next word is not."""
+    its script, and `-ne'...'` holds the script glued to its switch (that word is the script word); `-ie` is an
+    in-place flag with the suffix `e`, so its next word is not. A script that can run a command
+    (`_PERL_RUNS_COMMANDS`) is code, not text."""
     command, _rest = _segment_command([_unquoted(word) for word in raw])
     if command != "perl":
         return set()
-    return {at for at in range(1, len(raw))
-            if re.fullmatch(r"-[0-9aCcFlnpsStTuUvwW]*[eE]", _unquoted(raw[at - 1]))
-            and any(re.match(_PERL_IN_PLACE_FLAG, piece) for piece in _words_of(raw[at]))}
+
+    def spells_a_flag(word):
+        return not _PERL_RUNS_COMMANDS.search(_unquoted(word)) and any(
+            re.match(_PERL_IN_PLACE_FLAG, piece) for piece in _words_of(word))
+
+    found = {at for at in range(1, len(raw))
+             if re.fullmatch(_PERL_SCRIPT_SWITCH, _unquoted(raw[at - 1])) and spells_a_flag(raw[at])}
+    for at in range(1, len(raw)):
+        glued = re.match(_PERL_SCRIPT_SWITCH + r"(?=['\"])", raw[at])
+        if glued and spells_a_flag(raw[at][glued.end():]):
+            found.add(at)
+    return found
 
 
 def _sed_command_words(command):
