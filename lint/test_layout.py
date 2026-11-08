@@ -233,6 +233,24 @@ class LayoutFile(Tree):
                 self.origin(url)
                 self.assertEqual(self.layout.repo_name(self.tree), want)
 
+    def test_repo_name_reads_an_origin_with_a_port_after_the_host(self):
+        """repo_name reads the owner and name of a GitHub origin with a port between the host and the path."""
+        for url in ("ssh://git@github.com:22/shivinate7/q_max.git", "https://github.com:443/shivinate7/q_max.git"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertEqual(self.layout.repo_name(self.tree), "shivinate7/q_max",
+                                 "repo_name reads no owner/name from an origin with a port after the host")
+
+    def test_repo_name_is_none_when_the_origin_path_runs_past_owner_and_name(self):
+        """A GitHub origin names one owner and one name. A path past them, or a name under a folder, is no repo."""
+        for url in ("https://github.com/o/n/pulls", "git@github.com:o/sub/n.git", "https://github.com/o/n.git/pulls"):
+            with self.subTest(url=url):
+                self.setUp()
+                self.origin(url)
+                self.assertIsNone(self.layout.repo_name(self.tree),
+                                  "repo_name reads a name past the owner and name as the repo")
+
     def test_an_unreadable_git_file_is_no_origin_never_a_crash(self):
         with open(os.path.join(self.tree, ".git"), "wb") as f:
             f.write(b"gitdir: \xff\xfe\x00\n")
