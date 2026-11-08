@@ -137,7 +137,7 @@ record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.p
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
-record from before the cutover reads done, as merge --reviewed reads it; with no cwd the Stamp line is required. Cost: 2 gh reads and one git log
+record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it. Cost: 2 gh reads and one git log
 (review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop), plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
@@ -1603,6 +1603,10 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+REVIEW_NO_STAMP = (
+    " The newest review record on that PR has no Stamp line, and with no cutover for the base this check requires one. "
+    "Render the record again with `merge <pr> --review-record`, which prints the Stamp line, and post that."
+)
 
 
 def review_claims(text):
@@ -1638,14 +1642,19 @@ def _gh_json(args, cwd):
     return json.loads(run.stdout)
 
 
+def _newest_marked(comments, merge_mod):
+    """The newest comment of `comments` (oldest first) that merge's review_marked calls a record, else None."""
+    marked = [c for c in comments if isinstance(c, dict) and merge_mod.review_marked(c.get("body") or "")]
+    return marked[-1] if marked else None
+
+
 def _newest_record(n, comments, merge_mod, cutover=None):
     """The parsed newest review record comment of `comments` (oldest first), else None. With a `cutover` (merge's review_stamp_since), the
     comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped record from before the cutover reads as
     merge --reviewed reads it. With no cutover, the Stamp line is required."""
-    marked = [c for c in comments if isinstance(c, dict) and (c.get("body") or "").splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    if not marked:
+    newest = _newest_marked(comments, merge_mod)
+    if newest is None:
         return None
-    newest = marked[-1]
     edited = (newest.get("updated_at") or newest.get("created_at")) if cutover else None
     return merge_mod.parse_review(newest.get("body") or "", edited, cutover)
 
@@ -1680,11 +1689,14 @@ def review_record_problem(hook, text):
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"]) if cwd else None
             rec = _newest_record(n, comments, merge_mod, cutover)
+            newest = _newest_marked(comments, merge_mod)
+            unstamped = (not cutover and newest is not None
+                         and not any(line.startswith("Stamp: ") for line in (newest.get("body") or "").splitlines()))
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
         if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
-            reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            reasons.append(REVIEW_NO_RECORD % (n, n, n) + (REVIEW_NO_STAMP if unstamped else ""))
     return " ".join(reasons), " ".join(notes)
 
 
