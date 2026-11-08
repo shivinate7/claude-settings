@@ -13086,8 +13086,8 @@ class ReviewRoundCheckEnv(Env):
 
 class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (merge-unreviewed-head,
-    2026-11-07 21:26 CST): a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (merge-unreviewed-head):
+    a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
         # the integration pull request has no record of its own, so only the lane's record can owe the third round
@@ -13444,7 +13444,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses. Owner pick a (merge-unreviewed-head, 2026-11-07 21:26 CST): a lane tip with no done record for its head is refused, so the
+    batch still refuses. Owner pick a (merge-unreviewed-head): a lane tip with no done record for its head is refused, so the
     one stale-only case here expects the refusal; the other cases keep their records and their points."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
@@ -13500,7 +13500,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
 
 class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
-    Guard or check value (owner pick a, merge-unreviewed-head, 2026-11-07 21:26 CST). An integration pull request's own head is never refused for having
+    Guard or check value (owner pick a, merge-unreviewed-head). An integration pull request's own head is never refused for having
     no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too."""
 
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
