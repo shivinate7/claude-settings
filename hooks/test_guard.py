@@ -10019,7 +10019,7 @@ AG_EMPTY = "c8c7f2e1d0c9b8a7f"
 AG_ABSENT = "c9d8a3f2e1d0c9b8a"  # no transcript file is written for this id
 AG_DECOY = "cad9b4a3f2e1d0c9b"  # written beside the MAIN lane fixture: a lane record on another step
 AG_TRIAGE_OVER_LANE = "cb0a9f8e7d6c5b4a3"  # beside the MAIN lane fixture: a triage record, which the main lane must beat
-AG_LANE_OVER_TRIAGE = "cc1b0a9f8e7d6c5b4"  # beside the MAIN triage fixture: a lane record with no open pull request
+AG_LANE_OVER_TRIAGE = "cc1b0a9f8e7d6c5b4"  # beside the MAIN triage fixture: a lane record on the slug step
 ARCH_DECOY_TAGS = ["cs-build:lane", "cs-step:agent-step", "cs-repo:o/r"]  # a lane on a step other than the main lane's
 AG_FILLER = [line for i in range(400)
              for line in (role_use("f%d" % i, "Bash", {"command": "true"}), role_result("f%d" % i, "ok"))]
@@ -10137,8 +10137,11 @@ archive_agent_allow("an agent's lane record on another step beats the main lane 
 archive_agent_refuse("a main lane record with an open pull request beats an agent's triage record: the open pull request "
                      "refuses", role_path("archive-lane"), AG_TRIAGE_OVER_LANE, fake_gh_path(ARCHOPEN),
                      carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
-archive_agent_allow("a main triage record does not beat an agent's lane record: with no open pull request the lane is allowed",
+archive_agent_allow("an agent's lane record with no open pull request is allowed over a main triage record",
                     role_path("archive-triage"), AG_LANE_OVER_TRIAGE, fake_gh_path(ARCHCLOSED))
+archive_agent_refuse("an agent's lane record with an open pull request is refused over a main triage record",
+                     role_path("archive-triage"), AG_LANE_OVER_TRIAGE, fake_gh_path(ARCHOPEN),
+                     carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
