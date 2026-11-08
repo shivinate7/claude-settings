@@ -542,7 +542,9 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # nothing, `check_red_run.gaps` reads the accepted base up to the source in one `git log --no-merges
 # --numstat -z`, so a push costs one more `git log` and nothing else. Only a push that carries a gap costs
 # more: the rollout's `git ls-tree` (head, then each flagged commit's parent), the default base's reads
-# (once, in `memo`), and a second `git log` without the default base's commits. The guard passes its own
+# (once, in `memo`), a second `git log` without the default base's commits, and, for each commit that is
+# still a gap, one `git log -n 5000 --format=%T` of its ancestors (a commit whose tree an ancestor holds is
+# no gap; 5,000 tree ids are at most 205 KB, about 0.1 s). The guard passes its own
 # `is_test_rel`, so the lazy import of check_red_run loads no second guard (the import measured 0.4 ms).
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
