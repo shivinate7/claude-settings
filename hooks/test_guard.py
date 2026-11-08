@@ -20486,6 +20486,75 @@ def worktree_home_cross_checkout_copy_case():
     return True, "copy sources in another checkout pass; writes refused"
 
 
+def worktree_home_cross_checkout_heredoc_text_case():
+    """Rule 0, `other-checkout`, a quoted interpreter body that only quotes a path in another
+    checkout, beside `worktree_home_cross_checkout_copy_case`. Roadmap step other-checkout-heredoc-text.
+    A quoted python body that only quotes the path is text, so it passes. A body that runs the write
+    through os, subprocess, shutil, exec, eval or __import__, under any alias, is refused, and so is a
+    body that does not parse. A perl or ruby body that writes into another checkout is refused, and so
+    is a perl in-place edit of a file there. Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoheredoc")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A quoted python body that only quotes a path in another checkout is text, not a write.
+    check("quoted python body whose string quotes a copy into another checkout", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nnote = \"cp %s/x $f\"\nprint(note)\nPY" % other)
+    check("quoted python body that writes its own file and quotes a copy in a string", "allow",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\nopen('roadmap.json','w').write("
+                  "json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
+    check("quoted python body that prints a shell line naming another checkout", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nprint(\"os.system('cp a %s/x')\")\nPY" % other)
+
+    # Controls: each write into another checkout, run by an interpreter body, stays refused.
+    check("control: python f-string os.system copies into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system(f'cp a %s/x')\nPY" % other)
+    check("control: python os.system with a concatenated path", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a ' + '%s/x')\nPY" % other)
+    check("control: python subprocess.run with cwd in another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','x'], cwd='%s')\nPY"
+                  % other)
+    check("control: python os.system that cds into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cd %s && cp a x')\nPY" % other)
+    check("control: python subprocess list built in a variable", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; cmd=['cp','a','%s/x']; subprocess.run(cmd)\nPY"
+                  % other)
+    check("control: python os imported under an alias", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os as o; o.system('cp a %s/x')\nPY" % other)
+    check("control: python shutil imported under an alias", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil as s; s.copy('a','%s/x')\nPY" % other)
+    check("control: node child_process execSync copies into another checkout", "deny", "Bash",
+          lane_a, command="node - <<'JS'\nrequire('child_process').execSync('cp a %s/x')\nJS" % other)
+    check("control: python body that does not parse, holding a copy into another checkout", "deny",
+          "Bash", lane_a, command="python3 - <<'PY'\nimport os; os.system('cp a %s/x'\nPY" % other)
+    check("control: python exec of a string that copies into another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nexec(\"import os; os.system('cp a %s/x')\")\nPY" % other)
+    check("control: python __import__ of os copies into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\n__import__('os').system('cp a %s/x')\nPY" % other)
+
+    # New denies: a perl or ruby body, and a perl in-place edit, that write into another checkout.
+    check("perl heredoc body opens a file in another checkout for writing", "deny", "Bash", lane_a,
+          command="perl - <<'PL'\nopen(F, \">\", \"%s/x\");\nPL" % other)
+    check("ruby heredoc body writes a file in another checkout", "deny", "Bash", lane_a,
+          command="ruby - <<'RB'\nFile.write(\"%s/x\", \"1\")\nRB" % other)
+    check("perl -pi edits a file in another checkout in place", "deny", "Bash", lane_a,
+          command="perl -pi -e 's/a/b/' %s/x" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -21979,6 +22048,9 @@ LOG_CHECKS = (
     ("worktree-home: a copy whose source is in another checkout is allowed; a write into another "
      "checkout, from a copy or an interpreter body, is refused",
      worktree_home_cross_checkout_copy_case),
+    ("worktree-home: a quoted python body that only quotes a path in another checkout is allowed; a "
+     "perl or ruby write into another checkout, or an interpreter body that runs one, is refused",
+     worktree_home_cross_checkout_heredoc_text_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
