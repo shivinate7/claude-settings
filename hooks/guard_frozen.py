@@ -11,7 +11,7 @@ from guard_core import (
     REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_heredocs,
     basename, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
-from guard_env import _quoted_words
+from guard_env import _quoted_words, _substitutions
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -943,10 +943,30 @@ def _python_feeds_on(header: str) -> bool:
             and ends[holding[0]] in ("", ";", "&&", "||", "&"))
 
 
+# The extensions of a file a shell or an interpreter can run. A python body that writes one of these, a name
+# with no extension, or a name it cannot read, stays in view: its strings may be the script's lines.
+_PY_RUNNABLE_EXTENSIONS = frozenset((".sh", ".bash", ".zsh", ".ps1", ".py", ".pl", ".rb"))
+
+
+def _could_run_as_script(path: str) -> bool:
+    name = basename(path)
+    return not name or os.path.splitext(name)[1].lower() in _PY_RUNNABLE_EXTENSIONS or "." not in name.lstrip(".")
+
+
+def _heredoc_header_in_substitution(raw: str, header: str) -> bool:
+    """True when the heredoc header line HEADER sits inside a command or process substitution of RAW, or
+    holds one. A shell runs or reads what a substitution prints, so the body's output is not for the terminal."""
+    if re.search(r"[$<>]\(|`", header):
+        return True
+    texts, too_deep = _substitutions(_strip_heredoc_bodies_unconditionally(raw))   # a body's quote marks hide no `$(`
+    return too_deep or any(header in text for text, _message in texts[:-1])
+
+
 def _python_writes_a_named_file(body: str, rest: str) -> bool:
-    """True when the parsed BODY writes a file that a word of REST (the command without the body) names, or
-    a file whose path `_py_paths` cannot read. A body that writes `x.sh` while a later line runs `sh x.sh`
-    makes its strings shell lines, so it stays in view."""
+    """True when the parsed BODY writes a file that could run as a script (`_could_run_as_script`), a file
+    that a word of REST (the command without the body) names, or a file whose path `_py_paths` cannot read.
+    A body that writes `x.sh`, or writes `x.json` while a later line runs `sh x.json`, makes its strings
+    shell lines, so it stays in view."""
     import ast
     import textwrap
     try:
@@ -955,7 +975,7 @@ def _python_writes_a_named_file(body: str, rest: str) -> bool:
         for call, expression in _py_written(tree, env_at):
             paths = _py_paths(expression, env_at(call))
             if not paths or any(
-                    not basename(path)
+                    _could_run_as_script(path)
                     or re.search(r"(?<![\w.-])" + re.escape(basename(path)) + r"(?![\w-])", rest) for path in paths):
                 return True
     except Exception:
@@ -984,6 +1004,7 @@ def drop_text_python_bodies(raw: str) -> str:
         if (quote and all((span, body) in same for same in agreed)
                 and sum(other == header for _q, _b, other in bodies) == 1
                 and _python_feeds_on(header) and python_body_is_text(body)
+                and not _heredoc_header_in_substitution(raw, header)
                 and not _python_writes_a_named_file(
                     body, "\n".join(line for at, line in enumerate(lines) if not span[0] <= at < span[1]))):
             drop.update(range(*span))
