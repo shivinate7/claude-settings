@@ -12,7 +12,7 @@ Pins the contract that lint/test_no_window_spawn.py relies on:
   every flag the caller passed. The constant is pinned as a number, because subprocess has no
   CREATE_NO_WINDOW on the Linux CI runner.
 - On Windows the wrapper also sets stdin=DEVNULL when the caller gives no stdin (or stdin=None) and no input,
-  unless this process's stdin is a pipe or a file, which the child inherits. The check_output wrapper then drops
+  unless this process's stdin is a pipe or a file; then stdin stays unset. The check_output wrapper then drops
   input=None. A no-window child cannot use an inherited console stdin. The suite patches fstat(0) for the type.
 - Elsewhere the wrapper adds no creationflags key. The kwargs reach subprocess unchanged.
 """
