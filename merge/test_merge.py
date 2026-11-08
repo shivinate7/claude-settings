@@ -2455,12 +2455,14 @@ class CutLanes(Env):
         self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
         self.assertNotIn("stray", out)
 
-    def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_prs(self):
+    def test_deleteBranch_false_keeps_every_lane_and_reads_open_prs_once_for_the_gate(self):
+        # The third-round gate reads the open pull requests once when the batch has lane tips (decision pr-review-record, the cost). The
+        # deletion's own read does not run here, so the one read is the gate's.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 0)
+        self.assertEqual(self.host.open_calls, 1)
         self.assertNotIn("merge: lane", out)
         for b in ("lane1", "lane2", "feat"):
             self.assertNotEqual(self.head(b), "")
@@ -12170,9 +12172,12 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(net=net):
                 self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), want)
 
-    def test_a_pass_in_round_two_with_guard_yes_owes_no_net_value(self):
+    def test_a_pass_in_round_two_with_guard_yes_owes_round_three(self):
+        # item 359 pick b: a guard or check change owes round 3 whatever round 2 said, so the PASS does not read done
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
-        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="not owed")), "done")
+        state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="not owed"))
+        self.assertEqual(state, "open", f"round 3 is owed on a guard or check change, so the record must not read done: {why!r}")
+        self.assertIn("round 3", why, f"the why does not say round 3 is owed: {why!r}")
 
     def test_a_docs_only_change_with_no_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=(), kind="docs-only")), "done")
@@ -12182,8 +12187,9 @@ class ReviewRecordRules(unittest.TestCase):
 
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
-    the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
-    whatever that round's verdict, and owes no net value yet. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
+    the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, a change with
+    Guard or check no is done whatever that round's verdict. A guard or check change owes round 3 whatever the fix check says (item 359 pick b).
+    A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
     why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
     value that is still owed. With no round recorded the record is open. The rule cases build their record with fix_state(); the last case
     reads the fix line from the text."""
@@ -12205,22 +12211,26 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check failed", why)
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
-        # A fix PASS after the first round counts as that round passing, for a normal change with guard no or yes
+        # A fix PASS after the first round counts as that round passing. Guard or check no is done; guard or check yes owes round 3 (item 359 pick b)
         for verdict in ("PASS", "FAIL"):
-            for guard in ("no", "yes"):
+            for guard, want in (("no", "done"), ("yes", "open")):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
                     state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
-                    self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard {guard}, must read done: {why!r}")
+                    self.assertEqual(state, want, f"a fix check PASS after round 1 {verdict}, guard {guard}, must read {want}: {why!r}")
+                    if guard == "yes":
+                        self.assertIn("round 3", why, f"the why does not say round 3 is owed: {why!r}")
 
     def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
-        # A fix PASS after the second round counts as that round passing, and owes no net value before the last allowed round
+        # A fix PASS after the second round counts as that round passing. Guard or check no is done; guard or check yes owes round 3 (item 359 pick b)
         for verdict in ("PASS", "FAIL"):
-            for guard in ("no", "yes"):
+            for guard, want in (("no", "done"), ("yes", "open")):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
                     state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
-                    self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard {guard}, must read done: {why!r}")
+                    self.assertEqual(state, want, f"a fix check PASS after round 2 {verdict}, guard {guard}, must read {want}: {why!r}")
+                    if guard == "yes":
+                        self.assertIn("round 3", why, f"the why does not say round 3 is owed: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_yes_is_done(self):
         # A delete-only change with guard yes owes the later rounds after a failed first round. A fix PASS counts as that first round passing, so they are not owed
@@ -12958,6 +12968,54 @@ class ReviewGatePreview(ReviewGateEnv):
         rc, out, _before = self.run_gate(host)
         self.assertEqual([l for l in out.splitlines() if l.startswith("BLOCKED")], [], "preview blocks a lane that is done:\n" + out)
         self.assertEqual(rc, 0, out)
+
+class ReviewGateCost(ReviewGateEnv):
+    """What the third-round gate reads (decision pr-review-record, the cost): the repo's comment list once, and the open pull requests once when
+    the batch has lane tips, never for a pull request with no tips. A preview runs the gate alone. A confirm also runs cut_lanes, which reads the
+    open pull requests after the merge, so the confirm case keeps its branches: the one open-PR read it counts is the gate's."""
+
+    def counted(self, host):
+        """Counts the gate's two reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
+        comments, opens = [], []
+        real_comments, real_opens = host.review_comments, host.open_heads
+        def review_comments(since):
+            comments.append(since)
+            return real_comments(since)
+        def open_heads():
+            opens.append(True)
+            return real_opens()
+        host.review_comments, host.open_heads = review_comments, open_heads
+        return comments, opens
+
+    def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_open_prs_once(self):
+        tips = lane_batch(self, "agent/lane1", "agent/lane2")
+        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        comments, opens = self.counted(host)
+        rc, out = self.run_merge("7", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
+        self.assertEqual(len(opens), 1, f"the open pull requests were read {len(opens)} times, want 1:\n" + out)
+
+    def test_a_pull_request_with_no_lane_tips_reads_the_comment_list_once_and_no_open_prs(self):
+        host = self.batch_host({}, [gate_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
+        comments, opens = self.counted(host)
+        rc, out = self.run_merge("7", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
+        self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0 with no lane tips:\n" + out)
+
+    def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_open_prs_once(self):
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
+        tips = lane_batch(self, "agent/lane1", "agent/lane2")
+        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        comments, opens = self.counted(host)
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(host, "merged", False), "the confirm did not reach the merge:\n" + out)
+        self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
+        self.assertEqual(len(opens), 1, f"the open pull requests were read {len(opens)} times, want 1:\n" + out)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
