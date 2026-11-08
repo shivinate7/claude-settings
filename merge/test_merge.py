@@ -13037,6 +13037,41 @@ class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
         self.assert_allowed(rc, out, host)
         self.assertIn("--undo-check-unknown-ok, reason: comment list read by hand", out, "the lift is not logged with its reason:\n" + out)
 
+class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
+    """What a refusal tells Claude to do, by the state of the lane's newest record for its tip (decision hold-unsafe-after-round-3). A held change
+    says it is held for the owner and asks for no more rounds. Round 3 done with its net value owed names the net-value test. Below round 3 names
+    round 3 as owed. No state prints a passing record line."""
+
+    def test_a_held_lane_says_it_is_held_for_the_owner_and_asks_for_no_more_rounds(self):
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_FAILED_THREE, net="negative")])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("held", out, "the refusal does not say the change is held:\n" + out)
+        self.assertIn("owner", out, "the refusal does not say the change is held for the owner:\n" + out)
+        self.assertNotIn("Get round", out, "the refusal asks for more rounds on a held change:\n" + out)
+        self.assertNotIn("round 3 is owed", out, "the refusal says round 3 is owed on a held change:\n" + out)
+
+    def test_a_round_three_done_with_its_net_value_owed_names_the_net_value_test(self):
+        tips = lane_batch(self, "agent/lane1")
+        round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="not owed")])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("net-value test", out, "the refusal does not name the net-value test as owed:\n" + out)
+        self.assertNotIn("Get round", out, "the refusal asks for round 3 again, though round 3 is done:\n" + out)
+        self.assertNotIn("round 3 is owed", out, "the refusal says round 3 is owed, though round 3 is done:\n" + out)
+
+    def test_a_lane_below_round_three_names_round_three_as_owed(self):
+        # a pin: the base already says round 3 is owed below round 3, and it names no net-value test there
+        host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))])
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3 is owed", out, "the refusal does not say round 3 is owed:\n" + out)
+        self.assertNotIn("net-value test", out, "the refusal names the net-value test before round 3 is done:\n" + out)
+
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
 
