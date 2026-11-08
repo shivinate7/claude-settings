@@ -83,6 +83,7 @@ def family_files():
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
 # Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
 # <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
+# A rename of a name in the load's text (ROOT in lint/rule_audit.py, say) re-keys its entry: the key is updated with it.
 LOAD_EXCEPTIONS = {
     "hooks/decision_watch.py:<module>:_GUARD_PATH": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
     "hooks/guard_merge.py:merge_module:path": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py): merge/merge.py is in the closure",
@@ -372,7 +373,10 @@ def _refs_of(f, tree, tracked):
             c = _repo_load(f, node, tracked, bound)
             if c:
                 paths.add(c)
-    return modules, paths, loads, _keyed(unfollowed, parents)
+    once = {}  # one entry per node: a load that is both a run-time join and a loader's path is appended by both branches
+    for node, what in unfollowed:
+        once.setdefault(node, what)
+    return modules, paths, loads, _keyed(list(once.items()), parents)
 
 
 def guard_closure():
@@ -1181,6 +1185,37 @@ class GuardClosure(unittest.TestCase):
         keys = [key for key, _ in unfollowed]
         self.assertEqual(len(keys), 2, f"the two loads are not both named: {keys}")
         self.assertEqual(len(set(keys)), 2, f"two loads share a key: {keys}")
+
+    def test_a_run_time_join_passed_to_a_loader_keys_once(self):
+        # A load that is both a run-time join and a loader's path is one load, so it is keyed once, with no #2. Two forms:
+        # the join written in the loader call, and the join assigned to a name the call passes.
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        key = "load:os.path.join(root, 'lint', 'rule_mechanisms.json')"
+        forms = {
+            "join in the call": ('import importlib.util\nimport os\n\ndef load(root):\n'
+                                 '    return importlib.util.spec_from_file_location(\n'
+                                 '        "x", os.path.join(root, "lint", "rule_mechanisms.json"))\n'),
+            "join assigned first": ('import importlib.util\nimport os\n\ndef load(root):\n'
+                                    '    p = os.path.join(root, "lint", "rule_mechanisms.json")\n'
+                                    '    return importlib.util.spec_from_file_location("x", p)\n'),
+        }
+        for form, src in forms.items():
+            with self.subTest(form=form):
+                _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+                keys = [k for k, _ in unfollowed]
+                self.assertEqual(keys, [key], f"the one load is keyed {len(keys)} times, not once: {keys}")
+
+    def test_two_run_time_joins_of_one_text_key_apart(self):
+        # Control, green before and after the fix: two joins are two loads, each keyed once.
+        # The dedupe is per node, not per text.
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        src = ('import os\n\ndef load(root):\n    a = os.path.join(root, "lint", "rule_mechanisms.json")\n'
+               '    b = os.path.join(root, "lint", "rule_mechanisms.json")\n    return a, b\n')
+        _, _, _, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        key = "load:os.path.join(root, 'lint', 'rule_mechanisms.json')"
+        self.assertEqual([k for k, _ in unfollowed], [key, f"{key}#2"], "two loads of one text are not keyed apart")
 
     # A `/` chain and `.parent` are loads when the root is the repo and the path is a repo file. The chain is never named:
     # a directory and a user-config path are not repo files, and naming them would cry wolf.
