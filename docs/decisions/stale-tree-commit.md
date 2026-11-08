@@ -6,8 +6,8 @@ Lane resumed-agent-stale-tree, 2026-11-07, under the parent's lane brief. Orches
 
 The guard rule `stale-tree-commit` refuses `git commit` when the index holds the old copy of a file that the branch changed under it. Two steps:
 
-1. Find the old commit X. The branch moved under the checkout when `git rev-parse HEAD` differs from the newest entry of the checkout's own HEAD reflog. Git writes that per-worktree log for every act in the checkout itself, and no entry when another worktree of the same clone moves the shared branch. Then X is that newest entry. Else, when the newest entry is a move that leaves the index alone (a `reset:` entry, or the empty message `update-ref` writes), X is the entry before it. Else there is no X, and the commit passes.
-2. Refuse when X is a strict ancestor of HEAD (the branch moved forward), and some path differs between the index and HEAD, and the index holds X's copy of it while HEAD's copy differs from X's. That commit would undo the change X..HEAD made to that path.
+1. Find the old commit X. The branch moved under the checkout when `git rev-parse HEAD` differs from the newest entry of the checkout's own HEAD reflog. Git writes that per-worktree log for every act in the checkout itself, and no entry when another worktree of the same clone moves the shared branch. Then X is that newest entry. Else, when the newest entry is a move that leaves the index alone (a `reset:` entry, or the empty message `update-ref` writes), X is the new value of the entry before it, not the old value of the newest one: after the branch moved under the tree, the two differ. Else there is no X, and the commit passes.
+2. Refuse when X is a strict ancestor of HEAD (the branch moved forward), and the commit would record a copy other than HEAD's for some path that X..HEAD changed, added or deleted. The copy is the index's, or the work tree's for `-a`, `--only` and named paths. That commit would undo the move's change to that path, whole or in part: an edit made on a stale copy still carries the old lines.
 
 The second way to find X covers an agent that moved onto a new tip inside its own tree with `reset --soft` or `update-ref`. Its index still holds the old files. A `reset --soft` back to an older commit, as a squash does, gives an X that is not an ancestor of HEAD, so it passes. A commit, pull, merge, rebase or checkout entry gives no X: those acts sync the index, so a revert after them is deliberate.
 
@@ -17,6 +17,7 @@ The second way to find X covers an agent that moved onto a new tip inside its ow
 - A checkout with no HEAD reflog passes: there is no evidence either way, and a fresh clone or worktree may start with none.
 - A read that fails passes, with the same reason. Git errors on the commit itself in a broken tree.
 - Only `commit` is read. Any other command makes no git call for this rule. A commit makes at most five: HEAD, the reflog, the ancestor test, the staged paths, and X's and HEAD's copies of those paths.
+- Only the top-level command is read. A commit inside `bash -c` passes (note `stale-tree-inner-shell`).
 - An override lifts it.
 
 A push is not refused. A push from the stale tree sends the branch ref, which holds the right commits. The harm starts at the commit. A push from another clone after the branch moved is refused by the remote unless forced, and a forced push is decision `stale-safe-force-push` (a force push needs a lease and `--force-if-includes`).
