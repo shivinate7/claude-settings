@@ -925,6 +925,25 @@ def case_opus_ask_two_roles_grant_both():
           "take() returned %r for a test-author spawn" % (author,))
 
 
+def case_opus_ask_builders_and_reviewers_grant_both():
+    # Two roles named with "to" or "for", and a clause after them that names no role ("but keep it short", "other
+    # roles on sonnet", "keep the rest"), grant both roles as the sorted list. Each prompt reaches the judge once.
+    for prompt in ("send builders and reviewers to opus but keep it short",
+                   "builders and reviewers to opus, other roles on sonnet",
+                   "send opus to builders and reviewers, keep the rest"):
+        cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
+        got = opus_override(cfg)
+        check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
+        check("opus ask: %r names builder and reviewer, so both roles are granted as [builder, reviewer]" % prompt,
+              got is not None and got[0] == "opus" and got[2] == ["builder", "reviewer"],
+              "got %r; files %r" % (got, ov_files(cfg)))
+        builder, reviewer = take_spawn(cfg, "builder"), take_spawn(cfg, "reviewer")
+        check("opus ask: %r lifts a builder spawn" % prompt, lifted(builder),
+              "take() returned %r for a builder spawn" % (builder,))
+        check("opus ask: %r lifts a reviewer spawn" % prompt, lifted(reviewer),
+              "take() returned %r for a reviewer spawn" % (reviewer,))
+
+
 def case_opus_ask_addressee_is_not_a_role():
     # `claude` in a plain ask names the addressee, so the override covers every role. The keyword form
     # `opus claude 2h` still names the role claude.
@@ -2166,6 +2185,7 @@ def main():
         case_opus_ask_builders_only_lifts_builders()
         case_opus_ask_length_and_role_from_the_words()
         case_opus_ask_two_roles_grant_both()
+        case_opus_ask_builders_and_reviewers_grant_both()
         case_opus_ask_addressee_is_not_a_role()
         case_opus_ask_negated_role_grants_nothing()
         case_opus_ask_two_lengths_grant_nothing()

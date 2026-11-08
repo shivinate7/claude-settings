@@ -8083,6 +8083,13 @@ for _run in ("sh -o pipefail f", "node --env-file " + ENV + " f", "node --requir
        "cat > f <<'EOF'\ncat " + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
 sh("trim: env: a heredoc file with an env read, named as an argument by python3 check.py, is allowed",
    "cat > f <<'EOF'\ncat " + ENV + "\nEOF\npython3 check.py f", "allow", cwd=NOGIT)
+# A heredoc file whose body reads the env file, then run through a wrapper or a runner that starts the file's text.
+# timeout, env, nohup, sudo and pytest each start it, so the body stays in view and the env read denies, as on main.
+for _file, _run in (("f.ts", "timeout 30 npx ts-node f.ts"), ("f.ts", "env X=1 npx ts-node f.ts"),
+                    ("f", "nohup php f"), ("f", "timeout 5 php f"), ("t_x.py", "python3 -m pytest t_x.py"),
+                    ("f", "sudo python3 -m pytest f")):
+    sh("trim: env: a heredoc file %s with an env read, run as %r, denies" % (_file, _run),
+       "cat > %s <<'EOF'\ncat " % _file + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,

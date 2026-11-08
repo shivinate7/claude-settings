@@ -1100,6 +1100,9 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — no change; sets no new cap",
     "Departs from: lint/stamp.py:run_stamp — same as main; the set of fields is the same",
     "Departs from: lint/stamp.py:run_stamp — already set to 5",
+    # A kept part whose change side then says nothing changes ("changes: none", "changes not at all") restates main.
+    "Departs from: lint/stamp.py:run_stamp — keeps the layout; changes: none",
+    "Departs from: lint/stamp.py:run_stamp — keeps the menu, the header changes not at all",
 ]
 # A line with an empty side, no separator, or nothing after the colon. Each is refused.
 MALFORMED = [
