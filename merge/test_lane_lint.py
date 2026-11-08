@@ -363,17 +363,23 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assertIsNone(self.lint_calls()[0]["pr_body"], "an inherited CI_JOB_PR_BODY_FILE reached ci-job from a ref target")
 
-    def test_an_unknown_exit_that_names_no_step_is_not_lifted_by_lint_unknown_ok(self):
-        self.use_ci_job([("raw", "unknown         CI_JOB_PR_BODY_FILE cannot be read: [Errno 2] No such file")], 2)
-        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
-        self.assertNotIn("--lint-unknown-ok, reason:", out, "--lint-unknown-ok lifted an exit that names no step")
-        self.assertEqual(rc, 1, out)
+    def test_an_exit_two_with_no_unknown_line_or_naming_the_pr_body_file_is_not_lifted_by_lint_unknown_ok(self):
+        shapes = {
+            "names CI_JOB_PR_BODY_FILE": [("raw", "unknown         CI_JOB_PR_BODY_FILE cannot be read: [Errno 2] No such file")],
+            "no unknown line": [("PASS", "record slugs")],
+        }
+        for label, steps in shapes.items():
+            with self.subTest(label):
+                self.use_ci_job(steps, 2)
+                rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
+                self.assertNotIn("--lint-unknown-ok, reason:", out, "--lint-unknown-ok lifted an exit two (%s)" % label)
+                self.assertEqual(rc, 1, out)
 
-    def test_an_exit_two_with_no_unknown_line_is_not_lifted_by_lint_unknown_ok(self):
-        self.use_ci_job([("PASS", "record slugs")], 2)
+    def test_a_step_less_unknown_such_as_a_failed_shallow_fetch_is_still_lifted_by_lint_unknown_ok(self):
+        self.use_ci_job([("raw", "unknown         git fetch --unshallow failed: fatal: no remote")], 2)
         rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
-        self.assertNotIn("--lint-unknown-ok, reason:", out, "--lint-unknown-ok lifted an exit two that names no unknown step")
-        self.assertEqual(rc, 1, out)
+        self.assertIn("--lint-unknown-ok, reason:", out, "a step-less unknown is no longer lifted, as on main")
+        self.assertEqual(rc, 0, out)
 
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
@@ -685,6 +691,18 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the ready checks did not run ci-job once")
         self.assertIsNone(runs[0]["pr_body"], "an inherited CI_JOB_PR_BODY_FILE reached the ready checks")
+
+    def test_the_draft_steps_ready_checks_hand_ci_job_the_pr_body(self):
+        names = ["check invariants"]
+        self.declare(names)
+        self.stale_feat()
+        self.host.body = PR_BODY
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        runs = [run for run in self.lint_calls() if "--step" in run["argv"]]
+        self.assertEqual(len(runs), 1, "the ready checks ran ci-job %d times, want once: %s" % (len(runs), out))
+        self.assertEqual(runs[0]["pr_body"], PR_BODY, "the draft step's ready checks did not get the PR body")
 
 
 class RunFolderSweep(unittest.TestCase):
