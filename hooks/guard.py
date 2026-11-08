@@ -1938,7 +1938,7 @@ def workflow_disables_step(old_text: str, new_text: str) -> bool:
 
 
 def workflow_hides_failure(old_text: str, new_text: str) -> bool:
-    """True when an added `run:` command line runs tests and ends in a no-op fallback, so the step passes on a red test."""
+    """True when an added `run:` command line runs tests and holds a no-op fallback (`|| true`, `; exit 0`), at its end or before another command, so the step passes on a red test."""
     added = set(workflow_added_indexes(old_text, new_text))
     return any(index in added and WORKFLOW_NOOP_FALLBACK.search(command) and workflow_command_is_test(command)
                for index, command in workflow_run_command_lines(new_text))
