@@ -2497,6 +2497,10 @@ MUTATIONS = [
      "and int(word[len(MESSAGE_QUOTE_MASK):]) < len(quoted)",
      "and True",
      "guard", "message-role: message_edit_paths does not raise on a plain word quotespan0"),
+    ("brief-role: the role gate is off, so a record-writer's brief is judged as a test-author's",
+     "    if role not in (BUILDER_ROLE, AUTHOR_ROLE) or not isinstance(prompt, str):",
+     "    if not isinstance(prompt, str):",
+     "guard", "brief-role: a record-writer brief that deletes a notes line is allowed"),
 ]
 
 
