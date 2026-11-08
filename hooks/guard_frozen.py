@@ -573,6 +573,48 @@ def _copy_reads(raw, predicate, cwd, keywords=False):
     return set(operands)
 
 
+_CP_GLUED_TARGET = re.compile(r"-[RrfiaHLPpnvuxTS]*t(.+)")
+_WALK_SKIP = frozenset((".git", "node_modules", ".venv", "venv", "__pycache__"))
+_WALK_LIMIT = 5000
+
+
+def _glued_cp_target(word):
+    """(flag, value) of a `cp` word that glues the target directory to its flag (`-ttests`,
+    `--target-directory=tests`), else None. `_copy_reads` reads the same two forms."""
+    plain = _unquoted(word)
+    if plain.startswith("--"):
+        name, equals, value = plain[2:].partition("=")
+        if equals and value and name and "target-directory".startswith(name):
+            return "--target-directory", value
+        return None
+    found = _CP_GLUED_TARGET.fullmatch(plain)
+    return ("-t", found.group(1)) if found else None
+
+
+def _first_test_under(path: str, cwd: str, predicate) -> str:
+    """The first path under the folder `path`, at any depth, that `predicate` accepts, else ''. A
+    folder that `predicate` accepts as `DIR/_` counts. `.git`, `node_modules` and the virtualenv and
+    bytecode folders are not entered, and the walk stops after `_WALK_LIMIT` entries.
+    ponytail: a test past that many entries is missed; the walk costs one pass over the tree, once per
+    fed writer word that is a folder."""
+    try:
+        top = _expanded(path, cwd)
+        if not os.path.isdir(top):
+            return ""
+    except (OSError, ValueError):
+        return ""
+    seen = 0
+    for folder, folders, files in os.walk(top):
+        folders[:] = [name for name in folders if name not in _WALK_SKIP]
+        for found in [os.path.join(folder, "_")] + [os.path.join(folder, name) for name in files]:
+            if predicate(found, cwd):
+                return found
+        seen += len(folders) + len(files)
+        if seen > _WALK_LIMIT:
+            break
+    return ""
+
+
 def _cp_link_source(raw, holds, cwd, keywords=False) -> str:
     """The word of a linking `cp` (`-l`, `-s`, `--link`, `--symbolic-link`, in any cluster) that
     `holds(word, cwd)` accepts, else ''. A link to a frozen file, or to a folder of them, gives the
@@ -637,8 +679,10 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 # that with the same loop and predicate (`read_fed`). A root is a word that names where a command
 # reads, never a word that selects: a `-name` or `-path` value, a grep pattern. Roots are never
 # listed from disk (`_holds` does that), so a path that is not there yet is still a root.
-# ponytail: a `while read` loop, `find -delete`, a `$(...)` whose body holds a quoted paren, and a
-# root fed through a variable that a loop or an xargs itself assigns are not read.
+# A `while read V` loop that a pipe feeds reads `$V` as the pipe's roots, as a `for` list does.
+# ponytail: a `while read` loop fed by redirect (`done < FILE`) or by a substitution, `find -delete`, a
+# `$(...)` whose body holds a quoted paren, and a root fed through a variable that a loop or an xargs
+# itself assigns are not read.
 _MARK = "\0"
 _MARK_AT = re.compile("`\0`|\0")
 _WORD_MARK = "\x02"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL (\x01 is its newline stand-in)
@@ -782,6 +826,42 @@ def _put_roots(words, mark, roots):
             for part in ([word.replace(mark, root) for root in roots] if mark in word else [word])]
 
 
+def _piped_roots(ends, parsed, at) -> list:
+    """The roots of the pipeline stages that feed segment `at`, first stage first. A pipeline that
+    ends in a count (`_prints_a_count`) gives none."""
+    roots, back = [], _piped_into(ends, parsed, at)
+    if back is not None and _prints_a_count(parsed[back]):
+        back = None
+    while back is not None:
+        roots = _roots(parsed[back]) + roots
+        back = _piped_into(ends, parsed, back)
+    return roots
+
+
+_READ_VALUE_LETTERS = "dnNptua"
+
+
+def _read_loop(words, roots):
+    """The (variable, list) entry of a `while` or `until` loop whose condition is `words`: `read V`
+    over the roots a pipe feeds it, so `$V` in the body reads as each of them. Any other condition
+    binds nothing. The first variable of `read A B` takes the first word of each line; `REPLY` is
+    the name when `read` has none."""
+    at = 0
+    while at < len(words) and _ASSIGNMENT.match(words[at]):
+        at += 1
+    if not roots or words[at:at + 1] != ["read"]:
+        return ("", [])
+    skip = False
+    for word in words[at + 1:]:
+        if skip:
+            skip = False
+        elif word.startswith("-") and len(word) > 1:
+            skip = word[-1] in _READ_VALUE_LETTERS
+        else:
+            return (word, roots)
+    return ("REPLY", roots)
+
+
 def _fed_segments(segments, ends):
     """(segments, ends, changed): the segments with each `for` variable, xargs and `find -exec` put as
     the plain command the shell runs. An xargs command takes the roots of the segments piped into it,
@@ -796,8 +876,8 @@ def _fed_segments(segments, ends):
         head = words[lead] if lead < len(words) else ""
         if head == "for" and words[lead + 2:lead + 3] == ["in"]:
             loops.append((words[lead + 1], words[lead + 3:]))
-        elif head in ("while", "until", "select"):
-            loops.append(("", []))
+        elif head == "select" or any(word in ("while", "until") for word in words[:lead]):
+            loops.append(_read_loop(words[lead:], _piped_roots(out_ends, out_words, len(out))))
         elif head == "done" and loops:
             loops.pop()
         words = _fill_loop_variables(words, loops)
@@ -805,12 +885,7 @@ def _fed_segments(segments, ends):
         index, chain = _walk_wrappers(tuple(words))
         xargs = next((flags for word, flags in chain if word == "xargs"), None)
         if index is not None and xargs is not None:
-            roots, back = [], _piped_into(out_ends, out_words, len(out))
-            if back is not None and _prints_a_count(out_words[back]):
-                back = None
-            while back is not None:
-                roots = _roots(out_words[back]) + roots
-                back = _piped_into(out_ends, out_words, back)
+            roots = _piped_roots(out_ends, out_words, len(out))
             replace = None
             for flag, value in xargs:
                 if flag == "-I":
@@ -951,8 +1026,15 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
+        cp_at = _cp_start(raw, bool(fed))
         for index, word in enumerate(raw):
-            if index in data:
+            glued = _glued_cp_target(word) if cp_at is not None and index > cp_at else None
+            if glued and index not in data:
+                # The glued target judged as the spaced `-t DIR` is, by the same text.
+                words.extend(glued)
+                shown.extend(glued)
+                script.extend(glued)
+            elif index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -980,7 +1062,10 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            # A fed writer's word that is a folder writes each test under it: `find . | xargs sed -i`.
+            hit = predicate(word, at, verb) if predicate_command else (
+                predicate(word, at) or bool(fed) and _first_test_under(word, at, predicate))
+            if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
 
