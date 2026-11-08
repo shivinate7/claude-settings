@@ -64,8 +64,10 @@ no pronoun after it. For a passive verb, a subject sits in the three words after
 OSError", "I will block it until the check is green" and "The merge will be blocked until CI is green" are no claims.
 A claim that names no file, such as one that names a check only by pull request number, needs the cite: no run can
 clear it. A paren group that is no cite stays in the sentence, so "The guard (hooks/guard.py)" names its file.
-Prose lines of a paragraph are joined before sentences are split. Fenced text (stale_cites.fenced_lines) and past
-tense pass. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
+Prose lines of a paragraph are joined before sentences are split. Fenced text (stale_cites.fenced_lines), quoted text
+and inline code spans (stale_cites.MENTION, CODE_SPAN; a lone file path in them stays) and past tense pass. A forecast
+whose clause asks for the verdict (VERDICT_ASK_WORDS: whether, if, verify, confirm, prove, probe, find out, or a
+label "Unknown:") is a question, not a claim. A send that also fails the owner-question check is refused once, naming both rules, and both checks run
 before that refusal. A send with no forecast word and verdict word exits before any import, transcript read or model
 call. The refusal goes through refuse(), so the owner override lifts it. A source that cannot be read allows, with one
 stderr line.
@@ -130,11 +132,13 @@ VERDICT_ADVERBS = ("probably", "still", "also", "never", "then", "definitely", "
                    "now", "again", "always", "only", "really", "even", "already", "ever", "simply", "clearly")
 # A pronoun between a subject word and the forecast word is the actor instead: "when the test passes I will pass it".
 ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
+# The words that make a forecast's clause an ask: "Verify the check will pass it" asks for the run, it claims nothing.
+VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "find out", "unknown")
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, deny, catch, flag, fail, allow or pass, and the turn did "
     "not run it. Run the check first (a command that names the file the claim names), or add a backing cite at head: "
     "`(test path::name)`, where the file defines that name, or `(read path:line)`, where the file is one the claim "
-    "names or the file that defines the named rule. Or drop the forecast.")
+    "names (named in the sentence, outside the cite) or the file that defines the named rule. Or drop the forecast.")
 # THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
 # call (PAST_RULING_TIMEOUT, 15 s) plus the question call's 60 s plus start-up (the git read, the import of
 # lint/report_guard.py). Every other path makes one call. The settings.json PreToolUse entry for this hook carries
@@ -502,6 +506,9 @@ _LET_ANY = re.compile(r"\blet\s+(?:\w+\s+){1,2}through\b", re.I)  # "let it thro
 _BULLET = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>)")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SUBJECT_WORDS = {w.lower() for w in VERDICT_SUBJECT_WORDS if w != "CI"}  # CI counts only in capitals
+# A forecast in a clause that asks for the verdict is a question, not a claim: "Find out if CI will fail it".
+_ASK_WORDS = re.compile(r"\b(?:%s)\b" % "|".join(w.replace(" ", r"\s+") for w in VERDICT_ASK_WORDS), re.I)
+_UNKNOWN_LABEL = re.compile(r"\bunknown\s*$", re.I)  # "Unknown: the check will refuse it" reports a read that did not run
 
 
 def _straight(text):
@@ -534,11 +541,24 @@ def has_subject(tokens):
     return False
 
 
+def split_clause(prefix):
+    """(head, clause) of the text before a forecast word: the clause it sits in, and what comes before that clause."""
+    ends = list(_CLAUSE_END.finditer(prefix))
+    return (prefix[:ends[-1].start()], prefix[ends[-1].end():]) if ends else ("", prefix)
+
+
+def is_ask(prefix):
+    """True when the forecast that ends `prefix` is asked, not claimed: its clause holds an ask word ("Verify the check
+    will pass it", "whether the check will refuse it"), or a label "Unknown:" opens it."""
+    head, clause = split_clause(prefix)
+    return _ASK_WORDS.search(clause) is not None or _UNKNOWN_LABEL.search(head) is not None
+
+
 def actor_before(prefix):
     """True when the actor of the forecast word that ends `prefix` is a check: a subject in the last three words of
     its clause. The words are read back from the forecast word, and a pronoun stops the read, since it is the actor."""
     window = []
-    for token in reversed(_CLAUSE_END.split(prefix)[-1].split()[-3:]):
+    for token in reversed(split_clause(prefix)[1].split()[-3:]):
         if _bare(token).lower() in ACTOR_PRONOUNS:
             break
         window.insert(0, token)
@@ -561,7 +581,10 @@ def is_verdict_claim(sentence):
         verb = _PREDICATE.match(sentence, modal.end())
         if not verb:
             continue
-        if actor_after_by(sentence[verb.end():]) if verb.group("passive") else actor_before(sentence[:modal.start()]):
+        prefix = sentence[:modal.start()]
+        if is_ask(prefix):
+            continue
+        if actor_after_by(sentence[verb.end():]) if verb.group("passive") else actor_before(prefix):
             return True
     return False
 
@@ -595,8 +618,20 @@ def verdict_claims(message):
     if not _has_word(message, VERDICT_FORECAST_WORDS) \
             or not (_has_word(message, VERDICT_WORDS + VERDICT_PASSIVE_WORDS) or _LET_ANY.search(message)):
         return []
-    return [sentence for unit in prose_units(message) for sentence in SENTENCE_END.split(unit)
+    return [sentence for unit in prose_units(message) for sentence in SENTENCE_END.split(blank_mentions(unit))
             if is_verdict_claim(sentence)]
+
+
+def blank_mentions(unit):
+    """`unit` with quoted text and inline code spans blanked, as fenced text is: a forecast quoted is a mention, not a
+    claim. stale_cites holds both patterns (MENTION, CODE_SPAN). A bare file path, in a span or not, stays, since a path
+    may be the claim's subject or the file a run must name."""
+    import stale_cites
+
+    def blank(match):
+        inner = match.group(0).strip("`\"“”")
+        return match.group(0) if stale_cites.PATH_SPAN.match(inner) or is_path(inner) else " "
+    return stale_cites.MENTION.sub(blank, stale_cites.CODE_SPAN.sub(blank, unit))
 
 
 def strip_cites(sentence):
