@@ -69,7 +69,7 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
-a gap in the history (a shallow clone, a base with no merge base with the head, or `HEAD~1` of a root commit): that prints
+a gap in the history (a shallow clone, a base with no merge base with the head, or the first parent of a root commit, spelled `HEAD~1`, `HEAD^1`, `@~1` or `<head sha>~01`): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
@@ -109,6 +109,9 @@ when the run already listed the whole tree) and the `cat-file --batch`, which re
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
 `candidates(root, "decisions")` that holds a file. A changed RULE_FILES file adds its base and head blobs and the
 mechanisms file to that read. Its list of changed files comes from the diff the run already read, with no git start.
+A range whose merge-base or diff failed adds starts to tell the cause apart, an upper bound: `a...b` four, `a..b`
+three; a base with a first-parent suffix adds a `rev-list`, so five and four; the root form `HEAD~1..HEAD` five (its
+three-dot form six); a passing run adds none.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
 once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
 """
@@ -184,19 +187,35 @@ def resolves(rev):
     return done.returncode == 0
 
 
+# A first-parent suffix: `~`, `^`, `~1`, `^1`, also zero-padded (`~01`). `~0` and `^0` name the commit itself: no match.
+FIRST_PARENT_SUFFIX = re.compile(r"\A(.+?)[~^](?:0*1)?\Z")
+
+
 def cut_base(base, head):
     """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
-    shallow (its base sha is cut away), or `base` is the parent of `head` (`<head>~1`, `<head>^`) and `head` is a root
-    commit, which a first push to the default branch reads by design. Run only after a read failed."""
+    shallow (its base sha is cut away), or `base` is the first parent of `head` and `head` is a root commit, which a
+    first push to the default branch reads by design. `base` is the first parent of `head` when it is a stem plus a
+    first-parent suffix (`~`, `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and
+    `<sha>^` count, `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range
+    is unknown. Run only after a read failed.
+    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
+    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
+    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
     if resolves(base):
         return False
     shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
     if shallow.stdout.strip() == b"true":
         return True
-    if base in (head + "~1", head + "^"):
-        parents = _nowindow.run(["git", "rev-list", "--parents", "-n", "1", head], capture_output=True)
-        return len(parents.stdout.split()) == 1
-    return False
+    suffixed = FIRST_PARENT_SUFFIX.match(base)
+    if not suffixed:
+        return False
+    parents = _nowindow.run(["git", "rev-list", "--parents", "-n", "1", head], capture_output=True)
+    shas = parents.stdout.split()
+    if parents.returncode != 0 or len(shas) != 1:  # a failed rev-list is no root: unknown
+        return False
+    stem = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", suffixed.group(1) + "^{commit}"],
+                         capture_output=True)
+    return stem.returncode == 0 and stem.stdout.split() == shas  # the stem must be the head's own commit
 
 
 def history_gap(base, head):
