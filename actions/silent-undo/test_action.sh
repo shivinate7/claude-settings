@@ -112,5 +112,24 @@ expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
 expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
+# action.yml gives check.sh the pull request body as env PR_BODY. The step's env is read by the shared step parser
+# (lint/workflow_steps.py). action.yml indents its steps two columns less than a job does, so the steps move to a job's columns first.
+pin_py='
+import sys
+sys.path.insert(0, sys.argv[1])
+from workflow_steps import step_blocks, step_env, step_key
+with open(sys.argv[2], encoding="utf-8") as f:
+    text = f.read()
+steps = text.split("\n  steps:\n", 1)[1]
+shifted = "\n".join(("  " + ln) if ln.strip() else ln for ln in steps.split("\n"))
+found = [s for s in step_blocks(shifted) if step_key(s, "name") == "Check the change drops no earlier work"]
+if len(found) != 1:
+    sys.exit("action.yml has %d check steps by that name, want 1" % len(found))
+got = step_env(found[0]).get("PR_BODY")
+want = "${{ github.event.pull_request.body }}"
+if got != want:
+    sys.exit("action.yml gives check.sh PR_BODY %r, want the pull request body %r" % (got, want))
+'
+if msg=$(python3 -I -c "$pin_py" "$root/lint" "$here/action.yml" 2>&1); then echo "ok   action-gives-pr-body"; else echo "FAIL action-gives-pr-body: $msg"; fails=$((fails + 1)); fi
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))

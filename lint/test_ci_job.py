@@ -483,6 +483,15 @@ class GithubBaseRef(Job):
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
 
+    SEEN_PR_BODY = "printf '%s' \"${PR_BODY-<unset>}\" > seen.txt"
+
+    def test_a_step_env_that_reads_the_pull_request_body_gets_the_body_ci_job_is_given(self):
+        """The pull request body reaches a step as `${{ github.event.pull_request.body }}`, which ci-job reads from env CI_JOB_PR_BODY."""
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n"
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
+                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": body})
+        self.assertEqual((verdicts, seen), (["PASS"], body), out)
+
 
 def mapped(parent, body):
     """One `      - ` step whose `parent:` block (`with` or `env`) holds `body`, raw, as YAML writes it."""

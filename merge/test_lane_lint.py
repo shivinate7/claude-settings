@@ -507,11 +507,14 @@ class LaneLint(CiJobStub, tm.CloudSession):
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
 BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
 BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
-BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
+SILENT_UNDO = "Silent undo check"  # the CI step that reads the pull request body, as env PR_BODY
+BATCH_CI_STEPS = (SILENT_UNDO, "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
+PR_BODY_EXPR = "${{ github.event.pull_request.body }}"  # the value checks.yml gives PR_BODY
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
-CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
+CALL_STUB = ("import json, os, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n"
+             "    print(json.dumps({'argv': sys.argv, 'pr_body': os.environ.get('PR_BODY')}), file=f)\n")  # logs its argv and env PR_BODY, exits 0
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
@@ -722,6 +725,62 @@ class BatchLintFlags(tm.Env):
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
 
+    def test_the_silent_undo_step_sees_env_pr_body_as_the_pull_requests_body(self):
+        """A pull request's lint gives the silent-undo step env PR_BODY as the PR's body: lane_lint takes the body from the host,
+        ci-job maps it to `${{ github.event.pull_request.body }}`, and checks.yml names it as the step's PR_BODY. The body holds a Drops-lines line."""
+        body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X\n"
+        self.push_batch(BATCH)
+        self.host.branch, self.host.body = BATCH, body
+        out = io.StringIO()
+        rc = self.lane_lint("7", out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        calls = self.stub_calls(script_of(dict(self.found)[SILENT_UNDO]))
+        self.assertEqual(len(calls), 1, "the silent-undo step's script ran %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(calls[0]["pr_body"], body, "the silent-undo step saw env PR_BODY %r, want the PR's body" % calls[0]["pr_body"])
+
+
+def under(lines, key, indent):
+    """(the rest of the `key:` line, the lines under it) for the key at column `indent`; None when there is no such key line."""
+    for i, line in enumerate(lines):
+        m = re.match(r"^ {%d}%s:(.*)$" % (indent, re.escape(key)), line)
+        if m:
+            kids = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and len(nxt) - len(nxt.lstrip(" ")) <= indent:
+                    break
+                kids.append(nxt)
+            return m.group(1).strip(), kids
+    return None
+
+
+def pull_request_types(text):
+    """The names in checks.yml's `on:` `pull_request:` `types:`, read from its lines: a flow list or a block list. Raises when a key is missing."""
+    on = under(text.split("\n"), "on", 0)
+    pr = on and under(on[1], "pull_request", 2)
+    types = pr and under(pr[1], "types", 4)
+    if not types:
+        raise AssertionError("checks.yml has no on: pull_request: types: list this suite reads")
+    rest, kids = types
+    if rest.startswith("["):
+        return [name.strip() for name in rest.strip("[]").split(",") if name.strip()]
+    return [ln.strip()[len("- "):].strip() for ln in kids if ln.strip().startswith("- ")]
+
+
+class PrBodyPins(unittest.TestCase):
+    """checks.yml gives the silent-undo step the pull request body as PR_BODY, and its pull_request types leave out `edited`,
+    so a body-only edit does not rerun the checks job. Each pin parses the YAML it reads, never a grep of one of its lines."""
+
+    def test_the_silent_undo_step_takes_pr_body_from_the_pull_request_body(self):
+        env = step_env(dict(real_ci_steps())[SILENT_UNDO])
+        self.assertEqual(env.get("PR_BODY"), PR_BODY_EXPR, "checks.yml's silent-undo step gives PR_BODY %r, want the pull request body" % env.get("PR_BODY"))
+
+    def test_the_pull_request_types_do_not_list_edited(self):
+        with open(CHECKS_YML, encoding="utf-8") as f:
+            types = pull_request_types(f.read())
+        self.assertIn("synchronize", types, "the parse of checks.yml's pull_request types lost synchronize: %r" % types)
+        self.assertNotIn("edited", types, "checks.yml's pull_request types list edited, so a body-only edit reruns the checks job: %r" % types)
+
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
     """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
@@ -853,6 +912,20 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, out)
         self.assertEqual(self.host.readies, [], out)
+
+    def test_a_ready_check_that_reads_the_pr_body_gets_the_pull_requests_body(self):
+        """The ready check's ci-job run gets the PR's body as CI_JOB_PR_BODY, as the PR's own lint does, so a step that reads
+        PR_BODY (silent-undo) sees the body it sees in CI."""
+        body = "Summary.\n\nDrops-lines: docs/decisions/first.md -- the lines are dead\n"
+        self.host.body = body
+        self.declare([SILENT_UNDO])
+        self.stale_feat()
+        self.use_ci_job([("PASS", SILENT_UNDO)], 0)
+        rc, out = self.draft_confirm()
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready check did not run ci-job once: " + out)
+        self.assertEqual(runs[0].get("pr_body"), body, "the ready check's ci-job run got CI_JOB_PR_BODY %r, want the PR's body" % runs[0].get("pr_body"))
+        self.assertEqual(rc, 0, out)
 
     def test_a_repo_that_declares_no_ready_checks_marks_ready_and_runs_no_ci_job(self):  # the control
         self.declare(None)
