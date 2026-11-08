@@ -36,7 +36,7 @@
                           `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when a done PR is in reach of the base, plus the CI reads of each
                           ready PR on the base, one git fetch of the open heads (objects written into the root's object store, and the ref
-                          refs/remotes/origin/<base> updated) and one git rev-list; no compare read. A shallow root reads unknown. On the live set at 2026-11-08 10:39 CST (647 open PRs, 438 on main) the old logic made
+                          refs/remotes/origin/<base> updated) and one git rev-list; no compare read. In a shallow root (every cloud checkout) that fetch adds --unshallow, so the first run also pulls the whole history once (size unmeasured) and later runs find the root full. On the live set at 2026-11-08 10:39 CST (647 open PRs, 438 on main) the old logic made
                           68,315 compare reads per run, counted with the compares answered locally; the fetch of 645 heads took 18.8 s. No
                           new file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -974,16 +974,22 @@ class Host:
         or one of `shas`; `head` is one of `shas`. One git fetch of `shas` and one `git rev-list --parents` over them, minus the base, give the
         commit graph; containment is worked out here from it. A head the listing lacks is held by the base: it answers True for `base` and for
         itself, and False for any other sha, since the graph holds no path from that sha to it. The pairwise home is `ancestor()`; this read is
-        separate because a start per pair is up to ~98,000 processes on the live set. A shallow root, any failed read, or a head or `other`
-        outside `shas` raises Stop: a wrong False names a pull request twice."""
+        separate because a start per pair is up to ~98,000 processes on the live set. A shallow root (every cloud checkout) gets `--unshallow` on
+        that one fetch, so the first run also pulls the whole history once (size unmeasured) and later runs find the root full. The root must read
+        not shallow after the fetch. An unknown shallow probe, a root still shallow, any failed read, or a head or `other` outside `shas` raises
+        Stop: a wrong False names a pull request twice."""
         import git_reads  # hooks/git_reads.py, on sys.path from the top of this file; the one home of the shallow probe
         known, cwd, tip = set(shas), self.cwd or ".", f"refs/remotes/origin/{base}"
         shas = sorted(known)
-        if git_reads.is_shallow(cwd) is not False:  # a shallow clone cuts the graph, so a head the base holds could read as not held
+        shallow = git_reads.is_shallow(cwd)
+        if shallow is None:  # git could not tell: stop before any fetch
             raise Stop(f"cannot tell whether the root {cwd} is a full clone, or it is shallow, so its history is cut {READ_CITE}")
-        c, out = git(cwd, "fetch", "--no-tags", "--no-write-fetch-head", "origin", f"+refs/heads/{base}:{tip}", *shas)
+        # a shallow clone cuts the graph, so a head the base holds could read as not held: the one fetch deepens it to the full history
+        c, out = git(cwd, "fetch", "--no-tags", "--no-write-fetch-head", *(["--unshallow"] if shallow else []), "origin", f"+refs/heads/{base}:{tip}", *shas)
         if c:
             raise Stop(f"cannot fetch the open heads of {base} {READ_CITE}: {out}")
+        if shallow and git_reads.is_shallow(cwd) is not False:
+            raise Stop(f"the root {cwd} is still shallow after the fetch, so its history is cut {READ_CITE}")
         c, out = git(cwd, "rev-list", "--parents", *shas, f"^{tip}")
         if c:
             raise Stop(f"cannot list the commits of the open heads over {base} {READ_CITE}: {out}")
