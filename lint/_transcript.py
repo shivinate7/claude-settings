@@ -94,17 +94,23 @@ def owner_text(rec, notice_tags=()):
 
 
 def last_owner_index(records, peer_tags=()):
-    """Index of the last main-session record that starts a turn, or None.
+    """Index of the last main-session record that starts a turn (not only an owner message), or None.
 
     A turn start is a record is_incoming accepts that is either not isMeta and has no peer origin,
     whatever its text (an owner prompt, a fired wake), or a peer brief: its text starts with one of
     `peer_tags` (shared_names._PEER_FRAME_TAGS) and it has no peer origin. isMeta records (stop-hook
-    feedback, system reminders) and peer hand-backs never start one.
+    feedback, system reminders) and a mid-turn peer hand-back never start one. A user record whose
+    turnOrigin is "peer" is a turn start too: it is a hand-back that woke an idle session after a Stop.
     Not last_incoming_index: the spawn window skips isMeta records and peer messages, which that
     pick check counts."""
     idx = None
     for i, rec in enumerate(records):
-        if not is_incoming(rec) or _is_peer(rec.get("origin")):
+        if not is_incoming(rec):
+            continue
+        if rec.get("turnOrigin") == "peer":
+            idx = i
+            continue
+        if _is_peer(rec.get("origin")):
             continue
         if not rec.get("isMeta"):
             idx = i
