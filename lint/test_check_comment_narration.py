@@ -15,8 +15,9 @@ The cases pin this contract:
 - Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
 - `--exclude PREFIX` skips the files under that path prefix. Repeat it for each prefix.
 - JS, TS, Astro and Swift comments follow the same rule. The same words in their strings or template text never fail.
-- A comment that says a test or check was red or green on a head, on main, on the base, or before is history.
-  It fails under the `history phrase` pattern.
+- A comment that states a run's colour or result on a head, on main or on the base is history.
+  It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once is a
+  condition and stays clean.
 - The check is one file. The suite copies only that file into the fixture repo, so the check finds
   the repo from its working directory or from its own location, and both give the fixture repo.
 """
@@ -44,8 +45,10 @@ with open(STANDARD, encoding="utf-8") as f:
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 
-# Run-state history: a comment that says a test or check was red or green on a head, on main, on the base, or
-# before. The `history phrase` pattern flags each one. The list also joins FLAGGED, so every flagged test runs it.
+# Run-state history: a comment that states a run's colour or result on a head, on main or on the base is history,
+# whatever verb or label comes before it. A colour phrase after when, if, unless, until, while or once is a
+# condition and stays clean (see CLEAN). The `history phrase` pattern flags each hit. The list also joins FLAGGED,
+# so every flagged test runs it.
 RUN_STATE = [
     "RED on the head this branch starts from: the edit tool and the PATCH route are not judged",
     "PINS, green on the head this branch starts from: prose after the CI line is refused",
@@ -53,6 +56,8 @@ RUN_STATE = [
     "Both are green on main: they pin the cost of the new check",
     "red on main", "green on the base", "was green before", "went red on the head",
     "passed on main before this change",
+    "fails on main", "passes on the head", "This case passes on main.", "RED before this change",
+    "(green before the fix)", "the run is red on main", "Control, green on main:",
 ]
 
 # Text the check must flag, in a comment or in a docstring line.
@@ -92,6 +97,9 @@ CLEAN = [
     "refuses a head that is not green", 'returns "red" when any job fails',
     "the red/green colour of the badge", "a green check proves only its platform",
     "the gate goes red when any job fails",
+    # A colour phrase after when, if, unless, until, while, once or only ... when is a condition, so it stays clean.
+    "only merge when green on the head", "if red on main, page the on-call",
+    "None when it is green on the head", "until it is green on the base",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
