@@ -231,7 +231,7 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 REVIEWED_HEAD_PUSH_REASON = (
     "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record is "
-    "done and already carries its one fix check, so the merge tool can write no fix check for the new head (decision pr-review-record). "
+    "a record whose one fix check is used, whatever the record's state, so the merge tool can write no fix check for the new head (decision pr-review-record). "
     "Remedy: stack the change on a new branch, and open its own pull request."
 )
 
@@ -245,12 +245,21 @@ def _sends_nothing(specs, where: str, sha: str) -> bool:
     return True
 
 
+def _is_fork(row) -> bool:
+    """True when a pull request row's head repo is another repo than its base repo. A row with no repo field is not."""
+    head = ((row.get("head") or {}).get("repo") or {}).get("full_name")
+    base = ((row.get("base") or {}).get("repo") or {}).get("full_name")
+    return bool(head and base and head != base)
+
+
 def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> bool:
-    """True when this push writes the head branch of an open pull request whose newest review record is done
-    and already holds its fix check (rule reviewed-head-push). Fails open, the opposite of merge_check: a tool that
+    """True when this push writes the head branch of an open pull request whose newest review record, on the live
+    head, already holds its fix check, whatever the record's state: done, open after a FAILed fix check, or held (rule
+    reviewed-head-push). A stale record (another head) allows. A pull request whose head repo differs from its base repo is
+    a fork and is skipped before the comment read; a row with no repo field counts as the same repo. Fails open, the opposite of merge_check: a tool that
     cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
-    The record is read and judged by the merge tool's own `review_comments`, `parse_review` and `review_state`, so no
-    parse or state rule is copied here. Every destination the push names is read, globs and unresolved names skipped: a push
+    The record is read and judged by the merge tool's own `review_comments` and `parse_review`, so no
+    parse rule is copied here. Every destination the push names is read, globs and unresolved names skipped: a push
     of `--all`, `--mirror`, a tag alone, a deletion, or a push whose remote (named, or implied by `push_remote`) is not origin
     is never judged. When the push is the first command (`first`), a push whose sources all equal a pull request's live head
     sha sends nothing, and that pull request is not judged. A later push is judged as sending something: local HEAD is read
@@ -272,7 +281,7 @@ def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> boo
         host = module.Host(repo=None, cwd=where or None)
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             rows = [d for d in host.pages("pulls", fields={"state": "open"})
-                    if d["head"]["ref"] in branches
+                    if d["head"]["ref"] in branches and not _is_fork(d)
                     and not (first and _sends_nothing(scope[1], where, d["head"]["sha"]))]
             if not rows:
                 return False
@@ -282,8 +291,7 @@ def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> boo
             n, sha = row["number"], row["head"]["sha"]
             records = found.get(n, [])
             rec = module.parse_review(records[-1]) if records else None
-            if (rec and rec["n"] == n and rec["head"] == sha and rec["fix"] is not None
-                    and module.review_state(rec, sha)[0] == "done"):
+            if rec and rec["n"] == n and rec["head"] == sha and rec["fix"] is not None:
                 return True
         return False
     except (Exception, SystemExit) as e:
