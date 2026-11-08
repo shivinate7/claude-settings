@@ -2251,16 +2251,92 @@ def case_verdict_claim_with_its_test_run_this_turn_passes():
               r.code == 0 and r.deny() is None, detail(r))
 
 
-def case_read_of_the_claimed_file_in_this_turn_clears_the_claim():
-    # Pinned as allowed. A known limit, accepted: the gate counts a Bash call that names the claimed file as a run, and a
-    # read (`cat`) names it too. So a read clears the claim as a run, though it runs no test.
+# A forecast on hooks/guard.py. Only a run of that file backs it. Each read of the file below names it and runs nothing,
+# so each is refused. On the old code each clears the claim, since any Bash call that names the claimed file counts.
+GUARD_FILE = "hooks/guard.py"
+GUARD_CLAIM = GUARD_FILE + " will refuse it."
+READ_COMMANDS = (
+    "cat hooks/guard.py",
+    "head -n 20 hooks/guard.py",
+    "tail -n 20 hooks/guard.py",
+    "less hooks/guard.py",
+    "grep -n refuse hooks/guard.py",
+    "sed -n 1,40p hooks/guard.py",
+    "wc -l hooks/guard.py",
+    "ls hooks/guard.py",
+    "git show HEAD:hooks/guard.py",
+    "git diff hooks/guard.py",
+    'grep -n "python3 hooks/guard.py" docs/notes.md',
+    "python3 -c \"print(open('hooks/guard.py').read())\"",
+)
+# Each form runs the file, so each backs the claim. On the old code each is allowed too: the green controls.
+RUN_COMMANDS = (
+    "python3 hooks/guard.py < x.json",
+    "python3 -m pytest hooks/guard.py",
+    "bash hooks/guard.py",
+    "node hooks/guard.py",
+    "~/.claude/bin/verdict python3 hooks/guard.py",
+    "hooks/guard.py",
+)
+
+
+def case_read_of_the_claimed_file_in_this_turn_does_not_clear_the_claim():
+    # Re-pointed from a pinned known limit. That limit let a read of the claimed file clear the claim, because a Bash call
+    # that names the file counted as a run. Only a run clears a claim now, so a `cat` of the file is refused.
     transcript = write_transcript("case-read", commands=["cat " + CLAIM_CHECK])
-    check("read clears the claim scope: the turn's Bash call is a cat of the claimed file",
-          any(command == "cat " + CLAIM_CHECK for command in turn_commands(transcript)), turn_commands(transcript))
+    check("read does not clear the claim scope: the turn's only Bash call is a cat of the claimed file",
+          turn_commands(transcript) == ["cat " + CLAIM_CHECK], turn_commands(transcript))
     for tool in SEND_TOOLS:
         r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
-        check("verdict claim, its file read this turn, via %s: the send is not refused" % tool,
-              r.code == 0 and r.deny() is None, detail(r))
+        check("verdict claim, a read of its file this turn, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_forecast_on_the_claimed_file_with_no_bash_call_is_refused():
+    # Control, green on the old code too: with no Bash call in the turn, the claim on hooks/guard.py is refused.
+    transcript = write_transcript("guard-none")
+    check("no-run control scope: the turn has no Bash call", turn_commands(transcript) == [], turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, GUARD_CLAIM, transcript=transcript), answer=ALLOW)
+        check("forecast on hooks/guard.py, no Bash call, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_read_of_the_claimed_file_does_not_back_a_forecast():
+    # Each read is the turn's only Bash call. A read names the file and runs nothing, so the claim stays refused.
+    for index, command in enumerate(READ_COMMANDS):
+        transcript = write_transcript("claim-read-%d" % index, commands=[command])
+        check("read scope (%s): the turn's only Bash call is this read" % command,
+              turn_commands(transcript) == [command], turn_commands(transcript))
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, GUARD_CLAIM, transcript=transcript), answer=ALLOW)
+            check("read of the claimed file (%s), via %s: the send is refused" % (command, tool),
+                  (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_run_of_the_claimed_file_backs_a_forecast():
+    # Each run is the turn's only Bash call. Every form executes hooks/guard.py, so the claim is not refused.
+    for index, command in enumerate(RUN_COMMANDS):
+        transcript = write_transcript("claim-run-%d" % index, commands=[command])
+        check("run scope (%s): the turn's only Bash call names the claimed file" % command,
+              turn_commands(transcript) == [command] and GUARD_FILE in command, turn_commands(transcript))
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, GUARD_CLAIM, transcript=transcript), answer=ALLOW)
+            check("run of the claimed file (%s), via %s: the send is not refused" % (command, tool),
+                  r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_run_of_the_named_test_file_backs_its_forecast():
+    # The claim names hooks/test_guard.py, and a verdict wrapper around its run clears it: not refused.
+    claim = "hooks/test_guard.py will refuse it."
+    command = "~/.claude/bin/verdict python3 hooks/test_guard.py"
+    transcript = write_transcript("claim-test-guard", commands=[command])
+    check("named test run scope: the turn's only Bash call runs the file the claim names",
+          turn_commands(transcript) == [command] and "hooks/test_guard.py" in command, turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, claim, transcript=transcript), answer=ALLOW)
+        check("run of the named test file, via %s: the send is not refused" % tool, r.code == 0 and r.deny() is None,
+              detail(r))
 
 
 def case_verdict_claim_cited_to_an_existing_file_passes():
@@ -2480,10 +2556,11 @@ def case_round2_allowed_claims_pass():
 def case_run_before_a_peer_message_does_not_clear_a_later_claim():
     # The turn bound. The run is in the owner's turn both times, so the reader's scope is the same; only the
     # peer message's place differs. A run before the peer message is refused. After it, it clears (the green control).
-    before = write_records("r2-peer-before", [owner_record(), *bash_records("b1", "cat " + CLAIM_CHECK),
+    # The calls are runs of the file, since a read backs no claim.
+    before = write_records("r2-peer-before", [owner_record(), *bash_records("b1", "python3 " + CLAIM_CHECK),
                                               peer_record("Peer note: the lane is up.")])
     after = write_records("r2-peer-after", [owner_record(), peer_record("Peer note: the lane is up."),
-                                            *bash_records("b2", "cat " + CLAIM_CHECK)])
+                                            *bash_records("b2", "python3 " + CLAIM_CHECK)])
     for label, path in (("before", before), ("after", after)):
         check("peer turn scope (run %s the peer message): the reader sees the run" % label,
               any(CLAIM_CHECK in command for command in turn_commands(path)), turn_commands(path))
@@ -2777,7 +2854,11 @@ def main():
                  case_verdict_claim_without_run_or_cite_is_refused,
                  case_verdict_claim_with_its_test_run_this_turn_passes,
                  case_verdict_claim_cited_to_an_existing_file_passes, case_past_tense_report_passes,
-                 case_read_of_the_claimed_file_in_this_turn_clears_the_claim,
+                 case_read_of_the_claimed_file_in_this_turn_does_not_clear_the_claim,
+                 case_forecast_on_the_claimed_file_with_no_bash_call_is_refused,
+                 case_read_of_the_claimed_file_does_not_back_a_forecast,
+                 case_run_of_the_claimed_file_backs_a_forecast,
+                 case_run_of_the_named_test_file_backs_its_forecast,
                  case_quoted_claim_in_a_code_fence_passes,
                  case_send_with_no_verdict_word_reads_no_transcript_and_calls_no_model,
                  case_forecast_without_a_verdict_word_passes,
