@@ -29123,6 +29123,8 @@ CTM_REPO_VERSION = ctm_repo("version", [ctm_value("Claude Haiku 4.5")],
                             local=[ctm_message(ctm_trailer("Claude Haiku 4.5"))])
 CTM_REPO_NOMODEL = ctm_repo("nomodel", [ctm_value("Claude")], local=[ctm_message(ctm_trailer("Claude"))])
 CTM_REPO_FAMILY = ctm_repo("family", [ctm_value("Claude Opus")], local=[ctm_message(ctm_trailer("Claude Opus"))])
+CTM_REPO_FAMILYMATCH = ctm_repo("familymatch", [ctm_value("Claude Haiku")],
+                                local=[ctm_message(ctm_trailer("Claude Haiku"))])
 CTM_REPO_TWO = ctm_repo("two", [ctm_value("Claude Opus 5.5"), ctm_value("Claude Haiku 5.5")],
                         local=[ctm_message(ctm_trailer("Claude Opus 5.5")),
                                ctm_message(ctm_trailer("Claude Haiku 5.5"))])
@@ -29155,6 +29157,7 @@ ctm_case("a Haiku 4.5 trailer from a Haiku 5.5 agent is refused", CTM_REPO_VERSI
 ctm_case("an Opus trailer on the older of two unpushed commits is refused", CTM_REPO_TWO, "deny", CTM_HAIKU)
 ctm_case("an Opus trailer is refused when the last assistant record is Haiku", CTM_REPO_INCIDENT, "deny", CTM_LAST)
 ctm_case("an Opus trailer on the oldest of 25 unpushed commits is refused", CTM_REPO_LONG, "deny", CTM_HAIKU)
+ctm_case("a family word with no version naming another family is refused", CTM_REPO_FAMILY, "deny", CTM_HAIKU)
 
 # PASSES: the model matches, or no model is named, or the agent's model is unknown, or the check is not the agent's.
 ctm_case("a Haiku trailer from a Haiku agent passes", CTM_REPO_HAIKU, "allow", CTM_HAIKU)
@@ -29163,7 +29166,7 @@ ctm_case("a Fable trailer from a Fable agent passes", CTM_REPO_FABLE, "allow", C
 ctm_case("a Sonnet trailer from a Sonnet agent passes", CTM_REPO_SONNET, "allow", CTM_SONNET)
 ctm_case("a Haiku trailer passes when the last assistant record is Haiku", CTM_REPO_HAIKU, "allow", CTM_LAST)
 ctm_case("a trailer that names no model passes", CTM_REPO_NOMODEL, "allow", CTM_HAIKU)
-ctm_case("a family word with no version names no model and passes", CTM_REPO_FAMILY, "allow", CTM_HAIKU)
+ctm_case("a family word with no version passes when it names the agent's own family", CTM_REPO_FAMILYMATCH, "allow", CTM_HAIKU)
 ctm_case("an Opus line in a body paragraph is not a trailer and passes", CTM_REPO_BODY, "allow", CTM_HAIKU)
 ctm_case("an Opus commit already on origin is not judged", CTM_REPO_PUSHED, "allow", CTM_HAIKU)
 ctm_case("a push with nothing new to send passes", CTM_REPO_NOTHING, "allow", CTM_HAIKU)
