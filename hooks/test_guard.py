@@ -3939,6 +3939,27 @@ add("hand-made worktree: an Agent call with no isolation, whose prompt names a w
 add("hand-made worktree: an Explore Agent call with no isolation passes", "allow", tool="Agent",
     cwd=HMMAIN, subagent_type="Explore", description="look", prompt="Read the repo.")
 
+# VARIABLE TARGETS. The shell expands `$S` and `${S}` before git sees the path, so a target that holds a
+# variable is judged by the value the same command gives it. A variable the command does not set reads as
+# unknown, and a worktree add from a non-temp primary with an unknown target is refused.
+HMVAR_SCRATCH = "S=" + HMSCRATCH + "; "
+hm_deny("a scratch path set in the same command, added from the non-temp primary as $S, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S"')
+hm_deny("a scratch path set in the same command, added from the non-temp primary as $S/lane-x, is refused",
+        HMVAR_SCRATCH + HMADD + '"$S/lane-x"')
+hm_deny("a scratch path set in the same command, added from the non-temp primary as ${S}, is refused",
+        HMVAR_SCRATCH + HMADD + '"${S}"')
+hm_deny("a variable this command does not set, added from the non-temp primary as $S/lane, is refused",
+        HMADD + '"$S/lane"')
+hm_deny("an agent sets a variable to a tree in its folder that is not its home, and adds it, is refused",
+        "S=.claude/worktrees/lane9; " + HMADD + '"$S"', **HMAG)
+hm_allow("a variable set in the same command to a path under the home folder, with no agent, passes",
+         "S=.claude/worktrees/lane2; " + HMADD + '"$S"')
+hm_allow("a repo under the guard's temp folder adds a variable's path, and the throwaway rule passes it",
+         "S=../hmtmp-sibling; " + HMADD + '"$S"', cwd=HMTMPREPO)
+hm_allow("an agent sets a variable to its own red-run folder, as the red run does, and adds it, passes",
+         "R=" + HMAGENT_OWN_RED + "; " + HMADD + '--detach "$R" HEAD', **HMAG)
+
 TEMP_DIR = None   # back to the system temp for the sections below
 
 # THE REFUSAL TEXT and THE POINTER REMEDY, judged on the printed reason (see the two checks below).
