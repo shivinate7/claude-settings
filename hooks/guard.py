@@ -2089,9 +2089,14 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
         return target
-    if is_workflow_rel(rel) and any(
-            workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
-        return target
+    if is_workflow_rel(rel):
+        full = _expanded(target, cwd)
+        # The whole file shows a `run:` line below the fragment. The fragments stay judged too: the drop check is
+        # set-based, so on the whole file it misses a deleted step whose test path another step still runs.
+        whole = workflow_file_pair(tool_input, full)
+        pairs = ([whole] if whole else []) + (workflow_pairs(tool_input, full) or [])
+        if any(workflow_builder_refused(o, n) for o, n in pairs):
+            return target
     return ""
 
 
