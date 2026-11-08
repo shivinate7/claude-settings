@@ -1196,8 +1196,9 @@ jobs:
   # mutate-guard-split). Each shard runs about a third of the mutants. Every shard checks every anchor, then runs only its own
   # mutants and the clean-layout controls of its own targets; the guard, override and simlease targets run every
   # hooks/test_guard*.py.
-  # Cap: 25 min per shard. Cost: the one job paid 3 guard-suite controls (guard, override, simlease, about 870 s each alone);
-  # the 3 shards pay 5 (guard in each shard, override in one, simlease in one). Per-shard time unmeasured in CI.
+  # Cap: 25 min per shard. Cost: the 3 shards pay 5 guard-suite controls (guard in each shard, override in one, simlease in
+  # one). Each control is split in 4: test_guard.py as 4 parallel GUARD_SHARD sub-runs (CONTROL_SPLIT in hooks/mutate_guard.py).
+  # Per-shard time unmeasured in CI.
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope

@@ -70,6 +70,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -88,6 +89,7 @@ def guard_suites(folder=HERE):
 
 
 SUITE = guard_suites()
+CONTROL_SPLIT = 4  # a guard-suite control runs test_guard.py as this many parallel sub-runs (GUARD_SHARD i/CONTROL_SPLIT)
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
 DECISION = os.path.join(HERE, "decision_watch.py")
@@ -2911,11 +2913,14 @@ def run_suite(suite, variable: str, copy_path: str, config_dir: str, only=None):
     return code, red, ran, seen
 
 
-def run_suite_file(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one suite file once. `run_suite` joins these."""
+def run_suite_file(suite: str, variable: str, copy_path: str, config_dir: str, only=None, guard_shard=None):
+    """Run one suite file once. `run_suite` joins these. `guard_shard` ("i/n") is set only by a control's sub-run
+    (`run_control`); every other run carries no GUARD_SHARD."""
     env = dict(os.environ)
     for shard in ("MUTATE_SHARD", "GUARD_SHARD", "MERGE_SHARD"):
         env.pop(shard, None)  # a shard's own value must not shard the suites its mutants run
+    if guard_shard:
+        env["GUARD_SHARD"] = guard_shard
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
     env.pop("DECISION_WATCH_UNDER_TEST", None)
@@ -3103,10 +3108,10 @@ def run_controls(sources, work: str, entries):
     lint and guard reads in it.
 
     Cost (rule outcomes-mechanize-rules): one extra full suite run and one temp tree per target per run, each
-    inside the job cap. A guard-suite target (guard, override, simlease) measured about 870 s alone beside the
-    other controls. The one job paid 3 such controls. The 3 shards pay 5: guard in each shard, override in one,
-    simlease in one. The time per shard in CI is unmeasured. It
-    writes no log and starts no timer, thread or other long-lived process beyond the run's own pool."""
+    inside the job cap. A guard-suite target (guard, override, simlease) runs its control as CONTROL_SPLIT parallel
+    sub-runs of test_guard.py (`run_control`), so while it runs it adds CONTROL_SPLIT - 1 processes beyond MUTATE_JOBS.
+    The 3 shards pay 5 such controls: guard in each shard, override in one, simlease in one. The time per shard in CI
+    is unmeasured. It writes no log and starts no long-lived process: the sub-runs' pool lives inside the control call."""
     targets = []
     for entry in entries:
         _label, _old, _new, target, _required, only_on = mutation_parts(entry)
@@ -3121,13 +3126,36 @@ def control_name(target: str) -> str:
 
 
 def run_control(sources, work: str, target: str):
-    """Run the full suite once on the unmutated layout of `target`. Return run_suite's result tuple."""
+    """Run the full suite once on the unmutated layout of `target`. Return run_suite's result tuple.
+
+    A guard-suite target's suite holds test_guard.py, the longest file. Its control runs that file as CONTROL_SPLIT
+    sub-runs at GUARD_SHARD i/CONTROL_SPLIT, in parallel, and each other file once unsharded; it returns after every
+    sub-run, joining their lines in order, with the first nonzero exit. A sub-run's exception (a timeout) propagates,
+    so `mutate_shared.run_mutants` makes the target's mutants UNKNOWN. Other targets' controls are one unsharded run."""
     _path, suite, variable, _stem = TARGETS[target]
     name = control_name(target)
     copy_path = lay_out(sources, work, target, name, "", "")
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(name))
     os.makedirs(config_dir, exist_ok=True)
-    return run_suite(suite, variable, copy_path, config_dir, None)
+    suites = [suite] if isinstance(suite, str) else list(suite)
+    jobs = []
+    for path in suites:
+        if os.path.basename(path) == "test_guard.py":
+            jobs += [(path, "%d/%d" % (i, CONTROL_SPLIT)) for i in range(1, CONTROL_SPLIT + 1)]
+        else:
+            jobs.append((path, None))
+    if len(jobs) == len(suites):
+        return run_suite(suite, variable, copy_path, config_dir, None)
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = [pool.submit(run_suite_file, path, variable, copy_path, config_dir, None, shard) for path, shard in jobs]
+        results = [future.result() for future in futures]  # the first exception raises here, after the pool's join below
+    code, red, ran, seen = 0, [], [], []
+    for file_code, file_red, file_ran, file_seen in results:
+        code = code or file_code
+        red += file_red
+        ran += file_ran
+        seen += file_seen
+    return code, red, ran, seen
 
 
 def run_mutant(sources, work: str, entry):
