@@ -13583,6 +13583,39 @@ sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 
+# PWSH FOLLOWUPS. A builder's write to a test file is refused whatever PowerShell text carries it. `env -S`
+# appends the words after its split string, so `env -S pwsh -c '<script>'` runs `pwsh -c <script>`, and it is
+# refused as the plain form is. Smart quotes name a path only where PowerShell reads them as quotes, so a
+# quoted string that names a test file as text is not a write to that file. Each DENIES on a test-file write
+# and ALLOWS otherwise.
+sh("pwsh-followups: pwsh -c Set-Content onto a test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with the whole call in one quoted string, then a Set-Content onto a test file, "
+   "is refused [pwsh-followups green]",
+   "env -S 'pwsh -c \"Set-Content hooks/test_x.py x\"'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh unquoted, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -S pwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: env -S with pwsh glued to the flag, then -c and a Set-Content onto a test file, "
+   "is refused [pwsh-followups red]",
+   "env -Spwsh -c 'Set-Content hooks/test_x.py x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: pwsh -c Add-Content of a smart-quoted line that names a test file as text "
+   "is allowed [pwsh-followups red]",
+   "pwsh -c 'Add-Content docs/log.md “edited hooks/test_guard.py”'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "pwsh -c 'Copy-Item “hooks/test_x.py” docs/a.md'", "allow", **BR)
+sh("pwsh-followups: PowerShell tool Copy-Item of a smart-quoted test file as its source is allowed "
+   "[pwsh-followups red]",
+   "Copy-Item “hooks/test_x.py” docs/a.md", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted product file is allowed [pwsh-followups green]",
+   "pwsh -c 'Set-Content “src/app.py” x'", "allow", **BR)
+sh("pwsh-followups: pwsh -c Set-Content of a smart-quoted test file is refused [pwsh-followups green]",
+   "pwsh -c 'Set-Content “hooks/test_x.py” x'", "deny", rule=BT, carries=("test-author",), **BR)
+sh("pwsh-followups: PowerShell tool Set-Content of a smart-quoted test file is refused "
+   "[pwsh-followups green]",
+   "Set-Content “hooks/test_x.py” x", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
