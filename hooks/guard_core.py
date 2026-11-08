@@ -432,6 +432,33 @@ def _powershell_values(segment: str) -> str:
     return "".join(out)
 
 
+def _glued_end_ampersand(segment: str) -> bool:
+    """Whether the segment's last character is an unquoted `&` glued to the word before it
+    (`tail -3&`, `grep '#x'&`). Walks the segment with `walk_quotes`, so a quoted `&`, an escaped
+    `\\&` and a `&` inside a multi-line quote end nothing. A `&` that opens the segment is the pipe
+    of `|&` (or PowerShell's call operator), and one after `>`, `<` or `&` is a redirect."""
+    marks = [(index, char, quote) for index, char, quote in walk_quotes(segment) if not char.isspace()]
+    if len(marks) < 2:
+        return False
+    (_, before, _), (_, char, quote) = marks[-2], marks[-1]
+    return char == "&" and not quote and before not in ">&<"
+
+
+def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
+    """The text a backgrounding `&` ends in one segment, else ''. The one home of "this command
+    runs as a background job", read by the check-tail rule and the detached-launch rule. A `&` is a
+    job when it is a word after the command word at `start`, or when it is glued to the segment's
+    last word. `tokens` are `segment_tokens(segment)`, which keep no quote marks, so the glued form
+    reads the raw text. `split_segments` leaves the `&` of `|&` at the head of the next segment, so
+    a `&` at token 0 is no job."""
+    for index in range(start + 1, len(tokens)):
+        if tokens[index] == "&":
+            return tokens[index - 1] + " &"
+    if tokens and tokens[-1].endswith("&") and _glued_end_ampersand(segment):
+        return tokens[-1]
+    return ""
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 

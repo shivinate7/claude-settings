@@ -954,7 +954,6 @@
 - mutant-lint-copy-cost: each guard mutant copy now holds lint/ (97 files, 2.6 MB, about 9 ms); copies live until the run ends, so peak temp rises from about 0.6 GB to about 1.8 GB (estimate). Decision: none
 - mutant-watch-tree-lint: the decision-watch and ruling mutant trees in hooks/mutate_guard.py may lack ../lint as the guard copy did; no verdict path to `_layout_module` found, not measured in full. Decision: none
 - route-unread-wrappers: simulator-boot-route and the cap do not read `xcrun xcodebuild` or `arch -arm64 xcodebuild`, and they judge `ssh mac "xcodebuild ..."` against local devices. Decision: sim-test-is-the-one-boot-path.
-- detached-launch-glued-amp: detached-launch passes a `&` glued to a closing quote (`xcodebuild ... "id=U"&`). Decision: sim-test-is-the-one-boot-path.
 - route-remedy-glued-action: simulator-boot-route reads `(cd ios && xcodebuild ... test)` and `test-without-building` as no test action, so the remedy names the generic destination; the verdict is still deny. Decision: sim-test-is-the-one-boot-path.
 - route-glued-fd-redirect: a redirect glued to the destination quote (`'name=iPhone 15'2>&1`) reads as another name, so the boot is not judged. Decision: sim-test-is-the-one-boot-path.
 - sim-test-record-silent: sim-test drops the record call's output and failure, so a failed record leaves its device unrecorded and the sweep keeps it. Decision: sim-test-is-the-one-boot-path.

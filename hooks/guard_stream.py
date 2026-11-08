@@ -8,8 +8,8 @@ import os
 import re
 
 from guard_core import (
-    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
+    DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, backgrounding_amp,
+    basename, bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
     segment_tokens, split_segments,
 )
 from guard_env import _substitutions
@@ -168,25 +168,23 @@ def check_stage(segment: str, background: bool) -> str:
 
 
 def _ends_in_ampersand(stages, first: int) -> bool:
-    """Whether the pipeline is backgrounded by a lone `&` word in the stage at `first` or a later one.
-    split_segments leaves the `&` of `|&` at the head of the next stage; that one is a pipe, not a job
-    (the same reading as background_commands in guard.py), so it is skipped."""
+    """Whether the pipeline is backgrounded by a `&` in the stage at `first` or a later one, spaced
+    or glued to the last word (`backgrounding_amp`, the one reader detached-launch shares)."""
     for segment in stages[first:]:
         tokens = segment_tokens(segment)
-        if tokens and tokens[0] == "&":
-            tokens = tokens[1:]
-        if tokens and "&" in tokens:
+        if tokens and backgrounding_amp(segment, tokens):
             return True
     return False
 
 
 def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
-    """The matched text when a stage that `find_stage(segment, backgrounded)` names in one pipeline's stages reaches
-    `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
-    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. The one walk for the
-    narrated rule and the check rule. `any_filter` (the check rule, coordinator ruling 2026-11-08
-    07:16 CST) widens the reach to every later stage but a file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk`
-    cut what the agent reads as `tail` does."""
+    """The matched text when a stage that `find_stage(segment, backgrounded)` names in one pipeline's stages is
+    followed by a filter that cuts what the agent reads. The one walk for the narrated rule and the
+    check rule. Without `any_filter` (the narrated rule) the filter is `tail` or `head`: a `tee` between
+    them does not end the reach, and a `tee` with no `tail` or `head` after it is not a hit. `any_filter`
+    (the check rule, coordinator ruling 2026-11-08 07:16 CST) widens the reach to every later stage but a
+    file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk` cut
+    what the agent reads as `tail` does. There a lone `tee` is no hit, and `tail` or `head` still counts."""
     for first, segment in enumerate(stages):
         stage = find_stage(segment, _ends_in_ampersand(stages, first))
         if not stage:
