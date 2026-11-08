@@ -13,7 +13,6 @@ skills/waiting-page/tests/page.test.mjs, which show that the page writes the lab
 
 Each case builds its folders with test_page_grant's helpers (one home), under that module's run folder.
 """
-import json
 import os
 import sys
 import unittest
