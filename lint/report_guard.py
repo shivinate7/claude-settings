@@ -627,20 +627,31 @@ def agent_pin(role):
     return ""
 
 
+class Spawned(dict):
+    """spawn_models' map of role to model families, with `finished`: the roles that have a finished spawn."""
+    finished = frozenset()
+
+
 def spawn_models(records):
     """Map each named role spawned in `records` to the set of model families it ran on.
 
     A spawn's model is its call's `model` field, else its agent file's pin, else
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
+
+    A running spawn has no result yet, or only a background-launch result. It joins the map
+    but not `finished`.
     """
-    failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    failed, answered = set(), set()  # a denied or errored spawn ran no agent, so it counts for nothing
     for rec in records:
-        content = (rec.get("message") or {}).get("content")
-        for b in content if isinstance(content, list) else []:
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+        launch = rec.get("toolUseResult")
+        launched = isinstance(launch, dict) and launch.get("isAsync") is True and launch.get("status") == "async_launched"
+        for b in tool_results(rec):
+            if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
-    found = {}
+            elif not launched:
+                answered.add(b.get("tool_use_id"))
+    found, finished = Spawned(), set()
     for rec in records:
         for b in tool_uses(rec):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
@@ -652,6 +663,9 @@ def spawn_models(records):
             model = model_family(inp.get("model")) or model_family(agent_pin(role)) or \
                 model_family(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
             found.setdefault(role, set()).add(model)
+            if not b.get("id") or b.get("id") in answered:  # no id: no result to wait for
+                finished.add(role)
+    found.finished = frozenset(finished)
     return found
 
 
@@ -662,7 +676,7 @@ def done_models_problem(text, spawned):
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
-    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    missing = sorted(r for r in spawned.finished if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
