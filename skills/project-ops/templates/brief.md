@@ -31,7 +31,9 @@ Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", fo
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. The lane session runs it, never a builder in an
-isolated worktree, because Claude Code's worktree check refuses it there. It runs
+isolated worktree, because Claude Code's worktree check refuses it there. An isolated agent runs plain,
+separate git commands, never git named inside python text, and runs no background command. Claude Code's
+own worktree check refuses both. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
 
