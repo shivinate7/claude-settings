@@ -36,6 +36,10 @@ among them, and no full suite. A red lane does not hand off.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
+A pick the lane takes that departs from main carries a `Departs from:` line and a `Checked: decisions/<slug>, ...`
+line naming the decisions it searched. The coordinator's reply to that pick names its own `Checked:` line too
+(rule `pick-names-rulings`).
+
 ## Report
 
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
