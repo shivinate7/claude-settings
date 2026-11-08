@@ -15289,6 +15289,78 @@ class HandedLaneCheck(RecordsEnv):
         self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
         self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
 
+    def main_tip_into_head_unfetched(self):
+        """Merge origin's current main into the head from the second clone, and push the head. self.co is not fetched, so its origin/main
+        stays the tip it had before main moved: the main tip merged in is new to it. -> the main tip, as origin holds it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "origin/main")
+
+    def merge_parents_unfetched(self, base):
+        """-> the parents of each merge commit above origin/`base` on origin/feat, read in the second clone, so self.co keeps the refs it has."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        out = sh(self.other, "git", "log", "--merges", "--format=%P", f"origin/{base}..origin/feat")
+        return [line.split() for line in out.splitlines() if line.strip()]
+
+    def assert_clone_lacks_main_tip(self, main_tip):
+        """The scope, read first, without fetching self.co: the pull request is into release, origin's main tip is not on release, the head
+        merges that tip as a merge commit's second parent, and self.co's origin/main is not that tip."""
+        self.assertEqual(self.host.base, "release", "the pull request is not into release")
+        self.assertIn(main_tip, sh(self.other, "git", "log", "--format=%H", f"origin/release..{main_tip}").split(),
+                      "origin's main tip is already on release, so the fixture does not reach the defect")
+        self.assertTrue(any(main_tip in parents[1:] for parents in self.merge_parents_unfetched("release")),
+                        "the head does not merge origin's main tip as a merge commit's second parent")
+        self.assertNotEqual(sh(self.co, "git", "rev-parse", "origin/main"), main_tip,
+                            "the clone's origin/main is current, so the fixture does not reach the defect")
+        self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
+
+    def remove_clone_main_ref(self):
+        """Delete self.co's origin/main, so the default-ref read of the check cannot resolve. A release-base run fetches only the base and the
+        head (open_worktree, load_config), so the ref stays missing through the run."""
+        sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/main")
+        gone = subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/main"], cwd=self.co, capture_output=True, text=True)
+        self.assertNotEqual(gone.returncode, 0, "origin/main still resolves in the clone, so the default-ref read does not fail")
+
+    def failed_default_ref_fixture(self):
+        """A release-base ready pull request whose head merges lane-a's tip, which is on neither main nor release, with the clone's origin/main
+        missing: the default-ref read of the no-Lanes check cannot answer."""
+        self.release_base()  # the pull request is into release; main moves one commit past the cut
+        lane_batch(self, "lane-a")  # the lane is cut from origin's main and merged into the head; the fixture below clears the Lanes line
+        self.fixture("", handed=[], base="release", draft=False)
+        self.assertTrue(any(self.tips["lane-a"] in parents[1:] for parents in self.merge_parents_unfetched("release")), "the head does not merge lane-a")
+        self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
+        self.remove_clone_main_ref()
+
+    def test_handed_lane_no_lanes_release_head_merging_a_main_tip_the_clone_lacks_is_not_a_lane(self):
+        self.release_base()  # the pull request is into release, cut from main, and main moves one commit past the cut
+        main_tip = self.main_tip_into_head_unfetched()  # the head merges origin's new main tip; self.co is not fetched
+        self.fixture("", handed=[], base="release", draft=False)
+        self.assert_clone_lacks_main_tip(main_tip)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("merges lanes", out, f"the no-Lanes check read origin's main tip, which this clone's origin/main lacks, as a lane:\n{out}")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), f"the ready merge did not land:\n{out}")
+
+    def test_handed_lane_no_lanes_failed_default_ref_read_without_the_flag_stops(self):
+        self.failed_default_ref_fixture()
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertIn("git merge-base failed against origin/main", out, f"the failed default-ref read's stop is not printed:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+
+    def test_handed_lane_no_lanes_failed_default_ref_read_with_the_flag_goes_on_with_one_line(self):
+        self.failed_default_ref_fixture()
+        rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "the test clone has no origin/main")
+        lifts = [l for l in out.splitlines() if "handed-lane check UNKNOWN" in l]
+        self.assertEqual(rc, 0, f"the reason flag did not lift the failed default-ref read:\n{out}")
+        self.assertEqual(len(lifts), 1, f"the lift is not one line:\n{out}")
+        self.assertIn("the test clone has no origin/main", lifts[0], "the lift line does not name the reason")
+        self.assertIn(merge.UNDO_FLAG, lifts[0], "the lift line does not name the flag")
+        self.assertTrue(getattr(self.host, "merged", False), f"the ready merge did not land after the lift:\n{out}")
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
