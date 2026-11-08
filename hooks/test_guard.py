@@ -5536,12 +5536,19 @@ sh("waiter: a comment opener in quotes does not hide a loop, refused",
 # word and the flag, never the text the command only names.
 LANE_LINT_RULE = "lane-lint-foreground"
 LANE_LINT_REMEDY = ("run_in_background", "completion notice")
+# A shell, eval or $(...) that runs merge is a run too: the command it hands on is judged, not the wrapper.
 LANE_LINT_FORMS = (
     ("the bin shim by path", "~/.claude/bin/merge --lane-lint 1458", "Bash"),
     ("merge on the PATH", "merge --lane-lint 1458", "Bash"),
     ("merge.cmd in PowerShell", "merge.cmd --lane-lint 1458", "PowerShell"),
     ("merge.py through python", "python3 merge/merge.py --lane-lint 1458", "Bash"),
     ("merge piped to tail after a cd", "cd /x && merge --lane-lint 1458 2>&1 | tail -5", "Bash"),
+    ("bash -c around merge --lane-lint", 'bash -c "merge --lane-lint 1458"', "Bash"),
+    ("bash -lc around merge --lane-lint", 'bash -lc "merge --lane-lint 1458"', "Bash"),
+    ("sh -c with a cd before merge --lane-lint", 'sh -c "cd /x && merge --lane-lint 1458"', "Bash"),
+    ("eval around merge --lane-lint", 'eval "merge --lane-lint 1458"', "Bash"),
+    ("pwsh -c around merge.cmd in PowerShell", 'pwsh -c "merge.cmd --lane-lint 1458"', "PowerShell"),
+    ("merge --lane-lint in a $(...) substitution", "echo $(merge --lane-lint 1458)", "Bash"),
 )
 for _label, _command, _tool in LANE_LINT_FORMS:
     add("lane-lint-foreground: %s in the foreground is refused" % _label, "deny", LANE_LINT_RULE,
