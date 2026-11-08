@@ -373,7 +373,8 @@ def brief_faults(text, current=(), template=None, devices=None):
 
 def unfenced(text):
     """The text with each line inside a ``` or ~~~ fence blanked. The fence rule is lint/stale_cites.py's
-    fenced_lines, its one home; when that module cannot load, the text comes back whole."""
+    fenced_lines, its one home; when that module cannot load, or a fence is left open at the end, the text
+    comes back whole."""
     try:
         lint = os.path.join(HERE, "..", "lint")
         if lint not in sys.path:
@@ -382,6 +383,11 @@ def unfenced(text):
     except Exception:  # fail open: no scanner means the text is read as written
         return text
     rows = text.split("\n")
+    # A fence row longer than any opener closes an open fence of either kind, so the row after it stays outside.
+    # With no fence open it opens one, so the row after it stays inside.
+    for mark in ("`", "~"):
+        if len(rows) + 2 not in fenced_lines(rows + [mark * (len(text) + 3), "x"]):
+            return text
     inside = fenced_lines(rows)
     return "\n".join("" if number in inside else row for number, row in enumerate(rows, 1))
 
