@@ -12654,8 +12654,15 @@ def no_record_numbers(out):
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
 
-# A valid Grant text, the form a record's Grant line carries after "Grant: ". It admits one fourth round past the usual limit of three.
-REVIEW_GRANT = "item 396 a, owner, 2026-11-08 06:08 CST"
+# A valid Grant text, the form a record's Grant line carries after "Grant: ": `#<pr>, <cite>`. The PR is the record's own PR (7 in these
+# cases), and the cite is the owner's grant of one fourth round past the usual limit of three. GRANT_CITE is the cite part alone.
+GRANT_CITE = "item 396 a, owner, 2026-11-08 06:08 CST"
+
+def grant_text(pr=7, cite=GRANT_CITE):
+    """The Grant text for pull request `pr`: `#<pr>, <cite>`. Every grant literal in the review-record cases is built here."""
+    return f"#{pr}, {cite}"
+
+REVIEW_GRANT = grant_text()
 REVIEW_FOUR_ROUNDS = ((1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS"))
 
 def round_four_text(verdict="PASS"):
@@ -12827,13 +12834,14 @@ class ReviewRecordForm(unittest.TestCase):
 
 class ReviewGrantForm(unittest.TestCase):
     """A record with a Grant line may hold a fourth round, the one round past the usual limit, and no more. The Grant
-    line follows Guard or check and comes before the rounds. parse_review returns its text as rec["grant"], and None without the line. Each refusal
-    sits beside a well-formed sibling that must parse, so the case is red until the parser knows the line."""
+    line follows Guard or check and comes before the rounds, and its text is `#<pr>, <cite>`: the PR must be the record's own PR. parse_review
+    returns its text as rec["grant"], and None without the line. Each refusal sits beside a well-formed sibling that must parse, so the case
+    is red until the parser knows the line."""
 
     def test_a_grant_line_parses_to_its_text_and_round_four_parses(self):
         for zone in ("CST", "CDT"):
             with self.subTest(zone=zone):
-                grant = f"item 396 a, owner, 2026-11-08 06:08 {zone}"
+                grant = grant_text(cite=f"item 396 a, owner, 2026-11-08 06:08 {zone}")
                 rec = parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {grant}",)))
                 self.assertEqual(rec.get("grant"), grant, f"the Grant line did not parse to its text: {rec.get('grant')!r}")
                 self.assertEqual(rec["rounds"][-1], (4, "reviewer", "opus", "PASS"), "round 4 did not parse")
@@ -12858,14 +12866,43 @@ class ReviewGrantForm(unittest.TestCase):
 
     def test_a_malformed_grant_line_is_not_a_record(self):
         parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))
-        bad = {"an upper-case letter": "item 396 A, owner, 2026-11-08 06:08 CST", "no letter": "item 396, owner, 2026-11-08 06:08 CST",
-               "two letters": "item 396 ab, owner, 2026-11-08 06:08 CST", "a zone other than CST or CDT": "item 396 a, owner, 2026-11-08 06:08 PST",
-               "an unpadded day": "item 396 a, owner, 2026-11-8 06:08 CST", "no zone": "item 396 a, owner, 2026-11-08 06:08",
-               "an owner that is not owner": "item 396 a, lead, 2026-11-08 06:08 CST", "a trailing space": f"{REVIEW_GRANT} ", "no text": ""}
+        bad = {"an upper-case letter": grant_text(cite="item 396 A, owner, 2026-11-08 06:08 CST"),
+               "no letter": grant_text(cite="item 396, owner, 2026-11-08 06:08 CST"),
+               "two letters": grant_text(cite="item 396 ab, owner, 2026-11-08 06:08 CST"),
+               "a zone other than CST or CDT": grant_text(cite="item 396 a, owner, 2026-11-08 06:08 PST"),
+               "an unpadded day": grant_text(cite="item 396 a, owner, 2026-11-8 06:08 CST"),
+               "no zone": grant_text(cite="item 396 a, owner, 2026-11-08 06:08"),
+               "an owner that is not owner": grant_text(cite="item 396 a, lead, 2026-11-08 06:08 CST"),
+               "a trailing space": f"{REVIEW_GRANT} ", "no cite": grant_text(cite=""),
+               "a PR that is not digits": f"#7a, {GRANT_CITE}"}
         for cause, text in bad.items():
             with self.subTest(cause=cause):
                 self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: {text}",))),
                                   f"parse_review accepted a Grant line with {cause}")
+
+    def test_a_grant_line_naming_another_pr_is_not_a_record(self):
+        # A record copied to PR 9999 keeps a grant for PR 1979, and that is not a record. The PR must equal the record's own PR as a whole
+        # number: a PR 1979 record refuses #19790 and #197, which only start with or contain its number.
+        parse_text(self, record_text(n=9999, rounds=round_four_text(), grant=(f"Grant: {grant_text(9999)}",)))  # the sibling: its own PR parses
+        parse_text(self, record_text(n=1979, rounds=round_four_text(), grant=(f"Grant: {grant_text(1979)}",)))
+        for n, pr in ((9999, 1979), (1979, 19790), (1979, 197)):
+            with self.subTest(record=n, grant=pr):
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(n=n, rounds=round_four_text(), grant=(f"Grant: {grant_text(pr)}",))),
+                                  f"parse_review accepted a Grant line for PR {pr} on PR {n}")
+
+    def test_a_grant_in_todays_form_with_no_pr_part_is_not_a_record(self):
+        # The form before the PR part: `item N x, owner, ...` with no `#<pr>, `. That cite names no pull request, so a record that carries it
+        # is not a record. The refusal comes first, so a parser that still takes the old form fails here by name.
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: {GRANT_CITE}",))),
+                          "parse_review accepted a Grant line with no #pr part")
+        parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: the same cite with its PR part parses
+
+    def test_a_matching_pr_and_cite_parse_and_round_four_reads_final(self):
+        rec = parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))
+        self.assertEqual(rec.get("grant"), REVIEW_GRANT, f"the matching Grant line did not parse to its text: {rec.get('grant')!r}")
+        state, why = review_fn(self, "review_state")(rec, REVIEW_HEAD)
+        self.assertEqual(state, "done", f"round 4 is the final round of a granted record, and it reads {state!r}: {why!r}")
+        self.assertIn("round 4", why, f"the why does not name round 4: {why!r}")
 
     def test_a_grant_line_after_the_round_lines_is_not_a_record(self):
         parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: the Grant line before the rounds
@@ -12898,22 +12935,24 @@ class ReviewGrantForm(unittest.TestCase):
         # the sibling dates are real, a leap day among them, so each refusal below is for the date alone
         for date in ("2026-11-08 06:08 CST", "2028-02-29 06:08 CDT"):
             with self.subTest(sibling=date):
-                parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: item 396 a, owner, {date}",)))
+                parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {grant_text(cite=f'item 396 a, owner, {date}')}",)))
         for date in ("2026-99-99 25:99 CST", "2026-02-30 06:08 CST"):
             with self.subTest(date=date):
-                self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: item 396 a, owner, {date}",))),
+                text = grant_text(cite=f"item 396 a, owner, {date}")
+                self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: {text}",))),
                                   f"parse_review accepted a Grant line with the impossible date {date!r}")
 
     def test_two_grant_lines_are_not_a_record(self):
         parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: one Grant line parses
-        two = (f"Grant: {REVIEW_GRANT}", "Grant: item 397 b, owner, 2026-11-08 06:08 CST")
+        two = (f"Grant: {REVIEW_GRANT}", f"Grant: {grant_text(cite='item 397 b, owner, 2026-11-08 06:08 CST')}")
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=two)), "parse_review accepted two Grant lines")
 
     def test_a_grant_line_with_unicode_digits_is_not_a_record(self):
         parse_text(self, record_text(rounds=round_four_text(), grant=(f"Grant: {REVIEW_GRANT}",)))  # the sibling: ASCII digits parse
-        # fullwidth digits in the item number, and Arabic-Indic digits in the year
-        for cause, text in (("fullwidth digits", "item ３９６ a, owner, 2026-11-08 06:08 CST"),
-                            ("Arabic-Indic digits", "item 396 a, owner, ٢٠٢٦-11-08 06:08 CST")):
+        # fullwidth digits in the PR number, in the item number, and Arabic-Indic digits in the year
+        for cause, text in (("fullwidth digits in the PR", f"#７, {GRANT_CITE}"),
+                            ("fullwidth digits", grant_text(cite="item ３９６ a, owner, 2026-11-08 06:08 CST")),
+                            ("Arabic-Indic digits", grant_text(cite="item 396 a, owner, ٢٠٢٦-11-08 06:08 CST"))):
             with self.subTest(cause=cause):
                 self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=round_four_text(), grant=(f"Grant: {text}",))),
                                   f"parse_review accepted a Grant line with {cause}")
@@ -13417,15 +13456,24 @@ class ReviewFixFlag(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
 class ReviewGrantFlag(ReviewEnv):
-    """`--grant TEXT` goes with --review-record and lets a fourth round in: the one round past the usual limit. Every refusal sits
-    beside the good value, which must exit 0, so a parser that never learned the flag fails there too. A usage error prints no record."""
+    """`--grant TEXT` goes with --review-record and lets a fourth round in: the one round past the usual limit. Its text is `#<pr>, <cite>`,
+    and its PR must be the positional PR. Every refusal sits beside the good value, which must exit 0, so a parser that never learned the
+    flag fails there too. A usage error prints no record."""
 
     THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:opus:FAIL")
     FOUR = (*THREE, "--round", "4:reviewer:opus:PASS")
 
-    def granted(self, *tail, rounds=FOUR):
-        """The review flags for a normal change with guard no at the live head, with `rounds`, then `tail`."""
-        return ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), *rounds, *tail)
+    def granted(self, *tail, rounds=FOUR, pr="7"):
+        """The review flags for a normal change with guard no at the live head, for pull request `pr`, with `rounds`, then `tail`."""
+        return (pr, "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), *rounds, *tail)
+
+    def test_a_grant_naming_another_pr_is_a_usage_error(self):
+        # `merge 2005` with a grant for PR 1979 is refused. The 2005 control, with its own PR, must exit 0: the same form passes there, so only
+        # the PR differs. A parser that never learned the PR part fails at the control.
+        rc, out, err = self.run_args(*self.granted("--grant", grant_text(2005), pr="2005"))
+        self.assertEqual(rc, 0, "merge refused the matching --grant for pull request 2005:\n" + out + err)
+        out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(1979), pr="2005"))
+        self.assertNotIn(REVIEW_MARKER, out)
 
     def test_round_four_with_a_grant_passes_and_prints_the_grant_line_after_guard(self):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))
@@ -13458,10 +13506,13 @@ class ReviewGrantFlag(ReviewEnv):
     def test_a_malformed_grant_exits_two_and_prints_no_record(self):
         rc, out, err = self.run_args(*self.granted("--grant", REVIEW_GRANT))
         self.assertEqual(rc, 0, "merge refused the good --grant:\n" + out + err)
-        for bad in ("item 396 A, owner, 2026-11-08 06:08 CST", "item 396, owner, 2026-11-08 06:08 CST", "item 396 a, owner, 2026-11-08 06:08 PST",
-                    "item 396 a, owner, 2026-11-8 06:08 CST", "item 396 a, lead, 2026-11-08 06:08 CST", "item 396 a, owner, 2026-11-08 06:08"):
-            with self.subTest(bad=bad):
-                out, _err = self.assert_usage_error(*self.granted("--grant", bad))
+        bad = (grant_text(cite="item 396 A, owner, 2026-11-08 06:08 CST"), grant_text(cite="item 396, owner, 2026-11-08 06:08 CST"),
+               grant_text(cite="item 396 a, owner, 2026-11-08 06:08 PST"), grant_text(cite="item 396 a, owner, 2026-11-8 06:08 CST"),
+               grant_text(cite="item 396 a, lead, 2026-11-08 06:08 CST"), grant_text(cite="item 396 a, owner, 2026-11-08 06:08"),
+               f"#x, {GRANT_CITE}", GRANT_CITE)  # the last one is today's form, with no #pr part: it is a usage error now
+        for text in bad:
+            with self.subTest(bad=text):
+                out, _err = self.assert_usage_error(*self.granted("--grant", text))
                 self.assertNotIn(REVIEW_MARKER, out)
 
     def test_grant_with_no_round_four_refuses(self):
@@ -13483,7 +13534,7 @@ class ReviewGrantFlag(ReviewEnv):
         self.assertEqual(rc, 0, "merge refused the good --grant:\n" + out + err)
         for date in ("2026-99-99 25:99 CST", "2026-02-30 06:08 CST"):
             with self.subTest(date=date):
-                out, _err = self.assert_usage_error(*self.granted("--grant", f"item 396 a, owner, {date}"))
+                out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(cite=f"item 396 a, owner, {date}")))
                 self.assertNotIn(REVIEW_MARKER, out)
 
 class ReviewFixBase(ReviewEnv):
