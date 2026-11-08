@@ -13528,6 +13528,21 @@ for _name, _command in DOT_ROOT_WRITES:
 sh("builder-test: shell write, cd tests then find . piped to xargs, sed -i, is refused",
    "cd tests && find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT,
    carries=("test-author",), **DR)
+# A write that names a test through a folder, a brace list, a loop, a tee or a copy. hooks/ holds
+# test_a.py beside guard.py, so each form reaches a test, and each is refused.
+for _name, _command in (
+    ("grep -rl over hooks piped to xargs, sed -i", "grep -rl old hooks | xargs sed -i s/a/b/"),
+    ("find hooks for test_*.py piped to xargs, sed -i", "find hooks -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("find hooks for *.py, -exec sed -i", "find hooks -name '*.py' -exec sed -i s/a/b/ {} +"),
+    ("for loop over hooks/*.py, sed -i on the loop variable", 'for f in hooks/*.py; do sed -i s/a/b/ "$f"; done'),
+    ("git -C hooks ls-files piped to xargs, sed -i", "git -C hooks ls-files | xargs sed -i s/a/b/"),
+    ("tee over hooks/*.py, stdin from /dev/null", "tee hooks/*.py < /dev/null"),
+    ("cp of src/x.py over hooks/*.py", "cp src/x.py hooks/*.py"),
+    ("sed -i over a brace list that names hooks/test_a.py", "sed -i s/a/b/ hooks/{test_a,guard}.py"),
+    ("sed -i over a quoted hooks folder and *.py", 'sed -i s/a/b/ "hooks"/*.py'),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
 # A root with no tests in it is still allowed, in the same checkout.
 sh("builder-test: shell write, grep -rl over src piped to xargs, sed -i, is allowed",
    "grep -rl old src | xargs sed -i s/a/b/", "allow", **DR)
