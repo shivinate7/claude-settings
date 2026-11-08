@@ -10716,7 +10716,7 @@ def rf_cost_case():
 #   - an Agent or Task spawn from the main session with no `name`, or a name that is empty or only spaces: deny.
 # The rest passes: a send to the spawn's name, to main or to an id no spawn holds; a call with agent_id (an agent's
 # own); a named spawn; the remote send_message, which names sessions; a session that is not a proved lane; a missing
-# or unreadable transcript. Why: a lane sent three overlap lists to the wrong agents by bare id (2026-11-08).
+# or unreadable transcript. Why: a lane sent three overlap lists to the wrong agents by bare id.
 FAMILY = "agent-name-on-spawn"
 AN_RULE = "agent-name-on-spawn"
 AN_CARRIES = "name given at spawn"
