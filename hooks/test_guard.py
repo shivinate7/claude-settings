@@ -13805,10 +13805,70 @@ add("builder-test: an added run of a test path with --deselect is refused", "den
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
     carries=("test-author", "Report"), **B)
+# A wrapper runs the test it wraps, so a wrapped run is judged as the bare run it wraps. A builder's wrap of a bare
+# run keeps its test, a test-author's wrapped single-line run is a test step, and deleting a wrapped run drops its test.
+WRAPPED_RUNS = (
+    "timeout 600 python3 tests/test_a.py",
+    "xvfb-run -a python3 tests/test_a.py",
+    "coverage run tests/test_a.py",
+    "uv run tests/test_a.py",
+    "env FOO=1 python3 tests/test_a.py",
+    "nice python3 tests/test_a.py",
+    "python3 -m coverage run tests/test_a.py",
+)
+for _form in WRAPPED_RUNS:
+    add("builder-test: %s in place of a bare test run is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=R3_UNIT, new_string="      - name: Unit\n        run: %s\n" % _form, **B)
+for _form in WRAPPED_RUNS:
+    add("test-author: a whole new test step, %s, is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=LINT, new_string=LINT + "      - name: Unit\n        run: %s\n" % _form, **A)
+for _form in WRAPPED_RUNS:
+    add("builder-test: a wrapped test run, %s, deleted from checks.yml is refused" % _form, "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=LINT + "      - name: Unit\n        run: %s\n" % _form, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+add("builder-test: a wrapped test run unwrapped to its bare path is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Unit\n        run: timeout 600 python3 tests/test_a.py\n", new_string=R3_UNIT, **B)
+# Not a test run: a wrapper around one does not make it a test, so each of these still drops the test it replaces.
+add("builder-test: a bare test run replaced by an echo of its path is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: echo python3 tests/test_a.py\n",
+    carries=("test-author", "Report"), **B)
+add("builder-test: a bare test run replaced by a timeout around a lint run is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: timeout 600 python3 lint/ste_lint.py\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step, timeout around curl, is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + "      - name: Unit\n        run: timeout 600 curl -s x\n",
+    carries=("builder", "Report"), **A)
 add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+# A multi-line run: block whose wrapper takes a quoted value with a space. The shell reads the quoted value as one
+# word, so the run is a test. A whitespace split reads `-screen` and `0` as the command and finds no test path, so
+# the deletion would pass. The bare block beside it is the control: the same block shape, no wrapper, is refused.
+XVFB_QUOTED_BLOCK = ("      - name: Xvfb unit\n        run: |\n"
+                     "          xvfb-run -s \"-screen 0 1024x768x24\" python3 tests/test_a.py\n")
+BARE_BLOCK = "      - name: Bare unit\n        run: |\n          python3 tests/test_a.py\n"
+add("builder-test: a multi-line run under xvfb-run with a quoted -s value, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + XVFB_QUOTED_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+# A backslash in a test path is a separator on Windows, and is_test_rel reads it as `/`. The run line must keep it:
+# shlex in POSIX mode reads an unquoted backslash as an escape, so `tests\test_a.py` loses its separator and reads as
+# no test. Each deletion below is refused on main, so a parse that drops the backslash is a regression.
+BACKSLASH_INLINE = "      - name: Win unit\n        run: python tests\\test_a.py\n"
+BACKSLASH_BLOCK = "      - name: Win unit\n        run: |\n          python tests\\test_a.py\n"
+BACKSLASH_NODE = "      - name: Win node\n        run: node tests\\run.js\n"
+add("builder-test: a bare python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_INLINE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
