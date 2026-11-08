@@ -10218,13 +10218,19 @@ FAMILY = "lane-brief-roles"
 #
 # Rule lane-brief-roles. A lane brief is a send_message whose first non-blank line starts with the marker `Lane brief:`.
 # Sent to a lane that passes lane-one-topic, the brief must name a session id for each of three roles: Coordinator,
-# Triage and Batch runner. A role is named when its label, in any case, is followed by an optional number (as in
-# `Batch runner 8`), markdown (`*`, `_`, a backtick), an optional colon, markdown again, and whitespace, then `session_<id>`.
+# Triage and Batch runner. A role is named when its label, in any case and at a word boundary, is followed by an optional
+# number (as in `Batch runner 8`), markdown, an optional colon, markdown again, and whitespace, then `session_<id>`. Up to
+# 80 characters of other text may sit between a label and its id, if that text holds no other role label and no other
+# `session_`.
 # An id names a role only beside its label, and the whole message is read, not only its first line. lane-one-topic
 # runs first, so a brief it refuses keeps its own reason. A target that is no lane, and a message without the marker,
 # pass. Presence and format only: no id is matched to a roster.
 LANE_BRIEF_ROLES = "lane-brief-roles"
 BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
+# The most text the rule allows between a label and its id is 80 characters. The filler holds no role label and no
+# session_, so a gap holds its own label only.
+LBR_GAP_80 = " " + "x" * 79
+LBR_GAP_81 = " " + "x" * 80
 
 # Refused: no role is named. The lane is on topic icons, so lane-one-topic passes the brief and only the roles are missing.
 step_refuse("a brief with no roles, to a lane on its own topic, is refused",
@@ -10251,6 +10257,22 @@ step_refuse("three session ids with no role labels are refused: an id names a ro
 step_refuse("a brief with no roles, to an older lane with no cs-topic, is refused: the roles rule runs on that path too",
             role_path("step-old-lane"), "Lane brief: icon-b. Topic: icons.", rule=LANE_BRIEF_ROLES)
 
+# Refused: `subtriage` is not the label Triage. A label starts at a word boundary, so Triage is missing.
+step_refuse("a brief that names subtriage, not Triage, is refused: a label needs a word boundary before it",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons.\nCoordinator session_BRIEFCOORD01; subtriage session_BRIEFTRIAGE01; "
+            "Batch runner 8 session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
+# Refused: Coordinator has no id of its own. The text after its label holds the Triage label, so Triage's id is not
+# Coordinator's: a gap may not hold another role label.
+step_refuse("a Coordinator label whose gap holds the Triage label is refused: Triage's id is not Coordinator's",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons.\nCoordinator Triage session_BRIEFTRIAGE01; "
+            "Batch runner session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
+# Refused: the gap is 81 characters, one over the limit, so the id is not Coordinator's.
+step_refuse("a Coordinator label with an 81-character gap before its id is refused: the gap is over 80 characters",
+            role_path("step-topic-lane"),
+            "Lane brief: icon-b. Topic: icons.\nCoordinator" + LBR_GAP_81 + "session_BRIEFCOORD01\n"
+            "Triage session_BRIEFTRIAGE01\nBatch runner 8 session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
 # Passes: the three roles after the topic, all on line one: the brief form.
 step_allow("the three roles after the topic on line one are allowed",
            role_path("step-topic-lane"), with_roles("Lane brief: icon-b. Topic: icons."), rule=LANE_BRIEF_ROLES)
@@ -10279,11 +10301,47 @@ step_allow("role labels in lower case are allowed: a label is read in any case",
            role_path("step-topic-lane"),
            "Lane brief: icon-b. Topic: icons. coordinator session_BRIEFCOORD01; triage session_BRIEFTRIAGE01; "
            "batch runner 8 session_BRIEFRUNNER01.", rule=LANE_BRIEF_ROLES)
-# Passes: the Triage label in bold, its colon after the bold. Ruled an allow by the coordinator, 2026-11-08, by 12:27 UTC.
+# Passes: the Triage label in bold, with its colon after the bold.
 step_allow("a Triage label in bold, with its colon after the bold, is allowed",
            role_path("step-topic-lane"),
            "Lane brief: icon-b. Topic: icons.\nCoordinator: session_BRIEFCOORD01\n**Triage**: session_BRIEFTRIAGE01\n"
            "Batch runner 8: session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
+# Passes: a roster line per role, in the form the Standing sessions roster on the roadmap branch uses. Each gap holds
+# only its own label.
+step_allow("three roster lines, one per role, in the Standing sessions form are allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n"
+           "- Coordinator: \"Claude settings coordinator handoff\", session_C1, since 2026-11-03 15:32 CST.\n"
+           "- Triage: \"cs triage: claude-settings (6)\", session_T1, since 2026-11-03 15:38 CST.\n"
+           "- Batch runner: \"claude-settings batch runner 8\", session_B1, since 2026-11-03 15:38 CST.",
+           rule=LANE_BRIEF_ROLES)
+# Passes: a Triage roster line with a note in parentheses before its quoted label, as the brief's example writes it.
+step_allow("a Triage roster line with a note in parentheses before its quoted label is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\n"
+           "- Coordinator session_C1\n"
+           "- Triage (the repo's one page): \"cs triage (6)\", session_T1, since 2026-11-03 15:38 CST.\n"
+           "- Batch runner session_B1", rule=LANE_BRIEF_ROLES)
+# Passes: the id in parentheses after its label.
+step_allow("a Coordinator id in parentheses after its label is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator (session_C1)\nTriage session_T1\nBatch runner 8 session_B1",
+           rule=LANE_BRIEF_ROLES)
+# Passes: the word `is` between a label and its id.
+step_allow("a Coordinator id after the word is is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator is session_C1\nTriage session_T1\nBatch runner 8 session_B1",
+           rule=LANE_BRIEF_ROLES)
+# Passes: the Batch runner number in parentheses, before the colon.
+step_allow("a Batch runner number in parentheses before the colon is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator session_C1\nTriage session_T1\nBatch runner (7): session_B1",
+           rule=LANE_BRIEF_ROLES)
+# Passes: a gap of exactly 80 characters is the most the rule allows.
+step_allow("a Coordinator gap of exactly 80 characters before its id is allowed",
+           role_path("step-topic-lane"),
+           "Lane brief: icon-b. Topic: icons.\nCoordinator" + LBR_GAP_80 + "session_BRIEFCOORD01\n"
+           "Triage session_BRIEFTRIAGE01\nBatch runner 8 session_BRIEFRUNNER01", rule=LANE_BRIEF_ROLES)
 # Passes: a brief to a target that is no lane (cs-build:triage) is not judged for roles.
 step_allow("a brief with no roles to a target that is no lane is allowed",
            role_path("step-triage"), "Lane brief: icon-b. Topic: colors.", rule=LANE_BRIEF_ROLES)
