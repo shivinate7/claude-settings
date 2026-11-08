@@ -11682,6 +11682,43 @@ class StandingGrantSwitch(CloudSession):
         rc, out, err = self.run_main("7", "--confirm")
         self.assert_merged(rc, out, err)
 
+    # ---- the solo grant reaches only the repos its record names (decision standing-merge-grant, the bullet "A session with no
+    # coordinator"). The switch is no scope: an absent key or a true one leaves a repo the record does not name refusing the solo confirm.
+    # The check runs after the pull request read, as the grant's own check does, so no assertion below pins a host read.
+    def assert_solo_refused_outside_scope(self):
+        self.put_role("solo-owner", session=OWNER_SESSION)
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm", CLAUDE_CODE_SESSION_ID=OWNER_SESSION)
+        self.assertFalse(getattr(self.host, "merged", False),
+                         "a solo-owner session merged in o/r, a repo the solo grant does not name")
+        self.assertNotEqual(rc, 0, "a solo-owner session confirmed in o/r, a repo the solo grant does not name: " + out + err)
+        self.assertEqual(self.refs(), refs, "the refused solo confirm pushed a claim or took the lock")
+        self.assertNotIn("Traceback", out + err)
+
+    def test_a_solo_owner_confirm_in_a_repo_the_grant_does_not_name_is_refused_with_an_absent_key(self):
+        self.grant_config()
+        self.assert_solo_refused_outside_scope()
+
+    def test_a_solo_owner_confirm_in_a_repo_the_grant_does_not_name_is_refused_with_a_true_switch(self):
+        self.grant_config(standingGrant=True)
+        self.assert_solo_refused_outside_scope()
+
+
+class SoloMergeScope(unittest.TestCase):
+    """SOLO_MERGE_REPOS (merge/merge.py) holds the repos whose record grants a solo session its merge. The record's own bullet is the
+    source, read here, so no list of repos is copied into this test. Red until the builder adds the constant: see the commit's report."""
+    GRANT = os.path.join(os.path.dirname(HERE), "docs", "decisions", "standing-merge-grant.md")
+    SOLO_BULLET = re.compile(r"holds the 2026-10-10 grant in ([A-Za-z0-9._/-]+) only")
+
+    def test_the_constant_holds_exactly_the_repos_the_grant_record_names_for_a_solo_session(self):
+        with open(self.GRANT, encoding="utf-8") as f:
+            named = self.SOLO_BULLET.findall(f.read())
+        self.assertEqual(len(named), 1, "the grant record must name the repos of a solo session's grant in one bullet")
+        self.assertTrue(hasattr(merge, "SOLO_MERGE_REPOS"),
+                        "merge/merge.py has no SOLO_MERGE_REPOS, so the solo scope has no list the tool reads")
+        held = {repo.rsplit("/", 1)[-1] for repo in merge.SOLO_MERGE_REPOS}
+        self.assertEqual(held, set(named), "SOLO_MERGE_REPOS does not hold the repos the grant record names for a solo session")
+
 
 REPO_ROOT = os.path.dirname(HERE)
 CLOUD_ALLOW_FILE = os.path.join(HERE, "cloud_allow.json")

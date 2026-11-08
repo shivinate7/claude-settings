@@ -9351,8 +9351,17 @@ ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
     "lane": role_call("g1", LANE_TAGS),
-    # An owner-started session: no parent_session_id and no cs-build tag, so it merges its own PR (tier-boundaries-enforced).
+    # An owner-started session: no parent_session_id and no cs-build tag, so it merges its own PR (decision session-tiers,
+    # "Who started a session decides its merge path", owner 2026-11-02 15:38 CST).
     "owner-solo": role_call("g1", ["cs-repo:o/r"], title="an owner-started session", parent=None),
+    # An owner-started coordinator: no parent, yet its own record carries cs-build:coordinator. It never merges.
+    "owner-coordinator": role_call("g1", COORD_TAGS, title="an owner-started coordinator", parent=None),
+    # An owner-started session reads its record untagged, then tags itself cs-build, then merges: the untagged read is stale.
+    "owner-untagged-then-tags": role_call("g1", ["cs-repo:o/r"], title="an owner-started session", parent=None)
+                                + role_tag_call("t1"),
+    # An untagged owner-started session that starts another session with create_session: it is a coordinator, which never merges.
+    "owner-untagged-creates": role_call("g1", ["cs-repo:o/r"], title="an owner-started session", parent=None)
+                              + role_create_call("c1", LANE_TAGS),
     # A child session with a parent and no cs-build tag is not owner-started, so it never merges.
     "child-untagged": role_call("g1", ["cs-repo:o/r"], title="a child session with no cs-build tag"),
     # A batch runner that recorded its role file, under its own session id (see the merge-role-raw block).
@@ -9507,6 +9516,17 @@ role_allow("an owner-started session records solo-owner", MERGE_SHIM + " --role 
 role_refuse("a lane records solo-owner and is refused", MERGE_SHIM + " --role solo-owner", role_path("lane"))
 role_refuse("a child with no cs-build tag records solo-owner and is refused", MERGE_SHIM + " --role solo-owner",
             role_path("child-untagged"))
+# An owner-started coordinator is no solo session: its record names cs-build:coordinator, so solo-owner is refused.
+role_refuse("an owner-started coordinator with no parent and a cs-build:coordinator tag records solo-owner and is refused",
+            MERGE_SHIM + " --role solo-owner", role_path("owner-coordinator"))
+# A set_session_tags call with cs-build after the untagged read makes that read stale: the tag is in the own record now.
+# The remedy names the owner-started route, so it is pinned here too: get_session alone in its own turn, then the merge.
+role_refuse("an owner-started session that reads its record untagged, then tags itself cs-build, is refused for solo-owner",
+            MERGE_SHIM + " --role solo-owner", role_path("owner-untagged-then-tags"),
+            carries=("solo-owner", "get_session", "own turn", "owner-started"))
+# An untagged owner-started session that has started another session is a coordinator, and a coordinator never merges.
+role_refuse("an untagged owner-started session that has started a session is refused for solo-owner",
+            MERGE_SHIM + " --role solo-owner", role_path("owner-untagged-creates"))
 # decision session-tiers: the coordinator never merges, so its own record does not allow the coordinator role.
 role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
           role_path("coordinator"))
@@ -9930,12 +9950,27 @@ add("merge-role-raw: the merge tool of the host in a child session with no cs-bu
     "deny", RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
     env_path=GREEN_ON, config=MERGECFG, env=CLOUD_ROLE_ENV, transcript=role_path("child-untagged"))
 # An owner-started session (no parent, no cs-build tag) has no tag proof any more: with no role file it is refused.
+# The remedy names both routes besides the batch runner: the owner-started one is `merge --role solo-owner` after get_session.
 sh("merge-role-raw: gh pr merge in an owner-started session with no role file on a green head is refused",
    "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=SOLO_ENV, transcript=role_path("owner-solo"),
-   **_BARE_GUARD)
+   carries=("merge --role solo-owner", "get_session", "own turn", "merge --role batch-runner"), **_BARE_GUARD)
 add("merge-role-raw: the merge tool of the host in an owner-started session with no role file on a green head is refused",
     "deny", RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
-    env_path=GREEN_ON, config=MERGECFG, env=SOLO_ENV, transcript=role_path("owner-solo"))
+    env_path=GREEN_ON, config=MERGECFG, env=SOLO_ENV, transcript=role_path("owner-solo"),
+    carries=("merge --role solo-owner", "get_session", "own turn", "merge --role batch-runner"))
+# The hook judges the role by the payload's session_id. The hook process may have no CLAUDE_CODE_SESSION_ID in its env, so
+# these cases set the payload id and leave the env id unset: a solo-owner file that names the payload's id proves the tier.
+PAYLOAD_SOLO_ENV = CLOUD_ROLE_ENV   # no CLAUDE_CODE_SESSION_ID here: the payload's session_id is the only id this hook gets
+sh("merge-role-raw: gh pr merge in an owner-started session whose payload id names its solo-owner file, with no env id, keeps its ask",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=PAYLOAD_SOLO_ENV, session=SOLO_UUID,
+   transcript=role_path("owner-solo"), env_path=GREEN_ON, config=SOLO_CFG)
+add("merge-role-raw: the merge tool of the host in an owner-started session whose payload id names its solo-owner file, with no env id, allows",
+    "allow", silent=True, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=SOLO_CFG,
+    env=PAYLOAD_SOLO_ENV, session=SOLO_UUID, transcript=role_path("owner-solo"))
+# A payload id that names another session is no proof for this one, whether or not the env carries an id.
+sh("merge-role-raw: gh pr merge in an owner-started session whose payload id differs from its solo-owner file, with no env id, is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=PAYLOAD_SOLO_ENV, session=OTHER_UUID,
+   transcript=role_path("owner-solo"), env_path=GREEN_ON, config=SOLO_CFG)
 # Its solo-owner file names its own CLAUDE_CODE_SESSION_ID: the merge tool's reader allows it, so the raw path keeps the ask.
 sh("merge-role-raw: gh pr merge in an owner-started session with its solo-owner file on a green head keeps its ask",
    "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=SOLO_ENV,
