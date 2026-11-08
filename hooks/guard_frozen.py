@@ -664,8 +664,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        script = _powershell_script_of(segments[number])
-        if script:   # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
+        for script in _powershell_scripts_of(segments[number]):
+            # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(script, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
@@ -682,13 +682,20 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 _PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
 
 
-def _powershell_script_of(segment: str) -> str:
-    """The PowerShell script a segment hands on (`pwsh -c`, `powershell -Command`, `cmd /c`, `iex`), else ''."""
+def _powershell_scripts_of(segment: str) -> list:
+    """The PowerShell scripts a segment hands on (`pwsh -c`, `powershell -Command`, `cmd /c`, `iex`), else [].
+    A shell the segment starts (`bash -c`, `sh -c`, `env -S`, `eval`) hands on text that is no PowerShell
+    itself: its segments are read the same way, so a `pwsh -c` inside one is found. Each step cuts the
+    text to the script the segment holds, so the walk ends."""
     if not _PS_LAUNCHER.search(segment):
-        return ""
+        return []
     tokens = segment_tokens(segment)
     script = nested_script(tokens) if tokens else ""
-    return script if isinstance(script, PowerShellScript) else ""
+    if not script:
+        return []
+    if isinstance(script, PowerShellScript):
+        return [script]
+    return [found for inner in split_segments(script, []) for found in _powershell_scripts_of(inner)]
 
 
 def _segment_command(words):

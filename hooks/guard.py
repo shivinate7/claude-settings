@@ -1958,13 +1958,12 @@ def builder_test_path(path: str, cwd: str) -> bool:
     return is_test_rel(rel)
 
 
-def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool=None) -> str:
+def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command. `tool` is the
-    call's tool: it sets which shell's rules read the text. Left None, the flag stays as it is."""
-    if tool is not None:
-        POWERSHELL_CALL[0] = tool == "PowerShell"
+    call's tool: it sets which shell's rules read the text."""
+    POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
