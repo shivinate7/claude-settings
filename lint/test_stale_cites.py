@@ -263,6 +263,21 @@ class StaleCase(unittest.TestCase):
         rc, out = self.run_check(rng, spec=spec, extra_env={"GIT_TRACE": trace})
         return rc, out, git_commands(trace)
 
+    def assert_starts_after_failed_read(self, rng, spec, failed_read, rc, expected):
+        """Pin the git commands a failing `spec` starts after its one `failed_read`, with its exit code `rc`. The
+        count and the order of `expected` are both checked, so a change shows which start moved."""
+        code, out, traced = self.run_traced_commands(rng, spec=spec)
+        self.assertEqual(code, rc, "%s exited %d, expected %d\n%s" % (spec, code, rc, out))
+        commands = [" ".join(shlex.split(command)) for command in traced]  # the trace quotes `^{...}` arguments
+        reads = [i for i, command in enumerate(commands) if command.split()[0] == failed_read]
+        self.assertEqual(len(reads), 1, "scope: %s ran the %s read %d times, not once\n%s"
+                         % (spec, failed_read, len(reads), commands))
+        after = commands[reads[0] + 1:]
+        self.assertEqual(len(after), len(expected), "%s starts %d git processes after its failed %s, expected %d\n%s"
+                         % (spec, len(after), failed_read, len(expected), after))
+        self.assertEqual(after, expected, "%s starts other git processes after its failed %s than the pinned list\n%s"
+                         % (spec, failed_read, after))
+
     def assert_flags(self, rng, expected):
         """Exit 1 and exactly the expected (path, line, code) findings. Returns the findings."""
         rc, out = self.run_check(rng)
@@ -842,6 +857,29 @@ class UnknownTests(StaleCase):
     def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
         self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
 
+    def test_a_failing_two_dot_root_range_starts_five_git_processes_after_its_failed_diff(self):
+        """The root form `HEAD~1..HEAD`, whose base is the first parent of a root commit: after its failed `diff`, five
+        git processes start, in this order, and it exits 0 as on main."""
+        self.assert_starts_after_failed_read(self.root_repo(), "HEAD~1..HEAD", "diff", 0, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --is-shallow-repository",
+            "rev-list --parents -n 1 HEAD",
+            "rev-parse --verify --quiet HEAD^{commit}",
+        ])
+
+    def test_a_failing_three_dot_root_range_starts_six_git_processes_after_its_failed_merge_base(self):
+        """The root form `HEAD~1...HEAD`: after its failed `merge-base`, six git processes start, in this order, and it
+        exits 0 as on main."""
+        self.assert_starts_after_failed_read(self.root_repo(), "HEAD~1...HEAD", "merge-base", 0, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --verify --quiet HEAD~1^{commit}",
+            "rev-parse --is-shallow-repository",
+            "rev-list --parents -n 1 HEAD",
+            "rev-parse --verify --quiet HEAD^{commit}",
+        ])
+
     def test_a_root_commit_range_with_its_parent_spelled_caret_one_exits_zero_as_on_main(self):
         rng = self.root_repo()
         head = git(rng.repo, "rev-parse", "HEAD")
@@ -962,6 +1000,32 @@ class UnknownTests(StaleCase):
                          "(rev-list starts: %d)\n%s" % (len(starts), out))
         self.assertNotIn("stale-cites: PASS", out, "a rev-list that failed printed PASS\n" + out)
         self.assertRegex(out, "(?i)unknown", out)
+
+
+class ResolveTests(StaleCase):
+    """head_resolves and resolves each read whether a rev names a commit. They must agree on every input. Each input's
+    answer is pinned too, so the agreement is on the right answer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_head_resolves_and_resolves_give_the_same_answer_on_shared_inputs(self):
+        def topic_commit(repo):
+            write(repo, "topic.md", "topic\n")
+            commit(repo)
+        rng = self.make_range(base_files(), topic_commit)   # HEAD has a parent, so HEAD^1 and HEAD~1 name a commit
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(rng.repo)
+        names_commit = {"HEAD": True, "main": True, "topic": True, "HEAD^1": True, "HEAD~1": True,
+                        "HEAD~5": False, "nope": False, "nope^1": False, EMPTY_TREE: False}
+        for rev, expected in names_commit.items():
+            with self.subTest(rev=rev):
+                one = self.stale.resolves(rev)
+                other = self.stale.head_resolves(rev)
+                self.assertEqual(other, one, "head_resolves and resolves disagree on %s" % rev)
+                self.assertEqual(one, expected, "%s does not resolve as pinned" % rev)
 
 
 class PinTests(unittest.TestCase):
@@ -1338,18 +1402,16 @@ class UnreadableReadTests(StaleCase):
         self.assert_base_missing_from_full_clone("nosuchbase..HEAD")
 
     def test_a_failing_range_with_a_suffixed_base_starts_the_measured_git_processes_after_its_failed_read(self):
-        """The git starts the failing path adds after the read that failed, counted with GIT_TRACE. A suffixed base
-        (`nope^1`) also starts `rev-list`, which the published bounds (three for `a..b`, four for `a...b`, in
-        lint/stale_cites.py and the stale-cites-at-merge decision) leave out. Measured: `nope^1..HEAD` starts four
-        after `diff`, `nope^1...HEAD` starts five after `merge-base`."""
+        """A failing range whose base has a first-parent suffix (`nope^1`) starts one `rev-list` more than a plain base
+        does after its failed read: four git processes after `diff` for `..`, five after `merge-base` for `...`."""
         cases = (
-            ("nope^1..HEAD", "diff", 4, [
+            ("nope^1..HEAD", "diff", [
                 "rev-parse --verify --quiet HEAD^{commit}",
                 "rev-parse --verify --quiet nope^1^{commit}",
                 "rev-parse --is-shallow-repository",
                 "rev-list --parents -n 1 HEAD",
             ]),
-            ("nope^1...HEAD", "merge-base", 5, [
+            ("nope^1...HEAD", "merge-base", [
                 "rev-parse --verify --quiet HEAD^{commit}",
                 "rev-parse --verify --quiet nope^1^{commit}",
                 "rev-parse --verify --quiet nope^1^{commit}",
@@ -1357,23 +1419,34 @@ class UnreadableReadTests(StaleCase):
                 "rev-list --parents -n 1 HEAD",
             ]),
         )
-        for spec, failed_read, measured, expected in cases:
+        for spec, failed_read, expected in cases:
             with self.subTest(spec=spec):
                 rng = self.moved_lib(cited=True)
                 self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
                 self.assertFalse(has_object(rng.repo, "nope^1"), "scope: the base names nothing")
                 self.assertTrue(has_object(rng.repo, "HEAD^1"), "scope: HEAD has a parent, so it is not a root")
-                rc, out, traced = self.run_traced_commands(rng, spec=spec)
-                self.assertEqual(rc, 2, "a failing %s did not exit 2\n%s" % (spec, out))
-                commands = [" ".join(shlex.split(command)) for command in traced]  # the trace quotes `^{...}` arguments
-                reads = [i for i, command in enumerate(commands) if command.split()[0] == failed_read]
-                self.assertEqual(len(reads), 1, "scope: %s ran the %s read %d times, not once\n%s"
-                                 % (spec, failed_read, len(reads), commands))
-                after = commands[reads[0] + 1:]
-                self.assertEqual(len(after), measured, "%s starts %d git processes after its failed %s, expected %d\n%s"
-                                 % (spec, len(after), failed_read, measured, after))
-                self.assertEqual(after, expected, "%s starts other git processes after its failed %s than measured\n%s"
-                                 % (spec, failed_read, after))
+                self.assert_starts_after_failed_read(rng, spec, failed_read, 2, expected)
+
+    def test_a_failing_three_dot_range_with_a_plain_base_starts_four_git_processes_after_its_failed_merge_base(self):
+        """A plain base that names nothing: after its failed `merge-base`, four git processes start, in this order."""
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, "nope"), "scope: the base names nothing")
+        self.assert_starts_after_failed_read(rng, "nope...HEAD", "merge-base", 2, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --is-shallow-repository",
+        ])
+
+    def test_a_failing_two_dot_range_with_a_plain_base_starts_three_git_processes_after_its_failed_diff(self):
+        """A plain base that names nothing: after its failed `diff`, three git processes start, in this order."""
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, "nope"), "scope: the base names nothing")
+        self.assert_starts_after_failed_read(rng, "nope..HEAD", "diff", 2, [
+            "rev-parse --verify --quiet HEAD^{commit}",
+            "rev-parse --verify --quiet nope^{commit}",
+            "rev-parse --is-shallow-repository",
+        ])
 
     def test_an_unresolvable_base_in_a_depth_one_clone_two_dot_range_prints_unknown_and_exits_zero(self):
         rng = self.moved_lib(cited=True)
