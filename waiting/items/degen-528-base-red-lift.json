@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-08T16:39:00Z",
+  "context": "Goal: degen lanes merge again, starting with PR 528.\nProblem (rule): PR 528 is reviewed and its CI is running, but degen main's last milestone-proof run is red, and your item 404 lift covered #509 only. A lift needs your words typed in runner 9's chat; a page pick does not reach its check.\nBased on (read): the red run, 41747042457, is the by-hand Mac run of 11-04 at the old sha 73f66dbfc (runner 9, 10:37 CST Nov 8).\nBased on (ruling): item 404 a (06:18 CST Nov 8): one lift, for #509 only; every other degen merge waits on a green milestone-proof run.\nDeparts from: main, where only #509 merged over the red run \u2014 adds a second one-time lift.\nMeanwhile: PR 528 waits, and PR 526 and PR 527 cannot pass their lane lints until it lands. On a, type the lift for PR 528 in runner 9's chat (link below).",
+  "home": "base-red-reads-gate",
+  "id": "degen-528-base-red-lift",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Open runner 9's chat",
+      "url": "https://claude.ai/code/session_013NEJKymmzw37seAr3Qq5nv"
+    }
+  ],
+  "n": 430,
+  "options": [
+    {
+      "gain": "The pin bump lands now, and PR 526 and PR 527 can pass their lane lints.",
+      "how": "Type a one-time lift for PR 528 in runner 9's chat; it merges PR 528 once over the red run.",
+      "key": "a",
+      "label": "Lift for PR 528 only",
+      "lose": "One more merge over an unrelated red Mac run."
+    },
+    {
+      "gain": "A real green clears every degen merge.",
+      "how": "Runner 9 dispatches milestone-proof on degen main 76c7e57.",
+      "key": "b",
+      "label": "Run the Mac tests on main's head",
+      "lose": "GitHub Mac minutes are spent, and the last three runs failed or were cancelled."
+    },
+    {
+      "gain": "No merge over a red run.",
+      "how": "Nothing merges in degen until milestone-proof is fixed and green.",
+      "key": "c",
+      "label": "Wait",
+      "lose": "PR 528, PR 526 and PR 527 stay stuck."
+    }
+  ],
+  "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "ref": "degen PR 528; milestone-proof run 41747042457; item 404",
+  "repo": "degen",
+  "short": "degen PR 528: lift the red Mac run",
+  "status": "open",
+  "title": "May runner 9 merge degen PR 528 over the old red Mac test run on main?"
+}

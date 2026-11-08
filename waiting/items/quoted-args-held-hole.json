@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T16:39:00Z",
+  "context": "Goal: the other-checkout guard stops refusing quoted text as a write, such as a read-only judge script given a quoted redirect to a parent folder as its argument.\nProblem (rule): the fix check after round 3 found one hole main does not have: a kept script that runs a helper through a built path (`bash \"$PWD/helper.sh\"`, `bash $f`, `bash h*.sh`) leaves the helper's body unread. One hole opened and none closed, so the net safety value is negative, and your ruling parks the branch until you decide.\nBased on (measured): the fix-check reviewer probed 8e8cf9232 against main: main refuses each built-path form and the branch allows it; 10 false-alarm forms are fixed.\nBased on (read): the false alarm recurred 4 times today (3 test-author probes at 06:25 CST, triage at 07:00 CST), and once more when triage wrote this item (10:38 CST).\nDeparts from: main, where a quoted argument holding a write-looking token is refused on every interpreter command \u2014 the branch reads it as data when the script is in view and runs no shell.\nMeanwhile: the lane takes #1984 through review round 3 and leaves this branch untouched.",
+  "home": "guard-python-quoted-redirect",
+  "id": "quoted-args-held-hole",
+  "kind": "decision",
+  "n": 429,
+  "options": [
+    {
+      "gain": "The false alarms close, and the branch opens no hole Claude could write by mistake.",
+      "how": "A new lane from round 1 makes the guard keep every body when a kept body runs a path it cannot resolve (hooks/guard_core.py _kept_headers, the rule the outer scan already uses). Then a fix check, then it merges after #1906.",
+      "key": "a",
+      "label": "One fix lane for that hole",
+      "lose": "One more lane, with up to 3 review rounds."
+    },
+    {
+      "gain": "No more work spent on it.",
+      "how": "The branch stays held, with no more work.",
+      "key": "b",
+      "label": "Park the branch",
+      "lose": "The false alarm stays on every probe or judge script that quotes a redirect."
+    }
+  ],
+  "owner": "lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn)",
+  "pick": "a",
+  "ref": "branch guard-quoted-args-data at 8e8cf9232; decision hold-unsafe-after-round-3",
+  "short": "Held guard fix: one more lane?",
+  "status": "open",
+  "title": "May the held quoted-text fix to the other-checkout guard get one more fix lane?"
+}

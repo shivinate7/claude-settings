@@ -1,0 +1,11 @@
+{
+  "title": "A same-PR fix after a passed fix check can reuse the record when the new head's tree equals the record head's tree",
+  "why": "Lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb): on #1706 two empty Drops-lines commits after a record with a Fix check line left a tree-identical head; merge --fix-check refuses a second fix check, so the PR needs a fresh three-round chain.",
+  "note": "Filed 10:38 CST Nov 8 apart from replacement-pr-carries-review, whose lane declined it (a wider act). Fix: the refusal names the cost (a fresh chain), and a record is accepted when the new head's tree equals the newest record head's tree; it may reuse that lane's git diff --quiet proof in fix_base_problem. Owner item 426 a (2 fix checks per chain) may also cover the #1706 case.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 739,
+  "updatedAt": "2026-11-08T10:38:00-06:00"
+}
