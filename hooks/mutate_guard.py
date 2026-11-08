@@ -1397,6 +1397,15 @@ MUTATIONS = [
      '        writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))\n        moves =',
      '        writes = bool(SHELL_WRITE_HINT.search(command))\n        moves =',
      "guard", "worktree-home: the cross-checkout read costs"),
+    # The write forms the shell-write scan does not read: a python script and a `git -C` verb.
+    ("other-checkout: a python script that opens a sibling's file for writing is not read",
+     "            hit = interpreter_write_hit(raw, where, elsewhere)\n",
+     '            hit = ""\n',
+     "guard", "a python -c open in mode w is refused"),
+    ("other-checkout: a git -C verb is refused only in a separate clone, not in a sibling checkout",
+     "                if elsewhere(folder, folder):\n                    folders.append(folder)",
+     "                if elsewhere(folder, folder) and clone_hit.get(folder):\n                    folders.append(folder)",
+     "guard", "a git -C commit is refused"),
     # The `cd` act: `worktree_home_cd_*_case`.
     ("other-checkout: a cd into another checkout is not judged",
      "        if elsewhere(move, where) and not _own_red_run(",

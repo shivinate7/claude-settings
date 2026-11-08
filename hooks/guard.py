@@ -996,6 +996,7 @@ OTHER_CHECKOUT_CD_REASON = (
 OTHER_CLONE_DETAIL = "write into another clone: "
 OTHER_CLONE_CD_DETAIL = "cd into another clone: "
 OTHER_CLONE_GIT_DETAIL = "git write into another clone: "
+OTHER_CHECKOUT_GIT_DETAIL = "git write into another checkout: "
 OTHER_CLONE_REMEDY = (
     "Remedy: change files only in your home checkout. To read another clone, use "
     "`git -C <dir> log` or `git -C <dir> show`, or a path."
@@ -4437,6 +4438,17 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
 RED_RUN_ROOT_VERBS = ("cp",)
 
 
+def _python_write_may_hit(raw: str, where: str) -> bool:
+    """True when a python or node script in RAW writes a path whose nearest `.git` is not the cwd's,
+    so it is worth the one `git worktree list`. The scripts are read by interpreter_write_hit, the
+    one reader frozen-path uses; the path test is stat and small file reads, no git."""
+    own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
+    if not own_root:
+        return False
+    return bool(interpreter_write_hit(
+        raw, where, lambda path, at: _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)))
+
+
 def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
     """True when PATH is inside the caller's own test-author red-run folder
     `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
@@ -4488,7 +4500,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
-        writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+        writes = (writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+                  or _python_write_may_hit(raw, where))
     else:
         return ""
     if moves:
@@ -4537,14 +4550,23 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        if not hit and writes:
+            # A python or node script that opens a path for writing: the one reader is frozen-path's.
+            hit = interpreter_write_hit(raw, where, elsewhere)
         if not hit:
-            # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
-            # reader of such verbs is session_home_git_hit; only the folder test differs.
-            def in_clone(folder, _at):
-                elsewhere(folder, folder)
-                return clone_hit.get(folder, False)
-            verb = session_home_git_hit(command, where, in_clone) if "git" in command else ""
-            return OTHER_CLONE_GIT_DETAIL + verb if verb else ""
+            # A git verb that changes files, run in another checkout or clone, or from a stranded cwd.
+            # The one reader of such verbs is session_home_git_hit; only the folder test differs.
+            folders = []
+
+            def in_other(folder, _at):
+                if elsewhere(folder, folder):
+                    folders.append(folder)
+                    return True
+                return False
+            verb = session_home_git_hit(command, where, in_other) if "git" in command else ""
+            if not verb:
+                return ""
+            return (OTHER_CLONE_GIT_DETAIL if clone_hit.get(folders[-1]) else OTHER_CHECKOUT_GIT_DETAIL) + verb
         return ("shell write into another clone: " if clone_hit.get(hit) else
                 "shell write into another checkout: ") + hit
     for target in targets:
@@ -4566,7 +4588,7 @@ SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply", "clean")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean", "add")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
