@@ -14044,7 +14044,7 @@ SIGHTED_1909_PROSE = ("Earlier chain (step fix-check-chain): round 1, reviewer h
                       "This record is a fresh whole-PR review of a476ef100..a532aa8c3 at the live head. Its notes went to triage for debt comment-narration-limits.")
 SIGHTED_1834_PROSE = ("Printed by batch runner 8 with the merge tool. Coordinator yes at 02:33 CST. The verdicts come from lane comment-check-scans-shell "
                       "(session_013NEJL37UFXTQuAcox7s8fD). Lane lint passed at this head (run by runner 8).")
-# Two live bodies that did not parse, copied verbatim from PR #1909 comment 6720811601 and PR #1834 comment 6719312457: a blank line and a prose
+# Two live bodies that did not parse, copied verbatim from live comments: each a record with a blank line and a prose
 # paragraph between the CI line and `---`. They hold no secret. hooks/test_guard.py holds the same two bodies: that suite runs the guard as a
 # subprocess and cannot import this one.
 SIGHTED_1909 = "\n".join([

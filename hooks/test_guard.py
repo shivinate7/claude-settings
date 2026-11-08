@@ -10187,8 +10187,8 @@ bash_post("review-record: a record with a 39-digit Head is refused and names the
 
 # THE NAMED LINE. A form refusal names the first line that broke the parse, as `line N: <text>`, the text cut to 80 characters
 # (merge/merge.py review_parse). A line after the CI line breaks the parse when it is not blank: a blank line is legal as the trailing
-# line, so the prose after it is the break. The two sighted bodies are copied verbatim from live comments (PR #1909 comment 6720811601,
-# PR #1834 comment 6719312457), each with a blank line and a prose paragraph between its CI line and `---`. The copy in
+# line, so the prose after it is the break. The two sighted bodies are copied verbatim from live comments, each a record with a blank
+# line and a prose paragraph between its CI line and `---`. The copy in
 # merge/test_merge.py is the merge suite's own, since that suite calls the merge tool directly and cannot import this one.
 SIGHTED_1909_PROSE = ("Earlier chain (step fix-check-chain): round 1, reviewer haiku, FAILED at d4adf8811. That failure is answered by a532aa8c3. "
                       "This record is a fresh whole-PR review of a476ef100..a532aa8c3 at the live head. Its notes went to triage for debt comment-narration-limits.")
@@ -10212,9 +10212,9 @@ CI_LINE_TEXT = "CI: read live by merge --reviewed"
 
 # The sighted bodies are refused on a fresh post with the prose line named. A fresh post has no created time, so the Stamp is owed as well:
 # the structure is read first, so the prose line is named, as merge.review_parse reads it.
-mcp_post("review-record: a sighted body with prose after its CI line names the prose line, MCP add_issue_comment (PR 1909)",
+mcp_post("review-record: a sighted body with prose after its CI line names the prose line, MCP add_issue_comment (first sighted body)",
          SIGHTED_1909, "deny", rule=REVIEW_RULE, number=1909, carries=("line 10: " + SIGHTED_1909_PROSE[:80],))
-bash_post("review-record: a sighted body with prose after its CI line names the prose line, gh pr comment --body (PR 1834)",
+bash_post("review-record: a sighted body with prose after its CI line names the prose line, gh pr comment --body (second sighted body)",
           "gh pr comment 1834 --body '%s'" % SIGHTED_1834, "deny", rule=REVIEW_RULE, carries=("line 12: " + SIGHTED_1834_PROSE[:80],))
 mcp_post("review-record: prose between the CI line and --- names its line, MCP add_issue_comment", REVIEW_PROSE_FOOTED, "deny",
          rule=REVIEW_RULE, carries=("line 10: Lane note.",))
@@ -20086,6 +20086,7 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    "pr-review-record": ("haiku",),  # the form refusal echoes the posted body's first bad line, so a model name the poster typed may appear
 }
 
 
