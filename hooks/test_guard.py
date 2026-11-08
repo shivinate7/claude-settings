@@ -22631,11 +22631,37 @@ _KEPT_LOADED_RUNS = (
                          ("run.pl", 'for my $f (glob("*.pl")) { do $f; }')], "perl run.pl"),
     ("load f over Dir.glob", [("helper.rb", 'system("echo hi > ../other/f")'),
                               ("run.rb", 'Dir.glob("*.rb").each { |f| load f }')], "ruby run.rb"),
+    ('do "./$f" over glob', [("helper.pl", 'system("echo hi > ../other/f");'),
+                             ("run.pl", 'for my $f (glob("*.pl")) { do "./$f"; }')], "perl run.pl"),
+    ('require "./$f"', [("helper.pl", 'system("echo hi > ../other/f");'),
+                        ("run.pl", 'for my $f (glob("*.pl")) { require "./$f"; }')], "perl run.pl"),
+    ('load "./#{f}" over Dir.glob', [("helper.rb", 'system("echo hi > ../other/f")'),
+                                     ("run.rb", 'Dir.glob("*.rb").each { |f| load "./#{f}" }')], "ruby run.rb"),
+    ('import("./"+f) over readdirSync', [("helper.js", 'require("child_process").execSync("echo hi > ../other/f");'),
+                                         ("run.js", "const fs = require('fs');\nfor (const f of fs.readdirSync('.')) "
+                                                    "import(\"./\"+f);")], "node run.js"),
+    ("import pkg, where pkg/__init__.py was written",
+     [("pkg/__init__.py", 'import os\nos.system("echo hi > ../other/f")'), ("run.py", "import pkg")], "python3 run.py"),
+    ('require("./lib"), where lib/index.js was written',
+     [("lib/index.js", 'require("child_process").execSync("echo hi > ../other/f");'), ("run.js", 'require("./lib");')],
+     "node run.js"),
 )
 for _shown, _files, _cmd in _KEPT_LOADED_RUNS:
     _relesc_add("other-checkout: heredoc replay kept body script: a helper that writes ../other/f, reached from a script "
                 "through %s, then %s, is refused" % (_shown, _cmd),
                 "deny", _kept_heredocs(_files, _cmd), "home", rule="other-checkout")
+# A script that reads a file, or imports a stdlib name, runs no helper: the helper beside it is data and is dropped.
+_KEPT_LOADED_READS = (
+    ('const fs = require("fs"); fs.readFileSync("a")',
+     [("helper.js", 'require("child_process").execSync("echo hi > ../other/f");'),
+      ("run.js", 'const fs = require("fs"); fs.readFileSync("a")')], "node run.js"),
+    ("from json import load",
+     [("helper.py", 'import os\nos.system("echo hi > ../other/f")'), ("run.py", "from json import load")], "python3 run.py"),
+)
+for _shown, _files, _cmd in _KEPT_LOADED_READS:
+    _relesc_add("other-checkout: heredoc replay kept body script read: a helper that writes ../other/f, beside a script "
+                "whose body is %s, then %s, is allowed" % (_shown, _cmd),
+                "allow", _kept_heredocs(_files, _cmd), "home")
 # A command holding the word `bash 1a=b` beside a plain write out of the tree, in a kept body: the write is refused.
 _relesc_add("other-checkout: heredoc replay kept body unresolved word: a heredoc run.sh whose body holds bash 1a=b and then "
             "echo hi > ../other/f, then bash run.sh, is refused",
