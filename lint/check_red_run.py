@@ -17,7 +17,7 @@ A message passes only when it has at least one Red-run line and every Red-run li
 commit, even beside a valid one. A line counts as a Red-run line, at line start and in any case, in two ways. First, a key that reads
 `red`, then any run of spaces, underscores or hyphens (none too), then `run` or `runs`, then optional spaces and a colon
 (`Red-Run:`, `Red-run :`, `Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`). Second, the same key with no colon, only when the
-line also ends in `-> <N> failed on <sha>` (`Red-run python3 x -> 1 failed on abc1234`). A bare line-start "Red run" with no colon
+line also ends in `-> <N> failed on <sha>` (`Red-run python3 x -> 1 failed on <sha>`). A bare line-start "Red run" with no colon
 and no such tail is prose: eleven main messages carry valid trailers and begin a line that way. A key that is not exactly
 `Red-run:` is malformed. Prose that mentions red-run mid-line, and words such as `Redress:` or `Reduce:`, are not judged. The failed form judges the first word of its command in two layers, so a
 typo is not read as a failed form. First, it refuses a word that starts with `mutant` or `mutation` (`mutants:`,
