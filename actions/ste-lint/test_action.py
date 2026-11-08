@@ -13,8 +13,11 @@ actions/zizmor/run.sh, one line per action, and that a workflow pinning both act
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
-Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
-import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
+Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
+Also asserts the step's exit codes when a helper misbehaves (`run.sh exit codes:` cases): with fail=false, an UNKNOWN or a
+crash from lint/stale_cites.py stays red and only a FAIL verdict is zeroed; a linter that exits non-zero or prints non-JSON
+fails the job in both scopes; a failing git range fails it; and the fail input says it opts out of findings only."""
+import ast, atexit, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -26,7 +29,11 @@ EXCLUDE_TEXT = open(EXCLUDE_FILE, encoding="utf-8").read()  # run_pair writes th
 # Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
 text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
-script = "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", HERE)
+
+
+def step_script(action_dir):
+    """The step's `run:` block, with ${{ github.action_path }} set to action_dir, the folder that holds run.sh."""
+    return "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", action_dir)
 
 # /bin/bash is 3.2 on macOS: the script must survive empty arrays under set -u there.
 # Windows: a bare "bash" can resolve to WSL's System32 copy, which cannot run this script.
@@ -101,25 +108,77 @@ def make_repo(d, base, change, on_main=False):
     return work
 
 
-def run_step(d, work, env):
-    """Run the step script from a file, not `bash -c`: Windows argv quoting mangles its heredocs."""
+def run_step(d, work, env, action_dir=HERE):
+    """Run the step script from a file, not `bash -c`: Windows argv quoting mangles its heredocs. The step runs
+    the run.sh in action_dir."""
     path = os.path.join(d, "step.sh")
     with open(path, "w", newline="\n") as f:
-        f.write(script)
+        f.write(step_script(action_dir))
     p = subprocess.run([BASH, path.replace("\\", "/")], cwd=work, env=env, capture_output=True, text=True)
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, **over):
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
-    on_main), apply `change(work)`, then run the step script. `over` overrides env vars."""
+    on_main), apply `change(work)`, then run the step script. `over` overrides env vars. `stubs`, the keyword
+    arguments of stub_tree, runs the step from a scratch tree of stub helpers instead of this repo's."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
         env.update(over)
-        return run_step(d, work, env)
+        return run_step(d, work, env, HERE if stubs is None else stub_tree(d, **stubs))
+
+
+# Stub helpers for the exit-code cases. Each stub writes its own marker, so a case proves the helper ran.
+# (stdout, stderr, exit code) of one lint/stale_cites.py run.
+STALE_PASS = ("stale-cites: PASS\n", "", 0)
+STALE_FAIL = ("a.md:5: STALE001 names a path the range removed\nstale-cites: FAIL, 1 finding(s)\n", "", 1)
+STALE_UNKNOWN_2 = ("stale-cites: UNKNOWN, .ste-lint-exclude cannot be read\n", "", 2)
+STALE_UNKNOWN_1 = ("stale-cites: UNKNOWN, 1 read(s) could not be made; red because CI is set\n", "", 1)
+STALE_TRACEBACK = ("", "Traceback (most recent call last):\n  File \"stale_cites.py\", line 1, in <module>\n"
+                       "RuntimeError: stub crashed\n", 1)
+# (stdout, exit code) of one lint/ste_lint.py run.
+LINT_OK = (json.dumps({"files": 1, "findings": [], "summary": {"error": 0, "warning": 0}}), 0)
+LINT_STE = (json.dumps({"files": 1, "summary": {"error": 1, "warning": 0},
+                        "findings": [{"path": "a.md", "line": 5, "code": "STE001", "message": "Long sentence.",
+                                      "severity": "error"}]}), 0)
+LINT_EXIT3 = ("", 3)
+LINT_GARBAGE = ("this is not json\n", 0)
+
+
+def stale_stub(range_run, tree_run):
+    """A lint/stale_cites.py stand-in: --range answers with range_run, --tree with tree_run, each (stdout, stderr, exit)."""
+    return ("import sys\n"
+            "out, err, code = %r if sys.argv[1] == '--range' else %r\n"
+            "sys.stdout.write(out)\n"
+            "sys.stderr.write(err)\n"
+            "sys.exit(code)\n") % (range_run, tree_run)
+
+
+def linter_stub(stdout, code):
+    """A lint/ste_lint.py stand-in: writes stdout, the JSON the step reads, and exits with code. It names itself on stderr."""
+    return ("import sys\n"
+            "sys.stderr.write('ste_lint stub ran\\n')\n"
+            "sys.stdout.write(%r)\n"
+            "sys.exit(%d)\n") % (stdout, code)
+
+
+def stub_tree(d, linter=LINT_OK, stale=(STALE_PASS, STALE_PASS), real_stale=False):
+    """A scratch tree <d>/tree: a copy of this folder's run.sh at actions/ste-lint, where the step looks for its helpers,
+    with lint/ste_lint.py and lint/stale_cites.py beside it. Both helpers are stubs, except that real_stale keeps the
+    real lint/stale_cites.py and the modules it imports. Returns the action folder."""
+    tree = os.path.join(d, "tree")
+    action = os.path.join(tree, "actions", "ste-lint")
+    os.makedirs(action)
+    shutil.copy2(os.path.join(HERE, "run.sh"), os.path.join(action, "run.sh"))
+    if real_stale:
+        tracked_tree.copy_tracked(tree, "lint", "hooks")
+    else:
+        write(tree, "lint/stale_cites.py", stale_stub(*stale))
+    write(tree, "lint/ste_lint.py", linter_stub(*linter))  # after copy_tracked, which copies the real linter too
+    return action
 
 
 def run_command(work, extra=None, sub=None):
@@ -834,13 +893,17 @@ def action_yml():
         return f.read()
 
 
+def input_block(name):
+    """The lines of input `name` in action.yml, up to the next input or the runs block. Empty when it is not declared."""
+    head = action_yml().split("\n  %s:\n" % name, 1)
+    if len(head) < 2:
+        return ""
+    return re.split(r"\n  [\w-]+:\n|\nruns:", head[1], maxsplit=1)[0]
+
+
 def tree_cites_default():
     """The default of the tree-cites input, read from action.yml. None when the input is not declared."""
-    head = action_yml().split("\n  tree-cites:\n", 1)
-    if len(head) < 2:
-        return None
-    block = re.split(r"\n  [\w-]+:\n|\nruns:", head[1], 1)[0]
-    found = re.search(r'default: "([^"]*)"', block)
+    found = re.search(r'default: "([^"]*)"', input_block("tree-cites"))
     return found.group(1) if found else None
 
 
@@ -860,5 +923,84 @@ check("tree-cites on, fail=false: the finding prints and the step exits 0",
 rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
 check("tree-cites on, scope all: the step checks the whole tree",
       rc == 1 and "docs/old.md:3: STALE003 " in out, out)
+
+
+# The step's exit codes when a helper misbehaves. Decision ci-unknown-is-red: a caller's opt-out (fail=false)
+# covers findings only, so an UNKNOWN or a crash from a helper stays red. Only a FAIL verdict may be zeroed.
+def code_change(work):
+    write(work, "x.py", "X = 1\n", "w")
+    git(work, "add", "-A"); git(work, "commit", "-qm", "code")
+
+
+def unreadable_exclude(work):
+    default_change(work)
+    # A directory is present but cannot be read as the file (lint/stale_cites.py, exclude_patterns).
+    os.makedirs(os.path.join(work, ".ste-lint-exclude"))
+
+
+def unrelated_change(work):
+    """A branch with no history in common with the base, so the range base...HEAD has no merge base to read."""
+    git(work, "checkout", "-q", "--orphan", "lone")
+    write(work, "a.md", "# T\n\n" + LONG + "\n", "w")
+    git(work, "add", "-A"); git(work, "commit", "-qm", "lone")
+
+
+for name, stale_run, zero in (
+        ("exit 2 with 'stale-cites: UNKNOWN'", STALE_UNKNOWN_2, False),
+        ("exit 1 whose last line is 'stale-cites: UNKNOWN, ...'", STALE_UNKNOWN_1, False),
+        ("exit 1 with no verdict line (a traceback)", STALE_TRACEBACK, False),
+        ("exit 1 with 'stale-cites: FAIL, 1 finding(s)'", STALE_FAIL, True)):
+    rc, out = run("changed", "false", stubs={"stale": (stale_run, STALE_PASS)})
+    ran = "".join(stale_run[:2]).strip() in out
+    check("run.sh exit codes: fail=false + stale_cites %s → step exits %s" % (name, "0" if zero else "non-zero"),
+          ran and ((rc == 0) if zero else (rc != 0)), out)
+
+rc, out = run("changed", "true", stubs={"stale": (STALE_FAIL, STALE_PASS)})
+check("run.sh exit codes: fail=true + stale_cites 'stale-cites: FAIL' → step exits 1",
+      rc == 1 and "stale-cites: FAIL, 1 finding(s)" in out, out)
+rc, out = run("changed", "false", change=code_change, stubs={"stale": (STALE_UNKNOWN_2, STALE_PASS)})
+check("run.sh exit codes: fail=false, no markdown changed, stale_cites exit 2 'UNKNOWN' → step exits non-zero",
+      rc != 0 and "no markdown changed" in out and "stale-cites: UNKNOWN" in out, out)
+rc, out = run("changed", "false", change=unreadable_exclude, stubs={"real_stale": True})
+check("run.sh exit codes: fail=false + the real stale_cites on an unreadable .ste-lint-exclude → step exits non-zero",
+      rc != 0 and "stale-cites: UNKNOWN, .ste-lint-exclude cannot be read" in out, out)
+rc, out = run("changed", "false", stubs={"linter": LINT_STE})
+check("run.sh exit codes: fail=false + ste-lint STE findings only → step exits 0",
+      rc == 0 and "ste-lint: PASS" in out and "a.md:5: STE001" in out, out)
+
+for scope, name, tree_run, zero in (
+        ("changed", "--tree exit 2 with 'stale-cites: UNKNOWN'", STALE_UNKNOWN_2, False),
+        ("changed", "--tree exit 1 whose last line is 'stale-cites: UNKNOWN, ...'", STALE_UNKNOWN_1, False),
+        ("changed", "--tree exit 1 with no verdict line (a traceback)", STALE_TRACEBACK, False),
+        ("changed", "--tree exit 1 with 'stale-cites: FAIL, 1 finding(s)'", STALE_FAIL, True),
+        ("all", "--tree exit 2 with 'stale-cites: UNKNOWN'", STALE_UNKNOWN_2, False),
+        ("all", "--tree exit 1 with 'stale-cites: FAIL, 1 finding(s)'", STALE_FAIL, True)):
+    rc, out = run(scope, "false", TREE_CITES="true", stubs={"stale": (STALE_PASS, tree_run)})
+    ran = "".join(tree_run[:2]).strip() in out
+    check("run.sh exit codes: tree-cites, fail=false, scope %s + %s → step exits %s"
+          % (scope, name, "0" if zero else "non-zero"), ran and ((rc == 0) if zero else (rc != 0)), out)
+
+
+# set -e. A linter that exits non-zero, or prints what the split and audit scripts cannot read, fails the job in
+# both scopes and with fail true or false. Each case proves the linter ran first.
+for scope in ("changed", "all"):
+    for fail in ("true", "false"):
+        for label, linter in (("exits 3", LINT_EXIT3), ("prints non-JSON", LINT_GARBAGE)):
+            rc, out = run(scope, fail, stubs={"linter": linter})
+            check("run.sh exit codes: linter %s, scope %s, fail=%s → step exits non-zero" % (label, scope, fail),
+                  "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
+
+# A failing git range (base...HEAD with no merge base) must fail the job. The diff runs in a process substitution,
+# so set -e does not see its exit; the git error on stderr is the proof it ran.
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=unrelated_change, stubs={})  # stub helpers: only the step's own diff is read
+    check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → step exits non-zero"
+          % fail, rc != 0 and "no merge base" in out, out)
+
+
+# action.yml: the fail input opts out of findings only, so its description must not say "never fails".
+fail_block = input_block("fail")
+check("run.sh exit codes: action.yml fail input says it opts out of findings only, not 'never fails'",
+      "findings" in fail_block and "never fails" not in fail_block, fail_block)
 
 sys.exit(1 if failed else 0)
