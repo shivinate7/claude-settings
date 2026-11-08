@@ -63,20 +63,26 @@ KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutnat: x -> 1 failed on SHA",
                  "Red-run: nonee: x -> 1 failed on SHA",
                  "Red-run: runner: x -> 1 failed on SHA")
-# Wrapped and typo'd words. A wrapper is a bracket or a quote. A word is a typo of `mutant` or `mutation` (one edit or one
-# adjacent swap away), or starts `mutat` or `mutan` (`mutate=x`). The failed form would read each as a command, so each
-# must flag its commit, alone and beside a valid line.
+# Wrapped and typo'd words. A wrapper is a bracket, a quote (straight or curly), an underscore, `*` or `#`. A word is a typo of
+# `mutant` or `mutation` (one edit or one adjacent swap away), or starts `mutat` or `mutan` (`mutate=x`). The failed form would
+# read each as a command, so each must flag its commit, alone and beside a valid line. `**none**` is a none word, not a mutant
+# word, so it sits in WRAPPED_AND_TYPO only: the hint test reads MUTANT_TYPOS, and a none word takes no mutant hint.
 WRAPPED_MUTANT_TYPOS = ("Red-run: (mutant A) -> 1 failed on SHA",
                         'Red-run: "mutant A" -> 1 failed on SHA',
                         "Red-run: [mutant] -> 1 failed on SHA",
                         "Red-run: - mutant: A -> 1 failed on SHA",
+                        "Red-run: _mutant_ x -> 1 failed on SHA",
+                        "Red-run: _mutnat_ x -> 1 failed on SHA",
+                        "Red-run: “mutant A” -> 1 failed on SHA",
+                        "Red-run: #mutant x -> 1 failed on SHA",
+                        "Red-run: ‘mutant’ x -> 1 failed on SHA",
                         "Red-run: mutnat x -> 1 failed on SHA",
                         "Red-run: mtuant x -> 1 failed on SHA",
                         "Red-run: mutnt x -> 1 failed on SHA",
                         "Red-run: mutaiton x -> 1 failed on SHA",
                         "Red-run: mutate=x -> 1 failed on SHA",
                         "Red-run: mutan=x -> 1 failed on SHA")
-WRAPPED_AND_TYPO = WRAPPED_MUTANT_TYPOS + ("Red-run: (none) -> 1 failed on SHA",)
+WRAPPED_AND_TYPO = WRAPPED_MUTANT_TYPOS + ("Red-run: (none) -> 1 failed on SHA", "Red-run: **none** x -> 1 failed on SHA")
 # The refused keywords that start `mutant` or `mutation`, and the wrapped and typo'd mutant words. Their FAIL line holds the
 # hint that names the mutant form.
 MUTANT_TYPOS = (tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
@@ -114,7 +120,9 @@ REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: mutagen run -> 1 failed on SHA",
                  "Red-run: (cd lint && python3 test_x.py) -> 1 failed on SHA",
                  "Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA",
-                 "Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA")
+                 "Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA",
+                 "Red-run: _build/run_tests.sh -> 1 failed on SHA",
+                 "Red-run: __main__.py -> 1 failed on SHA")
 BASE_REF = "origin/main"
 # origin/main's name for the message verdict, read from its checker. #1672 renames has_trailer to has_valid_trailer,
 # so the baseline read takes either name.
