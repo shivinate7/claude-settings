@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T13:12:00Z",
+  "answeredAt": "2026-11-08T16:05:45Z",
   "context": "Goal: the merge record states only what the merge tool does.\nProblem (rule): decision standing-merge-grant says the lock-break path never waits or retries, so a late retry never deletes another run's fresh lock (your ruling, 2026-10-17). #1657 deletes that path: the lock becomes a leased push, and a push with a stale lease fails. Your ruling changes only on your word.\nBased on (ruling): your ruling of 2026-10-17 on the lock-break path.\nBased on (read): #1657 at da664509c passed a fresh chain of review rounds 1-3 with positive net value (coordinator, 07:09 CST Nov 8).\nDeparts from: main, where a rate-limited lock-break delete is a network stop \u2014 the lock-break path is gone, and the bullet says the leased push protects the fresh lock.\nMeanwhile: #1657 stays with runner 8, and the bullet is untouched until you answer.",
   "home": "merge-lock-expired-delete-race",
   "id": "lock-break-ruling-rewrite",
@@ -24,7 +25,8 @@
   "owner": "lane merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk)",
   "pick": "a",
   "ref": "PR #1657 (head da664509c); decision standing-merge-grant; step merge-lock-expired-delete-race",
+  "reply": "You picked a (10:05 CST Nov 8). When #1657 merges, the standing-merge-grant bullet is rewritten in place to say the leased push keeps another run's fresh lock safe. Routed to lane session_013NEJL2sZ68ECc62SiwfqPk and the coordinator; home: step merge-lock-expired-delete-race. Closed 10:09 CST Nov 8.",
   "short": "Merge lock: rewrite the lock-break bullet",
-  "status": "open",
+  "status": "closed",
   "title": "When #1657 removes the merge lock's break path, may the standing-merge-grant record's bullet on that path be rewritten?"
 }

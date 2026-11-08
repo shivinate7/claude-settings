@@ -1,11 +1,11 @@
 {
   "title": "The test-author-scope guard lets a test-author add a whole CI test-run step, as decision builders-cannot-edit-tests allows",
   "why": "Possible false alarm: lane one-home-check (session_013NEJKzbDHRpreufhWY48Vb) saw test-author-scope refuse a test-author adding a CI test step in checks.yml (coordinator, 05:46 CST Nov 8). Decision builders-cannot-edit-tests (main) lets a test-author add or remove a whole test-run step; workflow_test_steps_only in hooks/guard.py judges it.",
-  "note": "First: get the exact step text from the lane and see whether it met the decision's shape (only name, if, run, shell, working-directory, timeout-minutes; one single-line run). If it met it, fix workflow_test_steps_only with that step as the red case; if not, close with no change. Queue fix (owner 13:20 CST Nov 7). Filed 05:50 CST Nov 8; the coordinator assigns a lane. Doing in lane session_013NEJKzayeNCJa4csSCBG7k (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Red cases at 451011060. The auto-mode check refused the builder spawn (sonnet) for the guard.py fix with no reason; the lane waits on owner page task 417, ci-step-builder-spawn (coordinator, 06:33 CST Nov 8).",
+  "note": "First: get the exact step text from the lane and see whether it met the decision's shape (only name, if, run, shell, working-directory, timeout-minutes; one single-line run). If it met it, fix workflow_test_steps_only with that step as the red case; if not, close with no change. Queue fix (owner 13:20 CST Nov 7). Filed 05:50 CST Nov 8; the coordinator assigns a lane. Doing in lane session_013NEJKzayeNCJa4csSCBG7k (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Red cases at 451011060. The auto-mode check refused the builder spawn (sonnet) for the guard.py fix with no reason; the lane waits on owner page task 417, ci-step-builder-spawn (coordinator, 06:33 CST Nov 8). Owner pressed Done on item 417 (10:07 CST Nov 8): the lane's builder spawn may run.",
   "status": "doing",
   "order": 626,
   "lane": "session_013NEJKzayeNCJa4csSCBG7k",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T06:35:00-06:00"
+  "updatedAt": "2026-11-08T10:09:00-06:00"
 }

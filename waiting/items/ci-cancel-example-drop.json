@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T13:00:00Z",
+  "answeredAt": "2026-11-08T16:05:45Z",
   "context": "Goal: each auto-mode allow entry rests on a real, measured refusal.\nProblem (rule): the Own CI Run Cancel entry in settings.json (PR #1316) gives run 41377928751 as its measured example of a refused cancel, but that run was on main, which the entry's own Never line excludes. A settings text change needs your words typed in the lane's chat.\nBased on (ruling): your typed go, 2026-11-07 14:45 CST in lane lease-push-c-and-d, set the entry's text as drafted in #1316 (grant: item 278 c, 2026-11-06 12:41 CST).\nBased on (measured): gh api on q_max run 41377928751 gives head_branch main, event workflow_dispatch, conclusion cancelled (lane, 2026-11-08).\nDeparts from: main, which has no cancel entry \u2014 #1316 adds the entry without the example sentence.\nMeanwhile: the lane goes on with its other follow-ups; the example change stays out of the PR until you answer.",
   "home": "lease-push-c-and-d",
   "id": "ci-cancel-example-drop",
@@ -24,7 +25,8 @@
   "owner": "lane lease-push-c-and-d (session_013NEJL27e8puG926YPKVUMf)",
   "pick": "a",
   "ref": "PR #1316; page item 278 c; step lease-push-c-and-d",
+  "reply": "You picked a (10:05 CST Nov 8). Routed to lane session_013NEJL27e8puG926YPKVUMf. Closed 10:09 CST Nov 8.",
   "short": "CI cancel entry: drop the wrong example",
-  "status": "open",
+  "status": "closed",
   "title": "Should the Own CI Run Cancel entry drop its example, which cites a run the entry itself excludes?"
 }

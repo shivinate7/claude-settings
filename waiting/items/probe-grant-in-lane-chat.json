@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T12:22:00Z",
+  "answeredAt": "2026-11-08T16:07:22Z",
   "context": "Goal: the one-shot probe you picked in item 412 runs, so the resume guard is built on a real measure.\nWhy you: a settings write needs words you type in the session that makes it. The auto-mode check refused the lane's write by 06:00 CST, and a page pick does not reach that check.\nSteps: open the lane with the link below. Type a grant there for the one act: add a temporary PreToolUse hook to its container's /root/.claude/settings.json, log one subagent payload and one Workflow agent payload, then remove the hook. Then press Done here.",
   "home": "resume-guard-subagent-sends",
   "id": "probe-grant-in-lane-chat",
@@ -13,7 +14,8 @@
   "n": 414,
   "owner": "lane resume-finished-reviewer-no-tree (session_013NEJL3qSsV2LJ6R1a1HMCB), via the coordinator",
   "ref": "item 412 a; steps resume-guard-subagent-sends, resume-guard-workflow-agents",
+  "reply": "You pressed Done (10:07 CST Nov 8). Lane resume-finished-reviewer-no-tree (session_013NEJL3qSsV2LJ6R1a1HMCB) is told to run its one-shot probe; home: step resume-guard-subagent-sends. Closed 10:09 CST Nov 8.",
   "short": "Probe grant: type it in the lane",
-  "status": "open",
+  "status": "closed",
   "title": "Type the probe grant in lane resume-finished-reviewer-no-tree's chat"
 }

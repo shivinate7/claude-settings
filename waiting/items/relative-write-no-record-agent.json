@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T12:34:00Z",
+  "answeredAt": "2026-11-08T16:05:45Z",
   "context": "Goal: an agent's relative `../` write never lands outside its own checkout by mistake.\nProblem (rule): one of the two incident agents was a reviewer working in its caller's checkout, so it had no recorded home, and your decision allows such an agent. Covering it changes your decision's sentence.\nBased on (read): step guard-relative-write-escape: on 2026-11-08 an agent's relative `../` mkdir escaped its worktree twice (a #1458 test-author and an earlier reviewer) and made /home/user/tmp.\nBased on (ruling): decision an-agent-outside-its-home-tree-must-stop (latest cited event 2026-10-27) allows an agent with no recorded home to write anywhere (\"No record ... This part allows it.\", line 24 on main, read 06:34 CST Nov 8). Asked again because a 2026-11-08 incident shows a reviewer with no recorded home writing outside its checkout, which that ruling did not weigh.\nDeparts from: main, where an agent with no recorded home may write anywhere \u2014 refuses that agent's relative shell write that lands outside the checkout holding its working folder.\nMeanwhile: lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn) builds both parts, with the no-record part separable, and drops it on b.",
   "home": "guard-relative-write-escape",
   "id": "relative-write-no-record-agent",
@@ -24,7 +25,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "step guard-relative-write-escape; decision an-agent-outside-its-home-tree-must-stop (line 24 on main)",
+  "reply": "You picked neither (10:05 CST Nov 8): both options lose something large. A third option is being shaped: give every agent a recorded home when it is spawned (a reviewer's home is its caller's checkout), so the guard covers the reviewer with no change to your decision's sentence. The lane guard-relative-write-escape checks it can be built, then it comes back as a new question. Routed to the coordinator and that lane (session_013NEJKzJxDxuXzuwNe7fhYn); home: step guard-relative-write-escape. Closed 10:09 CST Nov 8.",
   "short": "Relative ../ writes: cover agents with no home",
-  "status": "open",
+  "status": "closed",
   "title": "Should the guard also refuse a relative ../ write outside its checkout by an agent with no recorded home?"
 }
