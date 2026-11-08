@@ -3453,7 +3453,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files, and an ancestor of the live head when that record has a PASS fix check (a FAIL or WIDE one refuses); VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
     p.add_argument("--fix-base-record", type=fix_base_record_arg, metavar="URL", help="with --review-record and --fix-check, for a pull request with no review record of its own: the link to an earlier review record on another pull request of this repo (https://github.com/OWNER/REPO/pull/N#issuecomment-ID), which stands in for the newest earlier record: its Head is the fix base, and its last round sets the round floor")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
@@ -3533,7 +3533,7 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it prints no pass
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            if a.fix_check:  # a fix never follows a fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
+            if a.fix_check:  # a fix follows no FAIL or WIDE fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
                 problem = None
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
@@ -3542,10 +3542,16 @@ def main(argv, host=None, lock=None):
                         problem = round_floor([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
                 else:
                     last = parse_review(recs[-1]) if recs else None
-                    if not last or last["fix"]:
-                        problem = "the newest earlier review record on this pull request must exist and have no Fix check line"
+                    if not last:
+                        problem = "the newest earlier review record on this pull request must exist"
+                    elif last["fix"] and last["fix"][3] != "PASS":  # a FAIL is the next round and a WIDE is a new lane; only a passed fix check chains
+                        problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
                 if not problem and last["head"] != a.fix_check[0]:
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
+                if not problem and last["fix"] and not a.fix_base_record:  # a chained fix diff must start inside the live head's history
+                    found = h.compare_files(a.fix_check[0], info["head"])
+                    if found["behind_by"] or not found["ahead_by"]:
+                        problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if found['behind_by'] and not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
                     return 2
