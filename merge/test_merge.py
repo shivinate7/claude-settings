@@ -12924,7 +12924,7 @@ class ReviewRecordAncestorHead(ReviewEnv):
 
     def test_a_round_three_fail_on_an_ancestor_head_is_refused_as_held(self):
         # A FAIL in the final allowed round reads held. The control stops at the first two rounds, which read open, so the final round is the
-        # factor under test. The earlier record holds the lower rounds, so the round lines are not the factor either.
+        # factor under test. The earlier record at EARLIER holds rounds 1 and 2 as FAIL, the same verdicts the new record gives them.
         lower = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))),)
         rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead",
                                             comments=lower)
@@ -12952,7 +12952,7 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: the same ancestor record with its default net value was refused:\n" + out + err)
 
     def test_a_pass_then_fail_round_two_on_an_ancestor_head_prints_that_head(self):
-        # The top round is all FAIL, though the first round passed. The rule reads only the highest round. The earlier record holds the passed round 1.
+        # The top round is all FAIL, though the first round passed. The rule reads only the highest round. The earlier record at EARLIER holds round 1 as PASS.
         passed = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=("Round 1: reviewer, sonnet, PASS",))),)
         rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead", comments=passed)
         self.assertEqual(rc, 0, "a record whose top round is all FAIL, after a passed round 1, was refused:\n" + out + err)
@@ -13147,9 +13147,10 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertNotIn("Traceback", err)
         self.assertIn(sha[:9], err, f"the refusal does not name the head {sha[:9]} that the earlier FAIL named:\n" + err)
 
-    def earlier_top_fail(self, verdict="FAIL", fix=()):
-        """An earlier record at HEAD_A: round 1 FAIL on OWN, then round 2 `verdict` on OWN_TWO, which is its top round, with `fix` after the rounds."""
-        return review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, {verdict}, {self.OWN_TWO}"), fix=fix))
+    def earlier_top_fail(self, verdict="FAIL", fix=(), sha=None):
+        """An earlier record at HEAD_A: round 1 FAIL on OWN, then round 2 `verdict` on `sha` (OWN_TWO when none is given), which is its top round, with `fix` after the rounds."""
+        sha = self.OWN_TWO if sha is None else sha
+        return review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, {verdict}, {sha}"), fix=fix))
 
     def assert_refused_without_record(self, rc, out, err, cause):
         """`cause` refuses the record: exit 2, no record printed, no traceback, and stderr cites the decision."""
@@ -13234,7 +13235,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: a round 1 PASS after a round 1 FAIL at an earlier head was refused:\n" + out + err)
 
     def test_a_first_round_one_pass_with_no_earlier_record_is_written(self):
-        # control: no earlier record on this pull request, and a round 1 PASS has no lower round to hold
+        # control: no earlier record on this pull request, so the round 1 PASS is written with no record before it
         rc, out, err = self.post(rounds=("1:reviewer:sonnet:PASS",))
         self.assertEqual(rc, 0, "control: a first round 1 PASS record was refused:\n" + out + err)
 
@@ -13471,7 +13472,83 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         rc, out, err = self.write_at(host, (f"1:reviewer:haiku:PASS:{self.OWN}",))
         self.assert_pass_refused(host, rc, out, err, self.OWN)
 
-class ReviewRoundHeadsGate(unittest.TestCase):
+    def test_round_heads_a_pass_top_round_naming_a_full_sha_is_refused_after_an_earlier_fail_naming_its_prefix(self):
+        # the #2235 mistake with a short sha: the earlier record's round 2 FAILed on OWN_TWO, named by its 9-hex prefix, and round 3 PASSes on its full sha
+        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN}", f"3:reviewer:opus:PASS:{self.OWN_TWO}")
+        host = self.record_host(self.earlier_top_fail(sha=self.OWN_TWO[:9]), diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
+        rc, out, err = self.write_at(host, rounds, guard="yes", net="positive")
+        self.assert_pass_refused(host, rc, out, err, self.OWN_TWO)
+        self.assertIn("where an earlier record's round 2 failed", err, "the refusal is not the same-head rule for the earlier record:\n" + err)
+        # control: the same earlier record, with the PASS on another commit, is written
+        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN}", f"3:reviewer:opus:PASS:{self.OWN_THREE}")
+        host = self.record_host(self.earlier_top_fail(sha=self.OWN_TWO[:9]), diffs=self.own_replies(self.OWN, self.OWN_THREE))
+        rc, out, err = self.write_at(host, rounds, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "control: a PASS top round on another commit than the earlier FAIL's prefix was refused:\n" + out + err)
+
+    def test_round_heads_a_pass_top_round_naming_a_full_sha_is_refused_after_a_lower_fail_naming_its_prefix(self):
+        # the same mistake inside one record: round 2 FAILed on OWN_TWO, named by its 9-hex prefix, and round 3 PASSes on its full sha
+        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO[:9]}", f"3:reviewer:opus:PASS:{self.OWN_TWO}")
+        host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO[:9], self.OWN_TWO))
+        rc, out, err = self.write_at(host, rounds, guard="yes", net="positive")
+        self.assertTrue(any(self.OWN_TWO[:9] in pair for pair in host.compare_reads), "scope: the prefix of round 2 was not read against the live head, so the own-commit check did not run")
+        self.assert_pass_refused(host, rc, out, err, self.OWN_TWO)
+        self.assertIn("where round 2 of this same record failed", err, "the refusal is not the same-head rule for the lower round:\n" + err)
+        # control: the lower FAIL on the prefix of one commit, and the PASS on another commit, is written
+        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO[:9]}", f"3:reviewer:opus:PASS:{self.OWN_THREE}")
+        rc, out, err = self.write_at(self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO[:9], self.OWN_THREE)), rounds, guard="yes", net="positive")
+        self.assertEqual(rc, 0, "control: a PASS top round on another commit than the lower FAIL's prefix was refused:\n" + out + err)
+
+    def test_round_heads_a_round_naming_the_live_head_by_its_prefix_is_written(self):
+        # the live head needs no compare read: its prefix is read against the base branch, which answers ahead, and no other compare is given
+        prefix = self.LIVE[:9]
+        host = self.record_host(diffs={("main", prefix): compare_of("ahead")})
+        rc, out, err = self.write_at(host, (f"1:reviewer:sonnet:PASS:{prefix}",))
+        self.assertTrue(any(prefix in pair for pair in host.compare_reads), "scope: no compare read names the live head's prefix, so the own-commit check did not run")
+        self.assertEqual(rc, 0, "a round naming the live head by its 9-hex prefix was refused:\n" + out + err)
+        self.assertIn(f"Round 1: reviewer, sonnet, PASS, {prefix}", posted_body(self, out).splitlines(), "the printed round does not name the live head's prefix")
+
+    def test_round_heads_a_top_round_naming_the_live_head_by_its_prefix_lists_as_done(self):
+        state, why = self.listed((review_comment(1, 7, record_text(rounds=(f"Round 1: reviewer, sonnet, PASS, {self.LIVE[:9]}",))),))
+        self.assertEqual(state, "done", f"a top round that names the live head by its prefix reads {state}: {why}")
+
+    def test_a_plain_write_reads_the_comment_list_once(self):
+        # the plain path adds one comment-list read, whether the comment list is empty or holds an earlier record of the pull request
+        earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        for label, comments in (("an empty comment list", ()), ("an earlier record", (earlier,))):
+            with self.subTest(comments=label):
+                host = self.record_host(*comments, diffs=self.own_replies(self.OWN))
+                rc, out, err = self.write_at(host, (f"1:reviewer:sonnet:PASS:{self.OWN}",))
+                self.assertEqual(rc, 0, f"scope: the plain write was not printed with {label}:\n" + out + err)
+                reads = [rel for rel, _fields in host.list_calls if rel == "issues/comments"]
+                self.assertEqual(len(reads), 1, f"a plain write read the comment list {len(reads)} times with {label}: {host.list_calls}")
+
+    def test_a_plain_write_with_no_earlier_record_names_a_head_on_every_round(self):
+        # an old-form write, with no head on any round, on a plain write with no earlier record is refused: exit 2, and no record is printed.
+        # A write that names a head on some rounds and not others is refused by the usage rule that every round names a head or none does.
+        for rounds in (("1:reviewer:sonnet:PASS",), ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")):
+            with self.subTest(rounds=rounds):
+                rc, out, err = self.write_at(self.record_host(diffs=self.own_replies(self.OWN)), rounds)
+                self.assertEqual(rc, 2, "an old-form round on a plain write with no earlier record was not refused with exit 2:\n" + out + err)
+                self.assertNotIn(REVIEW_MARKER, out, "an old-form round on a plain write with no earlier record still printed a record")
+                self.assertNotIn("Traceback", err)
+        # control: the same write with its round naming a head is printed
+        rc, out, err = self.write_at(self.record_host(diffs=self.own_replies(self.OWN)), (f"1:reviewer:sonnet:PASS:{self.OWN}",))
+        self.assertEqual(rc, 0, "control: the same write with its round naming a head was refused:\n" + out + err)
+        # control: an old-form write on a pull request whose earlier record is old-form is printed, since a posted record still parses
+        earlier = review_comment(1, 7, record_text(head=self.HEAD_A, rounds=(self.FIRST,)))
+        rc, out, err = self.write_at(self.record_host(earlier), ("1:reviewer:sonnet:PASS",))
+        self.assertEqual(rc, 0, "control: an old-form write on a pull request with an old-form earlier record was refused:\n" + out + err)
+
+    def test_a_second_line_in_the_same_round_at_the_same_head_is_written(self):
+        # round 1 holds a PARTIAL line and then a PASS line at one head: the round is not all PASS, so the same-head rule does not refuse it
+        rounds = (f"1:reviewer:sonnet:PARTIAL:{self.OWN}", f"1:reviewer:haiku:PASS:{self.OWN}")
+        rc, out, err = self.write_at(self.record_host(diffs=self.own_replies(self.OWN)), rounds)
+        self.assertEqual(rc, 0, "a second line in the same round at the same head was refused:\n" + out + err)
+        lines = posted_body(self, out).splitlines()
+        self.assertIn(f"Round 1: reviewer, sonnet, PARTIAL, {self.OWN}", lines, "the PARTIAL line of round 1 is not printed")
+        self.assertIn(f"Round 1: reviewer, haiku, PASS, {self.OWN}", lines, "the PASS line of round 1 is not printed")
+
+class ReviewRoundHeadsCheck(unittest.TestCase):
     """review_state reads a record whose Round lines name heads (decision pr-review-record). Its top round is done only when every line of that round
     names the live head by a sha prefix, or when a fix check PASS follows and the record's Head is live. A top round that names another head is stale
     or open, and its why names that head. A record that names no head keeps the equal-head rule."""
@@ -13514,7 +13591,7 @@ class ReviewRoundHeadsGate(unittest.TestCase):
         self.assertNotEqual(state, "done", "control: a top round on another head reads done without a fix check")
 
     def test_round_heads_a_record_that_names_no_head_keeps_the_equal_head_rule(self):
-        # E, the gate: no named head, so the record reads done at its own Head and stale at another
+        # E: no named head, so the record reads done at its own Head and stale at another
         self.assertEqual(self.state_of(REVIEW_PASS)[0], "done", "a record with no named head does not read done at its own head")
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS), head=self.OTHER), "stale", "a record with no named head does not read stale at another head")
 
@@ -14094,7 +14171,7 @@ class ReviewFixCountsRound(ReviewEnv):
 
     EARLIER_HEAD = "1e" * 20  # the head of the newest earlier record, whose fix check FAILed
     FIX_BASE = "2e" * 20  # the head the failed fix check's fix diff started from
-    OLDER_HEAD = "0d" * 20  # the head of an older earlier record, which holds the lower rounds the newest earlier record does not
+    OLDER_HEAD = "0d" * 20  # the Head of an older earlier record, posted before the newest one, for a case that gives it rounds
 
     def earlier_text(self, rounds):
         """The newest earlier record's text: the round lines given, then a fix check FAIL on its head."""
@@ -14107,7 +14184,7 @@ class ReviewFixCountsRound(ReviewEnv):
 
     def write_record(self, *rounds, earlier_rounds=None, older_rounds=None):
         """`merge 7 --review-record` on the live head with the round values given, on a host whose pull request 7 holds the earlier record of
-        `earlier_rounds` when given, after an older record of `older_rounds` when given (it holds the lower rounds the newest earlier record lacks).
+        `earlier_rounds` when given, after an older record of `older_rounds` when given, which is posted first.
         -> (rc, out, err, the printed record, parsed)."""
         argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", REVIEW_HEAD]
         for value in rounds:
@@ -14618,7 +14695,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
         host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
         low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
-        # the control has no source. Its pull request's own earlier record holds both lower rounds, so the record ending at 2 is still written
+        # the control has no source. Its pull request's own earlier record holds rounds 1 and 2 as FAIL, so the record ending at 2 is written
         own = review_comment(1, 7, record_text(head="7f" * 20, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")))
         rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
                                      "--round", low[0], "--round", low[1], host=self.record_host(own, head=REVIEW_HEAD))  # control, green on the old code: no source, a record ending at 2 is written
