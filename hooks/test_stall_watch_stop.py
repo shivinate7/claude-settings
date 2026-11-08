@@ -1732,10 +1732,12 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     return problems
 
 
-# Open tool calls. An agent in one tool call longer than OPEN_CAP is stuck, and its row says so. The open
-# call is the agent transcript's last record, so the transcript's age is the call's age too: each case
-# sets that age on its agent. The cap is the module's OPEN_CALL_CAP, read once when this file loads. Until
-# the module defines it, the ruled value stands, so the cases fail by assert on a module with no cap.
+# Open tool calls. An agent is stuck when its oldest readable Bash or PowerShell call with no tool_result is
+# older than OPEN_CAP; its row names that call's tool. Background calls set no age. A newer call of another
+# tool, or an untimed call, does not hide it. Agent, Task and mcp__ calls stay busy. The transcript's last
+# record is the time it was last written, so each case sets the agent's idle to its last record's age. The
+# cap is the module's OPEN_CALL_CAP, read once when this file loads. Until the module defines it, the ruled
+# value stands, so the cases fail by assert on a module with no cap.
 RULED_OPEN_CAP = 900  # ruling 2026-11-07 18:38 CST: Bash's 600 s maximum plus a margin
 
 
@@ -1765,19 +1767,19 @@ def open_tool_call(call_id, ago, name="Bash", command="sleep 900", background=Fa
 @case
 def O1_open_call_over_cap_lists_agent_as_stuck():
     """O1. an open call 1000 s old, in a quiet agent: listed once, and the row says the agent is stuck in one
-    tool call and names the tool. A second agent's open call is Grep. A third carries a 200 KB command, so its
+    tool call and names the tool. A second agent's open call is PowerShell. A third carries a 200 KB command, so its
     timestamp is read from a record past the first read window"""
     folder = new_dir()
     age = OPEN_CAP + 100
     lb, bash = background_agent(folder, agent_id(200), [open_tool_call("toolu_o1", age)], age)
-    lg, grep = background_agent(folder, agent_id(201), [open_tool_call("toolu_o2", age, name="Grep")], age)
+    lg, ps = background_agent(folder, agent_id(201), [open_tool_call("toolu_o2", age, name="PowerShell")], age)
     lh, big = background_agent(folder, agent_id(202),
                                [open_tool_call("toolu_o3", age, command="x" * 200000)], age)
-    path = transcript(stamped(lb + lg + lh, age + 100), agents=[bash, grep, big], folder=folder)
+    path = transcript(stamped(lb + lg + lh, age + 100), agents=[bash, ps, big], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
-    named = ((agent_id(200), "Bash"), (agent_id(201), "Grep"), (agent_id(202), "Bash"))
+    named = ((agent_id(200), "Bash"), (agent_id(201), "PowerShell"), (agent_id(202), "Bash"))
     for aid, _ in named:
         problems += listed_once(msg, aid, by_line=True)
     if problems:  # the row is read from a listing: with no listing there is no row to check
@@ -1870,32 +1872,42 @@ def O4_open_call_without_a_readable_time_is_not_listed():
 
 
 @case
-def O5_open_call_age_is_the_newest_open_calls_age():
-    """O5. two open calls in one agent: the age is the newest one's, by its timestamp, so the agent is not listed
-    while its newest call is under the cap. Agent 240 writes the newer call (800 s) first; agent 242 writes the
-    older call (1000 s) first, so file order gives the oldest for it. Control: agent 241, whose open calls are
-    1000 s and 950 s old, is listed, its newest call past the cap"""
+def O5_stuck_age_is_the_oldest_readable_foreground_call():
+    """O5. the age is the oldest readable Bash or PowerShell call's, by its timestamp, so a newer call of another
+    tool does not change the age or the tool named. Agent 240 writes the newer Bash call (800 s) first; agent 242
+    writes the older PowerShell call (1000 s) first. Both are listed, and each row names PowerShell and not Bash.
+    Agent 243 has an older PowerShell call and a newer background Bash call: it is listed as stuck, not quiet.
+    Control: agent 241, one PowerShell call 1000 s old, is listed"""
     folder = new_dir()
-    young, old, mid = OPEN_CAP - 100, OPEN_CAP + 100, OPEN_CAP + 50
-    la, two = background_agent(folder, agent_id(240),
-                               [open_tool_call("toolu_p1", young), open_tool_call("toolu_p2", old)], young)
-    lb, ctl = background_agent(folder, agent_id(241),
-                               [open_tool_call("toolu_p3", old), open_tool_call("toolu_p4", mid)], mid)
-    lc, late = background_agent(folder, agent_id(242),
-                                [open_tool_call("toolu_p5", old), open_tool_call("toolu_p6", young)], young)
-    path = transcript(stamped(la + lb + lc, old + 100), agents=[two, ctl, late], folder=folder)
+    young, old = OPEN_CAP - 100, OPEN_CAP + 100
+    l1, two = background_agent(folder, agent_id(240),
+                               [open_tool_call("toolu_p1", young, name="Bash"),
+                                open_tool_call("toolu_p2", old, name="PowerShell")], old)
+    l2, ctl = background_agent(folder, agent_id(241),
+                               [open_tool_call("toolu_p3", old, name="PowerShell")], old)
+    l3, late = background_agent(folder, agent_id(242),
+                                [open_tool_call("toolu_p4", old, name="PowerShell"),
+                                 open_tool_call("toolu_p5", young, name="Bash")], young)
+    l4, bg = background_agent(folder, agent_id(243),
+                              [open_tool_call("toolu_p6", old, name="PowerShell"),
+                               open_tool_call("toolu_p7", young, name="Bash", background=True)], young)
+    path = transcript(stamped(l1 + l2 + l3 + l4, old + 100), agents=[two, ctl, late, bg], folder=folder)
     rc, out, err = run_stop(path)
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
     problems += listed_once(msg, agent_id(241), by_line=True)  # scope: the control shows the check ran
     if problems:
         return problems
-    problems += expect(agent_id(240) not in msg,
-                       f"agent {agent_id(240)} is listed though its newest open call is {young} s old "
-                       f"(newer call written first): {msg!r}")
-    problems += expect(agent_id(242) not in msg,
-                       f"agent {agent_id(242)} is listed though its newest open call is {young} s old "
-                       f"(older call written first): {msg!r}")
+    for aid in (agent_id(240), agent_id(242), agent_id(243)):
+        problems += listed_once(msg, aid, by_line=True)
+    # Each row is checked even when another agent's listing failed, so one failure cannot hide another.
+    for aid, order in ((agent_id(240), "newer call first"), (agent_id(242), "older call first")):
+        line = line_of(msg, aid)
+        problems += expect("PowerShell" in line and "Bash" not in line,
+                           f"agent {aid} ({order}): row does not name the oldest call's tool PowerShell alone: {line!r}")
+    line = line_of(msg, agent_id(243))
+    problems += expect("stuck" in line and "PowerShell" in line,
+                       f"agent {agent_id(243)} with a newer background call is not stuck on its PowerShell call: {line!r}")
     return problems
 
 
@@ -1926,6 +1938,57 @@ def O6_open_call_cap_crossing_lists_once():
     problems += expect(rc3 == 0, f"third Stop exit {rc3}, want 0: {err3.strip()[:200]}")
     msg3 = system_message(out3, problems)
     problems += expect(agent_id(250) not in msg3, f"agent listed again after its crossing was listed: {msg3!r}")
+    return problems
+
+
+@case
+def O7_only_bash_and_powershell_calls_carry_the_cap():
+    """O7. the cap applies only to Bash and PowerShell calls. An open foreground Agent, Task or mcp__x__y call
+    1000 s old stays busy, as an untimed call does in A4: none is listed. Control: a Bash call 1000 s old, in the
+    same transcript, is listed"""
+    folder = new_dir()
+    age = OPEN_CAP + 100
+    la, ra = background_agent(folder, agent_id(270), [open_tool_call("toolu_r1", age, name="Agent")], age)
+    lt, rt = background_agent(folder, agent_id(271), [open_tool_call("toolu_r2", age, name="Task")], age)
+    lm, rm = background_agent(folder, agent_id(272), [open_tool_call("toolu_r3", age, name="mcp__x__y")], age)
+    lc, ctl = background_agent(folder, agent_id(273), [open_tool_call("toolu_r4", age, name="Bash")], age)
+    path = transcript(stamped(la + lt + lm + lc, age + 100), agents=[ra, rt, rm, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(273), by_line=True)  # scope: the control shows the check ran
+    if problems:
+        return problems
+    for aid, tool in ((agent_id(270), "Agent"), (agent_id(271), "Task"), (agent_id(272), "mcp__x__y")):
+        problems += expect(aid not in msg, f"agent {aid} with an open {tool} call {age} s old is listed: {msg!r}")
+    return problems
+
+
+@case
+def O8_untimed_call_does_not_hide_a_readable_stuck_call():
+    """O8. an open call with no timestamp beside a PowerShell call 1000 s old does not hide the stuck one: the
+    agent is listed, and its row names PowerShell. The untimed call comes first in one agent and last in the
+    other"""
+    folder = new_dir()
+    age = OPEN_CAP + 100
+    l1, first = background_agent(folder, agent_id(280),
+                                 [call("toolu_u1", "sleep 900"), open_tool_call("toolu_u2", age, name="PowerShell")],
+                                 age)
+    l2, last = background_agent(folder, agent_id(281),
+                                [open_tool_call("toolu_u3", age, name="PowerShell"), call("toolu_u4", "sleep 900")],
+                                age)
+    path = transcript(stamped(l1 + l2, age + 100), agents=[first, last], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for aid in (agent_id(280), agent_id(281)):
+        problems += listed_once(msg, aid, by_line=True)
+    if problems:  # the rows are read from a listing
+        return problems
+    for aid in (agent_id(280), agent_id(281)):
+        line = line_of(msg, aid)
+        problems += expect("PowerShell" in line, f"agent {aid} with an untimed call beside a PowerShell call "
+                                                 f"{age} s old: row does not name PowerShell: {line!r}")
     return problems
 
 
