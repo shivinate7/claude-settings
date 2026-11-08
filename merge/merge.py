@@ -3115,7 +3115,7 @@ def default_lock(root):
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
-REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state. The wording is the form's last line, kept as posted records carry it; --reviewed no longer reads CI per PR (it reads the base's latest run once)
+REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state. The wording is the form's last line, kept as posted records carry it; --reviewed no longer reads CI per PR (it reads the base's runs: host.base_state)
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
@@ -3271,8 +3271,8 @@ def _reviewed_lines(h, root):
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
-    request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
-    did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
+    request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base, plus the jobs and workflow files of
+    runs that may clear a run that did not succeed (host.base_state holds the count). No GraphQL, no head or check read, no timer, file or log."""
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
