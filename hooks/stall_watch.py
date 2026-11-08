@@ -104,13 +104,13 @@ except ImportError:  # the Stop check is a recovery control: it runs without not
     def until_note(description) -> str:
         return ""
 try:
-    from guard_core import strip_heredoc_bodies, walk_quotes  # the one heredoc walk and the one quote walk
-except ImportError:  # without them a heredoc body may name a log and a pair stays: at worst a stall is missed
+    from guard_core import join_continuations as _join_continuations, strip_heredoc_bodies  # the one join and the one heredoc walk
+except ImportError:  # without them a heredoc body may name a log and a pair stays: a log may be watched at a wrong path, so a false STALL
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 
-    def walk_quotes(text):
-        return iter(())
+    def _join_continuations(text) -> str:
+        return text
 try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
@@ -211,25 +211,6 @@ def _continues_list(prior, tokens, i, punct):
             break
         j -= 1
     return prior.endswith(("&&", "||", "|"))
-
-
-def _join_continuations(text):
-    """text without its backslash-newline pairs, as bash drops them before it splits words. A pair stays
-    inside single quotes and `$'...'`, in a comment (its newline ends the comment), and after a backslash
-    that is itself escaped (the quote walk reads `\\\\` as one step). Call it after the heredoc bodies are
-    gone: a body keeps its pairs."""
-    drop, comment = set(), False
-    for i, ch, quote in walk_quotes(text):
-        if ch == "\n":
-            comment = False
-        elif ch == "#" and not quote and (i == 0 or text[i - 1] in " \t\n;|&("):
-            comment = True
-        elif ch == "\\" and text[i + 1:i + 2] == "\n":  # the walk's step takes both characters
-            if comment:
-                comment = False
-            elif quote not in ("'", "$'"):
-                drop.update((i, i + 1))
-    return "".join(ch for i, ch in enumerate(text) if i not in drop) if drop else text
 
 
 def read_named_logs(command):

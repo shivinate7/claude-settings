@@ -67,7 +67,8 @@ guard rule, so the watcher does the waiting and the session is told once.
   A quoted operator word such as `";"` or `"&&"` is a word. It never ends a list or joins a path.
   A cd with that word as its target leaves the directory unknown, and `cd ""` leaves it as it was.
   A backslash-newline is dropped before the words are split, as in bash, so it joins two lines or two
-  halves of a word. It stays text inside single quotes and `$'...'`, and after an escaped backslash.
+  halves of a word. It stays text inside single quotes and `$'...'`, in a comment, and after an escaped
+  backslash. `join_continuations` in guard_core is its one home, and it reads a comment as `split_segments` does.
   A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
   Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
   Limit: a cd inside a shell heredoc body (`bash <<EOF`) is read as moving the main shell.

@@ -194,18 +194,39 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, comments: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `comments`, a bash comment (THE COMMENT RULE in `split_segments`) yields with
+    quote `#` and opens no quote, so the `'` in `# don't` is text."""
     quote, index = "", 0
     while index < len(text):
+        if (comments and not quote and text[index] == "#" and not is_powershell(text)
+                and (index == 0 or text[index - 1] in " \t\n;|&(")):
+            end = text.find("\n", index)
+            end = len(text) if end < 0 else end
+            for at in range(index, end):
+                yield at, text[at], "#"
+            index = end
+            continue
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
             width, after = quote_advance(text, index, quote)
         yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
+
+
+def join_continuations(text: str) -> str:
+    """`text` without its backslash-newline pairs, as bash drops them before it splits words (the
+    pair `split_segments` skips). A pair stays inside single quotes and `$'...'`, in a comment (its
+    newline ends the comment), and after a backslash that is itself escaped (the walk reads `\\\\`
+    as one step). Call it after the heredoc bodies are gone: a body keeps its pairs."""
+    drop = set()
+    for i, ch, quote in walk_quotes(text, comments=True):
+        if ch == "\\" and text[i + 1:i + 2] == "\n" and quote not in ("'", "$'", "#"):  # the walk's step takes both
+            drop.update((i, i + 1))
+    return "".join(ch for i, ch in enumerate(text) if i not in drop) if drop else text
 
 
 # ------------------------------------------------------------------ shell segments and command words
