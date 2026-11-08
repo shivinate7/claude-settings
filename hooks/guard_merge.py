@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -18,7 +18,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    push_calls, push_destinations, push_refspecs, push_target,
 )
 
 
@@ -922,7 +922,7 @@ def _push_calls(segment: str, script: str, cwd: str):
     segment hands on (`bash -c`, `sh -lc`, `eval`, `ssh`): the one reader of those wrappers is inner_commands.
     `script` is the text the segment came from, which push_target reads for a leading `cd`. A script
     runs in the folder its segment's own `cd` or `git -C` names."""
-    for subcommand, args in git_calls(push_text(segment)):
+    for subcommand, args in push_calls(segment):
         if subcommand == "push":
             where, overrides = push_target(segment, script, cwd)
             yield _command_words(args), where, overrides

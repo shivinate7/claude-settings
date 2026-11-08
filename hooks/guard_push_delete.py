@@ -116,9 +116,91 @@ def push_target(segment: str, cmd: str, cwd: str):
     return where, overrides
 
 
+def _span_end(text: str, start: int, escapes: bool) -> int:
+    """The index of the quote that closes the one at `start`, or -1 when none does. Inside double
+    quotes (and `$'..'`) a backslash escapes the next character, so `\\"` closes nothing."""
+    quote, index = text[start], start + 1
+    while index < len(text):
+        if escapes and text[index] == "\\":
+            index += 2
+        elif text[index] == quote:
+            return index
+        else:
+            index += 1
+    return -1
+
+
+def _nested_commands(span: str) -> str:
+    """A double-quoted span that holds escaped quotes is a script handed to an interpreter
+    (`python3 -c "os.system(\\"git push\\")"`). Each escaped-quote pair holds one command, and
+    the text between the pairs is the script's own. Give each command its own line, so the
+    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+    lines, piece, inner, index = ["\n"], [], False, 1
+    body = span[:-1]
+    while index < len(body):
+        if body.startswith('\\"', index):
+            if inner:
+                lines.append("".join(piece) + "\n")
+                piece = []
+            inner = not inner
+            width = 2
+        else:
+            width = 2 if body[index] == "\\" else 1
+            if inner:
+                piece.append(body[index:index + width])
+        index += width
+    if inner:
+        lines.append("".join(piece) + "\n")
+    return "".join(lines)
+
+
+def _push_scan(segment: str) -> str:
+    """The segment read the way the shell reads its quotes, comments and escapes, so what the
+    quote pattern sees is a whole span. A backslash pair is text (`it\\'s` opens no quote). A
+    `#` that starts a word is a comment to the line's end. A quote the shell leaves open hides
+    the rest of the line from it, so that rest, when it holds a space, is blanked. A
+    double-quoted span with escaped quotes is read by _nested_commands. PowerShell escapes
+    with a backtick, and a segment of it is left to the pattern."""
+    if is_powershell(segment):
+        return segment
+    out, index, length = [], 0, len(segment)
+    while index < length:
+        char = segment[index]
+        if char == "\\":
+            out.append(segment[index:index + 2])
+            index += 2
+        elif char == "#" and (index == 0 or segment[index - 1] in " \t\n;|&("):
+            while index < length and segment[index] != "\n":
+                index += 1
+        elif char in "'\"":
+            end = _span_end(segment, index, char == '"' or segment[index - 1:index] == "$")
+            if end < 0:
+                tail = segment[index + 1:]
+                out.append(" " if re.search(r"\s", tail) else char + tail)
+                index = length
+                continue
+            span = segment[index:end + 1]
+            out.append(_nested_commands(span) if char == '"' and '\\"' in span else span)
+            index = end + 1
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
 def push_text(segment: str) -> str:
-    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push."""
+    """The segment with quoted multi-word text blanked: a quoted `--force` is text, not a push.
+    A script handed to an interpreter in a string with escaped quotes keeps its commands, one
+    to a line; push_calls reads them line by line."""
+    segment = _push_scan(segment)
     return PUSH_QUOTED.sub(" ", segment)
+
+
+def push_calls(segment: str):
+    """(subcommand, arguments) of each `git` call in the live text of one segment: the one
+    reader of git calls for a push. Each line of push_text is its own command."""
+    for line in push_text(segment).split("\n"):
+        yield from guard_core.git_calls(line)
 
 
 def _push_parse(args):

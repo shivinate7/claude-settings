@@ -376,7 +376,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_calls, push_target, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3512,7 +3512,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
     for segment in split_segments(stripped):
-        for subcommand, args in git_calls(push_text(segment)):
+        for subcommand, args in push_calls(segment):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
             if verdict == "ask":
