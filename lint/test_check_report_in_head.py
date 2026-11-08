@@ -45,8 +45,33 @@ OTHER_TEXT = "def other():\n    return 2\n"
 RENAMED_TEXT = "def renamed():\n    return 3\n"
 WORKTREE = "/home/x/wt"
 ABS_PATH = WORKTREE + "/lint/widget.py"
+A_MD = "a.md"
+LINT_A = "lint/a.py"
+X_FILE = "lint/x.py"
+X_TEXT = "X = 2\n"
 
 RUN_FOLDER = None
+
+
+def counting_shim():
+    """A runner that loads the check and records each git call it makes, then runs the check's main."""
+    return COUNTING_SHIM.replace("MODULE_PATH", repr(MODULE))
+
+
+COUNTING_SHIM = """import importlib.util, sys
+spec = importlib.util.spec_from_file_location("check_report_in_head", MODULE_PATH)
+check = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(check)
+calls = []
+real_run = check._nowindow.run
+def counted(argv, **kwargs):
+    calls.append(argv[1])
+    return real_run(argv, **kwargs)
+check._nowindow.run = counted
+rc = check.main(sys.argv[1:])
+print("GIT_CALLS " + " ".join(calls))
+sys.exit(rc)
+"""
 
 
 def setUpModule():
@@ -74,25 +99,27 @@ class Fixture(unittest.TestCase):
         self.commit({"lint/base.py": "BASE = 1\n"}, "fixture base")
         self.git("push", "-q", "origin", "HEAD:refs/heads/main")
 
-    def git(self, *args):
-        done = subprocess.run(["git", "-C", self.work, "-c", "user.name=test", "-c", "user.email=test@example.com",
+    def git(self, *args, cwd=None):
+        done = subprocess.run(["git", "-C", cwd or self.work, "-c", "user.name=test",
+                               "-c", "user.email=test@example.com",
                                "-c", "core.autocrlf=false", *args],
                               check=True, capture_output=True, text=True, encoding="utf-8", env=GIT_ENV)
         return done.stdout.strip()
 
-    def commit(self, files, subject):
+    def commit(self, files, subject, cwd=None):
         """Write `files` (a None value deletes one), commit them, and return the new head sha."""
+        base = cwd or self.work
         for rel, text in files.items():
-            path = os.path.join(self.work, *rel.split("/"))
+            path = os.path.join(base, *rel.split("/"))
             if text is None:
                 os.remove(path)
                 continue
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
-        self.git("add", "-A", "--", *files)
-        self.git("commit", "-q", "-m", subject)
-        return self.git("rev-parse", "HEAD")
+        self.git("add", "-A", "--", *files, cwd=cwd)
+        self.git("commit", "-q", "-m", subject, cwd=cwd)
+        return self.git("rev-parse", "HEAD", cwd=cwd)
 
     def on_main(self, files, subject):
         """A commit on main, pushed, so a branch made after it starts from it."""
@@ -169,6 +196,14 @@ class CheckCase(Fixture):
             self.assertIn(word, out, "output names no %r:\n%s" % (word, out))
         for stray in ("can't open file", "usage:", "Traceback"):
             self.assertNotIn(stray, out, "exit 2 from %r, not from the check's UNKNOWN:\n%s" % (stray, out))
+
+    def run_check_bytes(self, branch, data, args=()):
+        """Run the check with `data` (bytes) on stdin. Returns (exit code, stdout and stderr decoded)."""
+        # strict UTF-8 on stdin, whatever the runner's locale: a C locale would read the bytes without error
+        env = dict(GIT_ENV, PYTHONIOENCODING="utf-8:strict")
+        done = subprocess.run([sys.executable, MODULE, "--branch", branch, *args], cwd=self.work, input=data,
+                              capture_output=True, env=env)
+        return done.returncode, (done.stdout + done.stderr).decode("utf-8", "replace")
 
     def test_reported_file_missing_from_the_diff_is_flagged(self):
         self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
@@ -291,6 +326,83 @@ class CheckCase(Fixture):
         report = "Files: %s\n" % OTHER
         self.assertPasses(BRANCH, report)  # the default base reads OTHER as in the diff
         self.assertFlags(BRANCH, report, missing=[OTHER], args=("--base", "origin/lane/parent"))
+
+
+    def test_a_range_entry_after_a_comma_continues_the_prior_range(self):
+        self.pushed_branch(BRANCH, {A_MD: "notes\n", LINT_A: "X = 1\n"})
+        self.scope(BRANCH, A_MD)
+        self.assertPasses(BRANCH, "Files: %s:10-20, 30-40\n" % A_MD)  # 30-40 is a range, not a path
+
+    def test_a_backticked_path_with_its_range_outside_the_backticks_passes(self):
+        self.pushed_branch(BRANCH, {A_MD: "notes\n", LINT_A: "X = 1\n"})
+        self.scope(BRANCH, LINT_A)
+        self.assertPasses(BRANCH, "Files: `%s`:10-20\n" % LINT_A)
+
+    def test_a_range_with_an_en_dash_passes(self):
+        self.pushed_branch(BRANCH, {A_MD: "notes\n", LINT_A: "X = 1\n"})
+        self.scope(BRANCH, LINT_A)
+        self.assertPasses(BRANCH, "Files: %s:10–20\n" % LINT_A)
+
+    def test_a_bold_path_passes(self):
+        self.pushed_branch(BRANCH, {A_MD: "notes\n", LINT_A: "X = 1\n"})
+        self.scope(BRANCH, LINT_A)
+        self.assertPasses(BRANCH, "Files: **%s**\n" % LINT_A)
+
+    def test_a_non_utf8_report_on_stdin_is_unknown_without_a_traceback(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        data = b"Files: " + WIDGET.encode("ascii") + b"\nDone: \x93widget\x94 fixed\n"  # cp1252 curly quotes
+        rc, out = self.run_check_bytes(BRANCH, data)
+        self.assertEqual(rc, 2, "exit %d, want 2 (UNKNOWN) for a cp1252 report on stdin:\n%s" % (rc, out))
+        self.assertNotIn("Traceback", out, out)
+
+    def test_a_stale_local_base_ref_is_not_trusted_for_the_base(self):
+        base_main = self.git("rev-parse", "main")  # the work tree's origin/main ref, which nothing fetches here
+        other = os.path.join(self.root, "other")
+        subprocess.run(["git", "clone", "-q", self.origin, other], check=True, capture_output=True, env=GIT_ENV)
+        self.git("checkout", "-q", "-b", BRANCH, "origin/main", cwd=other)
+        self.commit({WIDGET: WIDGET_TEXT}, "builder work on " + BRANCH, cwd=other)
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (BRANCH, BRANCH), cwd=other)
+        self.git("checkout", "-q", "-B", "main", "origin/main", cwd=other)
+        self.commit({X_FILE: X_TEXT}, "real main moves on", cwd=other)
+        self.git("push", "-q", "origin", "main:refs/heads/main", cwd=other)
+        self.git("checkout", "-q", BRANCH, cwd=other)
+        self.git("merge", "-q", "--no-edit", "main", cwd=other)  # the head takes real main in, changes nothing of X
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (BRANCH, BRANCH), cwd=other)
+        # scope, read in the clone that holds every object: the head's own change leaves X out, the stale base has it
+        self.assertEqual(self.git("diff", "--name-only", "--no-renames", "origin/main", BRANCH, cwd=other).split(),
+                         [WIDGET])
+        self.assertIn(X_FILE, self.git("diff", "--name-only", "--no-renames", base_main, BRANCH, cwd=other).split())
+        self.assertNotEqual(self.origin_head("main"), base_main)  # origin's real main moved past the local ref
+        self.assertFlags(BRANCH, "Files: %s\n" % X_FILE, missing=[X_FILE])
+
+    def test_a_fix_round_base_sha_leaves_out_a_fix_that_never_landed(self):
+        self.git("checkout", "-q", "-b", BRANCH, "main")
+        self.commit({X_FILE: X_TEXT}, "round one touches the file")
+        round_one = self.commit({OTHER: OTHER_TEXT}, "round one ends here")
+        self.commit({OTHER: "OTHER = 3\n"}, "round two changes another file")
+        self.git("push", "-q", "origin", "%s:refs/heads/%s" % (BRANCH, BRANCH))
+        self.git("checkout", "-q", "main")
+        head = self.origin_head(BRANCH)
+        # scope: against main the file is in the branch's change, and against the round-one sha it is not
+        self.assertIn(X_FILE, self.git("diff", "--name-only", "--no-renames", "main", head).split())
+        self.assertNotIn(X_FILE, self.git("diff", "--name-only", "--no-renames", round_one, head).split())
+        self.assertPasses(BRANCH, "Files: %s\n" % X_FILE)  # against main, the earlier touch counts
+        self.assertFlags(BRANCH, "Files: %s\n" % X_FILE, missing=[X_FILE], args=("--base", round_one))
+
+    def test_a_check_run_makes_three_git_calls(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        shim = os.path.join(self.root, "count_calls.py")
+        with open(shim, "w", encoding="utf-8") as f:
+            f.write(counting_shim())
+        done = subprocess.run([sys.executable, shim, "--branch", BRANCH], cwd=self.work,
+                              input="Files: %s\n" % WIDGET, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=GIT_ENV)
+        out = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, "exit %d, want 0:\n%s" % (done.returncode, out))
+        calls = [line.split()[1:] for line in done.stdout.splitlines() if line.startswith("GIT_CALLS")]
+        self.assertEqual(calls, [["fetch", "rev-parse", "diff"]], "git calls per run, want fetch, rev-parse, diff:\n" + out)
 
 
 class ControlCase(Fixture):
