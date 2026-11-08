@@ -12744,6 +12744,16 @@ class ReviewBodyRefusesBadValues(unittest.TestCase):
         # control: the values the tables hold build a record the parser reads back
         self.assertIsNotNone(review_fn(self, "parse_review")(self.build(guard="yes", net="zero")))
 
+    def test_every_table_value_builds(self):
+        # control: no value the tables hold is refused, so the raise is not a false alarm
+        for net in ("not owed", "zero", "positive", "negative"):
+            with self.subTest(net=net):
+                self.assertIsNotNone(review_fn(self, "parse_review")(self.build(guard="yes", net=net)))
+        for kind, guard in (("normal", "yes"), ("delete-only", "yes"), ("delete-only", "no"), ("docs-only", "no")):
+            with self.subTest(kind=kind, guard=guard):
+                self.assertIsNotNone(review_fn(self, "parse_review")(self.build(kind=kind, guard=guard)))
+        self.assertIsNotNone(review_fn(self, "parse_review")(self.build(kind="docs-only", rounds=[])), "a docs-only record with no round")
+
     def test_a_value_outside_its_table_raises_and_names_the_field(self):
         bad = {"Net value": dict(net="n/a"), "Kind": dict(kind="code"), "Guard or check": dict(guard="maybe")}
         for field, kw in bad.items():
