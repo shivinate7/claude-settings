@@ -730,6 +730,61 @@ class Hook(unittest.TestCase):
         self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control brief holds only the bulleted line")
         self.assertEqual(self.spawn(prompt), "", "a lone bulleted count line must count as its number")
 
+    def test_fenced_bulleted_count_line_is_refused(self):
+        # A count line inside a ``` fence is the pasted template, not the brief's count, so it never counts.
+        self.assertCountRefused("Designer kind: informed\n\n```\n- Blind designers: 2\n```\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2"],
+                                "a bulleted count line inside a backtick fence")
+
+    def test_info_string_fenced_bulleted_count_line_is_refused(self):
+        # The model writes a pasted template with an info string, so the opener is ```markdown, not a bare ```.
+        self.assertCountRefused("Designer kind: informed\n\n```markdown\n- Blind designers: 2\n```\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2"],
+                                "a bulleted count line inside a ```markdown fence")
+
+    def test_tilde_fenced_bulleted_count_line_is_refused(self):
+        # A ~~~ fence is a fence too: a count line inside it never counts.
+        self.assertCountRefused("Designer kind: informed\n\n~~~\n- Blind designers: 2\n~~~\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2"],
+                                "a bulleted count line inside a tilde fence")
+
+    def test_fenced_bold_count_line_is_refused(self):
+        # The bold marked form inside a fence never counts, as the bulleted form does not.
+        self.assertCountRefused("Designer kind: informed\n\n```\n**Blind designers:** 2\n```\n\n" + DUO_BRIEF,
+                                ["**Blind designers:** 2"],
+                                "a bold count line inside a backtick fence")
+
+    def test_tilde_line_inside_a_backtick_fence_does_not_close_it(self):
+        # A ~~~ line inside a ``` fence is content: only a ``` line closes that fence, so the count line stays fenced.
+        self.assertCountRefused("Designer kind: informed\n\n```\n~~~\n- Blind designers: 2\n```\n\n" + DUO_BRIEF,
+                                ["- Blind designers: 2"],
+                                "a count line after a tilde line inside a backtick fence")
+
+    def test_bulleted_count_outside_a_fence_passes_beside_a_fenced_template(self):
+        # Green control. The count line is outside the fence, and the fenced template holds no count line.
+        prompt = ("Designer kind: informed\n- Blind designers: 2\n\nKeep the notes in this shape:\n\n"
+                  "```\nDesigner: <name>\nJob: <one line>\n```\n\n" + DUO_BRIEF)
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control holds only the outside line")
+        self.assertEqual(self.spawn(prompt), "", "a count line outside any fence must count beside a fenced template")
+
+    def test_bulleted_count_after_a_closed_fence_passes(self):
+        # Green control. The fence closes before the count line, so the count line is outside it and counts.
+        prompt = ("Designer kind: informed\n\n```\nDesigner: <name>\n```\n\n- Blind designers: 2\n\n" + DUO_BRIEF)
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control holds only the line after the fence")
+        self.assertEqual(self.spawn(prompt), "", "a count line after a closed fence must count, so the fence did not stay open")
+
+    def test_inline_backticks_in_prose_do_not_open_a_fence(self):
+        # Green control. A ``` in the middle of a sentence is prose, not a fence, so the count line after it counts.
+        prompt = "Designer kind: informed\nWrap a count in ``` marks in your notes.\n- Blind designers: 2\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control holds only the bulleted line")
+        self.assertEqual(self.spawn(prompt), "", "backticks mid-sentence are not a fence, so the count line must count")
+
+    def test_fenced_plain_count_line_keeps_mains_verdict(self):
+        # Pin. Main reads a plain column-0 count line even inside a fence, so it passes. The head keeps that verdict.
+        prompt = "Designer kind: informed\n\n```\nBlind designers: 2\n```\n\n" + DUO_BRIEF
+        self.assertEqual(count_lines(prompt), ["Blind designers: 2"], "scope: the pin holds only the fenced plain line")
+        self.assertEqual(self.spawn(prompt), "", "a fenced plain count line must pass, as on main")
+
     def test_informed_spawn_with_owner_none_passes(self):
         self.assertEqual(self.spawn('Designer kind: informed\nBlind designers: none, owner: "informed only"\n\nDraw it.'), "")
 
