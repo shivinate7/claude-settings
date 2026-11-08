@@ -25,7 +25,7 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
-- The guard-set lists (the install.sh copy loop, the install.ps1 copy and set loops, and the ci-scope.sh case) now hold every module the guard imports, at load time or lazily in a function body: `override.py` and `_nowindow.py` joined the earlier ones. The lists name each module the guard imports, so the guard set stays whole when the flat landing fails or lands late. The check `guardset4` derives the required set from the imports of `guard.py` and each `guard_*.py` outside a try block, so a new import needs no edit to it. A module imported only inside a try (`_nowindow` in `guard_kill.py` and `git_reads.py`) is listed too, but the check does not require it (coordinator request, 2026-11-08 02:23 CST).
+- The guard-set lists (the install.sh copy loop, the install.ps1 copy and set loops, and the ci-scope.sh case) now hold every module the guard imports, at load time or lazily in a function body: `override.py` and `_nowindow.py` joined the earlier ones. The lists name each module the guard imports, so the guard set stays whole when the flat landing fails or lands late. The check `guardset4` derives the required set from the imports of `guard.py` and each `guard_*.py` outside a try block, so a new import needs no edit to it. A module the guard imports only inside a try block is not required by the check. `_nowindow` is required because `guard.py` imports it in a function body, outside any try (coordinator request, 2026-11-08 02:23 CST).
 
 ## A verdict call piped onward
 
