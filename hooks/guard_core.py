@@ -2019,9 +2019,11 @@ def _compile_read_call(call) -> bool:
 
 def _py_leading_text(node):
     """The literal text an expression starts with: a string, the left of `"-o" + p`, the first part of
-    an f-string; else None."""
+    an f-string, the text before the first `%` of `"-o%s" % p`; else None."""
     while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         node = node.left
+    if _py_is_format(node):
+        return node.left.value.split("%")[0]
     if isinstance(node, ast.JoinedStr) and node.values:
         node = node.values[0]
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
@@ -2319,25 +2321,60 @@ def _py_is_format(node) -> bool:
 
 def _py_list_items(node, bound):
     """The items of a list or tuple literal, or of the one a name holds where it is read
-    (`parts = [h, "x"]`), else None."""
-    if isinstance(node, ast.Name) and bound is not None:
+    (`parts = [h, "x"]`), else None. A list a name holds also takes what `parts.append(x)` adds after the
+    binding and before the read, in source order (`_python_paths` records each in `bound`, under the key
+    `parts.append`)."""
+    if not (isinstance(node, ast.Name) and bound is not None):
+        return node.elts if isinstance(node, (ast.List, ast.Tuple)) else None
+    entry = _py_bound_entry(node, bound)
+    if entry is None or not isinstance(entry[1], (ast.List, ast.Tuple)):
+        return None
+    end, value = entry
+    here = (node.lineno, node.col_offset)
+    added = [item for at, item in bound.get(node.id + ".append", ()) if end < at <= here]
+    return [*value.elts, *added] if isinstance(value, ast.List) else value.elts
+
+
+def _py_literal_text(node, bound=None):
+    """The string a literal holds, or a name bound to one where it is read (a few hops), else None."""
+    for _ in range(4):
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        if not (isinstance(node, ast.Name) and bound is not None):
+            return None
         node = _py_bound_value(node, bound)
-    return node.elts if isinstance(node, (ast.List, ast.Tuple)) else None
+    return None
+
+
+def _py_join_separator(node, bound=None):
+    """The separator of `sep.join(...)`: a string literal, `os.sep` or `os.path.sep` (read as `/`), or a
+    name bound to one (a few hops); else None."""
+    for _ in range(4):
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        owner = node.value if isinstance(node, ast.Attribute) and node.attr == "sep" else None
+        if isinstance(owner, ast.Attribute) and owner.attr == "path":
+            owner = owner.value
+        if isinstance(owner, ast.Name) and owner.id == "os":
+            return "/"
+        if not (isinstance(node, ast.Name) and bound is not None):
+            return None
+        node = _py_bound_value(node, bound)
+    return None
 
 
 def _py_is_str_join(node, bound=None) -> bool:
     """True for `"/".join([a, b])`: a join of a list or tuple literal (or a name bound to one) on a
-    string literal."""
+    string literal, `os.sep` or a name that holds one."""
     return (isinstance(node, ast.Call) and _call_name(node) == "join" and len(node.args) == 1
             and _py_list_items(node.args[0], bound) is not None and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str))
+            and _py_join_separator(node.func.value, bound) is not None)
 
 
-def _py_is_str_format(node) -> bool:
-    """True for `"{}/x".format(a)`: a `.format` call on a string literal."""
+def _py_is_str_format(node, bound=None) -> bool:
+    """True for `"{}/x".format(a)`: a `.format` call on a string literal, or on a name bound to one."""
     return (isinstance(node, ast.Call) and _call_name(node) == "format" and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str)
-            and bool(node.args or node.keywords))
+            and _py_literal_text(node.func.value, bound) is not None and bool(node.args or node.keywords))
 
 
 def _py_join_parts(call, bound=None):
@@ -2353,11 +2390,26 @@ def _py_join_parts(call, bound=None):
     return parts
 
 
+def _py_dict_items(node, bound):
+    """{key: value expression} for each string key of a dict literal, or of the one a name holds where it
+    is read (a few hops); {} for anything else."""
+    for _ in range(4):
+        if isinstance(node, ast.Name) and bound is not None:
+            node = _py_bound_value(node, bound)
+        else:
+            break
+    if not isinstance(node, ast.Dict):
+        return {}
+    return {key.value: value for key, value in zip(node.keys, node.values)
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+
+
 def _py_format_text(call, bound, depth) -> str:
     """`"{}/x/{0}/{name}".format(a, b, name=c)` with each hole read as its argument; `_` for a hole it
     cannot tell: a slot with no argument, a keyword the call does not name, and every positional slot at
     or after a star argument that is not a list or tuple literal (a `*[a, b]` is spread, and so is a
-    `*parts` of a name bound to one)."""
+    `*parts` of a name bound to one). The template is a literal or a name bound to one, and a `**d` of a
+    dict literal (or a name bound to one) names its string keys."""
     args, unknown_from = [], None
     for arg in call.args:
         if isinstance(arg, ast.Starred):
@@ -2371,6 +2423,10 @@ def _py_format_text(call, bound, depth) -> str:
         elif unknown_from is None:
             args.append(_py_composed_text(arg, bound, depth))
     named = {key.arg: _py_composed_text(key.value, bound, depth) for key in call.keywords if key.arg}
+    for key in call.keywords:   # `**d` of a dict literal, or of a name bound to one
+        if key.arg is None:
+            named.update({name: _py_composed_text(value, bound, depth)
+                          for name, value in _py_dict_items(key.value, bound).items()})
     auto = iter(range(len(args) + 1))
 
     def hole(match):
@@ -2386,17 +2442,23 @@ def _py_format_text(call, bound, depth) -> str:
             return args[int(key)] if int(key) < len(args) else "_"
         return named.get(key, "_")
 
-    return re.sub(r"\{\{|\}\}|\{(\w*)(?:[!:][^}]*)?\}", hole, call.func.value.value)
+    return re.sub(r"\{\{|\}\}|\{(\w*)(?:[!:][^}]*)?\}", hole, _py_literal_text(call.func.value, bound))
 
 
-def _py_bound_value(name, bound):
-    """The expression a name holds where `name` is read: the last `name = ...` that ends before it, so
-    `p = p / "x"` reads the p before it. A name read before every assignment takes the first one."""
+def _py_bound_entry(name, bound):
+    """(end, expression) of the last `name = ...` that ends before `name` is read, so `p = p / "x"` reads
+    the p before it. A name read before every assignment takes the first one. None for a name never bound."""
     values = bound.get(name.id)
     if not values:
         return None
     here = (name.lineno, name.col_offset)
-    return next((value for end, value in reversed(values) if end <= here), values[0][1])
+    return next((entry for entry in reversed(values) if entry[0] <= here), values[0])
+
+
+def _py_bound_value(name, bound):
+    """The expression a name holds where `name` is read (`_py_bound_entry`), else None."""
+    entry = _py_bound_entry(name, bound)
+    return entry[1] if entry is not None else None
 
 
 def _py_composed_text(node, bound, depth=0) -> str:
@@ -2435,9 +2497,9 @@ def _py_composed_text(node, bound, depth=0) -> str:
         if name == "str" and first is not None:
             return _py_composed_text(first, bound, step)   # `str(p)` is p in another spelling
         if _py_is_str_join(node, bound):
-            sep, parts = node.func.value.value, _py_list_items(node.args[0], bound)
+            sep, parts = _py_join_separator(node.func.value, bound), _py_list_items(node.args[0], bound)
             return sep.join(_py_composed_text(part, bound, step) for part in parts) or "_"
-        if _py_is_str_format(node):
+        if _py_is_str_format(node, bound):
             return _py_format_text(node, bound, step)
         if name == "join" or name.endswith("Path") or (name == "joinpath" and isinstance(node.func, ast.Attribute)):
             text = _py_composed_text(node.func.value, bound, step) if name == "joinpath" else ""
@@ -2460,7 +2522,7 @@ def _py_builds_path(node, bound=None) -> bool:
         return any(isinstance(part, ast.FormattedValue) for part in node.values)
     if isinstance(node, ast.Call) and node.args and _call_name(node) == "joinpath":
         return isinstance(node.func, ast.Attribute)
-    if _py_is_str_join(node, bound) or _py_is_str_format(node):
+    if _py_is_str_join(node, bound) or _py_is_str_format(node, bound):
         return True
     return isinstance(node, ast.Call) and len(_py_join_parts(node, bound)) > 1 and (
         _call_name(node) == "join" or _call_name(node).endswith("Path"))
@@ -2522,6 +2584,12 @@ def _python_paths(code: str, frozen=False):
             names.setdefault(node.id, []).append(node)
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             bound.setdefault(node.targets[0].id, []).append(((node.end_lineno, node.end_col_offset), node.value))
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "append"
+              and isinstance(node.func.value, ast.Name) and len(node.args) == 1 and not node.keywords
+              and isinstance(parents.get(node), ast.Expr)):
+            # `parts.append(x)` as a statement: read by `_py_list_items`, under a key no name can have
+            bound.setdefault(node.func.value.id + ".append", []).append(
+                ((node.end_lineno, node.end_col_offset), node.args[0]))
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
                 and isinstance(node.op, (ast.Add, ast.Div)):
             # `p += x` binds p to `p + x`: the value built from the one before it
@@ -2534,9 +2602,13 @@ def _python_paths(code: str, frozen=False):
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            mode = _python_mode(node, parents, names=names, frozen=frozen, bound=bound)
+            try:
+                mode = _python_mode(node, parents, names=names, frozen=frozen, bound=bound)
+                glued = _glued_write_value(node, node.value, parents) if frozen else None
+            except Exception:   # one unreadable literal must not hide a write later in the script
+                found.append((node.value, "unknown"))   # its own use is not told
+                continue
             found.append((node.value, mode))
-            glued = _glued_write_value(node, node.value, parents) if frozen else None
             if glued:
                 found.append((glued, mode))
     return found + _py_composed_paths(tree, parents, names, bound) if frozen else found

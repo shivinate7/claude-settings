@@ -389,7 +389,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_interpreter_hit, frozen_shell_hit,
+            FROZEN_CRASH_NOTE, FROZEN_CRASH_TAG, FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_interpreter_hit, frozen_shell_hit,
             interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
@@ -3590,7 +3590,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # The script a python or node heredoc body, -c or -e holds is read from the raw command.
     matched = frozen_shell_hit(stripped, cwd) or frozen_interpreter_hit(raw, cwd)
     if matched:
-        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
+        crash = FROZEN_CRASH_NOTE if matched.endswith(FROZEN_CRASH_TAG) else ""
+        refuse(tool, "deny", "frozen-path", FROZEN_REASON + crash, matched)
 
     # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
     matched = project_config_shell_hit(stripped, cwd)

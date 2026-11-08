@@ -922,13 +922,42 @@ def interpreter_write_hit(raw: str, cwd: str, predicate, modes=None) -> str:
     `modes` None reads the script by its own write calls (`_py_hit`, `_js_hit`). A tuple of modes
     reads it with guard_core's `code_paths` instead and hits a string literal whose mode is in the
     tuple (`FROZEN_CODE_MODES`).
-    A crash of the scan reads as no hit: it must never skip the rules after it."""
+    A crash of the scan never skips the rules after it. A crash of the frozen reading (`modes` given)
+    falls back to the plain text of the script (`_crash_text_hit`); any other crash reads as no hit."""
     try:
         if modes is not None:
             return _code_literal_hit(raw, cwd, predicate, modes)
         return _interpreter_write_hit(raw, cwd, predicate)
     except Exception:
-        return ""
+        return _crash_text_hit(raw, cwd, predicate) if modes is not None and _CODE_WORDS.search(raw) else ""
+
+
+# A crash of the frozen reader loses the reading of the script, and a frozen write in it with it. The fallback
+# reads the script as plain text: a word that holds a `/` is a path the predicate judges, and so is the tail of
+# one that names the config directory (`h + "/.claude/hooks/x"`, `.claude/hooks/x`) under the config directory's
+# parent. A script that names no frozen spelling reads as no hit, so a crash on a script that touches only
+# /tmp still allows (decision frozen-path-resolves-shell-vars). The hit carries FROZEN_CRASH_TAG, and the
+# refusal's reason then names the crash.
+FROZEN_CRASH_TAG = " [the frozen reader crashed on this script]"
+FROZEN_CRASH_NOTE = " The frozen reader crashed on this script, so it was read as plain text."
+_CRASH_WORD = re.compile(r"[^\s\"'`()\[\]{},;=+]*[/\\][^\s\"'`()\[\]{},;=+]*")
+
+
+def _crash_text_hit(text: str, cwd: str, predicate) -> str:
+    """The first path-like word of `text` that `predicate` accepts, tagged with FROZEN_CRASH_TAG, else ''."""
+    try:
+        config = guard_core.config_dir()
+        name, parent = os.path.basename(config.rstrip("/\\")), os.path.dirname(config.rstrip("/\\"))
+        for word in _CRASH_WORD.findall(text):
+            spellings = [word]
+            at = word.find(name + "/")
+            if name and at >= 0:
+                spellings.append(os.path.join(parent, word[at:]))
+            if any(predicate(spelling, cwd) for spelling in spellings):
+                return word + FROZEN_CRASH_TAG
+    except Exception:
+        pass   # the last fallback: it never raises into the rules after it
+    return ""
 
 
 # The frozen rule refuses a literal the interpreter writes, and one whose use the reader cannot tell
@@ -949,8 +978,8 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
     def hit(code: str, language: str, where: str) -> str:
         try:
             literals = code_paths(code, language, frozen=True)
-        except ValueError:
-            return ""   # node code nested past JS_DEPTH: the reader names no path
+        except Exception:   # a crash, or node code nested past JS_DEPTH (ValueError): the plain text is read
+            return _crash_text_hit(code, where, predicate)
         for text, mode in literals:
             text = text.strip()
             if mode == "shell":   # `sh -c <script>` from subprocess: the shell write scan reads the script
