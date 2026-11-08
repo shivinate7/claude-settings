@@ -526,22 +526,84 @@ def session_id_of(payload) -> str:
     return value if SESSION_ID_RE.match(value or "") else ""
 
 
-def under_session_scratchpad(where: str, session_id: str) -> bool:
-    """True when `where` resolves to a path inside this session's own scratchpad."""
+def session_scratchpad_root(where: str, session_id: str) -> str:
+    """The scratchpad folder of this session that `where` resolves into (the folder itself counts), else ''."""
     if not where or not session_id or not SESSION_ID_RE.match(session_id):
-        return False
+        return ""
     try:
         real = os.path.realpath(where)
         temp = os.path.realpath(tempfile.gettempdir())
     except Exception:
-        return False
+        return ""
     if not (os.path.normcase(real) + os.sep).startswith(os.path.normcase(temp) + os.sep):
-        return False
+        return ""
     parts = real.split(os.sep)
     for index in range(len(parts) - 1):
         if parts[index] == session_id and os.path.normcase(parts[index + 1]) == "scratchpad":
-            return True
-    return False
+            return os.sep.join(parts[:index + 2])
+    return ""
+
+
+def under_session_scratchpad(where: str, session_id: str) -> bool:
+    """True when `where` resolves to a path inside this session's own scratchpad."""
+    return bool(session_scratchpad_root(where, session_id))
+
+
+# Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares that session's
+# scratchpad, so the guard records which agent wrote each file there. One sidecar file per script,
+# `<scratchpad>/.writers/<hash of the script's real path>`, holds the writer's agent id: a write or a run
+# reads one file, a write never rewrites another record, and two agents never share a file to race on.
+SCRATCHPAD_WRITERS = ".writers"
+
+
+def scratchpad_writer_record(where: str, session_id: str) -> str:
+    """The sidecar path for the file `where` in this session's scratchpad, or '' when `where` is not a
+    file there (the scratchpad folder itself and the sidecar folder carry no record)."""
+    root = session_scratchpad_root(where, session_id)
+    if not root:
+        return ""
+    real = os.path.realpath(where)
+    if real == root or real.startswith(os.path.join(root, SCRATCHPAD_WRITERS) + os.sep):
+        return ""
+    import hashlib   # lazy: only a scratchpad file reaches here
+    key = os.path.normcase(real).encode("utf-8", "replace")
+    return os.path.join(root, SCRATCHPAD_WRITERS, hashlib.sha1(key).hexdigest()[:24])
+
+
+def scratchpad_record_writer(where: str, session_id: str, agent_id: str) -> None:
+    """Record `agent_id` as the writer of the scratchpad file `where`. A failed write leaves no record:
+    the rule then passes that file, and the call goes on."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if not record:
+            return
+        folder = os.path.dirname(record)
+        os.makedirs(folder, exist_ok=True)
+        handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as out:
+                out.write(agent_id)
+            os.replace(temp, record)   # one step: a reader never sees half an id
+        except BaseException:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        pass
+
+
+def scratchpad_writer_of(where: str, session_id: str) -> str:
+    """The agent id recorded as the writer of the scratchpad file `where`, or '' when none is recorded."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if not record:
+            return ""
+        with open(record, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except Exception:
+        return ""
 
 
 def in_any_session_scratchpad(where: str) -> bool:

@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The rule `scratchpad-owner` in `hooks/guard.py` asks before an agent runs a scratchpad file that another agent of its session wrote. Source: the incident below, 2026-11-08 06:57 CST. No owner ruling is named.
+The rule `scratchpad-owner` in `hooks/guard.py` asks before an agent runs, or writes over, a scratchpad file that another agent of its session wrote. Source: the incident below, 2026-11-08 06:57 CST. No owner ruling is named.
 
 - The mistake: a builder agent in lane `notes-fix-large-1` ran `probe2.py`, a script that another agent had left in the session's shared scratchpad. No guard stopped it.
 - The harm: the builder ran code it never read, with effects its brief never named.
@@ -13,9 +13,10 @@ The rule `scratchpad-owner` in `hooks/guard.py` asks before an agent runs a scra
 
 - Record at write. A call with a valid `agent_id` that writes a file under this session's scratchpad records that `agent_id` as the file's writer. The record is a small sidecar under the scratchpad. The writes it covers are the Write, Edit, MultiEdit and NotebookEdit targets, and a shell write target as `_shell_write_hit` (`hooks/guard_frozen.py`) reads it.
 - Judge at run. A Bash call with a valid `agent_id` that runs a scratchpad file gets "ask" when the record names another agent. A run is an interpreter word (`python*`, `bash`, `sh`, `node`, `perl`, `ruby`), `source` or `.`, or the path as the command word. The path may be absolute, or follow a `cd`.
+- Judge at overwrite. A call with a valid `agent_id` that writes over a scratchpad file whose record names another agent gets "ask" too (second incident, PR #1931). The writes are the ones the record covers, appends included. A write that passes updates the record to the latest writer.
 - Passes:
-  - the caller's own file, where the record names the same `agent_id`;
-  - a file with no record;
+  - the caller's own file, where the record names the same `agent_id`, run or rewritten;
+  - a file with no record, run or first written;
   - a call with no `agent_id`, since the top-level session may hand a script to its agent on purpose;
   - a read, which runs no code.
 - Ceiling: a file written by a route the guard cannot see (`python -c`, a variable path) has no record, so it passes. An ask there would be a false alarm. The scratchpad false alarm in trial `other-checkout-scratch-false-alarm` is the precedent: a guard refused a session's own scratchpad. A guard that goes red when nothing is wrong is spent (`guard-that-cries-wolf-is-spent`).
