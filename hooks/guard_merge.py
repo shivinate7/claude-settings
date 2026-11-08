@@ -12,7 +12,7 @@ import re
 import sys
 
 from guard_core import (
-    GIT_WORK_TREE_RE, REDIRECTION, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
+    GIT_WORK_TREE_RE, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
     command_root, dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base,
     segment_tokens, shell_abs, split_segments,
 )
@@ -350,11 +350,53 @@ _COMMIT_VALUE_FLAGS = {"--message", "--file", "--reuse-message", "--reedit-messa
 _ADD_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
 
 
+_REDIRECT_OP = re.compile(r"(?:\d*>>?&?|&>>?|\d*<{1,3})")   # a redirect operator, its target not attached
+
+
+def _redirect_length(tokens, index):
+    """How many words of `tokens` from `index` the shell consumes as one redirect, 0 when the word is none.
+    An operator word takes the next word as its target (`> "my out.txt"` is two words); an operator with its
+    target attached (`>f`, `2>&1`, `>"a b"`) is one. A process substitution target (`> >(tee x)`) runs on to
+    its closing parenthesis. The one home of this read: a word the shell spends never reaches the command."""
+    match = _REDIRECT_OP.match(tokens[index])
+    if not match:
+        return 0
+    end, target = index + 1, tokens[index][match.end():]
+    if not target:
+        if end >= len(tokens):
+            return end - index
+        target, end = tokens[end], end + 1
+    substitution = target.lstrip("<>").startswith("(")   # `>(tee x)`, or `(tee x)` after an attached operator
+    depth = target.count("(") - target.count(")") if substitution else 0
+    while depth > 0 and end < len(tokens):
+        depth += tokens[end].count("(") - tokens[end].count(")")
+        end += 1
+    return end - index
+
+
+def _strip_redirects(tokens):
+    """`tokens` without the words the shell consumes as redirects (`_redirect_length`)."""
+    out, index = [], 0
+    while index < len(tokens):
+        step = _redirect_length(tokens, index)
+        if step:
+            index += step
+        else:
+            out.append(tokens[index])
+            index += 1
+    return out
+
+
 def _commit_shape(args):
     """Return (all_flag, pathspecs) of a `git commit` call: `-a` or `--all` (also in a short
-    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec."""
+    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec, and a
+    redirect is no pathspec."""
     all_flag, specs, index, only_paths = False, [], 0, False
     while index < len(args):
+        step = _redirect_length(args, index)   # read before the flags: a value flag's own branch skips its value
+        if step:
+            index += step
+            continue
         arg = args[index]
         index += 1
         if only_paths:
@@ -381,7 +423,8 @@ def _commit_shape(args):
 
 def _add_shape(args):
     """Return (whole_tree, pathspecs) of a `git add` call. Whole tree: `-A`, `--all`, `-u` or
-    `--update` with no pathspec."""
+    `--update` with no pathspec. A redirect is no pathspec."""
+    args = _strip_redirects(args)
     flags = [a for a in args if a.startswith("-") and a != "--"]
     specs = [a for a in args if not a.startswith("-") and a != "--"]
     whole = any(f in _ADD_ALL_FLAGS or (not f.startswith("--") and set(f[1:]) & set("Au")) for f in flags)
@@ -493,10 +536,14 @@ def _runs_generator(segment):
     """None when the segment is no run of lint/hook_catalog.py that writes a page. Else (the --root the run
     names, "" for none; the segment's tokens, for `_env_chdir`). A run is the command word being the generator,
     or a python interpreter whose script argument is it, with arguments that `_generator_root` reads as a
-    write. The shell consumes a redirect (REDIRECTION, the one
-    `git_calls` drops too) and a closing subshell `)`, so neither reaches the generator's parser: a token the
-    shell consumes never turns a run into no run. The caller passes no git call."""
-    tokens = list(segment_tokens(REDIRECTION.sub(" ", segment)) or [])
+    write. The shell consumes a redirect (`_strip_redirects`, read on shlex words, so a quoted target with a
+    space is one) and a closing subshell `)`, so neither reaches the generator's parser: a token the shell
+    consumes never turns a run into no run. A segment shlex cannot read that names the generator and holds a
+    redirect counts as a run with no --root: the guard fails toward a hit. The caller passes no git call."""
+    read = segment_tokens(segment)
+    if read is None:
+        return ("", []) if _GENERATOR in segment and re.search(r"[<>]", segment) else None
+    tokens = _strip_redirects(list(read))
     while tokens and tokens[-1].strip(")") == "":
         tokens.pop()
     if tokens and tokens[-1].endswith(")"):

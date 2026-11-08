@@ -11612,6 +11612,47 @@ for _name, _run in (
 # A trailing & detaches the run, which detached-launch refuses before records-page reads it: a control, not a red.
 sh("a chain that runs the generator with a trailing &, then add -A and commit is refused",
    GEN + " & " + ADD_A + " && " + COMMIT_X, "deny", cwd=LANE)
+
+# A redirect is one shell word, and its target may hold a space or a quote (`> "my out.txt"`). The generator run
+# still writes this repo's page with such a target, and a commit that carries a redirect (`2>&1 | tail`, `> out.txt`)
+# still commits with -a. The controls already refuse without the fix: a bare target, and a commit with no redirect.
+# A `--help` run writes no page, so it is allowed.
+COMMIT_AM = VCS + " commit -am x"
+for _rd_name, _rd_command in (
+    ('a spaced target on the generator run, > "my out.txt"', GEN + ' > "my out.txt" && ' + COMMIT_AM),
+    ('a spaced quoted target on the generator run, >"/tmp/a b/x"', GEN + ' >"/tmp/a b/x" && ' + COMMIT_AM),
+    ('a spaced target on stderr, 2> "err log.txt"', GEN + ' 2> "err log.txt" && ' + COMMIT_AM),
+    ('a process-substitution target, > >(tee x)', GEN + " > >(tee x) && " + COMMIT_AM),
+    ('a commit piped to tail, commit -am x 2>&1 | tail -5', GEN + " && " + VCS + " commit -am x 2>&1 | tail -5"),
+    ('a commit redirected to a file, commit -am x > out.txt', GEN + " && " + VCS + " commit -am x > out.txt"),
+):
+    records_deny("redirect-judged: a chain with %s" % _rd_name, _rd_command, "product")
+records_deny("redirect-judged control: a chain that runs the generator, then commit -am",
+             GEN + " && " + COMMIT_AM, "product")
+records_deny("redirect-judged control: a chain with a bare target on the generator run, then commit -am",
+             GEN + " > out.txt && " + COMMIT_AM, "product")
+records_allow("redirect-judged: a --help run with a spaced target, then commit -am",
+              GEN + ' --help > "my out.txt" && ' + COMMIT_AM, REC_LANES["product"])
+# An `add` that carries a redirect still stages the files its words name. `_add_shape` reads the redirect's
+# operator and target as pathspecs, so `add -A > /dev/null` is no whole-tree add, and the page it stages goes
+# unseen. Each shape must refuse like a plain `add -A` after the generator run. The controls keep today's verdict:
+# a plain add -A, and an add of one other file with its output discarded, which names no page.
+ADD_REDIRECT_CASES = (
+    ("add -A > /dev/null", VCS + " add -A > /dev/null"),
+    ("add -A 2>&1", VCS + " add -A 2>&1"),
+    ("add -A > out.txt", VCS + " add -A > out.txt"),
+)
+for _name, _add in ADD_REDIRECT_CASES:
+    records_deny("add-redirect: a generator run, then git %s, then commit" % _name,
+                 GEN + " && " + _add + " && " + COMMIT_X, "product")
+records_deny("add-redirect pin: a generator run, then git add . > out.txt, then commit",
+             GEN + " && " + VCS + " add . > out.txt && " + COMMIT_X, "product")
+records_deny("add-redirect control: a generator run, then plain add -A, then commit",
+             GEN + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("add-redirect control: a generator run, then git add lint/other.py > /dev/null, then commit",
+              GEN + " && " + VCS + " add lint/other.py > /dev/null && " + COMMIT_X, REC_LANES["product"])
+records_allow("add-redirect control: git add lint/other.py > /dev/null, then commit",
+              VCS + " add lint/other.py > /dev/null && " + COMMIT_X, REC_LANES["product"])
 records_deny("a chain that runs the generator in a subshell from lint with --root .., then add -A and commit",
              "( cd lint && " + RUN_FROM_LINT + " ) && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator with env -C into this repo, from another folder, then git -C commit -am",
