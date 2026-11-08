@@ -1396,6 +1396,36 @@ class StaleGitReads(unittest.TestCase):
             self.fail(f"merge.py's loader raised {type(e).__name__} for a missing hooks/git_reads.py, not ImportError: {e}")
         self.fail("merge.py's loader loaded hooks/git_reads.py from a checkout that has none")
 
+    def older_and_newer(self):
+        """-> a fresh repo with two commits in the run folder: (its folder, the older commit's sha, the newer commit's sha)."""
+        d = tempfile.mkdtemp(prefix="ancestor-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, d, True)
+        sh(d, "git", "init", "-q", "-b", "main")
+        sh(d, "git", "commit", "-q", "--allow-empty", "-m", "older")
+        older = sh(d, "git", "rev-parse", "HEAD")
+        sh(d, "git", "commit", "-q", "--allow-empty", "-m", "newer")
+        return d, older, sh(d, "git", "rev-parse", "HEAD")
+
+    def test_ancestor_answers_with_the_real_git_reads(self):
+        d, older, newer = self.older_and_newer()
+        self.assertIs(merge.ancestor(d, older, newer), True, "ancestor did not report the older commit as reachable from the newer one")
+
+    def test_ancestor_answers_over_a_stale_git_reads_that_lacks_branch_is_ancestor(self):
+        """merge.ancestor imports git_reads when it is called, so an older git_reads in sys.modules answers for it. merge's own load
+        of hooks/git_reads.py has branch_is_ancestor, so ancestor must read that load, not the import."""
+        import git_reads  # hooks/git_reads.py: its other names are copied into the stand-in, so only branch_is_ancestor is missing
+        stale = types.ModuleType("git_reads")
+        stale.lists_refs, stale.listing_text = git_reads.lists_refs, git_reads.listing_text
+        self.assertFalse(hasattr(stale, "branch_is_ancestor"), "scope: the stand-in has branch_is_ancestor, so the case proves nothing")
+        d, older, newer = self.older_and_newer()
+        with module_as("git_reads", stale):
+            self.assertIs(sys.modules.get("git_reads"), stale, "scope: the stale git_reads is not the module the call imports")
+            try:
+                got = merge.ancestor(d, older, newer)
+            except AttributeError as e:
+                self.fail(f"ancestor reads branch_is_ancestor from the stale git_reads in sys.modules: {e}")
+        self.assertIs(got, True, "ancestor did not report the older commit as reachable from the newer one over a stale git_reads")
+
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
