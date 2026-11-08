@@ -337,13 +337,17 @@ const lowCell = (loc) => loc.evaluate((el) => {
   const s = getComputedStyle(el);
   return { size: s.backgroundSize, pos: s.backgroundPosition, repeat: s.backgroundRepeat, image: s.backgroundImage, shadow: s.boxShadow };
 });
-// The paused part as drawn: the cell, or its run in a narrow bar. A cell or a run at 0 width is not drawn, so it is not the part.
+// The paused part as drawn: the cell, or its run in a narrow bar. A cell at 0 width is not drawn; a run is drawn only in a runs layer
+// that has width (see barLayers).
 const drawnPaused = async (page, scope) => {
   const all = page.locator(`${scope} i.pzd`);
   const drawn = [];
   for (let i = 0; i < (await all.count()); i++) {
-    const box = await all.nth(i).boundingBox();
-    if (box && box.width > 0) drawn.push(all.nth(i));
+    const shown = await all.nth(i).evaluate((el) => {
+      const host = el.closest(".runs");
+      return el.getBoundingClientRect().width > 0 && (!host || host.getBoundingClientRect().width > 0);
+    });
+    if (shown) drawn.push(all.nth(i));
   }
   return drawn;
 };
@@ -393,17 +397,19 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --bad, read f
 // in progress, stalled, paused, blocked, to do, with no empty run and no cell. Each drawn part is at least 3px. The cells stay in the DOM at 0 width.
 const RULE_PX = 30 * 5 - 2;
 // The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
+// A run keeps its 4px minimum past a 0px runs layer, and the layer clips it, so a run counts as drawn only in a drawn layer.
 const barLayers = (loc) => loc.evaluate((bar) => {
-  const parts = (els) => els.map((e) => ({ cls: e.className, w: e.getBoundingClientRect().width }));
+  const w = (e) => e.getBoundingClientRect().width;
+  const parts = (els) => els.map((e) => ({ cls: e.className, w: w(e) }));
   const runs = bar.querySelector(":scope > .runs");
-  return { barW: bar.getBoundingClientRect().width, cells: parts([...bar.querySelectorAll(":scope > i")]), runs: runs ? parts([...runs.querySelectorAll(":scope > i")]) : [] };
+  return { barW: w(bar), cells: parts([...bar.querySelectorAll(":scope > i")]), runs: runs ? parts([...runs.querySelectorAll(":scope > i")]) : [], runsDrawn: !!runs && w(runs) > 0 };
 });
 for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (const [name, scope] of BARS) test(`${name} at ${width} wide in ${scheme} draws one layer, cells or runs by the narrow rule, and each drawn part is at least 3px`, async (t) => {
   const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 }), width); if (!page) return;
   await page.emulateMedia({ colorScheme: scheme });
   assert.equal(await page.locator(scope).count(), 1, `${name} at ${width} wide is missing (${scope})`);
   const L = await barLayers(page.locator(scope));
-  const cellsDrawn = L.cells.filter((p) => p.w > 0), runsDrawn = L.runs.filter((p) => p.w > 0);
+  const cellsDrawn = L.cells.filter((p) => p.w > 0), runsDrawn = L.runsDrawn ? L.runs : [];
   assert.ok(!(cellsDrawn.length && runsDrawn.length), `${name} at ${width} wide draws cells and runs both`);
   assert.ok(cellsDrawn.length + runsDrawn.length > 0, `${name} at ${width} wide draws no cell and no run`);
   const narrow = L.barW < RULE_PX;
