@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -468,15 +469,17 @@ class UnresolvedLoads(unittest.TestCase):
     drop it: a dropped load leaves its file out of the closure, so a change to that file gets no merge flag. Each case puts the load
     in hooks/mid.py, which merge/merge.py imports, so the failure comes through closure(), the walk the check runs."""
 
-    def closure_of(self, mid_src):
+    def closure_of(self, mid_src, allowed=()):
+        """The closure from merge/merge.py over the fixture files. `allowed` are the constants allow-listed for hooks/mid.py."""
         files = {"merge/merge.py", "hooks/mid.py", "hooks/deep.py"}
         source = {"merge/merge.py": "import mid\n", "hooks/mid.py": mid_src, "hooks/deep.py": "X = 1\n"}
-        return closure("merge/merge.py", files, source.__getitem__)
+        with mock.patch.dict(ALLOWED_CONSTANT_LOADS, {"hooks/mid.py": tuple(allowed)}):
+            return closure("merge/merge.py", files, source.__getitem__)
 
-    def assert_fails_loud(self, mid_src, load):
-        """The closure raises, and its message names hooks/mid.py and the load's text."""
-        with self.assertRaises(Exception, msg=f"the closure drops the unresolvable load {load!r} without a failure") as cm:
-            self.closure_of(mid_src)
+    def assert_fails_loud(self, mid_src, load, allowed=()):
+        """The closure raises UnresolvedLoad, and its message names hooks/mid.py and the load's text."""
+        with self.assertRaises(UnresolvedLoad, msg=f"the closure drops the unresolvable load {load!r} without a failure") as cm:
+            self.closure_of(mid_src, allowed)
         self.assertIn("hooks/mid.py", str(cm.exception), f"the failure for {load!r} does not name the file hooks/mid.py")
         self.assertIn(load, str(cm.exception), f"the failure does not name the load {load!r}")
 
@@ -504,7 +507,40 @@ class UnresolvedLoads(unittest.TestCase):
                                'SPEC = importlib.util.spec_from_file_location("deep", "hooks/{}.py".format(os.environ["X"]))\n',
                                "spec_from_file_location")
 
+    # An allow-listed constant that reads to nothing. The allow list names the constant that holds the path, so the reader must
+    # fail on an empty read of it, not pass the load with no file. Named failure: an allow-listed load passes with no file added.
+    def test_an_allow_listed_constant_that_reads_to_nothing_fails_loud(self):
+        # The decision_watch.py shape: a module constant holds an environment read, and a by-path load names it.
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'MID_PATH = os.environ.get("MID_UNDER_TEST")\n'
+                               'SPEC = importlib.util.spec_from_file_location("deep", MID_PATH)\n',
+                               "MID_PATH", allowed=("MID_PATH",))
+
+    # An allow-listed constant that reads to a file no closure holds. The merge_module shape: a local path joins a loop variable
+    # and the constant. Named failure: the read file is dropped by the closure filter, and no failure names it.
+    def test_an_allow_listed_constant_that_reads_to_no_closure_file_fails_loud(self):
+        self.assert_fails_loud('import importlib.util, os\n'
+                               'MID_PATH = os.path.join("hooks", "nope.py")\n'
+                               'def load(roots):\n'
+                               '    for root in roots:\n'
+                               '        path = os.path.join(root, MID_PATH)\n'
+                               '        return importlib.util.spec_from_file_location("nope", path)\n',
+                               "MID_PATH", allowed=("MID_PATH",))
+
     # Green controls: the same call shapes with a path or a name the reader can read, and loads it must ignore.
+
+    def test_an_allow_listed_constant_that_reads_to_a_closure_file_still_resolves(self):
+        src = ('import importlib.util, os\n'
+               'MID_PATH = os.path.join("hooks", "deep.py")\n'
+               'def load(roots):\n'
+               '    for root in roots:\n'
+               '        path = os.path.join(root, MID_PATH)\n'
+               '        return importlib.util.spec_from_file_location("deep", path)\n')
+        # Scope first: without the allow list this load is unreadable, so the case below tests the allow-listed path.
+        with self.assertRaises(UnresolvedLoad, msg="the load reads without the allow list, so this control tests nothing"):
+            self.closure_of(src)
+        self.assertEqual(self.closure_of(src, allowed=("MID_PATH",)), {"hooks/mid.py", "hooks/deep.py"},
+                         "an allow-listed constant that reads to a closure file no longer resolves")
 
     def test_a_literal_by_path_load_still_resolves(self):
         src = 'import importlib.util\nSPEC = importlib.util.spec_from_file_location("deep", "hooks/deep.py")\n'
