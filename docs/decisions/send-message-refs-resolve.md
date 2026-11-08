@@ -67,6 +67,7 @@ The worst case is 45 s: three git calls at 5 s, `ls-remote` at 5 s, and five `gh
 - A `#N` that follows a PR or pull word but means something else is judged as a PR (`PR merged, see #3`). Only a PR number that does not exist refuses.
 - A made-up PR whose gap breaks those limits passes (`PR for step 2 is #N`, `PR for this bug is #N`, a gap of 7 words). The limits keep issue and step numbers from refusing.
 - A PR word joined to the word before it by `-`, `/` or `.` is no PR word, so `mini-PR #8` passes.
+- After a gap of other words, a `#` with exactly 6 or 8 digits is read as a colour, not a PR (`the PR sets the border to #000000`). A PR number that long is not judged in that form.
 - A line with thousands of PR words is slow to read: 15 s for 10,000 on one 30 KB line (measured once). A hook timeout fails open.
 - The sha forms that `agent-report-shas-resolve` skips are skipped here too: `key=<sha>`, a URL word (this repo's compare URLs included) and a line starting `index `.
 - Another repo's PR named with no `owner/repo` on its line is judged against this repo and can refuse.
