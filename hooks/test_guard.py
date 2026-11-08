@@ -29393,6 +29393,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the frozen-path rule reads", "worktree-home"),
     ("worktree-home: the config-edit rule reads", "worktree-home"),
     ("worktree-home: the agent cap rule reads", "worktree-home"),
+    ("worktree-home: the settings-place drive read", "worktree-home"),
     ("worktree-home: a builder write to a test file from a /c/ cwd", "worktree-home"),
     ("worktree-home: a builder write to product code from a /c/ cwd", "worktree-home"),
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
