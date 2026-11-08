@@ -12,6 +12,7 @@ name alone. The transcript helpers and the run isolation come from lint/test_rep
 import ast
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -244,6 +245,37 @@ class LandingToolHomeTests(unittest.TestCase):
                        and node.value.startswith("mcp__")})
         self.assertEqual(hits, [], "report_guard.py keeps its own MCP tool names, not the shared_names constant: %s"
                          % ", ".join(hits))
+
+    def stop_in_copy(self, shared_names_src):
+        """Run the Stop hook of a copy of lint/report_guard.py on a stub turn that lands nothing. The copy of lint/
+        sits in this run's folder. A None source leaves no hooks/ folder beside it; otherwise hooks/shared_names.py
+        holds the source."""
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        shutil.copytree(HERE, os.path.join(root, "lint"), ignore=shutil.ignore_patterns("__pycache__"))
+        if shared_names_src is not None:
+            os.makedirs(os.path.join(root, "hooks"))
+            with open(os.path.join(root, "hooks", "shared_names.py"), "w", encoding="utf-8") as f:
+                f.write(shared_names_src)
+        records = [trg.human("land it"), trg.assistant_text("Nothing landed.")]
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        return trg.run_guard(os.path.join(root, "lint", "report_guard.py"), hook)
+
+    def test_lh_red_no_hooks_beside_the_copy_fails_open(self):
+        # Catches: a lint/ with no hooks/ beside it crashes the Stop hook at its import. The hook must fail open,
+        # because an install lands lint/ before hooks/.
+        run = self.stop_in_copy(None)
+        self.assertEqual(run.returncode, 0,
+                         "no hooks/ beside lint/: the Stop hook exited %d, not 0: %s"
+                         % (run.returncode, run.stderr[-300:]))
+
+    def test_lh_red_shared_names_without_landing_tools_fails_open(self):
+        # Catches: an older hooks/shared_names.py with no LANDING_TOOLS crashes the Stop hook at its import.
+        # The hook must fail open, as it does when hooks/ is missing.
+        run = self.stop_in_copy("STATE_DIR_NAME = 'state'\n")
+        self.assertEqual(run.returncode, 0,
+                         "shared_names without LANDING_TOOLS: the Stop hook exited %d, not 0: %s"
+                         % (run.returncode, run.stderr[-300:]))
 
     def test_lh_green_guard_merge_and_create_names_are_landing_tools(self):
         # Allow control: every name the guard merges through, or opens a pull request through, is a landing tool.
