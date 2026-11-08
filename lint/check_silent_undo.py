@@ -33,11 +33,14 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               process more (class Blobs) reads each commit's file and its parent's, one commit at a time, so at most
               two texts are held; each side whose tree lacks the file adds one `git ls-tree`. No process stays running.
   note edits  A note row the base holds is edited in place by the branch: a slug present at the merge base of upstream
-              and head whose head row text is none of that slug's base texts. A row the branch adds may be edited freely;
-              a delete, an add and an unchanged row pass. A merge of main that changes a base row passes, since the base is
-              the merge base. Each slug is named once, with its path. Cost, per run: one `git merge-base`, run only when a
-              notes file has a note at head, and per notes path one `git show` of the base file beside the head read
-              the revived read already makes. No process stays running, and no log or file is written.
+              and head with a base text gone and a new text under it, or a slug gone whose base text a new row under
+              another slug reads 0.85 like (a rename with a reword). A row the branch adds may be edited freely; a delete
+              (even beside an unrelated add), an unchanged row, and a second row beside a kept base row pass. A merge of main
+              that changes a base row passes, since the base is the merge base. A notes file git moves is read at its new
+              path. Each slug is named once, with its path. No merge base while a note is at head is UNKNOWN. Cost, per run:
+              one `git merge-base`. For a file with a note at head, 3 git reads in all (`show` head, `merge-base`, `show`
+              base); a file absent at head adds its `ls-tree` and, when the base holds a note there, the rename lookup (up to
+              two `git diff-tree`). No process stays running, and no log or file is written.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -640,12 +643,21 @@ def note_rows(text):
     return rows
 
 
+SAME_NOTE = 0.85  # a reworded row reads 0.90 against its base row; unrelated rows of the same shape read 0.80 or less
+
+
 def edited_notes(cwd, upstream, head):
-    """[(notes path, problem line)], one per slug the base holds whose head row text is none of that slug's base texts: an
-    edit in place of a row this branch does not own. The base is the merge base of upstream and head, so a row that main
-    edited and a merge brought in matches the base and passes. A row the branch adds, a delete and an unchanged row pass. A
-    file missing at the base or at head has no finding. A slug with several wordings at the base keeps each: a dedupe leaves
-    a base text. A note with no `- <slug>:` form has no slug, so the check does not see it."""
+    """[(notes path, problem line)], one per slug the base holds that the branch edits in place: a base text left the slug
+    and a new text arrived under it, or the slug is gone and a new row under another slug reads SAME_NOTE like one of its
+    base texts (a rename of the slug with a reword). The base is the merge base of upstream and head, so a row that main
+    edited and a merge brought in matches the base and passes. A row the branch adds, a delete beside an unrelated add, an
+    unchanged row, and a second row under a slug whose base row stays all pass. A slug with several wordings at the base
+    keeps each: a dedupe leaves a base text. A notes file git moves (`renamed`, base to head) is read at its head path, so
+    a row edited in a moved file is a finding and a pure rename passes. A file missing at the base has no finding. A note
+    with no `- <slug>:` form has no slug, so the check does not see it. No merge base while a note is at head is Unknown.
+    Cost, per run: one `git merge-base`. Per notes path, a file with a note at head: three git reads in all (`show` head,
+    `merge-base`, `show` base). A file absent at head also reads its `ls-tree`, and, when the base holds a note there, the
+    rename lookup (up to two `git diff-tree`). No process stays running, and no log or file is written."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as revived_notes loads it
     try:
@@ -653,22 +665,44 @@ def edited_notes(cwd, upstream, head):
     except layout.LayoutError as e:
         raise Unknown("the notes file is not known: %s" % e)
     found = []
-    base = None
+    base = None  # the merge base once read: a sha, or "" when upstream and head share none
+
+    def merge_base():
+        rc, out = git(cwd, "merge-base", upstream, head, ok=(0, 1))
+        return out.strip() if rc == 0 else ""
+
     for path in paths:
+        where = path
         now = note_rows(blob(cwd, head, path))
-        if not now:
-            continue
         if base is None:
-            rc, out = git(cwd, "merge-base", upstream, head, ok=(0, 1))
-            base = out.strip() if rc == 0 else ""
-        if not base:
-            break
+            base = merge_base()
+        if now and not base:
+            raise Unknown("upstream and head share no merge base: the notes in %s have nothing to be compared with" % path)
+        if not now:
+            if not base:
+                continue
+            if not note_rows(blob(cwd, base, path)):
+                continue
+            pair = renamed(cwd, base, head, raw_files(cwd, base, head)).get(path)
+            if not pair:
+                continue
+            where = pair[0]
+            now = note_rows(blob(cwd, head, where))
+            if not now:
+                continue
         then = note_rows(blob(cwd, base, path))
-        for slug in sorted(now):
-            if slug in then and not now[slug] <= then[slug]:
-                found.append((path, "%s: note `%s` is edited in place. A branch edits only the notes it adds; the base row is "
-                              "another change's. Put the row back as the base holds it, or delete it and add the new wording "
-                              "as a row of this branch." % (path, slug)))
+        fresh = [(s, line) for s in now if s not in then for line in now[s]]  # rows under a slug the base lacks
+        for slug in sorted(then):
+            had, has = then[slug], now.get(slug, set())
+            if slug in now:
+                edited = bool(had - has) and bool(has - had)
+            else:
+                edited = any(difflib.SequenceMatcher(None, a.split(":", 1)[1], b.split(":", 1)[1], autojunk=False).ratio() >= SAME_NOTE
+                             for a in had for _, b in fresh)
+            if edited:
+                found.append((where, "%s: note `%s` is edited in place. A branch edits only the notes it adds; the base row is "
+                              "another change's. Restore the row as it was on the base, or add a new row of your own, or excuse "
+                              "it with a `%s: %s -- <reason>` trailer." % (where, slug, TRAILER, where)))
     return found
 
 
