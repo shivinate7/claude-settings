@@ -9796,6 +9796,9 @@ role_refuse("cd merge && launch.py --role batch-runner is refused on a lane reco
             "cd merge && launch.py --role batch-runner", role_path("lane"))
 role_refuse("cd merge && python3 ./merge.py --role batch-runner is refused on a lane record",
             "cd merge && python3 ./merge.py --role batch-runner", role_path("lane"))
+# A quoted argument that ends in `)` is still one argument, so the arguments do not end at it: the --role after it counts.
+role_refuse('cd merge && python3 ./merge.py --root "o/alpha=/Work (old)" --role batch-runner is refused on a lane record',
+            'cd merge && python3 ./merge.py --root "o/alpha=/Work (old)" --role batch-runner', role_path("lane"))
 # A `)` or `&` glued to the last argument ends that argument, so it must not hide a flag from merge-role-proof or
 # merge-roots-cover. A lane is refused on any tier, so the runner's allow shows the glued `)` hides the tier.
 roots_refuse("(cd merge && python3 ./merge.py --reviewed) with a two-tag runner's bare call is refused, and the reason says to pass one --root per tag",
@@ -9813,6 +9816,13 @@ role_allow("(merge --role batch-runner) allows a batch runner's own record, so t
 # The control: the exact two roots with the glued `)` allow, so the strip must not refuse a call that names every tag.
 roots_allow("(merge --reviewed --root o/alpha=/work/alpha --root o/bravo=/work/bravo) with the exact two roots allows",
             roots_cmd(["o/alpha", "o/bravo"], "(", "merge", close=")"), role_path("roots-runner"))
+# A quoted --root whose DIR ends in `)` is one argument, so the --root after it is still read and the two tags allow.
+roots_allow('merge --reviewed --root "o/alpha=/Users/me/Foo (2026)" --root o/bravo=/b with two tagged repos allows',
+            'merge --reviewed --root "o/alpha=/Users/me/Foo (2026)" --root o/bravo=/b', role_path("roots-runner"))
+# A lone `&` ends the arguments, so the --role after it is not read. Detached-launch refuses a lone `&` with no pid captured,
+# before the merge rules run, so this case captures one with `& echo $!`, and the role rule decides the call.
+role_refuse("merge --reviewed & merge --role batch-runner & echo $! is refused on a lane record",
+            "merge --reviewed & merge --role batch-runner & echo $!", role_path("lane"))
 roots_refuse("cd merge && python3 ./merge.py --reviewed, a two-tag runner's bare call, is refused, and the reason says to pass one --root per tag",
              "cd merge && python3 ./merge.py --reviewed", role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
              lacks=(ROOTS_REMEDY,))
