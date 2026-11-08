@@ -28074,6 +28074,9 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a lone backtick
 # verdict, so it is refused.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief, Give a verdict: PASS and FAIL are the two words, the list runs on",
            "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS and FAIL are the two words.\nFiles: hooks/guard.py.")
+# The round label may carry `of N`. Without that group, `Round 2 of 3: PASS` reads as a round with no verdict line.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 2 of 3: PASS line, the round label carrying of N",
+           "Check the floor fix in hooks/guard.py.\nRound 2 of 3: PASS\nFiles: hooks/guard.py.", model="sonnet")
 
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
@@ -28118,6 +28121,9 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdi
           "Check the floor fix in hooks/guard.py.\nEnd your report with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL",
           "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
+# The joiner `and` is a choice joiner too, so a list of two verdict words joined by `and` that ends its sentence passes.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS and FAIL.",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS and FAIL.\nFiles: hooks/guard.py.")
 # A choice list that ends its sentence is a format line, even when another choice list or a quoted verdict follows it.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, then End with a verdict: PASS, FAIL or PARTIAL on the same line",
           "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL. End with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
@@ -28144,6 +28150,9 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdi
           "Check the floor fix.\nGive a verdict: PASS/FAIL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL; then list findings.",
           "Check the floor fix.\nGive a verdict: PASS or FAIL; then list findings.\nFiles: hooks/guard.py.")
+# A question mark ends a sentence as a period does, so a choice list that ends a question is a format line too.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Give a verdict: PASS or FAIL?",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: PASS or FAIL?\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict, Is it done? Give a verdict: PASS or FAIL!",
           "Check the floor fix.\nIs it done? Give a verdict: PASS or FAIL!\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict after a path and a number, See guard.py:12 and a 2.5 s run.",
