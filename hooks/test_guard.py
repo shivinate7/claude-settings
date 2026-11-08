@@ -20324,6 +20324,69 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def worktree_home_cross_checkout_copy_case():
+    """Rule 0, `other-checkout`, the false alarms on a copy and on a heredoc, beside
+    `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
+    is a read; only the target is a write. A quoted heredoc hands its body to an interpreter as
+    text, so a path quoted inside it is not a command. A substitution in an unquoted heredoc, a
+    bash body, and an interpreter that writes a file still judge their writes. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocp")
+    write(os.path.join(lane_b, "bin", "ci-job"), "#!/bin/sh\n")
+    write(os.path.join(lane_b, "x"), "x\n")
+    write(os.path.join(lane_b, "y"), "y\n")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A copy reads its source: the source may sit in another checkout. Only the target is judged.
+    check("for-loop copy of another checkout's file into its own", "allow", "Bash", lane_a,
+          command='B=%s; for f in bin/ci-job; do cp "$B/$f" "$f"; done' % other)
+    check("copy from another checkout, inside a loop body", "allow", "Bash", lane_a,
+          command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
+    check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
+          command='cp "%s/x" "$f"' % other)
+    # A quoted heredoc is text: a path quoted in its body is not a command.
+    check("quoted heredoc that only quotes a copy from another checkout", "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nnote = \"cp %s/x $f\"\nprint(note)\nPY" % other)
+    check("quoted heredoc writing an own file that quotes a copy from another checkout", "allow",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\n"
+                  "open('roadmap.json','w').write(json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
+
+    # Controls: each write into another checkout stays refused.
+    check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
+          command='B=%s; cp bin/x "$B/bin/ci-job"' % other)
+    check("control: copy into another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do cp a "$B/$f"; done' % other)
+    check("control: move out of another checkout", "deny", "Bash", lane_a,
+          command="mv %s/x ./x" % other)
+    check("control: move out of another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do mv "$B/$f" "$f"; done' % other)
+    check("control: unquoted heredoc whose substitution copies into another checkout", "deny",
+          "Bash", lane_a, command='python3 - <<EOF\nx="$(cp a %s/y)"\nEOF' % other)
+    check("control: quoted heredoc whose interpreter copies into another checkout", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil; shutil.copy('a', '%s/x')\nPY" % other)
+    check("control: bash heredoc body that copies into another checkout", "deny", "Bash", lane_a,
+          command="bash <<'EOF'\ncp a %s/x\nEOF" % other)
+    # New deny: a quoted heredoc whose interpreter writes a file in another checkout.
+    check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "copy sources in another checkout pass; quoted heredoc text passes; writes refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -21772,6 +21835,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: a copy whose source is in another checkout, and a quoted heredoc that only "
+     "quotes a path, are allowed; a write into another checkout from either is refused",
+     worktree_home_cross_checkout_copy_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
