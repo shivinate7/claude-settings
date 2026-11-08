@@ -5733,6 +5733,12 @@ sh("verdict-pipe-exit: cat of the lint script piped to tail, then && echo, is al
 
 sh("verdict-pipe-exit: a lint script run by its bare name after cd lint, piped to tail, then && push, is refused",
    "cd lint && ./ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+# Pins, not reds: the guard already refuses these two on a19d231ff. They stop a later edit from
+# losing the refusal of the module form when a flag comes before -m.
+sh("verdict-pipe-exit: the lint module run by python3 -Im, piped to tail, then && push, is refused",
+   "python3 -Im lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: the lint module run by python3 -W ignore -m, piped to tail, then && push, is refused",
+   "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
 sh("verdict-pipe-exit: python3 -Im pytest piped to tail, then && echo, is allowed",
    "python3 -Im pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
 
