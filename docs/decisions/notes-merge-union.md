@@ -16,11 +16,16 @@ Known cost: union never removes a line that one side kept. When two lanes rewrit
 versions stay. A note that one lane deletes or reverts can come back when another lane appends.
 `lint/test_notes_union_merge.py` pins the rewrite case.
 
-Check: `lint/check_record_slugs.py` (`duplicate_note_slugs`) refuses a slug written on two rows, so a
-rewrite that union keeps twice goes red. A deleted row that union restores has one slug; the silent-undo
-check catches it (decision silent-undo-check-design, the check for undone work). Incidents: the #1449 main
-merge left 9 slugs twice on main. Union merges into #1863, #2081 and #2108 each kept two copies of a
-note. Only a fix check caught them (step notes-slug-unique, Nov 8).
+Check: `lint/check_record_slugs.py` fails a lane only when the lane's diff raises a slug's row count above
+its count at the merge base of origin/main and HEAD, and the slug then has two or more rows. Slugs compare
+without case. Duplicates already on main do not fail a lane. With file names given, or when git cannot read
+the diff, any duplicate in the file fails. `--list` prints every duplicate in the checkout's notes file,
+main's included, and exits 0 (1 only when the layout cannot be read). It names slugs, not lanes, and
+nothing calls it yet. A rewrite that union keeps twice goes red when the lane raises the count. A deleted
+row that union restores has one slug; the silent-undo check catches it (decision silent-undo-check-design,
+the check for undone work). Incidents: the #1449 main merge left 9 slugs twice on main. Union merges into
+#1863, #2081 and #2108 each kept two copies of a note. PR #1920 was dropped from batch 65 for a duplicate
+slug. Only a fix check caught them (roadmap step notes-slug-unique, Nov 8).
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
