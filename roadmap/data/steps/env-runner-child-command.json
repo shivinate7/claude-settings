@@ -5,7 +5,7 @@
   "order": 60,
   "owner": "coordinator",
   "lane": "session_013NEJL2GCqtkmpEVLrpgPF2",
-  "why": "`uv run --env-file`, `docker run --env-file \u2026 env` and `npm exec -c env` print the env file through a child command, and hooks/guard_env.py lets them pass.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
-  "updatedAt": "2026-11-07T18:32:00-06:00"
+  "why": "`uv run --env-file`, `docker run --env-file … env` and `npm exec -c env` print the env file through a child command, and hooks/guard_env.py lets them pass.",
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Possible false alarm on main (coordinator 13:28 CST Nov 8, from this lane): `find . -name '.env' -print` is refused, although it lists paths and reads no secret.",
+  "updatedAt": "2026-11-08T13:28:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "The guard reads a guard path passed by name in a Python argv list, and reads node argv only in subprocess calls",
   "why": "Lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8), 11:53 CST Nov 8, two Low round-2 findings on #2125 (python-text-list-argv): (1) a guard path passed by name, `run([sys.executable, GUARD])`, is still refused; (2) the node argv read runs on any list argument, not only on subprocess calls. Stacked on #2125.",
-  "note": "",
+  "note": "Lane other-checkout-cp-own 13:28 CST Nov 8: #2213 head 189e03a70, round 2 PASS, lane lint PASS, handed to runner 8, Merge after #2125. Lane holds #1867, #1906, #2060, #2125, #2213 with runner 8; its notes docs PR waits for #1906.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8)",
-  "status": "todo",
+  "status": "ready",
   "order": 772,
-  "updatedAt": "2026-11-08T11:54:00-06:00"
+  "updatedAt": "2026-11-08T13:28:00-06:00"
 }

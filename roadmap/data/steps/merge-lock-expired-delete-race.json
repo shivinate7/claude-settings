@@ -5,7 +5,7 @@
   "order": 0.22,
   "owner": "coordinator",
   "why": "Coordinator, 14:31 CST Nov 7.",
-  "note": " Built as #1657, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST). Owner question, page item 421 (lock-break-ruling-rewrite, 07:12 CST Nov 8): may decision standing-merge-grant's lock-break bullet (owner ruling 2026-10-17) be rewritten when #1657 merges? Pick a. The bullet stays untouched until the answer. Reviewed and with runner 8 as #1657 (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Owner item 421 a (10:05 CST Nov 8): when #1657 merges, the standing-merge-grant lock-break bullet is rewritten in place to say the leased push keeps another run's fresh lock safe.",
+  "note": "Built as #1657, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST). Owner question, page item 421 (lock-break-ruling-rewrite, 07:12 CST Nov 8): may decision standing-merge-grant's lock-break bullet (owner ruling 2026-10-17) be rewritten when #1657 merges? Pick a. The bullet stays untouched until the answer. Reviewed and with runner 8 as #1657 (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Owner item 421 a (10:05 CST Nov 8): when #1657 merges, the standing-merge-grant lock-break bullet is rewritten in place to say the leased push keeps another run's fresh lock safe. Lane 13:27 CST Nov 8: new slug lane-lows-followup, PR #2148 (fixes for the stack's low findings), handed to runner 8. Owner item 421 a queued here for when #1657 merges.",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
-  "updatedAt": "2026-11-08T10:09:00-06:00"
+  "updatedAt": "2026-11-08T13:28:00-06:00"
 }
