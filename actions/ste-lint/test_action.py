@@ -11,7 +11,7 @@ says unknown and never "not on main", and LINT_FILES holds every file the step r
 Also asserts a zizmor pin, `claude-settings/actions/zizmor@<sha>`, is read with the same verdict lines, compared on
 actions/zizmor/run.sh, one line per action, and that a workflow pinning both actions at one commit keeps both lines.
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
-bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
+bin/ste-changed where its own folder holds no actions/ste-lint. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
@@ -729,7 +729,7 @@ check("shallow pin: the line never says does not hold or off main",
 
 
 # The installed copy. install.sh lands bin/ste-changed in ~/.claude: a copy in cloud mode, a symlink into the
-# <clone>-live checkout in local mode. In the copy, the command's own folder holds no actions/ and is no git clone.
+# <clone>-live checkout in local mode. In the copy, the command's own folder holds no actions/ste-lint and is no git clone.
 # The checkout is the one the global CLAUDE.md names on its `@<dir>/CLAUDE.md` line. The cases run the clone's own
 # install.sh into a temp HOME, so each one reads what an install lands. Only PATH and HOME reach the installer:
 # CLAUDE_CODE_REMOTE in the caller's environment would force cloud mode, and CLAUDE_CONFIG_DIR would move ~/.claude.
@@ -752,7 +752,7 @@ def install_case(mode, pointer=None, mkdirs=()):
         facts = {"shas": shas, "install_rc": p.returncode, "install_out": p.stdout + p.stderr,
                  "is_file": os.path.isfile(installed), "is_link": os.path.islink(installed),
                  "real": os.path.realpath(installed), "live": os.path.realpath(clone + "-live"),
-                 "actions": os.path.exists(os.path.join(cfg, "actions")),
+                 "ste_lint": os.path.exists(os.path.join(cfg, "actions", "ste-lint")),
                  "pointer": open(md, encoding="utf-8").read().split("\n")[0] if os.path.exists(md) else ""}
         for rel in mkdirs:
             os.makedirs(os.path.join(home, rel))
@@ -798,8 +798,8 @@ if os.name == "nt":
     print("skip - installed copy: install.sh does not run on Windows")
 else:
     r = install_case("cloud")
-    check("installed copy, cloud: install.sh exits 0 and copies bin/ste-changed, with no actions/ beside it",
-          r["install_rc"] == 0 and r["is_file"] and not r["is_link"] and not r["actions"], shown(r))
+    check("installed copy, cloud: install.sh exits 0 and copies bin/ste-changed, and lands no actions/ste-lint beside it",
+          r["install_rc"] == 0 and r["is_file"] and not r["is_link"] and not r["ste_lint"], shown(r))
     check("installed copy, cloud: the global CLAUDE.md names the checkout", r["pointer"] == "@~/claude-settings/CLAUDE.md",
           r["pointer"])
     check("installed copy, cloud: a drifted pin exits 3 with the pin message read from the checkout the pointer names",
