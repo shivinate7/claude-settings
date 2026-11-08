@@ -889,7 +889,8 @@ def _holds_shell(line: str) -> bool:
 
 
 def _stage_runs(words):
-    """(the command word of a stage, whether it reads a script on stdin). An interpreter in the chain from the
+    """(the command word of a stage, whether it reads a script on stdin, whether an interpreter is in its chain at
+    all). An interpreter in the chain from the
     command word (`python3`, `sudo node`, `timeout 5 perl`) reads stdin when it has no operand after its flags,
     or `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root python3`), and so may the word
     after an interpreter's value flag (`python3 -W ignore -`), but never the `-` itself. The chain may start past
@@ -898,6 +899,7 @@ def _stage_runs(words):
     start = _command_start(words)
     ran = words[start:start + 1]
     stdin = False
+    interp = False
     launcher = words[start:words.index("-", start) if "-" in words[start:] else len(words)]   # a `-` ends it
     at = start if _reads_only(words) else next(
         (start + i for i, word in enumerate(launcher) if _RUNNER(_basename_word(word))), len(words))
@@ -906,6 +908,7 @@ def _stage_runs(words):
         if not _RUNNER(name):
             break
         script = bool(_INTERPRETER(name))
+        interp = interp or script
         flags = []
         picked = []
         end = at
@@ -928,7 +931,7 @@ def _stage_runs(words):
             break   # its operand is a file, so no runner after it is in the chain
         at = next((i for i in range(at + 1, end + 2) if i < len(words) and _RUNNER(_basename_word(words[i]))),
                   len(words))
-    return ran, stdin
+    return ran, stdin, interp
 
 
 # The flags of `sudo` and `ssh` that take a value, so the word after one is no command.
@@ -973,10 +976,22 @@ def _stdin_shell(words) -> bool:
     return False
 
 
+# The flags of a wrapper that take a value, so the word after one is no command (`nice -n 5 cat f`). `sudo` keeps its
+# own set in _VALUE_FLAGS_OF. `timeout`'s duration is the one operand that is a value too (`_DURATION`).
+_WRAPPER_VALUE_FLAGS = {
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
+    "xargs": {"-n", "-P", "-L", "-d", "-E", "-s", "-a", "-I", "--max-args", "--max-procs", "--delimiter"},
+}
+_DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?").fullmatch
+
+
 def _reads_only(words) -> bool:
     """True when the command of a stage, through its wrappers (`sudo cat f`, `timeout 5 wc f`, `xargs wc`), is a
-    pure reader: the words after it are files it reads, and none runs. Any other command, `ssh host cat f`
-    too, is not."""
+    pure reader: the words after it are files it reads, and none runs. A wrapper's value is a flag's value
+    (`sudo -u root cat`) or `timeout`'s duration, and no other word: a path after a wrapper is the command
+    (`sudo ./tool diff`). Any other command, `ssh host cat f` too, is not."""
     at = _command_start(words)
     while at < len(words):
         name = _basename_word(words[at])
@@ -985,10 +1000,16 @@ def _reads_only(words) -> bool:
         if name not in _WRAPPERS:
             return False
         at += 1
-        while at < len(words) and _is_flag(words[at]):
-            at += 1
-        if at < len(words) and _basename_word(words[at]) not in _READERS and not _RUNNER(_basename_word(words[at])):
-            at += 1   # a value of the wrapper or of its flag (`timeout 5 wc`, `sudo -u root cat`)
+        values = _VALUE_FLAGS_OF.get(name) or _WRAPPER_VALUE_FLAGS.get(name, set())
+        duration = name == "timeout"
+        while at < len(words):
+            if _is_flag(words[at]):
+                at += 2 if words[at] in values else 1
+            elif duration and _DURATION(words[at]):
+                duration = False
+                at += 1
+            else:
+                break
     return False
 
 
@@ -1064,6 +1085,22 @@ def _substitution_runs(text: str, written) -> set:
     return ran
 
 
+_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
+
+
+def _exec_tails(words):
+    """The command each `-exec` of a `find` stage runs: the words after the flag, up to its `\\;` or `+`."""
+    if "find" not in map(_basename_word, words):
+        return []
+    tails = []
+    for at, word in enumerate(words):
+        if word in _EXEC_FLAGS:
+            tail = words[at + 1:]
+            end = next((i for i, part in enumerate(tail) if part in ("\\", "+")), len(tail))
+            tails.append(tail[:end])
+    return tails
+
+
 def _run_files(text: str, written) -> set:
     """The files of WRITTEN that a command in TEXT runs. Each one a pipeline names that holds a shell word, as main
     (`bash f`, `(cat f) | sh`, `xargs -I{} sh -c {}`, `ssh host bash < f`). On any other line: the command
@@ -1086,14 +1123,21 @@ def _run_files(text: str, written) -> set:
         for pipeline in re.split(r";|&&|\|\||&|\$\(|<\(|`", line):
             stages = pipeline.split("|")
             words = [_plain_words(_WORDS(stage)) for stage in stages]
+            # A find's `-exec ./f {} \\;` is a stage of its own that runs f.
+            for stage_words in list(words):
+                for tail in _exec_tails(stage_words):
+                    stages.append(" ".join(tail))
+                    words.append(tail)
             reads = [_reads_only(stage_words) for stage_words in words]
             holds_runner = any(not only and any(_RUNNER(_basename_word(word)) for word in stage_words)
                                for only, stage_words in zip(reads, words))
             for at, (stage, stage_words, only) in enumerate(zip(stages, words, reads)):
-                runs, stdin = _stage_runs(stage_words)
+                runs, stdin, interp = _stage_runs(stage_words)
                 ran.update(written.intersection(runs))
                 if stdin or _stdin_shell(stage_words):
                     ran.update(written.intersection(_plain_words(_STDIN_FILE.findall(stage))))
+                if stdin or interp or _stdin_shell(stage_words):
+                    # An interpreter given a script still runs what is piped into it (`cat f | python3 check.py`).
                     ran.update(written.intersection(word for earlier in words[:at] for word in earlier))
                 if holds_runner and not only:
                     data = _data_positions(stage_words)

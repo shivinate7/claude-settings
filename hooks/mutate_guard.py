@@ -368,6 +368,21 @@ MUTATIONS = [
      '    for line in _list_pieces(text):',
      '    for line in [text]:', "guard",
      'heredoc-keep: a body in notes.md, then cat notes.md, then a python version probe, allows'),
+    # _reads_only: a wrapper's value is a flag's value or a duration, so a path after it is the command.
+    ("heredoc: any word after a wrapper is its value, sudo ./tool diff reads only",
+     '            elif duration and _DURATION(words[at]):',
+     '            elif words[at] not in _READERS:', "guard",
+     'heredoc-keep: a gh pr create line written to tool, then sudo ./tool diff, denies'),
+    # _exec_tails: the word after find -exec is a command word.
+    ("heredoc: find -exec runs no command, find . -exec ./f runs nothing",
+     '    if "find" not in map(_basename_word, words):\n        return []',
+     '    if True:\n        return []', "guard",
+     'heredoc-keep: a written file holding gh pr create --title x, run by find -exec ./f, denies'),
+    # _run_files: an interpreter with a script operand still runs what is piped into it.
+    ("heredoc: only a script on stdin runs the piped file, cat f | python3 check.py runs nothing",
+     '                if stdin or interp or _stdin_shell(stage_words):',
+     '                if stdin or _stdin_shell(stage_words):', "guard",
+     'heredoc-keep: pin, a body in f run by a pipe into python3 check.py, denies'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
