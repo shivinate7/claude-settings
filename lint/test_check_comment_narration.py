@@ -897,6 +897,191 @@ class SwiftScan(Case):
         self.assertClean()
 
 
+class ShellScan(Case):
+    """Shell comments: a `#` inside quotes, after an escape, in an expansion, in arithmetic or in a heredoc body is text."""
+
+    def scan(self, files):
+        self.base({"keep.py": "x = 1\n"})
+        self.change(files)
+        return self.lint()
+
+    def test_full_line_comment_is_flagged(self):
+        rc, out = self.scan({"x.sh": "# fixed in round 2\necho hi\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_trailing_comment_after_a_command_is_flagged(self):
+        rc, out = self.scan({"x.sh": "cmd  # fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_incident_text_in_hooks_is_flagged(self):
+        rc, out = self.scan({"hooks/x.sh": "# (incident 2026-11-07, /base_run.txt)\n"})
+        self.assertHit(out, "hooks/x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_sh_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-sh": "#!/bin/sh\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_bash_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-bash": "#!/bin/bash\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-bash", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_extensionless_env_bash_shebang_script_is_flagged(self):
+        rc, out = self.scan({"bin/run-env": "#!/usr/bin/env bash\n# fixed in round 2\n"})
+        self.assertHit(out, "bin/run-env", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_bash_extension_is_flagged(self):
+        rc, out = self.scan({"lib/x.bash": "# fixed in round 2\n"})
+        self.assertHit(out, "lib/x.bash", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_comment_after_a_multi_line_double_quoted_string_is_flagged(self):
+        rc, out = self.scan({"x.sh": 'echo "one\ntwo"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 3)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_double_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": 'echo "x # fixed in round 2"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_single_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": "echo 'x # fixed in round 2'\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_ansi_c_quotes_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $'x # fixed in round 2'\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_escaped_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo \\# fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_hash_inside_a_word_is_text(self):
+        rc, out = self.scan({"x.sh": "echo a#b fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_dollar_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $# fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_length_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${#var} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_prefix_strip_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${x#*/} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_longest_prefix_strip_expansion_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo ${x##*/} fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_arithmetic_base_hash_is_text(self):
+        rc, out = self.scan({"x.sh": "echo $((16#ff)) fixed in round 2\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_plain_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_single_quoted_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<'EOF'\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_double_quoted_opener_is_text(self):
+        rc, out = self.scan({"x.sh": 'cat <<"EOF"\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_backslash_opener_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<\\EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_heredoc_body_with_tab_stripping_opener_and_tab_terminator_is_text(self):
+        rc, out = self.scan({"x.sh": "cat <<-EOF\n\t# fixed on 2026-10-28\n\tEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_two_heredocs_on_one_line_keep_both_bodies_as_text(self):
+        src = "cat <<A; cat <<B\n# fixed on 2026-10-28\nA\n# fixed on 2026-10-28\nB\n# fixed in round 2\n"
+        rc, out = self.scan({"x.sh": src})
+        self.assertHit(out, "x.sh", 6)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 4)
+        self.assertEqual(rc, 1, out)
+
+    def test_here_string_does_not_swallow_the_next_line(self):
+        rc, out = self.scan({"x.sh": 'cat <<< "# fixed on 2026-10-28"\n# fixed in round 2\n'})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_lone_apostrophe_in_a_comment_does_not_hide_the_next_comment(self):
+        rc, out = self.scan({"x.sh": "# don't\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_lone_apostrophe_in_an_unquoted_heredoc_body_does_not_hide_the_next_comment(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# don't, fixed on 2026-10-28\nEOF\n# fixed in round 2\n"})
+        self.assertHit(out, "x.sh", 4)
+        self.assertNoHit(out, "x.sh", 2)
+        self.assertEqual(rc, 1, out)
+
+    def test_unclosed_double_quote_exits_unknown(self):
+        rc, out = self.scan({"x.sh": 'echo "open\n# fixed in round 2\n'})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+
+    def test_unclosed_heredoc_exits_unknown(self):
+        rc, out = self.scan({"x.sh": "cat <<EOF\n# fixed in round 2\n"})
+        self.assertEqual(rc, 2, out)
+        self.assertRegex(out, r"UNKNOWN.*x\.sh")
+
+    def test_why_comment_is_clean(self):
+        rc, out = self.scan({"x.sh": "# git may be missing in a fresh container\ngit status\n"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+    def test_shebang_on_line_one_is_clean(self):
+        rc, out = self.scan({"x.sh": "#!/bin/sh\necho ok\n"})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+
+
 class Degraded(Case):
     def test_node_failure_still_prints_python_and_swift_hits_and_exits_3(self):
         env, _ = self.fake_tool("tsc", "echo bogus >&2\nexit 3\n")
