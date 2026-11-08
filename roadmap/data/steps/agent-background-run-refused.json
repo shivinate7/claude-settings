@@ -1,0 +1,11 @@
+{
+  "title": "An agent in a worktree may run a long check as a background Bash run",
+  "why": "Builders cannot run the 25-minute hooks/test_guard.py in the background, so they cut it into shards or block in the foreground (seen 06:35 and 09:39 CST Nov 8).",
+  "note": "Filed 09:49 CST Nov 8 from lane notes-fix-page. hooks/guard.py:4948 passes run_in_background to judge_shell. Unmeasured: whether our guard or the harness refuses. First act: measure that and name the refusing rule; then a red case. Related: step waiter-wait-until (ready), which allows one bounded background wait.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 710,
+  "updatedAt": "2026-11-08T09:49:00-06:00"
+}

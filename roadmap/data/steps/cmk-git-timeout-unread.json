@@ -1,0 +1,11 @@
+{
+  "title": "The conflict-markers guard asks when its git read cannot run",
+  "why": "A git read that times out or fails left the conflict-markers check silent, so a commit with markers could pass unread.",
+  "note": "Filed 09:49 CST Nov 8 from the coordinator's ask of 07:56 CST. Doing in lane commit-refuses-conflict-markers as #2083; round 1 FAIL, fixes in build (lane, 09:48 CST).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
+  "status": "doing",
+  "order": 708,
+  "updatedAt": "2026-11-08T09:49:00-06:00"
+}

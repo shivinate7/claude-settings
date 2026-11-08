@@ -1,11 +1,11 @@
 {
   "title": "The guard reads a git command inside a python3 -c, sh -c or bash -c body, or a PowerShell & ('git') call",
   "why": "Lane guard-split-git-word's red rows (43fac17a3, 04:54 CST Nov 8) found that a force push inside a python3 -c, sh -c or bash -c body, or a PowerShell & ('git') call, is not read even unsplit. The #1593 incident's own form, python3 -c with 'gi'+'t', falls in this gap, so Claude has hit it.",
-  "note": "Fix: the guard reads the body of python3 -c, sh -c and bash -c, and a PowerShell & ('git') call, as commands; red rows first. Rides in the lane that found it (item 386 b), after guard-split-git-word. Queue fix (owner 13:20 CST Nov 7). Filed 04:57 CST Nov 8. Doing in lane commit-refuses-conflict-markers (session_013NEJKzXJPDWrSRe3i1fGJd), branch cmk-interp-body-git from #1937's head 6807c5e85; a test-author writes red rows first (lane, 06:27 CST Nov 8).",
+  "note": "Fix: the guard reads the body of python3 -c, sh -c and bash -c, and a PowerShell & ('git') call, as commands; red rows first. Rides in the lane that found it (item 386 b), after guard-split-git-word. Queue fix (owner 13:20 CST Nov 7). Filed 04:57 CST Nov 8. Doing in lane commit-refuses-conflict-markers (session_013NEJKzXJPDWrSRe3i1fGJd), branch cmk-interp-body-git from #1937's head 6807c5e85; a test-author writes red rows first (lane, 06:27 CST Nov 8). Ready 09:49 CST Nov 8: #1993 handed to runner 8 (head 3411185aa, rounds 1-3 plus a fix check, net positive, Merge after: #1937). Its limit notes ride in this lane (item 386).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 610,
   "owner": "triage",
   "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
-  "updatedAt": "2026-11-08T06:25:00-06:00"
+  "updatedAt": "2026-11-08T09:49:00-06:00"
 }

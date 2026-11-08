@@ -1,0 +1,11 @@
+{
+  "title": "A reviewer agent may run a read-only page render, as builders and test-authors do",
+  "why": "A reviewer was refused node page renders for a pixel compare on #1733's fix check (06:29 CST Nov 8), so it could not check the screen it reviewed.",
+  "note": "Filed 09:49 CST Nov 8 from lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8). Unmeasured: whether our guard or the harness refuses. First act: measure that and name the refusing rule; then a red case on the refused render.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 709,
+  "updatedAt": "2026-11-08T09:49:00-06:00"
+}
