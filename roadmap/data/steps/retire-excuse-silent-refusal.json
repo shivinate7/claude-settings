@@ -2,10 +2,10 @@
   "title": "The merge tool prints a reason for an unread or refused cite",
   "order": 262.2,
   "why": "A cite the merge tool refuses or cannot read today stops it with no reason, so the reader cannot fix it.",
-  "note": "Retires the note of the same name. Also adds the `actions: read` line to action.yml. Stacked on #1712 (silent-undo-ci-body). Filed from the coordinator, 19:26 CST Nov 7.",
+  "note": "Retires the note of the same name. Also adds the `actions: read` line to action.yml. Stacked on #1712 (silent-undo-ci-body). Filed from the coordinator, 19:26 CST Nov 7. Built as draft #1726 (round 2 PASS); the lane handed it to runner 8 (coordinator 20:58 CST: all of its PRs are handed off). PR mapping read from the PR titles and bodies, 20:59 CST Nov 7.",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "owner": "coordinator",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
-  "updatedAt": "2026-11-07T19:26:00-06:00"
+  "updatedAt": "2026-11-07T20:59:00-06:00"
 }

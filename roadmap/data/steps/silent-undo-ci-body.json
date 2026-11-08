@@ -1,11 +1,11 @@
 {
   "title": "CI's silent-undo step reads the PR body and the cited run, so a Retire-run cite clears a debt delete in CI too",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
   "why": "#1677 lets the local silent-undo check accept a valid Retire-run line, but CI's step does not read the PR body or the cited run, so CI still refuses.",
-  "note": "Fix: the CI step reads the PR body through an env var and the cited run through merge.py's reader. Stacked on #1677. Coordinator 18:39 CST Nov 7.",
-  "updatedAt": "2026-11-07T18:40:00-06:00"
+  "note": "Fix: the CI step reads the PR body through an env var and the cited run through merge.py's reader. Stacked on #1677. Coordinator 18:39 CST Nov 7. Built as draft #1712; the lane handed it to runner 8 (coordinator 20:58 CST: all of its PRs are handed off). PR mapping read from the PR titles and bodies, 20:59 CST Nov 7.",
+  "updatedAt": "2026-11-07T20:59:00-06:00"
 }
