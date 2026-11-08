@@ -490,12 +490,13 @@ class PrBody(Job):
     BODY = step("body", "printf '%s' \"$PR_BODY\" > body.txt", env={"PR_BODY": "${{ github.event.pull_request.body }}"})
 
     def body_file(self, body):
-        """A file holding `body` as UTF-8, with no newline translation, in a folder of this run's temp root."""
+        """A file holding `body` in a folder of this run's temp root: text as UTF-8, bytes as given. Written in binary mode,
+        so no newline is translated on any platform."""
         folder = tempfile.mkdtemp(prefix="prbody_", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, folder, True)
         path = os.path.join(folder, "pr-body.md")
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(body)
+        with open(path, "wb") as f:
+            f.write(body if isinstance(body, bytes) else body.encode("utf-8"))
         return path
 
     def test_the_pr_body_file_text_reaches_the_expression(self):
@@ -525,6 +526,20 @@ class PrBody(Job):
         self.assertEqual(verdicts, ["PASS"], out)
         self.assertEqual(len(text), len(body), "the step saw %d of the body's %d characters" % (len(text), len(body)))
         self.assertTrue(text == body, "the step's copy of the full-size body differs from the body")
+
+    def test_a_missing_pr_body_file_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(self.BODY, env={PR_BODY_FILE: os.path.join(self.root, "no-such-body.md")})
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(len(lines), 1, "a missing PR body file did not print exactly one line: %s" % out)
+        self.assertTrue(lines[0].startswith("unknown"), out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "body.txt")), "a step ran with no PR body")
+
+    def test_a_non_utf8_pr_body_file_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(self.BODY, env={PR_BODY_FILE: self.body_file(b"\xff\xfe not UTF-8\n")})
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(len(lines), 1, "a non-UTF-8 PR body file did not print exactly one line: %s" % out)
+        self.assertTrue(lines[0].startswith("unknown"), out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "body.txt")), "a step ran with an unreadable PR body")
 
 
 def mapped(parent, body):
