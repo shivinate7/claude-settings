@@ -14,6 +14,7 @@ The cases pin this contract:
 - A real concatenation outside a literal, and the same words in a comment, never flag.
 - Comment openers inside strings, a multi-line string, a lone quote in text and a large file never move a line.
 - Only hooks/test_*.py and lint/test_*.py are scanned. --root names the tree. A tree with neither folder exits 0.
+- A hit needs its closing quote. A hit with an odd count of its own quote before it is embedded source, and is skipped.
 
 CHECK_ENV_CONST_IN_LITERAL_UNDER_TEST, when set, names the module to run instead. The red record runs a
 stand-in that exits 0 and prints nothing, as lint/test_check_red_run.py does for its own check. Each case that
@@ -66,6 +67,15 @@ C = "'"
 D = 'x'
 """
 CLEAN = 'ENV = "/x/.env"\nMSG = "ok, then done"\nPATH = "x" + SUFFIX\n'
+# The line-139 shape of hooks/test_sendmessage_state.py: five quotes come before the match, so its count is odd.
+JS_SHAPE = 'spawn("sh", ["-c", "echo 1 > started.flag && sleep %s && echo 1 > done.flag"])'
+# Shapes for the closing-quote part and the odd-count skip. Each is one source line, built with % like the rest.
+GAP_LINE = "GUARD = '%s + %s + x'\n" % (DQ, "ENV")                    # no closing quote after the NAME
+EMBEDDED_PY = "CODE = '%s'\n" % ("f = %srepos/%s/%s" % (DQ, inc(DQ, "word"), DQ))  # the test_guard.py:1055 shape
+EMBEDDED_JS = "CODE = '%s'\n" % (JS_SHAPE % inc(DQ, "secs"))          # the test_sendmessage_state.py:139 shape
+EVEN_BEFORE = "GUARD = '%s'\n" % ("say %shi%s then %s" % (DQ, DQ, inc(DQ)))  # two quotes come before the incident
+ESCAPED_BEFORE = "GUARD = '%s'\n" % ("x \\%s then %s" % (DQ, inc(DQ)))       # an escaped quote before the incident
+OTHER_QUOTE_BEFORE = "GUARD = '''%s'''\n" % ("it's %s x" % inc(DQ))          # an apostrophe before the incident
 
 
 def tree(files):
@@ -120,6 +130,17 @@ class Scan(unittest.TestCase):
         exit_want = 1 if want else 0
         self.assertEqual(got.returncode, exit_want, "%s: exit %d, want %d" % (cause, got.returncode, exit_want))
         self.assertEqual(hits_of(got.stdout, root), want, "%s: wrong hit lines" % cause)
+
+    def assert_clean_beside_control(self, text, cause):
+        """Scan a clean probe beside a control incident. The control is asserted first: a scan that flags
+        nothing must not pass the probe as clean."""
+        root = tree({"hooks/test_control.py": SINGLE_LINE, "hooks/test_probe.py": text})
+        got = scan(root)
+        hits = hits_of(got.stdout, root)
+        self.assertIn(("hooks/test_control.py", 1), hits,
+                      "the control incident was not flagged, so the scan proves nothing")
+        self.assertEqual(got.returncode, 1, "%s: exit %d, want 1 (the control only)" % (cause, got.returncode))
+        self.assertEqual({hit for hit in hits if hit[0] == "hooks/test_probe.py"}, set(), cause)
 
     def test_single_quoted_incident_is_flagged(self):
         self.assert_scan({"hooks/test_single.py": SINGLE_LINE},
@@ -242,6 +263,39 @@ class Scan(unittest.TestCase):
         self.assertEqual(got.returncode, 0, "a root with neither folder: exit %d, want 0" % got.returncode)
         self.assertEqual(hits_of(got.stdout, empty), set(), "a root with neither folder: hit lines printed")
 
+    def test_closing_quote_gap_is_clean(self):
+        # The pattern needs the closing quote: a quote, plus, NAME and plus with no quote after the NAME is not a hit.
+        self.assert_clean_beside_control(GAP_LINE, "a quote, plus, NAME and plus with no closing quote flagged")
+
+    def test_odd_quote_before_embedded_python_is_clean(self):
+        # The quote before the match closes "repos/", so its count is odd: embedded source.
+        self.assert_clean_beside_control(EMBEDDED_PY, "embedded Python concatenation flagged")
+
+    def test_odd_quote_before_embedded_js_is_clean(self):
+        # Five quotes come before the match on the line-139 shape, so the count of that quote is odd: embedded source.
+        self.assert_clean_beside_control(EMBEDDED_JS, "embedded JS concatenation flagged")
+
+    def test_incident_forms_with_no_earlier_quote_stay_flagged(self):
+        # Zero quotes come before the match: the count is even, so the skip never applies to these two forms.
+        self.assert_scan({"hooks/test_bare_single.py": SINGLE_LINE, "hooks/test_bare_double.py": DOUBLE_LINE},
+                         {("hooks/test_bare_single.py", 1), ("hooks/test_bare_double.py", 1)},
+                         "an incident form with no earlier quote was skipped")
+
+    def test_incident_after_an_even_count_of_its_quote_stays_flagged(self):
+        # Two quotes come before the match, an even count, so it is flagged. A skip on any nonzero count fails here.
+        self.assert_scan({"hooks/test_even.py": EVEN_BEFORE}, {("hooks/test_even.py", 1)},
+                         "an incident after two of its quote was skipped")
+
+    def test_escaped_quote_before_incident_does_not_count(self):
+        # The escaped quote is not counted: zero unescaped quotes come before the match, so it is flagged.
+        self.assert_scan({"hooks/test_escaped.py": ESCAPED_BEFORE}, {("hooks/test_escaped.py", 1)},
+                         "an escaped quote before the incident was counted")
+
+    def test_odd_count_of_the_other_quote_does_not_skip(self):
+        # The count is of the match's own quote only: one apostrophe comes before it, zero of the match's quote.
+        self.assert_scan({"hooks/test_other.py": OTHER_QUOTE_BEFORE}, {("hooks/test_other.py", 1)},
+                         "an apostrophe before the incident skipped it")
+
     def test_repo_tree_gets_a_defined_exit(self):
         got = scan(REPO)
         self.assertIn(got.returncode, (0, 1),
@@ -263,6 +317,18 @@ class Scan(unittest.TestCase):
             self.assertEqual(value(line).value, key + " x", "opener fixture %r is not one string" % key)
         self.assertEqual([s.value.value for s in ast.parse(LONE_QUOTES).body],
                          ["don't", '"', "'", "x"], "lone-quote fixture does not hold the four strings")
+        self.assertEqual(value(GAP_LINE).value, "%s + %s + x" % (DQ, "ENV"),
+                         "closing-quote gap fixture is not one string")
+        self.assertEqual(value(EMBEDDED_PY).value, "f = %srepos/%s/%s" % (DQ, inc(DQ, "word"), DQ),
+                         "embedded Python fixture is not one string")
+        self.assertEqual(value(EMBEDDED_JS).value, JS_SHAPE % inc(DQ, "secs"), "embedded JS fixture is not one string")
+        self.assertEqual(value(EVEN_BEFORE).value, "say %shi%s then %s" % (DQ, DQ, inc(DQ)),
+                         "even-count fixture is not one string")
+        self.assertEqual(value(ESCAPED_BEFORE).value, "x %s then %s" % (DQ, inc(DQ)),
+                         "escaped fixture is not one string")
+        self.assertIn("\\" + DQ, ESCAPED_BEFORE, "escaped fixture holds no backslash before its quote")
+        self.assertEqual(value(OTHER_QUOTE_BEFORE).value, "it's %s x" % inc(DQ),
+                         "other-quote fixture is not one string")
 
 
 def tearDownModule():
