@@ -105,7 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "lane-step-dup": "one live lane per step: a brief or a create_session naming a step that another live session in its cs-repo carries is refused and names that session; an archived carrier, the brief's own target, a near-miss step, a carrier in another repo or a full read that found none passes; no read, a subject with no cs-repo, or a read with more pages that finds no carrier is asked",
+    "lane-step-dup": "one live lane per step: a brief or a create_session naming a step that another live session in its cs-repo carries is refused and names that session; an archived carrier, the brief's own target, a near-miss step or a carrier in another repo passes; a brief to a target that carries the step passes unread; any other brief or create is asked unless a whole read found no carrier and its subject has a cs-repo (whole: one no-cursor read, or a chain of after_id reads, each from the previous page's last row id, ending has_more false, with no tags or mine filter)",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10644,6 +10644,8 @@ ROLE_LINES = {
                                              dup_row(DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)])
                            + dup_tag("s1", DUP_NEW, "cs-step:dup-step-a"),
     "dup-target-record-other": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS) + dup_list("l1", []),
+    # A target that carries the step, with no list_sessions call in the transcript: only its record and one Bash call.
+    "dup-target-no-list": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS) + dup_noise(1),
 }
 
 
@@ -11328,8 +11330,9 @@ FAMILY = "lane-step-dup"
 # not the brief's own target, carries `cs-step:<step>`. The reason names that session's id and says to send the work there.
 # A session is live unless its session_status holds ARCHIVED or a later archive_session call names it. A carrier counts
 # only when it shares a cs-repo tag with the subject, the brief's target record or the create's tags; a subject with no
-# cs-repo tag is asked. A brief or a step-tagged create with no read of a carrier is asked, never allowed, and so is a
-# list read with has_more set that finds no carrier. A read that ran in full and found none allows.
+# cs-repo tag is asked. A brief or a step-tagged create with no read of a carrier is asked, never allowed, except a brief
+# to a target that carries the step: it starts no new lane, so it passes before any read. A list read with has_more set
+# that finds no carrier is asked. A read that ran in full and found none allows.
 # A message without the marker, and a create_session with no cs-step tag, read no transcript and pass.
 BRIEF_DUP = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
 DUP_STEER = (DUP_CARRIER, "send")  # the reason names the live carrier's id, and says to send the work there
@@ -11516,6 +11519,16 @@ dup_send("a brief to a target that carries the step is allowed after set_session
 dup_send("a brief to a target that carries the step is allowed when the step record names another session",
          "allow", role_path("dup-target-record-other"), BRIEF_DUP, target=DUP_CARRIER,
          cwd=DUP_STEP_OTHER, env_path=dup_gh_path(DUP_PRS_NONE))
+
+# A brief to a target that carries the step starts no new lane, so it passes before any read: no list read and no step
+# record read. Its control, a brief to a new lane with no list read, is the asked case dup-no-read above.
+# The transcript is dup-target-record-other, a whole read with no carrier, so only the unreadable ref can ask.
+dup_send("a brief to a target that carries the step is allowed though the roadmap ref cannot be read",
+         "allow", role_path("dup-target-record-other"), BRIEF_DUP, target=DUP_CARRIER,
+         cwd=DUP_STEP_NOREF, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_send("a brief to a target that carries the step is allowed with no list_sessions read in the transcript",
+         "allow", role_path("dup-target-no-list"), BRIEF_DUP, target=DUP_CARRIER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 
 
 # =========================================================================== 5d. cite by id
