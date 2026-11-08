@@ -34,8 +34,13 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   agentId in the launch's toolUseResult, and its transcript is `<stem>/subagents/agent-<id>.jsonl`
   beside the session file. It is listed when that transcript has not changed for the quiet age and
   its last assistant record holds a tool_use with no result (one long call is not a stall). A
-  completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
-  as unknown, once.
+  completed notice or a TaskStop result closes it, as for a shell, until a resume reopens it (below).
+  A missing transcript is listed as unknown, once.
+- A resume by name is a SendMessage result whose toolUseResult has resumedAgentId. It makes the
+  agent running again: a quiet agent after a resume is listed once per stall crossing, and an earlier
+  listing before the close does not silence it. A resume also makes a job of an agent whose launch is
+  not in this transcript. A queued SendMessage result (no resumedAgentId) is no resume, and neither is
+  resumedAgentId text quoted in a tool result.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
 - Any error prints nothing and exits 0.
 
@@ -1727,6 +1732,247 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += listed_once(msg, aid, by_line=True)
+    return problems
+
+
+def send_call(call_id, aid):
+    """A SendMessage tool_use to an agent, as the assistant records it: to, summary and message."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": call_id, "name": "SendMessage",
+         "input": {"to": aid, "summary": "follow up", "message": "review the diff again"}}]}}
+
+
+def send_result(call_id, body):
+    """The result of a SendMessage call as the transcript holds it: a tool_result whose content is one text
+    block holding the JSON body, and a toolUseResult with the same fields."""
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id,
+         "content": [{"type": "text", "text": json.dumps(body)}]}]},
+        "toolUseResult": body}
+
+
+def resume(aid):
+    """A resume by name: the SendMessage call and its result. The body names the agent as resumedAgentId and
+    revivedAgentId, with the message and pin fields of a live record."""
+    cid = "toolu_resume_" + aid
+    body = {"success": True, "message": "Resuming agent " + aid[:7], "resumedAgentId": aid,
+            "revivedAgentId": aid, "pin": {"id": aid, "name": aid, "ref": "a553a8"}}
+    return [send_call(cid, aid), send_result(cid, body)]
+
+
+def queued(aid):
+    """A SendMessage to an agent that is still running: queued for delivery. Its body names no resumedAgentId,
+    so it is no resume."""
+    cid = "toolu_queued_" + aid
+    body = {"success": True, "message": "Message queued for delivery to %s at its next tool round." % aid}
+    return [send_call(cid, aid), send_result(cid, body)]
+
+
+def read_call(call_id, path):
+    """A Read tool_use of a file."""
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": call_id, "name": "Read", "input": {"file_path": path}}]}}
+
+
+def read_result(call_id, text):
+    """The result of a Read call: the file's text as string content, with no toolUseResult."""
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": call_id, "content": text}]}}
+
+
+def rows(msg, aid):
+    """How many rows of the message name the agent id."""
+    return sum(aid in line for line in msg.splitlines())
+
+
+def resumed_row(msg, aid, state):
+    """A resumed agent is listed once, by its id. state says how the agent came to be closed or quiet, so a
+    failure names the record that hid it."""
+    n = rows(msg, aid)
+    return expect(n == 1, f"agent {aid} is {state}, listed {n} times, want 1: {msg!r}")
+
+
+@case
+def R1_agent_resumed_after_a_completed_notice_is_listed_when_quiet():
+    """R1. a background agent whose completed notice came before a resume by name (a SendMessage result
+    with resumedAgentId), then a quiet transcript: listed once, by its id. Control: a quiet agent with no
+    notice is listed too, so the check ran"""
+    folder = new_dir()
+    lr, resumed = background_agent(folder, agent_id(200), agent_step("r1"), 600)
+    lc, ctl = background_agent(folder, agent_id(201), agent_step("c1"), 600)
+    recs = (stamped(lr + lc, 900)
+            + [at(attachment_notice(agent_id(200), "completed", summary='Agent "review the diff" completed'), 800)]
+            + stamped(resume(agent_id(200)), 700))
+    path = transcript(recs, agents=[resumed, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(201), by_line=True)
+    problems += resumed_row(msg, agent_id(200), "resumed after its completed notice and quiet")
+    return problems
+
+
+@case
+def R2_agent_resumed_after_a_task_stop_is_listed_when_quiet():
+    """R2. a background agent stopped by a TaskStop result, then resumed by name, then a quiet transcript:
+    listed once, by its id. Control: a quiet agent with no stop is listed too"""
+    folder = new_dir()
+    ls_, resumed = background_agent(folder, agent_id(202), agent_step("r2"), 600)
+    lc, ctl = background_agent(folder, agent_id(203), agent_step("c2"), 600)
+    recs = (stamped(ls_ + lc, 900)
+            + stamped([stop_call("toolu_ts2", agent_id(202)),
+                       stop_result("toolu_ts2", agent_id(202), command="review the diff")], 800)
+            + stamped(resume(agent_id(202)), 700))
+    path = transcript(recs, agents=[resumed, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(203), by_line=True)
+    problems += resumed_row(msg, agent_id(202), "resumed after a TaskStop and quiet")
+    return problems
+
+
+@case
+def R3_completed_notice_after_a_resume_closes_the_agent():
+    """R3. a resume by name, then a completed notice after it, then a quiet transcript: not listed. The notice
+    is the newer close. Control: a quiet agent with no notice is listed, so the check ran"""
+    folder = new_dir()
+    lr, resumed = background_agent(folder, agent_id(204), agent_step("r3"), 600)
+    lc, ctl = background_agent(folder, agent_id(205), agent_step("c3"), 600)
+    recs = (stamped(lr + lc, 900)
+            + stamped(resume(agent_id(204)), 800)
+            + [at(attachment_notice(agent_id(204), "completed", summary='Agent "review the diff" completed'), 700)])
+    path = transcript(recs, agents=[resumed, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(205), by_line=True)
+    problems += expect(rows(msg, agent_id(204)) == 0,
+                       f"agent {agent_id(204)} has a completed notice after its resume but is listed: {msg!r}")
+    return problems
+
+
+@case
+def R4_queued_send_message_after_a_completed_notice_does_not_reopen():
+    """R4. a completed notice, then a SendMessage result that queued delivery and names no resumedAgentId: not
+    listed. A queued delivery is no resume. Control: a quiet agent with no notice is listed"""
+    folder = new_dir()
+    lr, closed = background_agent(folder, agent_id(206), agent_step("r4"), 600)
+    lc, ctl = background_agent(folder, agent_id(207), agent_step("c4"), 600)
+    recs = (stamped(lr + lc, 900)
+            + [at(attachment_notice(agent_id(206), "completed", summary='Agent "review the diff" completed'), 800)]
+            + stamped(queued(agent_id(206)), 700))
+    path = transcript(recs, agents=[closed, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(207), by_line=True)
+    problems += expect(rows(msg, agent_id(206)) == 0,
+                       f"agent {agent_id(206)} has a completed notice and only a queued delivery after it, but is listed: {msg!r}")
+    return problems
+
+
+@case
+def R5_resume_of_an_agent_launched_outside_this_transcript_is_listed_when_quiet():
+    """R5. a resume by name of an agent whose launch is not in this transcript, its transcript beside the
+    session quiet: listed once. A resume makes the agent running, so a quiet transcript is a stall, as in R1.
+    Control: a quiet launched agent is listed too"""
+    folder = new_dir()
+    lc, ctl = background_agent(folder, agent_id(209), agent_step("c5"), 600)
+    recs = stamped(lc, 900) + stamped(resume(agent_id(208)), 700)
+    path = transcript(recs, agents=[ctl, (agent_id(208), agent_step("r5"), 600)], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(209), by_line=True)
+    problems += resumed_row(msg, agent_id(208), "resumed with no launch in this transcript and quiet")
+    return problems
+
+
+@case
+def R6_resumed_agent_is_listed_at_its_new_crossing_once():
+    """R6. an agent is listed at one Stop; a completed notice closes it, a resume reopens it, and it goes quiet
+    again. The Stop after the resume lists it once, though the earlier listing came before the close. The Stop
+    after that does not list it again: its crossing is older than that Stop. Control: an agent that goes quiet
+    after the second Stop is listed at the third, so the third Stop ran"""
+    folder = new_dir()
+    lx, x1 = background_agent(folder, agent_id(210), agent_step("x1"), 2800)  # quiet since NOW-2800
+    launch = stamped(lx, 3000)
+    # first Stop, at NOW-2000: quiet 800 s, the stall crossed at NOW-2500, no Stop before it: listed
+    rc1, out1, err1 = run_stop(transcript(launch, agents=[x1], folder=folder), now=NOW - 2000)
+    problems = expect(rc1 == 0, f"first Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += expect(rows(msg1, agent_id(210)) == 1,
+                       f"the first Stop does not list agent {agent_id(210)}, so no listing comes before the close: {msg1!r}")
+    # second Stop, at NOW-800: a completed notice closed it at NOW-1900, a resume reopened it at NOW-1500, and
+    # it has been quiet since NOW-1200: a new crossing at NOW-900, after the first Stop
+    x2 = (agent_id(210), agent_step("x2"), 1200)
+    between = ([stop_summary(2000)]
+               + [at(attachment_notice(agent_id(210), "completed", summary='Agent "review the diff" completed'), 1900)]
+               + stamped(resume(agent_id(210)), 1500))
+    rc2, out2, err2 = run_stop(transcript(launch + between, agents=[x2], folder=folder), now=NOW - 800)
+    problems += expect(rc2 == 0, f"second Stop exit {rc2}, want 0: {err2.strip()[:200]}")
+    msg2 = system_message(out2, problems)
+    problems += resumed_row(msg2, agent_id(210), "resumed after a completed notice and quiet at a new crossing")
+    # third Stop, at NOW: the second Stop's summary is the newest. Agent X's crossing (NOW-900) is older than
+    # it, so X is silent. Agent Y, quiet since NOW-500, crossed at NOW-200, after it: listed
+    ly, y = background_agent(folder, agent_id(211), agent_step("y1"), 500)
+    after = [stop_summary(800)] + stamped(ly, 600)
+    rc3, out3, err3 = run_stop(transcript(launch + between + after, agents=[x2, y], folder=folder))
+    problems += expect(rc3 == 0, f"third Stop exit {rc3}, want 0: {err3.strip()[:200]}")
+    msg3 = system_message(out3, problems)
+    problems += listed_once(msg3, agent_id(211), by_line=True)
+    problems += expect(rows(msg3, agent_id(210)) == 0,
+                       f"agent {agent_id(210)} is listed again at the third Stop with no new crossing: {msg3!r}")
+    return problems
+
+
+@case
+def R7_resume_text_quoted_in_a_tool_result_is_no_resume():
+    """R7. a completed notice closes an agent; then a Bash result and a Read result quote its resume record,
+    with resumedAgentId in the text. Quoted text is no resume: the agent stays closed and is not listed.
+    Control: a quiet agent with no notice is listed"""
+    folder = new_dir()
+    lx, x = background_agent(folder, agent_id(212), agent_step("x7"), 600)
+    lc, ctl = background_agent(folder, agent_id(213), agent_step("c7"), 600)
+    record = resume(agent_id(212))[1]
+    recs = (stamped(lx + lc, 900)
+            + [at(attachment_notice(agent_id(212), "completed", summary='Agent "review the diff" completed'), 800)]
+            + stamped([call("toolu_grep7", "grep resumedAgentId session.jsonl", desc="find the resumes"),
+                       bash_result("toolu_grep7", json.dumps(record["toolUseResult"]))], 700)
+            + stamped([read_call("toolu_read7", "session.jsonl"),
+                       read_result("toolu_read7", json.dumps(record))], 650))
+    path = transcript(recs, agents=[x, ctl], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(213), by_line=True)
+    problems += expect(rows(msg, agent_id(212)) == 0,
+                       f"agent {agent_id(212)} is listed though its only resume is quoted text after a completed notice: {msg!r}")
+    return problems
+
+
+@case
+def R8_full_size_each_resumed_agent_is_listed_once():
+    """R8. thirty agents, each with a completed notice and then a resume by name, each quiet: each is listed
+    once, by its own id. Full size for the resume fixture (P8). A10 holds the same claim for agents with no
+    notice"""
+    folder = new_dir()
+    launches, specs, ids, after = [], [], [], []
+    for n in range(30):
+        aid = agent_id(300 + n)
+        ids.append(aid)
+        launch, spec = background_agent(folder, aid, agent_step("t%d" % n), 600)
+        launches += launch
+        specs.append(spec)
+        after += [at(attachment_notice(aid, "completed", summary='Agent "review the diff" completed'), 800)]
+        after += stamped(resume(aid), 700)
+    path = transcript(stamped(launches, 900) + after, agents=specs, folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    for aid in ids:
+        problems += resumed_row(msg, aid, "resumed after its completed notice and quiet")
     return problems
 
 
