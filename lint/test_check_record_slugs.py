@@ -916,7 +916,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assert_only_the_scope_note_fails(out)
 
-    # Round 2 of the cite rule. Each case sits in the text after a listed reason. The refused cases name a cost the
+    # More cite-rule cases. Each case sits in the text after a listed reason. The refused cases name a cost the
     # digit form misses: spelled numbers, count units, unit gaps and case, and linear or quadratic in other forms.
     # The passing cases are honest check output and words that only look like a cost.
 
