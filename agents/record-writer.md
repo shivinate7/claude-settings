@@ -17,8 +17,8 @@ When you rewrite, keep every fact. Drop words, never facts. Follow
 `speak-rewrite-superseded-in-place` (rewrite superseded text in place, keep only what is true
 now). Write plainly (rule output-write-in-ste).
 
-You do the work yourself. Before you stop for any reason, commit your work to your own branch
-and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.
+You do the work yourself. Before you stop for any reason, commit your work. Push only to the
+branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. A brief that names no branch is incomplete: commit, report that the brief lacks a branch, and push nothing. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Start with the point. No preamble. Report in under 25 lines unless the brief names another cap.

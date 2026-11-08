@@ -86,6 +86,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
+  agent-branch-push    deny. A push whose destination is an agent's own worktree branch. A delete,
+                       a dry run and a fetch pass. (agent-branch-never-pushed)
   push-main            ask. A non-forced push whose destination is literally main or master,
                        `--all` included. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
@@ -384,9 +386,10 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            AGENT_PUSH_REASON, AGENT_PUSH_RULE, DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON,
+            PUSH_ASK_REASON, PUSH_MAIN_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit,
+            delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_target,
+            PUSH_READS, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3260,6 +3263,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 background: bool = False, description: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
+    PUSH_READS.clear()  # a call reads each push destination once; nothing carries to the next call
     stripped = strip_heredoc_bodies(raw)
     cmd = norm(stripped)
 
@@ -3520,8 +3524,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     for segment in split_segments(stripped):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
-            if verdict == "ask":
+            verdict = push_verdict(args, where, overrides, read_verb("push", args)) if subcommand == "push" else ""
+            if verdict == AGENT_PUSH_RULE:
+                # the rule id is a literal here: lint/rule_audit.py lists ids from literals only
+                refuse(tool, "deny", "agent-branch-push", AGENT_PUSH_REASON, "git push " + " ".join(args))
+            elif verdict == "ask":
                 ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
@@ -3563,7 +3570,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
-    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
+    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, one `git symbolic-ref`
+    # for a HEAD or bare push (the per-call PUSH_READS memo serves every later read), and one
     # transcript read only when the push reaches the record branch.
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if matched:
