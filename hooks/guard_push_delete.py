@@ -34,8 +34,19 @@ def _push_config(cwd: str, key: str, overrides=None):
     return answer.stdout.strip()
 
 
+def _push_head_read(cwd: str):
+    """The finished `git symbolic-ref -q HEAD`, or None when git did not run."""
+    return guard_core._git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
+
+
+def push_branch_unread(cwd: str):
+    """True when the checked-out branch could not be read because git did not run, False when git
+    answered: a detached HEAD answers (no branch), so it is not unread."""
+    return _push_head_read(cwd) is None
+
+
 def _push_current_branch(cwd: str):
-    answer = guard_core._git(cwd, "symbolic-ref", "-q", "HEAD") if cwd else None
+    answer = _push_head_read(cwd)
     if answer is None or answer.returncode != 0 or not answer.stdout.strip():
         return None
     # no `--short`: it prints `heads/<name>` when a tag has the branch's name

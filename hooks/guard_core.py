@@ -23,7 +23,7 @@ from git_reads import (  # noqa: F401
     _path_identity, _process_start_ms, _process_start_ms_windows, _under_by_identity,
     branch_cherry_empty, branch_is_ancestor, branch_is_empty, branch_on_remote, branch_proof,
     clone_checkouts, dirty_paths_are_pushed_copies, git_common_dir, is_worktree, porcelain,
-    primary_checkout, read_default_base,
+    primary_checkout, read_default_base, read_default_base_state,
     resolve_default_base, session_is_live, session_records, stash_stack, worktree_live_session,
     worktree_locked,
 )

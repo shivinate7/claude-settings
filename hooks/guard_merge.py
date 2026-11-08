@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, read_default_base_state, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -18,7 +18,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    push_branch_unread, push_destinations, push_refspecs, push_target, push_text,
 )
 
 
@@ -633,10 +633,12 @@ def _plain_source(source):
 
 
 def _ref_sha(top, ref):
-    """The commit a revision names, or '' when it names none."""
+    """The commit a revision names, or '' when it names none. Raises _GitUnread when git did not run."""
     if ref.startswith("-"):
         return ""
     done = _git(top, "rev-parse", "--verify", "-q", ref + "^{commit}")
+    if done is None:
+        raise _GitUnread(top)
     return done.stdout.strip() if done is not None and done.returncode == 0 else ""
 
 
@@ -646,17 +648,20 @@ def _checked_range(where, source, tracking, memo):
     bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
     once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
     read once: one that does not resolve is read as HEAD, and the same base is tried again.
-    `--check` exits 2 on a finding."""
+    `--check` exits 2 on a finding. A read that did not run (None from `_git`) raises _GitUnread."""
     verified = source == "HEAD"
     step = 0
     while step < 3:
         if step == 2 and "default" not in memo:
-            memo["default"] = resolve_default_base(where) or ""
-        base = (tracking, source + "@{upstream}", memo.get("default"))[step]
+            found, _head, unread = read_default_base_state(where)
+            memo["default"] = (found or "", unread)
+        if step == 2 and memo["default"][1]:
+            raise _GitUnread(where)
+        base = (tracking, source + "@{upstream}", memo.get("default", ("", False))[0])[step]
         if base:
             done = _diff_check(where, [base + "..." + source, "--"])
             if done is None:
-                return None, source
+                raise _GitUnread(where)
             if done.returncode in (0, 2):
                 return done, source
             if not verified:
@@ -682,28 +687,40 @@ def _push_hit(segment, stripped, cwd, args):
     specs = named[1] or [""]
     dests = push_destinations(args, where, overrides)
     memo = {}
+    unread = None   # the first spec whose read could not run: a later spec's triplet is still refused
     for spec, dest in zip(specs, dests):
-        source, colon, _target = spec.lstrip("+").partition(":")
+        source, colon, target = spec.lstrip("+").partition(":")
         if colon and not source:
             continue
         source = _plain_source(source)
         tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
-        done, source = _checked_range(where, source, tracking, memo)
-        if done is None:
+        try:
+            if not dest and (not named[1] or (target if colon else source) in ("HEAD", "@")) and push_branch_unread(where):
+                raise _GitUnread(where)   # a detached HEAD answers, so it is not unread and keeps its path
+            done, source = _checked_range(where, source, tracking, memo)
+            if done is None:
+                continue
+            name = _triplet_file(_kinds_of(done, where, source))
+        except _GitUnread as caught:
+            unread = unread or caught
             continue
-        name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return name
+    if unread:
+        raise unread
     return ""
 
 
 def _untracked_findings(where, top, specs):
     """Marker findings in the untracked files that `git add` would stage: all of them under `top` when
     `specs` is None, else those the pathspecs name. `git diff HEAD` skips an untracked file, so each is
-    read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order."""
+    read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order. A listing
+    that did not run raises _GitUnread."""
     done = _git(where, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
                 "--full-name", *(["--", *specs] if specs else []))
-    if done is None or done.returncode != 0:
+    if done is None:
+        raise _GitUnread(where)
+    if done.returncode != 0:
         return {}
     found = {}
     for name in [n for n in done.stdout.split("\0") if n][:_UNTRACKED_CAP]:
@@ -759,6 +776,7 @@ def _conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
+    unread = None                       # the first push whose read could not run, answered at the end if nothing is refused
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
@@ -768,7 +786,11 @@ def _conflict_markers_hit(stripped: str, cwd: str):
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            name = _push_hit(segment, stripped, cwd, call[1])
+            try:
+                name = _push_hit(segment, stripped, cwd, call[1])
+            except _GitUnread as caught:
+                unread = unread or caught   # a later segment's triplet is still refused
+                name = ""
             if name:
                 return "push", name
             readable = False
@@ -806,6 +828,7 @@ def _conflict_markers_hit(stripped: str, cwd: str):
             raise _GitUnread(top)
         if head.returncode != 0:
             continue
+        later = None   # a read after the first that could not run: a triplet already found is still refused
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
@@ -813,23 +836,30 @@ def _conflict_markers_hit(stripped: str, cwd: str):
                 found = _marker_findings(top, top, ["HEAD"], None)
             else:
                 found = _marker_findings(top, top, ["--cached"], "")
-            if top in wholes:
-                found.update(_untracked_findings(top, top, None))
-            for add_where, add_top, add_paths in adds:
-                if add_top != top:
-                    continue
-                if not (all_flag or top in wholes):
-                    for name in _covered_by(add_where, add_paths):
-                        found.pop(name, None)
-                    found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
-                found.update(_untracked_findings(add_where, top, add_paths))
+            try:
+                if top in wholes:
+                    found.update(_untracked_findings(top, top, None))
+                for add_where, add_top, add_paths in adds:
+                    if add_top != top:
+                        continue
+                    if not (all_flag or top in wholes):
+                        for name in _covered_by(add_where, add_paths):
+                            found.pop(name, None)
+                        found.update(_marker_findings(add_where, top, ["HEAD", "--", *add_paths], None))
+                    found.update(_untracked_findings(add_where, top, add_paths))
+            except _GitUnread as caught:
+                later = caught
         name = _triplet_file(found)
+        if later and not name:
+            raise later
         if readable:
             if name:
                 return "commit", name
         else:
             blind_commit = True
             blind_triplet = blind_triplet or bool(name)
+    if unread:
+        raise unread
     return "", ""
 
 

@@ -206,7 +206,15 @@ def stash_stack(where: str):
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
 def read_default_base(where: str, remote: str = "origin"):
-    """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
+    """Return (short ref name, `<remote>/HEAD`'s short name); see `read_default_base_state`."""
+    return read_default_base_state(where, remote)[:2]
+
+
+def read_default_base_state(where: str, remote: str = "origin"):
+    """`read_default_base` with a third value: True when a read could not run (a base of None is then
+    unknown), False when git answered every read it made and none named a base.
+
+    Return (short ref name, `<remote>/HEAD`'s short name, unread), each name None when git does not answer.
 
     The order is `<remote>/HEAD` when it resolves, then `<remote>/main`, then
     `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
@@ -221,7 +229,7 @@ def read_default_base(where: str, remote: str = "origin"):
     # `remotes/<remote>/<default>`. The full ref strips to the name with no such ambiguity.
     named = _git(where, "symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD")
     if named is None:  # git could not run: unreadable
-        return None, None
+        return None, None, True
     full_head = named.stdout.strip() if named.returncode == 0 else ""
     head = full_head.removeprefix("refs/remotes/")
     if head == full_head or not head.startswith(remote + "/"):
@@ -232,10 +240,10 @@ def read_default_base(where: str, remote: str = "origin"):
         full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
         live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None, head
+            return None, head, True
         if live.returncode == 0:
-            return name, head
-    return None, head
+            return name, head, False
+    return None, head, False
 
 
 def resolve_default_base(where: str, remote: str = "origin"):
