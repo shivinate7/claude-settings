@@ -338,8 +338,9 @@ def grant_override(raw, at):
 
 def grant_line(raw):
     """Owner prompt that is a grant word (hooks/grant_word.py, decision grant-reaches-lanes): prints one line, the
-    grant parsed and the relay the coordinator sends to the lane. It writes no file. With no session id (the
-    lane's guard needs this session's id to find the event) the line says the relay cannot run."""
+    grant parsed and the relay the coordinator sends to the lane. It writes no file. With no session id, the line says
+    the relay cannot run. The relay carries the session id so the lane can find this session's event with
+    list_events or get_event. The guard takes no session id."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import grant_word
