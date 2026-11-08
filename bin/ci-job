@@ -58,7 +58,7 @@
 # threads, each with its own temp log (appended to the one log in workflow order, all removed at the end of the call), and the lines print in
 # workflow order. The pool ends with the call. --step and full runs stay serial.
 # Cost: one process per step (bin/verdict and the step's shell), one log file (one more temp log per lint step while it runs,
-# removed at the end); no timer, no lasting process. Parallel lint: 198 s, measured once on 2026-11-07 in a cloud session. Under
+# removed at the end); no timer, no lasting process. Parallel lint takes about 198 s in a cloud session. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.

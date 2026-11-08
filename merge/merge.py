@@ -29,8 +29,8 @@
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (parallel lint, 198 s measured
-                          once on 2026-11-07 in a cloud session), one worktree.
+                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (parallel lint, about 198 s in
+                          a cloud session), one worktree.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
