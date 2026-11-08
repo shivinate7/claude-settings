@@ -583,8 +583,9 @@ class Flow(Env):
 
 
 class ShallowMain(unittest.TestCase):
-    """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
-    between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
+    """ff_main, and the round-3 check's history read, in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts
+    the history between that commit and main. shallow_pr_clone cuts a pull request's head off its base the same way. The folders come from this
+    run's run folder (test-temp-standard), not the system temp dir."""
 
     @classmethod
     def setUpClass(cls):
@@ -596,6 +597,7 @@ class ShallowMain(unittest.TestCase):
         self.t = tempfile.mkdtemp(dir=self.run_dir)
         build_repos(self.t)  # origin.git, and the clones seed, co and other: main holds the seed commit
         bare, other = os.path.join(self.t, "origin.git"), os.path.join(self.t, "other")
+        self.other = other  # the clone that pushes; cut_pr_branch pushes the pull request's branch from here
         put(os.path.join(other, "old.txt"), "old\n")
         sh(other, "git", "add", "-A"); sh(other, "git", "commit", "-q", "-m", "old"); sh(other, "git", "push", "-q", "origin", "main")
         self.old = sh(other, "git", "rev-parse", "HEAD")
@@ -620,6 +622,62 @@ class ShallowMain(unittest.TestCase):
             merge.ff_main(self.shallow, "main", self.old)
         self.assertNotIn("is not on origin/main", str(cm.exception))  # the Stop may name the shallow clone, not a false claim
         self.assertEqual(sh(self.shallow, "git", "rev-parse", "refs/heads/main"), main_before, "main moved")
+
+    def cut_pr_branch(self):
+        """Branch feat is two commits on its origin head, pushed: P, then F, the head of the pull request. P is on no commit of origin/main. -> (P, F)."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(self.other, "pr-p.txt"), "p\n")
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", "feat: P")
+        p = sh(self.other, "git", "rev-parse", "HEAD")
+        put(os.path.join(self.other, "pr-f.txt"), "f\n")
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", "feat: F")
+        f = sh(self.other, "git", "rev-parse", "HEAD")
+        sh(self.other, "git", "push", "-q", "origin", "feat")
+        return p, f
+
+    def shallow_pr_clone(self, p, f):
+        """A shallow clone of origin with P fetched at depth 1 and feat fetched at depth 1 to its head F, so P's object is present and the path
+        from F to P is cut. The clone's shape is checked before any case reads it: shallow, P present, and exit 1 from P to F. -> the clone's path."""
+        clone = os.path.join(self.t, "shallow-pr")
+        error = shallow_clone.make(os.path.join(self.t, "origin.git"), clone, p)
+        if error:
+            raise RuntimeError("shallow fixture could not be built: " + error)
+        sh(clone, "git", "fetch", "-q", "--depth", "1", "origin", "feat")
+        self.assertEqual(shallow_clone.facts(clone, p, f), {"shallow": True, "pin_present": True, "ancestor_rc": 1}, "the clone is not the bug shape")
+        return clone
+
+    def stale_record_host(self, p):
+        """The round-3 check's comment read: one record on pull request 20, which is no lane of the batch, for head `p`. Guard or check yes, first round PASS."""
+        return types.SimpleNamespace(review_comments=lambda since: {20: [record_text(n=20, head=p, guard="yes")]})
+
+    def test_a_record_for_a_head_the_shallow_clone_cuts_off_is_unknown_and_refuses(self):
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f)
+        try:
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=clone)
+        except merge.Liftable as e:
+            self.assertIn("--undo-check-unknown-ok", str(e), "the refusal does not name the reason flag:\n" + str(e))
+            return
+        self.fail(f"the round-3 check read the cut history as not in it, and let the record through (it returned {got!r})")
+
+    def test_the_reason_flag_lifts_the_unknown_read_and_logs_its_reason(self):
+        p, f = self.cut_pr_branch()
+        clone = self.shallow_pr_clone(p, f)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            got = merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), "octopus read it", root=clone)
+        self.assertEqual(got, "octopus read it", "the round-3 check read the cut history as not in it, so there was no unknown read for the reason flag to lift:\n" + out.getvalue())
+        self.assertIn("--undo-check-unknown-ok, reason: octopus read it", out.getvalue(), "the lift is not logged with its reason:\n" + out.getvalue())
+
+    def test_the_same_record_in_a_full_clone_is_refused_as_owed_not_unknown(self):
+        # the control beside the cases above: the full clone holds the history, so P is in the history of F and not on origin/main, and the record owes the third round
+        p, f = self.cut_pr_branch()
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, f], cwd=self.other).returncode, 0, "P is not in the history of F")
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", p, "origin/main"], cwd=self.other).returncode, 1, "P is on origin/main")
+        with self.assertRaises(merge.RoundOwed) as cm:
+            merge.refuse_owed_round([], {"head": f, "base": "main"}, 7, self.stale_record_host(p), root=self.other)
+        self.assertIn("#20", str(cm.exception), "the refusal does not name pull request #20:\n" + str(cm.exception))
 
 
 class ClaudeMdFlag(Env):
@@ -13960,6 +14018,22 @@ class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
         self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, which is no lane of this batch:\n" + out)
         self.assert_allowed(rc, out, host)
 
+    def test_a_lifted_lane_read_does_not_refuse_another_prs_done_stale_record(self):
+        # the pin beside the bypass: pull request 20 is no lane of the batch, and its newest record is done for a head a push replaced. That head is in the
+        # history of feat and not on main, so it is new to the batch. The stale rule passes another pull request's done record, lifted or not
+        tips = lane_batch(self, "agent/lane1")
+        older = self.push_feat_commit()
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        host = self.batch_host(tips, [round_check_comment(1, 20, older, guard="yes", rounds=done, net="zero")])
+        self.scope(tips, host)
+        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
+        self.assertEqual(self.history_exit(older, "origin/main"), 1, "the replaced head is on origin/main, so it is not new to the batch")
+        self.assertEqual(record_state(self, record_text(n=20, head=older, guard="yes", rounds=done, net="zero"), head=older), "done",
+                         "the record is not done on its own head, so the pin does not reach the done rule")
+        rc, out, _before = self.lifted_confirm(host)
+        self.assertNotIn("#20", out, "the round-3 check refuses for pull request #20, whose done record the stale rule must pass:\n" + out)
+        self.assert_allowed(rc, out, host)
+
 class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
     """The round-3 check's own read of the repo's comments. A failed read refuses before any claim or push (unknown is red). The reason
     flag lets it on, and the lift is logged with its reason, as the dropped-lane check's lift is."""
@@ -14022,6 +14096,35 @@ class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("round 3 is owed", out, "the refusal does not say round 3 is owed:\n" + out)
         self.assertNotIn("net-value test", out, "the refusal names the net-value test before round 3 is done:\n" + out)
+
+    def test_a_failed_fix_check_after_a_finished_third_round_says_the_fix_needs_a_new_lane_at_round_one(self):
+        # the fix check failed after the third round was done with net value positive. The fix needs a new lane at the first round, so the remedy
+        # must not ask for the third round again
+        tips = lane_batch(self, "agent/lane1")
+        tip = tips["agent/lane1"]
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        failed = record_text(n=8, head=tip, guard="yes", rounds=done, net="positive", fix=(fix_check_line("FAIL"),))
+        self.assertEqual(record_state(self, failed, head=tip), "open", "the failed fix check does not leave the record open, so the case does not reach the fix rule")
+        host = self.batch_host(tips, [review_comment(1, 8, failed)])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        remedy = [l for l in out.splitlines() if "hold-unsafe-after-round-3" in l]
+        self.assertTrue(remedy, "the refusal prints no remedy line:\n" + out)
+        self.assertIn("new lane at round 1", remedy[-1], "the remedy does not say the fix needs a new lane at round 1:\n" + out)
+        self.assertNotIn("Get round 3 done", out, "the remedy asks for the third round again, though the third round is done:\n" + out)
+
+    def test_a_passed_fix_check_after_a_finished_third_round_is_not_refused(self):
+        # the control beside the failed fix check: the same finished third round, with a fix check that passed, is done and refuses nothing
+        tips = lane_batch(self, "agent/lane1")
+        tip = tips["agent/lane1"]
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        passed = record_text(n=8, head=tip, guard="yes", rounds=done, net="positive", fix=(fix_check_line("PASS"),))
+        self.assertEqual(record_state(self, passed, head=tip), "done", "the passed fix check does not leave the record done, so the control does not reach the done rule")
+        host = self.batch_host(tips, [review_comment(1, 8, passed)])
+        self.scope(tips, host)
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
 
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
@@ -14167,6 +14270,32 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("round 3", out, "the refusal does not say the third round is owed:\n" + out)
+
+    def test_a_done_record_for_a_replaced_head_of_the_pr_itself_refuses_when_no_record_covers_the_new_head(self):
+        # the bypass: pull request 7's own newest record is done, its third round passed with net value positive, but for the head a push replaced.
+        # The live head has no record and no fix check, so no review covers it. A done record covers only the head it names
+        older = self.push_feat_commit()
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        record = record_text(n=7, head=older, guard="yes", rounds=done, net="positive")
+        self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
+        self.assertNotEqual(older, self.head("feat"), "the replaced head is the live head of feat")
+        self.assertEqual(record_state(self, record, head=older), "done", "the record is not done on its own head, so the case does not reach the done rule")
+        host = self.batch_host({}, [review_comment(1, 7, record)])
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("new head", out, "the refusal does not name the new head:\n" + out)
+
+    def test_a_done_record_for_the_new_head_of_the_pr_itself_is_not_refused(self):
+        # the control beside the bypass: the same done record on the replaced head, and a done record on the live head with a fix check PASS
+        older = self.push_feat_commit()
+        done = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        live = self.head("feat")
+        live_record = record_text(n=7, head=live, guard="yes", rounds=done, net="positive", fix=(fix_check_line("PASS", head=older),))
+        self.assertEqual(record_state(self, live_record, head=live), "done", "the live head's record is not done, so the control does not reach the done rule")
+        host = self.batch_host({}, [review_comment(1, 7, record_text(n=7, head=older, guard="yes", rounds=done, net="positive")),
+                                    review_comment(2, 7, live_record)])
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
