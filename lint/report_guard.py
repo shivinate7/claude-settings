@@ -144,7 +144,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, is_incoming, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
@@ -313,6 +313,30 @@ def turn_landed(records):
             elif name in LANDING_TOOLS:
                 return True
     return False
+
+
+def _ends_a_reply(rec):
+    """True for an assistant record that holds text and no tool use: the reply that ends a turn."""
+    content = (rec.get("message") or {}).get("content")
+    if rec.get("type") != "assistant" or not isinstance(content, list):
+        return False
+    return (any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+            and not any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content))
+
+
+def landing_turn(records, last_human_idx):
+    """The records of the turn that may have landed: those after the owner's last message, or after a
+    later peer message that woke the session once a reply had ended the turn. A peer message that
+    lands mid-turn (after a tool result) starts nothing."""
+    start, prev = last_human_idx, None
+    for i in range(last_human_idx + 1, len(records)):
+        rec = records[i]
+        if rec.get("type") not in ("user", "assistant") or rec.get("isSidechain"):
+            continue
+        if is_incoming(rec) and peer_sender(rec) and prev is not None and _ends_a_reply(prev):
+            start = i
+        prev = rec
+    return records[start + 1:]
 
 
 def find_block_start(lines):
@@ -577,23 +601,39 @@ def agent_pin(role):
     return ""
 
 
-def spawn_models(records):
+def _spawn_finished(records, i, use, result_ids):
+    """True when the spawn `use`, in records[i], has its tool result. A real tool use carries an id
+    that its result names. A use with no id has none to match, so the record right after it must
+    be a tool result."""
+    if use.get("id") is not None:
+        return use["id"] in result_ids
+    nxt = records[i + 1] if i + 1 < len(records) else {}
+    return any(True for _ in tool_results(nxt))
+
+
+def spawn_models(records, finished_only=False):
     """Map each named role spawned in `records` to the set of model families it ran on.
+
+    With `finished_only`, a spawn whose tool result has not come back (the agent still runs) is
+    left out: it has built and reviewed nothing yet, so Done owes no model for it.
 
     A spawn's model is its call's `model` field, else its agent file's pin, else
     CLAUDE_CODE_SUBAGENT_MODEL; Claude Code reads them in that order. A spawn none of them
     resolve adds '' (unknown), which never counts as a mismatch.
     """
     failed = set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    result_ids = set()
     for rec in records:
-        content = (rec.get("message") or {}).get("content")
-        for b in content if isinstance(content, list) else []:
-            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("is_error"):
+        for b in tool_results(rec):
+            result_ids.add(b.get("tool_use_id"))
+            if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
     found = {}
-    for rec in records:
+    for i, rec in enumerate(records):
         for b in tool_uses(rec):
             if b.get("name") not in SPAWN_TOOLS or b.get("id") in failed:
+                continue
+            if finished_only and not _spawn_finished(records, i, b, result_ids):
                 continue
             inp = b.get("input") or {}
             role = str(inp.get("subagent_type") or "").lower()
@@ -1663,7 +1703,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(records[idx + 1:])
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawn_models(records[idx + 1:], finished_only=True))
         if models:
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
@@ -2095,7 +2135,7 @@ def main():
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:
             pass
-    if last_human_idx is None or not turn_landed(after):
+    if last_human_idx is None or not turn_landed(landing_turn(records, last_human_idx)):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
         pick = [pick_reason]
@@ -2131,7 +2171,7 @@ def main():
             "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
     spawned = spawn_models(after)
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawn_models(after, finished_only=True)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
