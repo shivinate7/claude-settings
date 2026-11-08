@@ -1510,3 +1510,8 @@
 - mail-not-merged-text: docs/decisions/session-messages.md ("it is not in main", "(not merged)") and skill waiting-page section "Message another session" ("not merged") turn false when PR 1371 merges. Decision: session-messages.
 - mail-comment-bug-term: a hooks/mail.py comment says "a bug"; the glossary term is "defect". Decision: none.
 - mail-store-named-public: the public repo names the private mailbox store by its repo name (decision session-messages); a name only, no secret. Decision: session-messages.
+- mail-safe-trailing-newline: `safe` matches with `$`, which accepts one trailing newline, so `--re 'x\n'` splits the header and the message is never listed; use fullmatch (hooks/mail.py `safe`). Decision: session-messages.
+- mail-shared-cache-fetch: sessions on one machine fetch into one shared bare cache, so a ref lock can give one false "mail unknown" or "not sent"; it heals on the next turn (hooks/mail.py `fetch`). Decision: session-messages.
+- mail-push-timeout-landed: a push timeout after the server took the ref prints "not sent", and a resend gets a new id; `push` retries only "[rejected]" (bin/mail `send`, hooks/mail.py `push`). Decision: session-messages.
+- mail-listing-unpruned: one `listing-*.json` per session address stays in the cache forever, and `hooks/test_local_time.py` does not scrub `MAILBOX_REPO` (hooks/mail.py `listing_path`). Decision: session-messages.
+- mail-lines-docstring-process: the `mail_lines` docstring says it starts no process, yet it starts up to four git processes through hooks/mail.py (hooks/local_time.py `mail_lines`). Decision: session-messages.
