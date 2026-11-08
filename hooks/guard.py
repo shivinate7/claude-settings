@@ -294,6 +294,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import ast
 import difflib
 import importlib
 import importlib.machinery
@@ -1540,7 +1541,9 @@ TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", 
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
-# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+# mutate_*.py stays a builder's. They are not test paths, so a builder's edit is not refused by path; a builder
+# may only ADD to each file here (BUILDER_ADD_ONLY) and ADD a name to this set, never remove or change one
+# (`builder_set_breach`). Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
@@ -1966,12 +1969,296 @@ def builder_test_path(path: str, cwd: str) -> bool:
     return is_test_rel(rel)
 
 
+# A builder may ADD to a file here, never remove or change a line of it: one edited helper or import can
+# weaken every mutant the file holds. The set is AUTHOR_MUTATION_TESTS, one home (decision builders-cannot-edit-tests). The set's own names are guarded too: see `builder_set_breach`.
+BUILDER_ADD_ONLY = AUTHOR_MUTATION_TESTS
+# The file that holds AUTHOR_MUTATION_TESTS. A builder may add a name to the set, never remove or change one.
+AUTHOR_SET_FILE = "hooks/guard.py"
+
+
+def builder_add_only_path(path: str, cwd: str) -> bool:
+    """True when `path` is a file a builder may add lines to but not rewrite. A shell write to it is
+    refused outright, since a `sed -i` or a redirect cannot be shown to be add-only."""
+    rel = repo_rel(path, cwd)
+    return rel is not None and norm(rel).lstrip("/").lower() in BUILDER_ADD_ONLY
+
+
+def _lines_kept(old: str, new: str) -> bool:
+    """True when every line of `old` stays in `new`, in order: the change removes and rewrites none."""
+    kept = iter(new.splitlines())
+    return all(any(line == other for other in kept) for line in old.splitlines())
+
+
+def _head_text(full: str):
+    """The text of `full` at HEAD of the repository that holds it: '' when HEAD has no such file (a new
+    file, or a repository with no commit), None when git could not answer (a read error)."""
+    folder = os.path.dirname(full)
+    while folder and not os.path.isdir(folder):
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return None
+        folder = parent
+    top = guard_core._git(folder, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0:
+        return None
+    root = os.path.realpath(top.stdout.strip())
+    rel = os.path.relpath(os.path.realpath(full), root).replace(os.sep, "/")
+    if rel.startswith(".."):
+        return None
+    head = guard_core._git(root, "rev-parse", "--verify", "-q", "HEAD")
+    if head is None:
+        return None
+    if head.returncode != 0:
+        return ""   # no commit yet: every line is the builder's own
+    held = guard_core._git(root, "cat-file", "-e", "HEAD:" + rel)
+    if held is None:
+        return None
+    if held.returncode != 0:
+        return ""
+    shown = guard_core._git(root, "show", "HEAD:" + rel)
+    if shown is None or shown.returncode != 0:
+        return None
+    return shown.stdout
+
+
+def _edited_text(tool_input, full: str):
+    """The text `full` holds after a builder's Edit, MultiEdit or Write, the way the tool would apply it:
+    the edits run on the file on disk, and an edit the tool would fail (text not on disk) changes nothing.
+    None when the call or the file cannot be read."""
+    if not isinstance(tool_input, dict):
+        return None
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        edits = [tool_input] if "old_string" in tool_input or "new_string" in tool_input else []
+    if isinstance(tool_input.get("content"), str) and not edits:
+        return tool_input["content"]
+    try:
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            result = handle.read()
+    except Exception:
+        return None
+    for edit in edits:
+        if not isinstance(edit, dict):
+            return None
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str):
+            return None
+        if not old or old not in result:
+            continue
+        replace_all = bool(edit.get("replace_all", tool_input.get("replace_all")))
+        result = result.replace(old, new) if replace_all else result.replace(old, new, 1)
+    return result
+
+
+def builder_add_only_breach(tool_input, full: str) -> bool:
+    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line HEAD
+    holds (decision builders-cannot-edit-tests: an existing line is a line committed at HEAD, so the
+    builder may change its own uncommitted adds). The result is read against HEAD's text. HEAD or the
+    call unreadable: refuse, never pass."""
+    if not isinstance(tool_input, dict):
+        return False
+    head = _head_text(full)
+    result = _edited_text(tool_input, full)
+    if head is None or result is None:
+        return True
+    return not _lines_kept(head, result)
+
+
+def author_set_names(text: str):
+    """The names `AUTHOR_MUTATION_TESTS` holds in `text`, as a set: empty when the file has no such
+    assignment, holds `set()`, or assigns no literal set, list or tuple of strings (a set expression's
+    names cannot be read, so it holds none and drops every name). None when the text does not parse."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        elif isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        else:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "AUTHOR_MUTATION_TESTS" for t in targets):
+            continue
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in ("set", "frozenset"):
+            if not value.args and not value.keywords:
+                return set()
+            value = value.args[0] if len(value.args) == 1 and not value.keywords else None
+        if isinstance(value, (ast.Set, ast.List, ast.Tuple)) and all(
+                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
+            return {e.value for e in value.elts}
+        return set()
+    return set()
+
+
+def set_names_dropped(old: str, new: str, strict: bool) -> bool:
+    """True when `new` removes or changes a name `old` holds in AUTHOR_MUTATION_TESTS. `old` unreadable:
+    nothing to judge. `new` unreadable: refused when `strict` (a commit or stop, which holds a whole file),
+    and passed otherwise, since an edit may leave a file half-written; the next judge reads it whole."""
+    before = author_set_names(old)
+    if not before:
+        return False
+    after = author_set_names(new)
+    if after is None:
+        return strict
+    return not before <= after
+
+
+def builder_set_breach(tool_input, full: str) -> bool:
+    """True when a builder's Edit, MultiEdit or Write of the file that holds AUTHOR_MUTATION_TESTS removes
+    or changes a name HEAD's set holds. A name added passes. HEAD unreadable: refuse, never pass."""
+    if not isinstance(tool_input, dict):
+        return False
+    head = _head_text(full)
+    result = _edited_text(tool_input, full)
+    if head is None or result is None:
+        return True
+    return set_names_dropped(head, result, strict=False)
+
+
+def builder_set_path(path: str, cwd: str) -> bool:
+    rel = repo_rel(path, cwd)
+    return rel is not None and norm(rel).lstrip("/").lower() == AUTHOR_SET_FILE
+
+
+# A command that rewrites a file it names, though `writes_to` reads it as a mention: a restore from git, a
+# patch, an in-place edit by perl, ruby or awk, an editor, `dd of=`. Used for the add-only file only: a
+# builder restores a changed test file from HEAD as its undo route, so `writes_to` must not read these.
+_ADD_ONLY_SHELL_WRITERS = {"patch", "ed", "ex", "dd", "rsync", "perl", "ruby", "awk", "gawk", "sponge"}
+_ADD_ONLY_GIT_WRITERS = {"checkout", "restore", "checkout-index", "apply", "am", "stash"}
+# `-i` alone or after switches that take no value (`-pi`, `-lni.bak`); `-Mstrict` and `-Ilib` name a module or folder.
+_IN_PLACE_FLAG = re.compile(r"^-[acdlnpsStuUvwWXy0-9]*i[A-Za-z0-9.]*$")
+
+
+def _restore_index_only(rest) -> bool:
+    """True when a `git restore` writes only the index: `--staged` without `--worktree`."""
+    staged = worktree = False
+    for word in rest:
+        if word == "--":
+            break
+        if word.startswith("--"):
+            staged = staged or guard_core.long_flag_abbrev(word, "--staged", "--sta")
+            worktree = worktree or guard_core.long_flag_abbrev(word, "--worktree", "--w")
+        elif word.startswith("-"):
+            letters = word[1:].split("s", 1)[0]   # `-s` takes the rest of the word as its revision
+            staged, worktree = staged or "S" in letters, worktree or "W" in letters
+    return staged and not worktree
+
+
+def _source_pathspecs(subcommand: str, rest):
+    """The pathspecs a `git checkout` or `git restore` rewrites from a named revision, else []."""
+    if subcommand == "checkout":
+        if any(word in ("-b", "-B", "--orphan") for word in rest):
+            return []
+        if "--" in rest:
+            cut = rest.index("--")
+            revision = [word for word in rest[:cut] if not word.startswith("-")]
+            return rest[cut + 1:] if revision else []
+        return [word for word in rest if not word.startswith("-")][1:]
+    if subcommand != "restore":
+        return []
+    source, paths, value = False, [], False
+    for word in rest:
+        if value:
+            value = False
+        elif word in ("-s", "--source"):
+            source = value = True
+        elif word.startswith("--source=") or (word.startswith("-s") and not word.startswith("--")):
+            source = True
+        elif not word.startswith("-"):
+            paths.append(word)
+    return paths if source else []
+
+
+def _holds_add_only(word: str, where: str) -> bool:
+    """True when `word` names a folder of its repository that holds a file of BUILDER_ADD_ONLY."""
+    try:
+        if os.path.exists(os.path.join(os.path.normpath(_expanded(word, where)), ".git")):
+            return True   # the repository top holds every file (`repo_rel` reads only its parents)
+    except Exception:
+        return False
+    rel = repo_rel(word, where, outside=False)
+    if rel is None:
+        return False
+    rel = norm(rel).strip("/").lower()
+    return any(name.startswith(rel + "/") for name in BUILDER_ADD_ONLY)
+
+
+def _index_only_paths(stripped: str):
+    """The words a `git rm --cached` names that no other segment of the command names: it drops them from
+    the index and keeps the file, so it writes no add-only file."""
+    named, others = set(), set()
+    for segment in split_segments(stripped):
+        calls = git_calls(segment)
+        if calls and all(sub == "rm" and "--cached" in rest for sub, rest in calls):
+            named.update(word for _sub, rest in calls for word in rest if not word.startswith("-"))
+        else:
+            others.update(str(token) for token in (segment_tokens(segment) or segment.split()))
+    return named - others
+
+
+def builder_add_only_shell_hit(stripped: str, cwd: str) -> str:
+    """The add-only path a builder's shell command names and can write, else ''. The verb is judged
+    beside the path: `cat`, `diff`, `git add`, `python3 hooks/mutate_guard.py` only read it."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            tokens = segment.split()
+        if not tokens:
+            continue
+        index = resolve_command(tokens)
+        if index is None:
+            continue
+        command = os.path.basename(str(tokens[index]).replace("\\", "/")).lower().removesuffix(".exe")
+        args = [str(t) for t in tokens[index + 1:]]
+        where = dir_before_segment(segments, number, cwd, ends) or cwd
+
+        def names(words):
+            for word in words:
+                bare = word.split("=", 1)[1] if word.startswith("of=") else word
+                if not bare.startswith("-") and builder_add_only_path(bare, where):
+                    return bare
+            return ""
+        if command == "git":
+            hit = ""
+            for subcommand, rest in git_calls(segment):
+                if subcommand == "restore" and _restore_index_only(rest):
+                    continue
+                if subcommand in _ADD_ONLY_GIT_WRITERS:
+                    hit = hit or names(rest) or next(
+                        (word for word in _source_pathspecs(subcommand, rest) if _holds_add_only(word, where)), "")
+            if hit:
+                return hit
+        elif command in guard_core.INLINE_SCRIPT_SHELLS:
+            for word in args:
+                if " " in word:
+                    hit = builder_add_only_shell_hit(word, where)
+                    if hit:
+                        return hit
+        elif command in _ADD_ONLY_SHELL_WRITERS:
+            in_place = command not in ("perl", "ruby", "awk", "gawk") or "inplace" in args or any(
+                _IN_PLACE_FLAG.match(a) for a in args)
+            written = [a for a in args if not a.startswith("-")][-1:] if command == "rsync" else args
+            hit = names(written) if in_place else ""
+            if hit:
+                return hit
+    return ""
+
+
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
-    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+    kept = _index_only_paths(stripped)
+
+    def refused(path: str, where: str) -> bool:
+        return builder_test_path(path, where) or (builder_add_only_path(path, where) and path not in kept)
+    return (_shell_write_hit(stripped, cwd, refused, follow_cd=True, command_position=True)
+            or builder_add_only_shell_hit(stripped, cwd)
+            or interpreter_write_hit(raw, cwd, refused))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -2000,6 +2287,10 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
+        return target
+    if builder_add_only_path(target, cwd) and builder_add_only_breach(tool_input, _expanded(target, cwd)):
+        return target
+    if builder_set_path(target, cwd) and builder_set_breach(tool_input, _expanded(target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
@@ -2233,21 +2524,26 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
-            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+            bad = not workflow_test_steps_only(text_at(top, old, rel), text_at(top, new, rel))
         elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not package_json_author_ok(text_at(top, old, rel), text_at(top, new, rel))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not pyproject_author_ok(text_at(top, old, rel), text_at(top, new, rel))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
-                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
+            bad = any(is_test_rel(n) for n in names) or (
+                any(norm(n).lstrip("/").lower() in BUILDER_ADD_ONLY for n in names)
+                and not _lines_kept(text_at(top, old, rel), text_at(top, new, rel))) or (
+                any(norm(n).lstrip("/").lower() == AUTHOR_SET_FILE for n in names)
+                and set_names_dropped(text_at(top, old, rel), text_at(top, new, rel), strict=True)) or (
+                is_test_config_rel(rel) and disables_tests(
+                text_at(top, new, rel).splitlines(), text_at(top, old, rel).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(top, old, rel), text_at(top, new, rel)))
         if bad:
             found.append(rel)
     return found
