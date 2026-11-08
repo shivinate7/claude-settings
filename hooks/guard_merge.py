@@ -1300,6 +1300,22 @@ RESUME_UNPARSED_REASON = (
 )
 
 
+def _spawn_reads(records):
+    """(agents, spawns) of the main session's `records`: `agents` maps a spawn call's id to the agentId its launch
+    result carries, and `spawns` lists the Agent and Task calls (with a dict input) in order, less the spawns whose
+    result is an error, since those ran no agent. The one home of this read: resume_finished_hit and agent_name_hit
+    both call it. Raises what a record of the wrong shape raises."""
+    reader = _transcript_reader()
+    failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
+    agents = {res.get("tool_use_id"): rec["toolUseResult"].get("agentId")
+              for rec in records if isinstance(rec.get("toolUseResult"), dict)
+              for res in reader.tool_results(rec)}
+    spawns = [use for rec in records for use in reader.tool_uses(rec)
+              if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
+              and use.get("id") not in failed]
+    return agents, spawns
+
+
 def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
     """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a
     reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown or a parsed transcript
@@ -1324,13 +1340,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
     except Exception:
         return "", "", "", RESUME_UNREAD_NOTE
     try:
-        failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
-        agents = {res.get("tool_use_id"): rec["toolUseResult"].get("agentId")
-                  for rec in records if isinstance(rec.get("toolUseResult"), dict)
-                  for res in reader.tool_results(rec)}
-        spawns = [use for rec in records for use in reader.tool_uses(rec)
-                  if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
-                  and use.get("id") not in failed]
+        agents, spawns = _spawn_reads(records)
         named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
         if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:
             return "", "", "", ""
@@ -1343,6 +1353,60 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
     if state == reader.UNKNOWN:
         return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), ""
     return "", "", "", ""
+
+
+# ---- a lane messages its agents by the name given at spawn (rule agent-name-on-spawn, decision agent-name-on-spawn)
+AN_SEND_REASON = (
+    "agent-name-on-spawn: this send names an agent by its bare agent id. A lane messages each of its agents by the "
+    "name given at spawn, because a bare id is easy to mix up and the message then reaches the wrong agent. Send to "
+    "the name given at spawn. (decision agent-name-on-spawn)"
+)
+AN_UNNAMED_REASON = (
+    "agent-name-on-spawn: this send names an agent by its bare id, and that spawn was given no name, so no name can "
+    "address it. Allow the send only if you are sure the id is the right agent. Next time, give each spawn a name "
+    "at spawn, so later messages address it by that name. (decision agent-name-on-spawn)"
+)
+AN_SPAWN_REASON = (
+    "agent-name-on-spawn: this spawn has no name. Give the spawn a `name` field, such as `overlap-list-a`, so later "
+    "messages address it by that name, never by a bare agent id. (decision agent-name-on-spawn)"
+)
+
+
+def agent_name_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+    """(decision, reason, matched): judged only when this session is a proved lane (_own_tier_proved). "deny" when the
+    call is an Agent or Task spawn from the main session with no `name`, or a blank one. "deny" when a built-in
+    SendMessage's `to` (one trailing ` [<ref>]` stripped, as resume_finished_hit does) is the agentId of a spawn that
+    had a non-blank `name`, and "ask" when that spawn had none. A send to main, a name or an id no spawn holds, the
+    remote send_message, a call with an agent_id, a session that is not a proved lane and a missing or unreadable
+    transcript pass. The reason never carries the agent id or the name. Cost: the lane proof reads the transcript once
+    per judged call (a main-session spawn with no name, or a built-in send); a send adds the shared _main_records read.
+    No subprocess, no network."""
+    if agent or not isinstance(tool_input, dict) or not transcript:
+        return "", "", ""
+    if tool in RECORD_SPAWN_TOOLS:
+        name = tool_input.get("name")
+        if isinstance(name, str) and name.strip():
+            return "", "", ""
+        if not _own_tier_proved(transcript, "lane"):
+            return "", "", ""
+        return "deny", AN_SPAWN_REASON, "%s spawn with no name" % tool
+    target = tool_input.get("to")
+    if tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
+        return "", "", ""
+    if not _own_tier_proved(transcript, "lane"):
+        return "", "", ""
+    target = re.sub(r" \[[^\[\]]*\]$", "", target)
+    try:
+        agents, spawns = _spawn_reads(_main_records(transcript))
+    except Exception:
+        return "", "", ""
+    held = [use for use in spawns if agents.get(use.get("id")) == target]
+    if not held:
+        return "", "", ""
+    name = held[-1]["input"].get("name")
+    if isinstance(name, str) and name.strip():
+        return "deny", AN_SEND_REASON, "%s to an agent by its bare id" % tool
+    return "ask", AN_UNNAMED_REASON, "%s to an agent with no name, by its bare id" % tool
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

@@ -143,6 +143,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
                        fresh reviewer and pass it the prior report. One transcript read per judged send, shared with
                        review-record-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
+  agent-name-on-spawn  deny or ask, in a session proved a lane (its own record tags cs-build:lane). A built-in `SendMessage`
+                       from a call with no `agent_id` whose `to` is the agent id of an Agent or Task spawn: deny when
+                       the spawn had a non-blank `name`, ask when it had none. A trailing ` [<ref>]` on `to` is
+                       stripped first. An Agent or Task spawn with no `name`, or a blank one, is denied. A send to
+                       `main`, to a name or to an id no spawn holds, the remote `send_message`, a call with an
+                       agent_id, a session that is not a proved lane, and a missing or unreadable transcript pass.
+                       The reasons never carry the agent id or the name. One lane-proof transcript read per
+                       judged call, plus the shared `_main_records` read for a send, no subprocess, no network.
+                       An override lifts it. (agent-name-on-spawn)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -406,7 +415,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, resume_finished_hit, review_record_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, agent_name_hit, brief_hit, resume_finished_hit, review_record_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4930,6 +4939,14 @@ def judge(payload) -> None:
         refuse(tool, "deny", "resume-finished-reviewer", resume_reason, resume_matched)
     if resume_decision == "ask":
         refuse(tool, "ask", "resume-finished-reviewer", resume_reason, resume_matched)
+
+    # A lane's send to an agent by its bare id, or its spawn with no name (rule agent-name-on-spawn).
+    name_decision, name_reason, name_matched = agent_name_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+    if name_decision == "deny":
+        refuse(tool, "deny", "agent-name-on-spawn", name_reason, name_matched)
+    if name_decision == "ask":
+        refuse(tool, "ask", "agent-name-on-spawn", name_reason, name_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
