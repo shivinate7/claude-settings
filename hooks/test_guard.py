@@ -7983,11 +7983,14 @@ for _command in NM_OFF_LIST:
 
 # THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
 # changes the install through the link. Without one it only rewrites package.json (a control below).
-# `verison` is npm's own alias for version, so it takes the same flags.
+# `verison` is npm's own alias for version, so it takes the same flags. `--ws` is npm's shorthand for
+# `--workspaces`: `npm version patch --ws` bumps the workspace as `--workspaces` does, not only the root.
 NM_WORKSPACE_VERSION = (
     "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
     "npm version patch --workspace=a", "npm -w a version patch",
     "npm verison patch -w a", "npm -w a verison patch",
+    "npm version patch --ws", "npm version patch --workspace a", "npm --ws version patch",
+    "npm verison patch --ws",
 )
 # THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
 # --dry-run, so a dry run is no no-change for them. npm resolves the unique abbreviations of rebuild and edit to
@@ -8024,6 +8027,8 @@ NM_READ_ONLY = (
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
+# THE PLAIN `npm version` in a real folder. It is the control for the workspace forms above: no flag, no install.
+nm_case("linked-nm: npm version patch (Bash) in a real folder is allowed", "npm version patch", "allow", NMREAL)
 
 # THE SHRINKWRAP COMMAND. npm shrinkwrap reads the tree, then writes npm-shrinkwrap.json and yarn.lock at the
 # prefix, never under node_modules (arborist shrinkwrap.js, save). So it is read-only for this rule, and the
