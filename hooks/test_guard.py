@@ -22262,6 +22262,38 @@ def session_home_lost_refuses_case():
     return True, "every write tool and shell write is refused, naming session-home, EnterWorktree and its shape"
 
 
+def session_home_lost_script_refuses_case():
+    """Rule session-home, by a script: while the record is lost, a call that tees a shell script whose text
+    writes into the primary checkout, and then runs it with sh, is refused as the direct shell write is. The
+    refusal names session-home and EnterWorktree, and no path. The text alone, with no script run, is allowed.
+    The lane call that makes the record is checked first. The redirect forms of the same script are refused
+    already and stay so; this case pins the tee form, which 0343b6758 allows."""
+    primary = sh_new_primary("lostscript")
+    lane, branch = sh_add_lane(primary, "lane-lostscript")
+    session = sh_session()
+    problems = []
+    got, reason = _decide_full("Bash", lane, session=session, command="echo hi")
+    if got != "allow":
+        problems.append("the lane call: want allow, got %s (%s)" % (got, reason[:120]))
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    target = slash(os.path.join(primary, "f.txt"))
+    got, reason = _decide_full("Bash", primary, session=session,
+                               command="echo 'echo x > " + target + "' | tee /tmp/s.sh && sh /tmp/s.sh")
+    problems += sh_refusal_problems("script row", got, reason, primary, lane)
+    if ENTER_WORKTREE_SHAPE not in reason:
+        problems.append("script row: the refusal does not say %s" % ENTER_WORKTREE_SHAPE)
+    got, reason = _decide_full("Bash", primary, session=session,
+                               command="echo 'echo x > " + target + "'")
+    if got != "allow":
+        problems.append("the text alone, with no script run: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a script that writes the primary checkout is refused, naming session-home and EnterWorktree; the text alone is allowed"
+
+
 def session_home_present_folder_passes_case():
     """A session whose worktree folder is still there may write into the primary checkout. The
     record is checked first, so the pass is the record's doing, not a missing record's."""
@@ -22868,6 +22900,9 @@ LOG_CHECKS_EXTRA.append(("session-home: while lost, a commit whose folder is a s
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a write into the "
                          "primary checkout, by each write tool and a shell write, naming EnterWorktree "
                          "and no path", session_home_lost_refuses_case))
+LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree is gone is refused a tee'd script that writes "
+                         "the primary checkout and that sh then runs, naming EnterWorktree and no path; the "
+                         "same text with no script run is allowed", session_home_lost_script_refuses_case))
 LOG_CHECKS_EXTRA.append(("session-home: a session whose worktree folder stands writes into the primary "
                          "checkout", session_home_present_folder_passes_case))
 LOG_CHECKS_EXTRA.append(("session-home: a fresh session with no record writes into the primary checkout "
