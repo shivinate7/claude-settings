@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, inspect, io, json, os, re, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2692,6 +2692,62 @@ class RevivedNote(unittest.TestCase):
         self.assert_refused(self.r.verdict())
         self.trailer_commit("the owner retired it - retired-note - untouched-note - no-such-note")
         self.assertEqual(self.r.verdict(), [], "a trailer that also names slugs never revived was refused")
+
+    run_main = PrintedFindings.run_main  # main() on the repo, its stdout read as text: (exit code, printed text)
+
+    def test_a_trailer_naming_a_prefix_of_a_revived_slug_refuses_it(self):  # control: green here, red under a prefix match
+        self.start(union=True)
+        self.merge_main()
+        self.trailer_commit("the owner retired it - retired")
+        self.assert_refused(self.r.verdict(), slug="retired-note")
+
+    def test_a_trailer_naming_a_longer_slug_refuses_it(self):  # control: green here, red under the reverse prefix match
+        self.start(union=True)
+        self.merge_main()
+        self.trailer_commit("the owner retired it - retired-note-x")
+        self.assert_refused(self.r.verdict(), slug="retired-note")
+
+    def test_a_named_revival_prints_one_allowed_line_that_names_the_slug(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it - retired-note")
+        self.assertEqual(self.r.verdict(), [], "premise: a trailer that names retired-note is green")
+        allowed = [n for n in self.r.notes if n.startswith("ALLOWED %s:" % self.NOTES) and "retired-note" in n]
+        self.assertEqual(len(allowed), 1, "a named revival printed %d ALLOWED lines for the notes path that name retired-note, not one: %r"
+                         % (len(allowed), self.r.notes))
+
+    def test_the_refusal_says_a_named_slug_keeps_the_copy_and_never_drops_it(self):
+        self.start(union=True)
+        self.merge_main()
+        refusal = [p for p in self.r.verdict() if "note `retired-note`" in p]
+        self.assertTrue(refusal, "premise: retired-note is refused: %r" % self.r.notes)
+        about = [s for s in re.split(r"(?<=\.) ", refusal[0]) if any(k in s for k in ("trailer", "- retired-note", "- <slug>"))]
+        keeps = any(re.search(r"\bkeeps?\b", s) for s in about)
+        drops = any(re.search(r"\bdrop(?:s|ped|ping)?\b(?!-)", s, re.I) for s in about)
+        self.assertTrue(keeps and not drops, "the refusal's sentence on the trailer does not say naming the slug keeps the revived copy, "
+                        "or says it drops the note: %r" % about)
+
+    def test_the_footer_for_a_refused_revival_suggests_the_slug_form(self):
+        self.start(union=True)
+        self.merge_main()
+        _, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertTrue(any("note `retired-note`" in l for l in text.splitlines()), "premise: retired-note is refused: %r" % text)
+        footer = [l for l in text.splitlines() if l.startswith("silent-undo: put the work back")]
+        self.assertEqual(len(footer), 1, "premise: the refusal prints one footer line: %r" % text)
+        self.assertTrue("- retired-note" in footer[0] or "- <slug>" in footer[0],
+                        "the footer for a refused revival suggests a path-only trailer, not the `- <slug>` form: %r" % footer[0])
+
+    def test_a_slug_followed_by_a_comma_or_a_period_in_the_reason_is_excused(self):
+        refused = []
+        for reason in ("the owner retired it - retired-note,", "the owner retired it - retired-note."):
+            self.start(union=True)
+            self.merge_main()
+            self.assert_refused(self.r.verdict())
+            self.trailer_commit(reason)
+            if self.r.verdict():
+                refused.append(reason)
+        self.assertEqual(refused, [], "a reason that names retired-note with punctuation after it does not excuse it: %r" % refused)
 
 
 if __name__ == "__main__":
