@@ -51,7 +51,7 @@ import subprocess
 import sys
 import tempfile
 
-from mutate_shared import guard_tree  # run as a script, so hooks/ is on sys.path
+from mutate_shared import guard_beside, guard_tree  # run as a script, so hooks/ is on sys.path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
@@ -364,21 +364,14 @@ def split_tree(mutant):
     hooks/ holds guard.py and its guard_* siblings, and merge/, lint/ and actions/ci-alarm/ sit beside it.
     guard_merge loads merge/merge.py from one folder above the copy's hooks/. merge.py imports
     lint/hook_catalog.py at import and reads events.json, so a copy without them reads the merge tool as
-    unloadable, and the review-record fixture raises. The mutate_guard list is in a file this suite may not
-    edit, so this copy repeats it.
+    unloadable, and the review-record fixture raises.
     With `mutant`, the sibling guard_core.py (created if absent) ends in SPLIT_MUTANT, so a load that
     takes split_segments from that sibling shows it. Without it, the sibling is left as it is.
     Returns the checkout root. The guard under test is root/hooks/guard.py."""
     root = tempfile.mkdtemp(prefix="guard-split-")
     hooks = os.path.join(root, "hooks")
     guard_tree(hooks)
-    os.makedirs(os.path.join(root, "merge"))
-    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
-    os.makedirs(os.path.join(root, "actions", "ci-alarm"))
-    shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
-                os.path.join(root, "actions", "ci-alarm"))
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    guard_beside(root)
     if mutant:
         with open(os.path.join(hooks, "guard_core.py"), "a", encoding="utf-8") as handle:
             handle.write(SPLIT_MUTANT)
