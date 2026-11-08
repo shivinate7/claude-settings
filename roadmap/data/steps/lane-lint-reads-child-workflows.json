@@ -2,10 +2,10 @@
   "title": "Lane lint reads the checks job in degen, joyous and ios-adblock",
   "order": 103.53,
   "why": "Runner 9 measured `ci-job checks --lint` at 22:54 CST Nov 7: rc 2 in degen (its workflow is check.yml), joyous (checks.yml has no job `checks`) and ios-adblock (its workflow is ci.yml). It blocks the release of #1760, which prints a review record only after lane lint reads the job.",
-  "note": "The fix is in each repo's workflow shape, not a second form in the tool. Ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Done check: `ci-job checks --lint` exits 0 in each of the three repos. A queue-fix lane under the item 384 hold. Slug and title from the coordinator, 22:59 CST Nov 7.",
+  "note": "The fix is in each repo's workflow shape, not a second form in the tool. Ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Done check: `ci-job checks --lint` exits 0 in each of the three repos. A queue-fix lane under the item 384 hold. Slug and title from the coordinator, 22:59 CST Nov 7. Nov 7 23:11 CST: done with no change, because the premise was stale. Fresh clones of degen (c3d1d21), joyous (ef58858) and ios-adblock (409dc24) each have checks.yml with job `checks`. Runner 9 measured stale clones. The lane closes, and nothing merges (coordinator, 23:09 CST).",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "owner": "coordinator",
   "lane": "session_013NEJKzBhfZJXADmATcCisK",
-  "updatedAt": "2026-11-07T23:03:00-06:00"
+  "updatedAt": "2026-11-07T23:09:00-06:00"
 }
