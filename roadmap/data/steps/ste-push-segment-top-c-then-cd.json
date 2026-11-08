@@ -1,11 +1,11 @@
 {
   "title": "The STE push guard reads a commit's folder from its own segment, not the call's first `git -C`",
   "why": "In one call such as `git -C <A> status && cd <B> && git commit -am m && git push`, rule ste-push takes the commit's folder from the first `-C` (command_root), so it misses B's commit, skips the chain refusal and lints B's pre-commit HEAD (lane lint-before-record-push, 04:05 CST Nov 8). Follow-up of step lint-before-record-push (#1755).",
-  "note": "Fix: `_segment_top` in hooks/guard_merge.py uses dir_before_segment, as the conflict-markers check does. Red case first: that chain passes today; control: a one-folder commit and push still lints as today. Lane session_013NEJKzXyKNARtJsbz3Q1R2 (lint-before-record-push) builds it on branch ste-push-segment-top-c-then-cd off #1755's head 9278579a8; its PR carries Merge after: #1755. Queue fix (coordinator, 04:06 CST Nov 8). Filed 04:07 CST Nov 8.",
+  "note": "Fix: `_segment_top` in hooks/guard_merge.py uses dir_before_segment, as the conflict-markers check does. Red case first: that chain passes today; control: a one-folder commit and push still lints as today. Lane session_013NEJKzXyKNARtJsbz3Q1R2 (lint-before-record-push) builds it on branch ste-push-segment-top-c-then-cd off #1755's head 9278579a8; its PR carries Merge after: #1755. Queue fix (coordinator, 04:06 CST Nov 8). Filed 04:07 CST Nov 8. Built as PR #2032 (replaces #1898), in review (lane, 08:15 CST Nov 8).",
   "phase": "now",
   "status": "doing",
   "order": 586,
   "owner": "triage",
   "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
-  "updatedAt": "2026-11-08T04:06:00-06:00"
+  "updatedAt": "2026-11-08T08:08:00-06:00"
 }
