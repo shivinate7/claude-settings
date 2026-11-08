@@ -38,6 +38,15 @@ are scanned for lines containing "FAIL", and a mutant's death only counts when t
 case name shows up in one of them: a mutant that crashes the suite, or that some UNRELATED case
 happens to catch, is WRONG CAUSE, not KILLED.
 
+A CRASHED LAYOUT IS NOT A KILL EITHER. A scaffold that crashes the suite (a missing sibling
+module, a wrong path) makes every case red whatever was mutated. The required-case check above
+catches a crash that leaves no FAIL line (WRONG CAUSE), but not one that leaves the required
+case red too. So `main` runs one clean-layout control per suite with a chosen, unskipped mutant:
+the suite on an unmutated scaffold, judged by `mutate_shared.control_verdict`. A red or raising
+control reads every mutant of its suite UNKNOWN (exit 1), never KILLED. Cost: one full run of
+each such suite and one temp scaffold (folder `c_<safe_name(suite)>`, removed in a `finally`), run inside
+the same job cap as the mutants, with no log and no timer. One full test_sweep.py run: 62 s on Linux (11 cases skipped), unmeasured on macOS and Windows.
+
 A mutant no case kills is a survivor, and the run exits 1.
 
 Run:
@@ -1570,6 +1579,20 @@ def run_mutant(sources, work: str, index: int, entry):
         shutil.rmtree(scaffold, ignore_errors=True)
 
 
+def run_control(sources, work: str, suite: str):
+    """The clean-layout control of one suite: run it with no mutation, in its own scaffold, and return
+    run_suite's (code, red, ran, seen). The scaffold is removed afterwards. A timeout raises from run_suite;
+    `mutate_shared.run_mutants` reads that as a red control."""
+    scaffold = os.path.join(work, "c_%s" % mutate_shared.safe_name(suite))
+    config_dir = os.path.join(scaffold, "cfg")
+    os.makedirs(config_dir, exist_ok=True)
+    try:
+        build_scaffold(scaffold, sources, None, "")
+        return run_suite(os.path.join(scaffold, "janitor", suite), config_dir, None)
+    finally:
+        shutil.rmtree(scaffold, ignore_errors=True)
+
+
 def main() -> int:
     sources = {}
     for name, path in SOURCES.items():
@@ -1604,9 +1627,15 @@ def main() -> int:
 
     work = tempfile.mkdtemp(prefix="mutate_sweep_")
     try:
+        # One control per suite that has a chosen entry which is not skipped on this platform.
+        suites = sorted({SUITE_FOR_TARGET[mutation_parts(entry)[1]] for _i, entry in chosen
+                         if not mutate_shared.skip_reason(mutation_parts(entry)[5])})
+        controls = {suite: (lambda suite=suite: run_control(sources, work, suite)) for suite in suites}
         return mutate_shared.run_mutants(
             chosen,
-            lambda item: run_mutant(sources, work, item[0], item[1]))
+            lambda item: run_mutant(sources, work, item[0], item[1]),
+            controls=controls,
+            control_of=lambda item: SUITE_FOR_TARGET[mutation_parts(item[1])[1]])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

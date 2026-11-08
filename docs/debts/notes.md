@@ -187,8 +187,6 @@
 - mods-refresh-cadence-unmeasured: the docs say auto-update runs up to 10 minutes after a session's first message and the new version loads at the next launch; unmeasured on the owner's machines (settings.json marketplace entry)
 - mods-session-board-timer-margins: two real-timer margins, within(200) against 100 ms grace, unproven on a slow runner (mods/session-board/session-board.test.mjs)
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
-- mutate-sweep-no-control: `run_mutant` in janitor/mutate_sweep.py has no clean-layout control, so a scaffold that crashes on every case reads as a kill (hooks/mutate_guard.py `run_controls` has one). Fix: step:mutate-sweep-control
-- mutate-tree-paths-uncollided: the `tree_` folders of ruling and decision mutants are not in the path-collision check of `main` (hooks/mutate_guard.py `lay_out`). Fix: step:mutate-tree-collision
 - nesting-risk-unrecorded: nothing prompts a risk record when a repo raises agent spawn depth (settings.json, deleted rule roles-workers-never-spawn)
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR)
 - no-start-lock-has-no-pid-check: agent lock with no start time has no pid-reuse check; a reused pid keeps the tree, the safe side (janitor/sweep.py)
@@ -1151,6 +1149,7 @@
 - budget-s-flake-margin: `BUDGET_S = 5.0` leaves about 1 s above the first mutant's start, so a slow machine can flake (hooks/test_mutate_replay.py). Decision: mutation-report-scores-suites.
 - mutate-js-linecount-per-site: `lineOf` in hooks/mutate_js.mjs splits the source from its start for each site, so the cost is O(n) per site. Decision: mutation-report-scores-suites.
 - mutate-js-multiline-site-first-line: a multi-line site is keyed by its first line (`lineOf(node)`, hooks/mutate_js.mjs). Decision: mutation-report-scores-suites.
+- mutate-sweep-control-flaky-case: one flaky clean case in janitor/test_sweep.py (time.sleep, clock reads) turns the whole sweep control red, and every test_sweep mutant reads UNKNOWN (red CI, never a false kill). Unmeasured in CI (janitor/mutate_sweep.py `run_control`).
 - renamed-file-all-lines-changed: `changed_lines` runs with `--no-renames`, so a renamed file reads as all lines added (hooks/mutate_shared.py). Decision: mutation-report-scores-suites.
 - lane-force-push-refused: the auto-mode classifier refused a lane's `git push --force-with-lease` to its own draft branch, to add Red-run trailers, twice on 2026-11-02: lane worktree-base-copies-remove at 00:30 CST (replacement PR #1064) and lane tci-6 at 06:05 CST (replacement PR #1087). Refusing stays as on main (lint/report_guard.py forced an allow ask). Decision: owner-override.
 - stale-cancel-all-skipped: a cancelled main run whose jobs were all skipped clears when a newer covering run holds those job names, whatever their conclusions (`cleared`, merge/merge.py). Decision: no-merge-onto-red-main.

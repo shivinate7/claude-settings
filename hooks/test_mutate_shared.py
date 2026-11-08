@@ -24,8 +24,12 @@ its own root, the folder beside its hooks/.
 The fifth part pins the clean-layout control: a target's mutants count as kills only after one full-suite
 run of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
 runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNKNOWN too.
+
+The sixth part pins mutate_sweep's clean-layout control: one control per suite, not per target, built only for
+a suite with a chosen, unskipped entry, and judged through `run_mutants` as the guard's control is.
 """
 import contextlib
+import functools
 import io
 import os
 import shutil
@@ -260,6 +264,39 @@ def pass_result(*names):
 JOIN_WAIT = 0.5  # a call waits this long for a second call to join it, so overlap shows without a fixed sleep
 RELEASE_WAIT = 1.0  # a held control waits this long for the mutant it is held on, so no case hangs
 RUN_LIMIT = 4.0  # main must return within this long, or the case reads a stall, not a hang
+FULL_RUN_LIMIT = 120.0  # the whole real sweep list runs about 185 scaffolds, so a stall reads at this bound
+
+
+def run_main_outcome_on(module, folder, entries, suite, env=None, limit=RUN_LIMIT):
+    """Run `module.main()` over `entries`, with `suite` as its run_suite and `env` set for the run. Return
+    (exit code or None, stdout lines, exception or None). main runs on its own thread, so a run that does not
+    return within `limit` seconds reads as a TimeoutError here, not as a hang. main's work folder is made under
+    `folder`, not the system temp dir."""
+    out = io.StringIO()
+    real_mkdtemp = tempfile.mkdtemp
+    outcome = {}
+
+    def mkdtemp_in_run(suffix=None, prefix=None, dir=None):
+        return real_mkdtemp(suffix=suffix, prefix=prefix, dir=folder)
+
+    def call_main():
+        try:
+            outcome["code"] = module.main()
+        except Exception as caught:  # a crash is what the caller asserts on, not a test error
+            outcome["error"] = caught
+
+    with mock.patch.dict(os.environ, env or {}), \
+            mock.patch.object(module, "MUTATIONS", entries), \
+            mock.patch.object(module, "run_suite", side_effect=suite), \
+            mock.patch.object(tempfile, "mkdtemp", side_effect=mkdtemp_in_run), \
+            contextlib.redirect_stdout(out):
+        runner = threading.Thread(target=call_main, daemon=True)
+        runner.start()
+        runner.join(limit)
+    error = outcome.get("error")
+    if runner.is_alive():
+        error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % limit)
+    return outcome.get("code"), out.getvalue().splitlines(), error
 
 
 class _FakeSuite:
@@ -351,35 +388,10 @@ class CleanLayoutControlTests(unittest.TestCase):
 
     def run_main_outcome(self, entries, suite, jobs=None):
         """As run_main, but return what main raised, with the lines it printed before, as (exit code or None,
-        stdout lines, exception or None). main runs on its own thread, so a run that does not return reads as a
-        TimeoutError here, not as a hang. main's work folder is made under this test's run folder, not the system
-        temp dir."""
-        out = io.StringIO()
-        real_mkdtemp = tempfile.mkdtemp
-        outcome = {}
-
-        def mkdtemp_in_run(suffix=None, prefix=None, dir=None):
-            return real_mkdtemp(suffix=suffix, prefix=prefix, dir=self.run)
-
-        def call_main():
-            try:
-                outcome["code"] = mutate_guard.main()
-            except Exception as caught:  # a crash is what the caller asserts on, not a test error
-                outcome["error"] = caught
-
+        stdout lines, exception or None). main's work folder is made under this test's run folder, not the system
+        temp dir. The run itself is run_main_outcome_on, shared with the sweep cases."""
         env = {} if jobs is None else {"MUTATE_JOBS": str(jobs)}
-        with mock.patch.dict(os.environ, env), \
-                mock.patch.object(mutate_guard, "MUTATIONS", entries), \
-                mock.patch.object(mutate_guard, "run_suite", side_effect=suite), \
-                mock.patch.object(tempfile, "mkdtemp", side_effect=mkdtemp_in_run), \
-                contextlib.redirect_stdout(out):
-            runner = threading.Thread(target=call_main, daemon=True)
-            runner.start()
-            runner.join(RUN_LIMIT)
-        error = outcome.get("error")
-        if runner.is_alive():
-            error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % RUN_LIMIT)
-        return outcome.get("code"), out.getvalue().splitlines(), error
+        return run_main_outcome_on(mutate_guard, self.run, entries, suite, env)
 
     def test_a_red_clean_layout_reads_unknown_not_killed(self):
         entries = self.guard_entries("role-model: Explore loses its audit exemption")
@@ -746,6 +758,245 @@ class ErrorBlockReportTests(unittest.TestCase):
                         "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
         self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
                          "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
+
+
+SWEEP_SUITE = "test_sweep.py"
+SESSION_END_SUITE = "test_session_end_sweep.py"
+CONTROL_CASE = "test_the_clean_layout_passes"
+
+
+def lf_bytes(path):
+    """The file's bytes, with CRLF read as LF, so a checkout's line endings never read as a mutation."""
+    with open(path, "rb") as handle:
+        return handle.read().replace(b"\r\n", b"\n")
+
+
+@functools.lru_cache(maxsize=None)
+def real_lf_bytes(rel):
+    """The repository's own file at `rel`, read once per run."""
+    return lf_bytes(os.path.join(mutate_sweep.REPO_ROOT, rel))
+
+
+def scaffold_mutated(scaffold):
+    """Return (names, mutated) for the .py modules under <scaffold>/hooks and <scaffold>/janitor. `names` lists
+    each as `hooks/x.py` or `janitor/x.py`; `mutated` lists those whose bytes are not the repository's own file.
+    A mutant's scaffold holds exactly one mutated file, and a clean-layout control holds none."""
+    names, mutated = [], []
+    for folder in ("hooks", "janitor"):
+        here = os.path.join(scaffold, folder)
+        if not os.path.isdir(here):
+            continue
+        for name in sorted(os.listdir(here)):
+            if name.endswith(".py"):
+                rel = folder + "/" + name
+                names.append(rel)
+                if lf_bytes(os.path.join(scaffold, rel)) != real_lf_bytes(rel):
+                    mutated.append(rel)
+    return names, mutated
+
+
+class SweepSuiteFake:
+    """A stand-in for `mutate_sweep.run_suite(suite_path, config_dir, only=None)`.
+
+    A call with `only` set is a mutant's stage-1 run: its required case fails, so the mutant is killed. A call with
+    `only` None is a clean-layout control: green, unless its suite is in `red`, and it raises `raises[suite]` when
+    the suite names one. Each call records its suite, its scaffold's folder name and path, `only`, the scaffold's
+    module names and the ones mutated. The scaffold is read during the call, since main removes it afterwards."""
+
+    def __init__(self, red=(), raises=None):
+        self.red = set(red)
+        self.raises = dict(raises or {})
+        self.calls = []
+        self.lock = threading.Lock()
+
+    def __call__(self, suite_path, config_dir, only=None):
+        scaffold = os.path.dirname(os.path.dirname(suite_path))
+        names, mutated = scaffold_mutated(scaffold)
+        call = {"suite": os.path.basename(suite_path), "folder": os.path.basename(scaffold), "path": scaffold,
+                "only": only, "names": names, "mutated": mutated}
+        with self.lock:
+            self.calls.append(call)
+        if only is not None:
+            return fail_result(only)
+        if call["suite"] in self.raises:
+            raise self.raises[call["suite"]]
+        return fail_result(CONTROL_CASE) if call["suite"] in self.red else pass_result(CONTROL_CASE)
+
+    def controls(self, suite=None):
+        """The clean-layout control calls, for one suite or for all."""
+        return [call for call in self.calls if call["only"] is None and suite in (None, call["suite"])]
+
+    def mutants(self):
+        return [call for call in self.calls if call["only"] is not None]
+
+
+def mutation(fragment):
+    """The real mutate_sweep entry whose label holds `fragment`. Each fragment a case names matches one entry."""
+    return next(entry for entry in mutate_sweep.MUTATIONS if fragment in mutate_sweep.mutation_parts(entry)[0])
+
+
+def label_of(entry):
+    return mutate_sweep.mutation_parts(entry)[0]
+
+
+def skipped_here(entry):
+    """`entry` marked for the other platform, so this platform skips it: its `only_on` is the one that is not here."""
+    other = "posix" if sys.platform.startswith("win") else "windows"
+    return tuple(mutate_sweep.mutation_parts(entry)[:5]) + (other,)
+
+
+def printed(lines, word, label="", reason=""):
+    """The printed lines that start with `word` (KILLED, UNKNOWN, SKIPPED), name `label` and hold `reason`."""
+    return [line for line in lines if line.startswith(word) and label in line and reason in line]
+
+
+class CleanLayoutControlPerSuiteTests(unittest.TestCase):
+    """mutate_sweep's mutants count as kills only when the clean-layout control of their suite passes. There is one
+    control per suite (test_sweep.py, test_session_end_sweep.py), not per target. It is built only for a suite with a
+    chosen, unskipped entry: a run_suite call with only None on an unmutated scaffold, in its own folder, removed
+    after. A red or raising control reads every mutant of its suite UNKNOWN and exits 1. A green one keeps the kills.
+    Each case runs main() with run_suite faked, so no real suite runs."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ("MUTATE_ONLY", "MUTATE_FULL", "MUTATE_JOBS"):  # a developer's setting must not change the run
+            os.environ.pop(name, None)
+
+    def outcome(self, entries, suite, env=None, limit=RUN_LIMIT):
+        return run_main_outcome_on(mutate_sweep, self.run, entries, suite, env, limit)
+
+    def test_a_red_control_reads_every_mutant_of_its_suite_unknown(self):
+        entries = [mutation("NaN is no deadline"), mutation("N <= 0 is no deadline")]
+        suite = SweepSuiteFake(red=[SWEEP_SUITE])
+        code, lines, error = self.outcome(entries, suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue(suite.controls(SWEEP_SUITE), "no clean-layout control ran for %s: %r" % (SWEEP_SUITE, lines))
+        self.assertEqual(printed(lines, "KILLED"), [], "a red clean layout still reads a mutant KILLED: %r" % lines)
+        for entry in entries:
+            self.assertTrue(printed(lines, "UNKNOWN", label_of(entry), "clean layout"),
+                            "no UNKNOWN line names %s with 'clean layout': %r" % (label_of(entry), lines))
+        self.assertEqual(code, 1, "a red clean layout must exit 1, not %r" % code)
+
+    def test_a_red_control_leaves_the_other_suites_mutants_judged(self):
+        sweep = mutation("NaN is no deadline")
+        session_end = mutation("strict: the SessionEnd sweep call passes --attended")
+        suite = SweepSuiteFake(red=[SWEEP_SUITE])
+        code, lines, error = self.outcome([sweep, session_end], suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue(suite.controls(SWEEP_SUITE), "no clean-layout control ran for %s: %r" % (SWEEP_SUITE, lines))
+        self.assertTrue(printed(lines, "UNKNOWN", label_of(sweep)),
+                        "the test_sweep.py mutant is not UNKNOWN under its red control: %r" % lines)
+        self.assertTrue(printed(lines, "KILLED", label_of(session_end)),
+                        "a red test_sweep.py control leaves the test_session_end_sweep.py mutant unjudged: %r" % lines)
+        self.assertEqual(code, 1, "a run with an UNKNOWN mutant must exit 1, not %r" % code)
+
+    def test_a_control_that_times_out_reads_its_suite_unknown(self):
+        entry = mutation("NaN is no deadline")
+        suite = SweepSuiteFake(raises={SWEEP_SUITE: subprocess.TimeoutExpired("python3", 1200)})
+        code, lines, error = self.outcome([entry], suite)
+        self.assertIsNone(error, "main raised %r: a control that times out ends the run, where its mutants should "
+                                 "read UNKNOWN" % (error,))
+        self.assertTrue(suite.controls(SWEEP_SUITE), "no clean-layout control ran for %s: %r" % (SWEEP_SUITE, lines))
+        self.assertTrue(printed(lines, "UNKNOWN", label_of(entry), "clean layout"),
+                        "a control that times out does not read its mutant UNKNOWN: %r" % lines)
+        self.assertEqual(printed(lines, "KILLED"), [], "a timed-out clean layout still reads a mutant KILLED: %r" % lines)
+        self.assertEqual(code, 1, "a run with an UNKNOWN mutant must exit 1, not %r" % code)
+
+    def test_a_green_control_keeps_every_kill(self):
+        entries = [mutation("NaN is no deadline"), mutation("strict: the SessionEnd sweep call passes --attended")]
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome(entries, suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        for entry in entries:
+            self.assertTrue(printed(lines, "KILLED", label_of(entry)),
+                            "a green clean layout lost the kill of %s: %r" % (label_of(entry), lines))
+        self.assertEqual(printed(lines, "UNKNOWN"), [], "a green clean layout still reads a mutant UNKNOWN: %r" % lines)
+        self.assertEqual(code, 0, "every mutant killed under green controls must exit 0, not %r" % code)
+
+    def test_one_control_per_suite_not_per_target(self):
+        # "sweep" and "agent_end_reap" are two targets that both prove test_sweep.py.
+        entries = [mutation("NaN is no deadline"),
+                   mutation("primary checkout is no longer refused as a target"),
+                   mutation("strict: the SessionEnd sweep call passes --attended")]
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome(entries, suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertEqual(len(suite.controls(SWEEP_SUITE)), 1,
+                         "two targets prove %s, want one control for it, got %d: %r"
+                         % (SWEEP_SUITE, len(suite.controls(SWEEP_SUITE)), lines))
+        self.assertEqual(len(suite.controls(SESSION_END_SUITE)), 1,
+                         "want one control for %s, got %d: %r"
+                         % (SESSION_END_SUITE, len(suite.controls(SESSION_END_SUITE)), lines))
+
+    def test_a_suite_with_no_chosen_entry_runs_no_control(self):
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome(mutate_sweep.MUTATIONS, suite,
+                                          env={"MUTATE_ONLY": "NaN is no deadline"})
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue(suite.controls(SWEEP_SUITE),
+                        "the one chosen test_sweep.py mutant ran with no control: %r" % lines)
+        self.assertEqual([call["suite"] for call in suite.calls if call["suite"] == SESSION_END_SUITE], [],
+                         "%s ran though no entry of that suite was chosen: %r" % (SESSION_END_SUITE, lines))
+
+    def test_a_suite_whose_chosen_entries_are_all_skipped_runs_no_control(self):
+        unskipped = mutation("NaN is no deadline")
+        skipped = skipped_here(mutation("strict: the SessionEnd sweep call passes --attended"))
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome([unskipped, skipped], suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertTrue(suite.controls(SWEEP_SUITE),
+                        "no control ran for the chosen, unskipped test_sweep.py mutant: %r" % lines)
+        self.assertEqual([call["suite"] for call in suite.calls if call["suite"] == SESSION_END_SUITE], [],
+                         "%s ran though its only chosen entry is skipped on this platform: %r"
+                         % (SESSION_END_SUITE, lines))
+        self.assertTrue(printed(lines, "SKIPPED", label_of(skipped)),
+                        "the other-platform entry did not print SKIPPED: %r" % lines)
+
+    def test_the_control_scaffold_holds_unmutated_sources(self):
+        entry = mutation("NaN is no deadline")
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome([entry], suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        controls = suite.controls(SWEEP_SUITE)
+        self.assertEqual(len(controls), 1, "want one test_sweep.py control, got %d: %r" % (len(controls), lines))
+        control = controls[0]
+        self.assertIn("janitor/sweep.py", control["names"],
+                      "the control's scaffold holds no janitor/sweep.py: %r" % control["names"])
+        self.assertEqual(control["mutated"], [],
+                         "the control's scaffold holds a mutated file: %r" % control["mutated"])
+        self.assertNotRegex(control["folder"], r"^m_\d{3}_",
+                            "the control's folder takes the name shape of a mutant's folder: %r" % control["folder"])
+        self.assertNotIn(control["folder"], [call["folder"] for call in suite.mutants()],
+                         "the control's folder has the same name as a mutant's folder")
+        self.assertEqual([call["mutated"] for call in suite.mutants()], [["janitor/sweep.py"]],
+                         "a mutant's scaffold must hold exactly its own mutated file, or the check above proves "
+                         "nothing: %r" % [call["mutated"] for call in suite.mutants()])
+
+    def test_the_control_folder_is_removed_once_main_returns(self):
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome([mutation("NaN is no deadline")], suite)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        controls = suite.controls(SWEEP_SUITE)
+        self.assertEqual(len(controls), 1, "want one test_sweep.py control, got %d: %r" % (len(controls), lines))
+        self.assertFalse(os.path.exists(controls[0]["path"]),
+                         "the control's folder is still there once main returns: %r" % controls[0]["path"])
+
+    def test_the_full_list_runs_one_control_per_suite_and_every_mutant_judged(self):
+        suite = SweepSuiteFake()
+        code, lines, error = self.outcome(mutate_sweep.MUTATIONS, suite, limit=FULL_RUN_LIMIT)
+        self.assertIsNone(error, "main raised %r" % (error,))
+        self.assertEqual(len(suite.controls(SWEEP_SUITE)), 1,
+                         "the full list: want one control for %s, got %d"
+                         % (SWEEP_SUITE, len(suite.controls(SWEEP_SUITE))))
+        self.assertEqual(len(suite.controls(SESSION_END_SUITE)), 1,
+                         "the full list: want one control for %s, got %d"
+                         % (SESSION_END_SUITE, len(suite.controls(SESSION_END_SUITE))))
+        self.assertEqual(code, 0, "every mutant killed under green controls must exit 0, not %r: %r"
+                         % (code, [line for line in lines if line.startswith(("UNKNOWN", "SURVIVED", "WRONG"))]))
 
 
 if __name__ == "__main__":
