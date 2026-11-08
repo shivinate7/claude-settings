@@ -5,15 +5,21 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import contextlib, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+import check_debt_retire as D  # noqa: E402  the debt-close check: the scope each Retire-run case is read against
+from test_check_debt_retire import PROSE, RUN_URL, Runs, debt  # noqa: E402  one home of the debt shape and the fake run reader
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+
+RUN = os.path.realpath(_test_temp.run_folder())  # every temp repo of this run lives under it, removed at exit
+atexit.register(shutil.rmtree, RUN, True)
 
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -41,7 +47,7 @@ def without_opt_out(env):
 class Repo:
     def __init__(self):
         self.signs = False  # a case that signs on purpose sets this, and its git runs without the opt-out
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN)
         REPOS.append(self)
         self.dir = os.path.join(self.tmp.name, "w")
         origin = os.path.join(self.tmp.name, "o.git")
@@ -2128,6 +2134,269 @@ class RecordsPage(unittest.TestCase):
         self.commit_all(r, "drop the debts from the records page, with the generator that drops them")
         got, notes = C.check(r.dir, "origin/main", "HEAD", tool=self.TOOL)
         self.assertTrue(any("docs/records.md" in p for p in got), (got, notes))
+
+
+NO_EXCUSE = "check() takes no run_state: a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+
+
+class RetireCite(unittest.TestCase):
+    """A debt close is excused only by a `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph, for a run that
+    is green on the PR head or above it, and only for the debt's own path (decision debt-close-runs-retire). The green case is
+    the #1099 shape: a prose Retire and that cite. Each other case changes one input and must keep its finding. Each case first
+    reads the same PR through the debt-close check, so its kind is known before the silent-undo verdict is read."""
+
+    SLUG = "session-start-env-reaches-neon"
+    DEBT = "docs/debts/%s.md" % SLUG
+    NOTE = "docs/other/second-note.md"
+    CITE = "Summary.\n\nRetire-run: %s -- %s\n"
+    RED_RETIRE = "Delete the old helper. Check: `tests/test_fail.py`."
+    MOVED = "docs/moved.md"
+    OTHER = "docs/debts/other-debt.md"
+    OTHER_SLUG = "other-debt"
+    OTHER_RUN_URL = "https://github.com/fixture/repo/actions/runs/43"
+    NOTE_LINE = "- **Note.** Added on main after the cut.\n"
+
+    def setUp(self):
+        self.r = base_repo()
+        self.r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        self.r.put("tests/test_pass.py", "import sys\nsys.exit(0)\n")
+        self.r.put("tests/test_fail.py", "import sys\nsys.exit(1)\n")
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "base: the layout file and two test files")
+        self.r.push()
+
+    def land(self, paths):
+        """A merged PR that adds `paths` ({path: text}, .md only) to main: the step Red.merged_pr makes."""
+        Red.merged_pr(self, branch="landed", msg="add the files", **{p[:-3].replace("/", "__") + "_md": t for p, t in paths.items()})
+
+    def drop(self, *paths):
+        """A branch cut from main that deletes `paths`. -> its head sha."""
+        self.r.sh("checkout", "-q", "-b", "retire")
+        for p in paths:
+            self.r.sh("rm", "-q", p)
+        self.r.sh("commit", "-q", "-m", "drop the files")
+        return self.r.sh("rev-parse", "HEAD")
+
+    def assert_deleted(self, head, *paths):
+        names = self.r.sh("diff", "--name-status", "-M", "origin/main", head).splitlines()
+        for p in paths:
+            self.assertIn("D\t" + p, names, "the PR does not delete %s, so the case proves nothing" % p)
+
+    def cut_then_main_adds_the_note(self):
+        """Cut `retire` from main, then main adds NOTE_LINE to the debt, then `retire` merges main in: it holds that line."""
+        self.r.sh("checkout", "-q", "-b", "retire")
+        self.r.put("other.txt", "branch work\n")
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "branch work")
+        self.r.sh("checkout", "-q", "main")
+        self.r.put(self.DEBT, debt(PROSE) + self.NOTE_LINE)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "main adds a line to the debt")
+        self.r.push()
+        self.r.sh("checkout", "-q", "retire")
+        self.r.sh("merge", "-q", "--no-edit", "origin/main")
+
+    def drop_note(self, path):
+        full = os.path.join(self.r.dir, path)
+        with open(full) as f:
+            text = f.read()
+        self.assertIn(self.NOTE_LINE, text, "the branch does not hold main's line, so the case proves nothing")
+        self.r.put(path, text.replace(self.NOTE_LINE, ""))
+
+    def two_cited_closes(self):
+        """Two debts. DEBT: landed by a PR, then main adds NOTE_LINE after the cut; the branch deletes it, so the delete undoes
+        main's line and has a finding with no cite. OTHER: on main with no PR, so its delete has no finding. Both are cited."""
+        self.r.put(self.OTHER, debt("Delete the other helper once nothing reads it."))
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "add the other debt on main with no PR")
+        self.r.push()
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("rm", "-q", self.DEBT, self.OTHER)
+        self.r.sh("commit", "-q", "-m", "delete both debts")
+        head = self.r.sh("rev-parse", "HEAD")
+        self.assert_deleted(head, self.DEBT, self.OTHER)
+        body = (self.CITE % (self.SLUG, RUN_URL)) + ("Retire-run: %s -- %s\n" % (self.OTHER_SLUG, self.OTHER_RUN_URL))
+        return head, body
+
+    def scope(self, head, body, runs):
+        """(slug, kind) of each close the debt-close check gives this PR: the kind the case is about."""
+        return sorted((f.slug, f.kind) for f in D.check(self.r.dir, "origin/main", head, pr_body=body, run_state=runs))
+
+    def silent(self, head, body="", runs=None, strict=False):
+        """(problems, notes) of the silent-undo check on `head`, cited by `body` with the reader `runs`.
+        strict: the case needs the excuse, so check() must take run_state; a missing parameter is a named red.
+        Otherwise the reader is passed only when check() takes it, so on a check without the parameter the case
+        reads the finding it keeps."""
+        params = inspect.signature(C.check).parameters
+        if strict:
+            self.assertIn("run_state", params, NO_EXCUSE)
+        kw = {"run_state": runs} if "run_state" in params else {}
+        return C.check(self.r.dir, "origin/main", head, pr_body=body, **kw)
+
+    @staticmethod
+    def finding(problems, path):
+        return [p for p in problems if p.startswith(path + ":")]
+
+    @staticmethod
+    def allowed(notes):
+        return [n for n in notes if n.startswith("ALLOWED ")]
+
+    def test_green_cite_on_a_prose_retire_excuses_the_debt_delete(self):
+        """The #1099 shape: the debt's Retire names no test, and the PR body's last paragraph cites a green run on the head."""
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt-close check does not clear this close")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertEqual(problems, [], (problems, notes))
+        self.assertEqual(len(self.allowed(notes)), 1, notes)
+        self.assertTrue(self.allowed(notes)[0].startswith("ALLOWED %s:" % self.DEBT), notes)
+
+    def test_a_cite_for_another_slug_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % ("another-slug", RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "prose")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_cited_run_that_failed_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("failure", head))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("failure", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_green_run_below_the_pr_head_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        below = self.r.sh("rev-parse", "origin/main")  # the parent of the PR head: an ancestor, not a commit at or above it
+        self.assertEqual(self.scope(head, body, Runs(("success", below))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", below)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_no_run_reader_excuses_nothing(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, None), [(self.SLUG, "unknown")], "scope")
+        problems, notes = self.silent(head, body, None)  # no run_state: the default, so the case passes the argument only if check() takes one
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_run_reader_that_raises_excuses_nothing(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        boom = RuntimeError("the run read failed: HTTP 502")
+        self.assertEqual(self.scope(head, body, Runs(boom)), [(self.SLUG, "unknown")], "scope")
+        problems, notes = self.silent(head, body, Runs(boom))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_green_cite_does_not_excuse_a_retire_test_that_fails(self):
+        self.land({self.DEBT: debt(self.RED_RETIRE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_cite_matching_a_deleted_non_debt_file_does_not_excuse_it(self):
+        self.land({self.NOTE: "A note.\n"})
+        head = self.drop(self.NOTE)
+        self.assert_deleted(head, self.NOTE)
+        body = self.CITE % (os.path.basename(self.NOTE)[:-3], RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: no debt closes in this PR")
+        problems, notes = self.silent(head)  # no cite: the deletion is a finding on its own
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        self.assertEqual(self.allowed(notes), [], notes)
+
+    def test_a_cite_matching_the_deleted_debts_notes_file_does_not_excuse_it(self):
+        self.land({"docs/debts/notes.md": "# Notes\n\n- A note.\n"})
+        head = self.drop("docs/debts/notes.md")
+        self.assert_deleted(head, "docs/debts/notes.md")
+        body = self.CITE % ("notes", RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the notes file is not a debt")
+        problems, notes = self.silent(head)
+        self.assertTrue(self.finding(problems, "docs/debts/notes.md"), (problems, notes))
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, "docs/debts/notes.md"), (problems, notes))
+        self.assertEqual(self.allowed(notes), [], notes)
+
+    def test_a_cite_in_an_earlier_paragraph_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = "Retire-run: %s -- %s\n\nA later paragraph that cites nothing.\n" % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "prose")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_the_debt_delete_is_excused_and_a_second_deleted_file_stays(self):
+        self.land({self.DEBT: debt(PROSE), self.NOTE: "A note.\n"})
+        head = self.drop(self.DEBT, self.NOTE)
+        self.assert_deleted(head, self.DEBT, self.NOTE)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt close is cleared")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertEqual(self.finding(problems, self.DEBT), [], (problems, notes))
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        self.assertTrue(any(n.startswith("ALLOWED %s:" % self.DEBT) for n in notes), notes)
+
+    def test_a_rename_out_of_the_debts_folder_that_drops_a_main_line_keeps_its_finding(self):
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("mv", self.DEBT, self.MOVED)
+        self.drop_note(self.MOVED)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "rename the debt out and drop the main line")
+        head = self.r.sh("rev-parse", "HEAD")
+        names = self.r.sh("diff", "--name-status", "-M", "origin/main", head)
+        self.assertIn("\t%s\t%s" % (self.DEBT, self.MOVED), names, "the PR does not rename the debt out, so the case proves nothing")
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt-close check clears this rename")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertTrue(self.finding(problems, self.DEBT), "the cite excused a rename out of docs/debts that drops a main line: "
+                        "only a whole delete is excused (problems %r, notes %r)" % (problems, notes))
+
+    def test_a_rename_out_of_the_debts_folder_that_drops_a_main_line_has_a_finding_with_no_cite(self):  # control
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("mv", self.DEBT, self.MOVED)
+        self.drop_note(self.MOVED)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "rename the debt out and drop the main line")
+        head = self.r.sh("rev-parse", "HEAD")
+        problems, notes = self.silent(head)
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_only_the_close_with_a_finding_has_its_run_read(self):
+        head, body = self.two_cited_closes()
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: both debt closes are cleared")
+        bare, _ = self.silent(head)
+        self.assertTrue(self.finding(bare, self.DEBT), "premise: the debt's delete undoes main's line, so it has a finding with no cite")
+        self.assertEqual(self.finding(bare, self.OTHER), [], "premise: the debt main added with no PR has no finding")
+        flagged = Runs(("success", head))
+        problems, notes = self.silent(head, body, flagged, strict=True)
+        self.assertEqual(self.finding(problems, self.DEBT), [], (problems, notes))
+        self.assertEqual(flagged.urls, [RUN_URL], "run_state read a cited run for a close with no silent-undo finding")
+
+    def test_the_close_with_a_finding_still_has_its_own_run_read(self):  # control
+        head, body = self.two_cited_closes()
+        flagged = Runs(("success", head))
+        self.silent(head, body, flagged, strict=True)
+        self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
 if __name__ == "__main__":
