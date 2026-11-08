@@ -17,6 +17,7 @@ Contract the builder codes against:
     whatever stdin holds. As a UserPromptSubmit hook it also saves each owner prompt; those cases
     are in test_feedback_inbox.py. With --agent, prints one JSON object:
     {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}}.
+    The printed line in both modes may end with a pointer to now-central, on the same line (LINE_PRINTED).
     As a UserPromptSubmit hook it also grants the owner override when the prompt starts with the
     word `override` (the rest is the reason, logged to guard.log). The whole-prompt forms
     `override <n>[m|h]` and `override off` keep their meaning. The cases for that are the override_* ones.
@@ -58,6 +59,9 @@ FAILED = []
 LINE_FULL = re.compile(
     r"Local time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CDT \(UTC-05:00\)|CST \(UTC-06:00\))"
 )
+# The hook's printed line may carry a pointer to now-central after it, on the same line. Optional here: the
+# pointer's presence is checked once, in hooks/test_now_central.py. LINE_FULL stays exact for line() itself.
+LINE_PRINTED = re.compile(LINE_FULL.pattern + r"(?: [^\n]*now-central[^\n]*)?")
 
 
 def utc(*args):
@@ -235,7 +239,7 @@ def case_cli_hook_shape():
     check("CLI as UserPromptSubmit hook: exit 0", proc.returncode == 0,
           "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
     check("CLI as UserPromptSubmit hook: one Central line on stdout",
-          len(lines) == 1 and LINE_FULL.fullmatch(lines[0]) is not None,
+          len(lines) == 1 and LINE_PRINTED.fullmatch(lines[0]) is not None,
           "stdout=%r" % proc.stdout[-200:])
     check("CLI as UserPromptSubmit hook: no traceback", "Traceback" not in proc.stderr,
           "stderr=%r" % proc.stderr[-300:])
@@ -264,7 +268,7 @@ def case_cli_agent(flag="--agent"):
     check("CLI %s: additionalContext starts with 'Local time: '" % flag,
           isinstance(ctx, str) and ctx.startswith("Local time: "), "got %r" % (ctx,))
     check("CLI %s: additionalContext is one Central line" % flag,
-          isinstance(ctx, str) and LINE_FULL.fullmatch(ctx) is not None, "got %r" % (ctx,))
+          isinstance(ctx, str) and LINE_PRINTED.fullmatch(ctx) is not None, "got %r" % (ctx,))
 
 
 # Runs the real script as __main__ with the tz database blocked. Only the shape is checked here:
@@ -293,7 +297,7 @@ def case_cli_no_tz_database():
     check("CLI with no tz database: exit 0", proc.returncode == 0,
           "rc=%d stderr=%s" % (proc.returncode, proc.stderr.strip()[-300:]))
     check("CLI with no tz database: one Central line on stdout",
-          len(lines) == 1 and LINE_FULL.fullmatch(lines[0]) is not None,
+          len(lines) == 1 and LINE_PRINTED.fullmatch(lines[0]) is not None,
           "stdout=%r" % proc.stdout[-200:])
 
 
@@ -408,7 +412,7 @@ def case_override_context_line():
         lines = proc.stdout.splitlines() if proc else []
         named = [l for l in lines if "override" in l.lower()]
         check("override: `%s` prints one line that names the override and its end %s" % (prompt, ends),
-              any(ends in l for l in named) and any(LINE_FULL.fullmatch(l) for l in lines),
+              any(ends in l for l in named) and any(LINE_PRINTED.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
 
 
@@ -422,7 +426,7 @@ def case_opus_context_line():
         lines = proc.stdout.splitlines() if proc else []
         check("opus: `%s` prints one line that names the Opus override and %s" % (prompt, want),
               sum(l.startswith("Opus override:") for l in lines) == 1 and any(want in l for l in lines)
-              and any(LINE_FULL.fullmatch(l) for l in lines),
+              and any(LINE_PRINTED.fullmatch(l) for l in lines),
               "stdout=%r" % (proc.stdout[-200:] if proc else "timed out"))
     cfg = ov_cfg()
     ov_type(cfg, "opus 2h")
@@ -619,7 +623,7 @@ def case_override_fail_open():
     proc = ov_type(blocker, "override 15m")
     lines = proc.stdout.splitlines() if proc else []
     check("override: a config directory that cannot be written still prints the time and exits 0",
-          proc is not None and proc.returncode == 0 and any(LINE_FULL.fullmatch(l) for l in lines)
+          proc is not None and proc.returncode == 0 and any(LINE_PRINTED.fullmatch(l) for l in lines)
           and "Traceback" not in proc.stderr,
           "rc=%s stdout=%r stderr=%r" % (proc and proc.returncode, proc and proc.stdout[-120:],
                                          proc and proc.stderr[-120:]))
