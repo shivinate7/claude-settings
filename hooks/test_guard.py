@@ -4978,6 +4978,9 @@ sh("git-after-cd: a cd into a missing folder, then || exit 1, then ; a git push 
 # A failed `if` test skips the then branch, so the push there never runs in the stranded folder.
 sh("git-after-cd: a cd into a missing folder as an if test, then a git push in the then branch passes",
    "if cd /tmp/w; then %s push; fi" % VCS, "allow", cwd=NOGIT)
+# The fi of a nested if closes only that if: the push after it is still in the outer then branch.
+sh("git-after-cd: a cd into a missing folder as an if test, then a nested if and fi, then a git push in the then branch passes",
+   "if cd /tmp/w; then if true; then :; fi; %s push; fi" % VCS, "allow", cwd=NOGIT)
 # The write verbs the rule does not name yet: each runs in the stranded folder after a failed cd and ;.
 sh("git-after-cd: a cd into a missing folder, then ; git add -A is refused",
    "cd /tmp/w; %s add -A" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
