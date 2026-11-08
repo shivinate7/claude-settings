@@ -512,9 +512,10 @@ ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft b
 ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # The branch read (lane-closes-after-records). The incident: a lane tagged for claude-settings and q_max, its branch pushed
 # to q_max alone. Its fakes name both repos (make_fake_gh's `repos`), and each repo answers for itself.
-# THE MEASURED SCOPE REPLY: the bytes gh printed for `gh api -i repos/shivinate7/q_max/pulls?per_page=100&page=1`
-# (exit 1, measured 02:04 CST Nov 8). The status block (CRLF), the JSON body, then gh's tail line that ends the output.
-# Copied byte for byte from the measurement, never built from a code constant; see the scope cases below.
+# The scope reply fixture: the bytes gh printed for `gh api -i repos/shivinate7/q_max/pulls?per_page=100&page=1`
+# (exit 1, captured 02:04 CST Nov 8). The status block (CRLF), the JSON body, then gh's tail line that ends the output.
+# Copied byte for byte from gh's output, not built from a code constant: a built copy would match the parser by
+# construction, so the scope cases would prove nothing. See the scope cases below.
 SCOPE_403_REPLY = (
     b'HTTP/1.1 403 Forbidden\nContent-Length: 378\r\nContent-Type: application/js'
     b'on; charset=utf-8\r\n\r\n{"message":"GitHub access to this repository is not'
@@ -10279,7 +10280,7 @@ archive_refuse("a branch whose compare in q_max is diverged, on no pull request:
 
 # The scope read. A 403 that says the repo is not in this session's GitHub scope is not a transient failure: a retry
 # can never pass it. The refusal names that cause and routes the archive to the batch runner whose session holds the
-# repo. It never says retry, and it never names the tool. Every case in this block is a deny.
+# repo. It never says retry, and it never names the tool. Every case in this block is a refusal.
 ARCHIVE_SCOPE_PIN = "not in this session's GitHub scope"  # the cause the scope refusal names
 ARCHIVE_BATCH_PIN = "batch runner"  # the route: the batch runner whose session holds the repo
 ARCHIVE_SCOPE_LACKS = ("retry", "Retry", "could not be read")  # a scope refusal has no retry and no read-failure wording
@@ -14237,6 +14238,57 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a non-lane archive makes no
                          archive_non_lane_no_read_case))
 LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no file in the session's folders",
                          archive_writes_nothing_case))
+
+
+def archive_stub_read_case():
+    """A merge tool with no ScopeStop and no is_scope, whose page read raises, makes archive_hit refuse with the
+    read reason. An escaped error would leave the archive to the guard-wide crash path, which allows it."""
+    guard = _load_guard_module()
+    archive_hit = guard.archive_hit
+    holder = archive_hit.__globals__["_MERGE_MODULE"]
+    reads = []
+
+    class Host:  # the one read archive_hit makes through the tool: pages(), which fails
+        def __init__(self, repo=None):
+            self.repo = repo
+
+        def pages(self, *args, **kwargs):
+            reads.append(self.repo)
+            raise RuntimeError("the read failed")
+
+    class StubTool:  # the merge tool's surface that archive_hit uses, with no ScopeStop and no is_scope
+        @staticmethod
+        def shared_deadline(seconds):
+            return contextlib.nullcontext()
+
+    StubTool.Host = Host
+    if hasattr(StubTool, "ScopeStop") or hasattr(StubTool, "is_scope"):
+        return False, "the stub has a scope name, so it does not model a merge tool without one"
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the call
+    saved = list(holder)
+    holder[:] = [StubTool]
+    try:
+        if archive_hit.__globals__["merge_module"]() is not StubTool:
+            return False, "merge_module() does not return the stub, so the read is not the stub's"
+        try:
+            hit = archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, role_path("archive-lane"))
+        except Exception as error:
+            return False, "archive_hit raised %s on the failed read, where it should refuse: %s" % (type(error).__name__, error)
+    finally:
+        holder[:] = saved
+    if not reads:
+        return False, "archive_hit made no page read, so the failed read never ran: it returned %r" % (hit,)
+    if hit is None:
+        return False, "archive_hit allowed the archive after the page read failed"
+    read_reason = archive_hit.__globals__["ARCHIVE_READ_REASON"]
+    if not (isinstance(hit, tuple) and len(hit) == 2 and hit[1] == read_reason):
+        return False, "archive_hit refused, but not with the read reason: %r" % (hit,)
+    return True, "after the page read raised, archive_hit refused with the read reason"
+
+
+LOG_CHECKS_EXTRA.append((
+    "lane-closes-after-records: a merge tool without ScopeStop and is_scope refuses a failed read with the read reason",
+    archive_stub_read_case))
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
