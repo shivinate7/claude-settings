@@ -13314,7 +13314,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         self.assertIn("owed on the new head", out, "the refusal is not the stale-record refusal:\n" + out)
 
     def test_the_comment_read_reaches_back_to_the_oldest_commit_new_to_the_batch_less_a_day(self):
-        # the one-day margin is the clock-skew margin oldest_tip_since keeps, so the pinned value is the older head's date less one day
+        # the one-day margin is the clock-skew margin oldest_new_since keeps, so the pinned value is the older head's date less one day
         _tips, host, _a = self.backdated_lane_batch("yes")
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assertEqual(host.since_reads, [LANE_OLD_WINDOW],
