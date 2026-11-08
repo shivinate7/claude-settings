@@ -23,10 +23,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
   Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
   limits the already granted act to messages that ask.
-- One "Own CI Run Cancel:" entry quotes the run cancel command and names its method, and its Never
+- One "Own CI Run Cancel:" entry quotes the run cancel command and names its method. Its Covers text
+  requires a run whose head branch this session itself pushed earlier in the session, and its Never
   covers names each run act it refuses (decision auto-mode-owner-acts).
 - One "Own Check-in Delete:" entry names the delete tool and the create and send tools that make a
-  check-in, and its Never covers names each check-in act it refuses (decision auto-mode-owner-acts).
+  check-in. Its Covers text requires the create_trigger call to set neither flag, and its Never covers
+  names each check-in act it refuses (decision auto-mode-owner-acts).
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
@@ -103,6 +105,9 @@ CI_REFUSED = (("default branch", "default branch"),
               ("run_workflow", "`run_workflow`"), ("rerun_failed_jobs", "`rerun_failed_jobs`"),
               ("delete_workflow_run_logs", "`delete_workflow_run_logs`"),
               ("repo outside shivinate7", "outside shivinate7"))
+# (name, case-insensitive pattern) for the run the Own CI Run Cancel Covers text must name.
+CI_SCOPE = (("run on a branch this session pushed earlier",
+             "a run whose head branch this session itself pushed earlier in the session"),)
 OWN_CHECKIN = "Own Check-in Delete:"
 CHECKIN_DELETE = "mcp__claude-code-remote__delete_trigger"
 # (name, case-insensitive pattern) for each check-in tool the Own Check-in Delete entry must name.
@@ -114,6 +119,10 @@ CHECKIN_REFUSED = (("list_triggers", "`list_triggers`"), ("update_trigger", "`up
                     "trigger this session did not visibly create"),
                    ("create_new_session_on_fire", "`create_new_session_on_fire`"),
                    ("persistent_session_id", "`persistent_session_id`"))
+# (name, case-insensitive pattern) for the create_trigger call the Own Check-in Delete Covers text must name.
+CHECKIN_SCOPE = (("create_trigger set neither flag",
+                  "`create_trigger` call returned when that call set neither "
+                  "`create_new_session_on_fire` nor `persistent_session_id`"),)
 # The Covers text names the session that started this one, and the no-act report it lets through.
 MESSAGE_TARGET = (("the session that started this one", "the session that started this one"),)
 MESSAGE_REPORT = (("asks for no act", "asks for no act"), ("pull request number", "pull request number"),
@@ -401,6 +410,11 @@ class OwnCiRunCancelIsAllowed(unittest.TestCase):
         missing = unnamed_terms(clause, CI_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
 
+    def test_covers_requires_a_run_on_a_branch_this_session_pushed(self):
+        missing = unnamed_terms(entry_part(self, OWN_CI), CI_SCOPE)
+        self.assertFalse(missing, "Covers text does not require a run on a branch this session pushed: %r"
+                         % missing)
+
 
 class OwnCheckinDeleteIsAllowed(unittest.TestCase):
     def test_one_entry_names_the_own_checkin_delete(self):
@@ -425,6 +439,11 @@ class OwnCheckinDeleteIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Own Check-in Delete entry")
         missing = unnamed_terms(clause, CHECKIN_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_covers_requires_create_trigger_to_set_neither_flag(self):
+        missing = unnamed_terms(entry_part(self, OWN_CHECKIN), CHECKIN_SCOPE)
+        self.assertFalse(missing, "Covers text does not require the create_trigger call to set neither flag: %r"
+                         % missing)
 
 
 class OwnBranchLeasePushIsAllowed(unittest.TestCase):
