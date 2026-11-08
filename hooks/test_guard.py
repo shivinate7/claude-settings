@@ -140,6 +140,7 @@ FAMILIES = {
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "encoded-retry-after-refusal": "a Bash call that decodes text and runs it, or whose command word is an ANSI-C escape word, is refused when the session had a refusal in the last ten minutes: the refusal state rows, the guard.log deny rows, the agent match, the window, and the state read only on a decode-and-run call",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -24425,14 +24426,20 @@ LOG_CHECKS_EXTRA.append(("rm-var: 2000 unclosed $( spans are judged in under 2 s
 # subprocess is timed here. judge answers by printing one JSON block and exiting, so stdout is
 # captured and SystemExit is caught. The guard's log goes under CLAUDE_CONFIG_DIR, pointed at the
 # fixture config for the call and then restored.
-def judge_in_process(command, cwd):
-    """Return (decision, reason, CPU seconds) for one Bash call judged in this process."""
+def judge_in_process(command, cwd, config=None, session=None, env=None):
+    """Return (decision, reason, CPU seconds) for one Bash call judged in this process. `config` is the config
+    folder (CFG when unset), `session` the payload's session_id (absent when None), and `env` the variables set
+    for the call and restored after it."""
     materialize(cwd)
     guard = _load_guard_module()
     payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    if session is not None:
+        payload["session_id"] = session
     printed = io.StringIO()
-    saved = os.environ.get("CLAUDE_CONFIG_DIR")
-    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    names = ("CLAUDE_CONFIG_DIR",) + tuple(env or {})
+    saved = {name: os.environ.get(name) for name in names}
+    os.environ["CLAUDE_CONFIG_DIR"] = config or CFG
+    os.environ.update(env or {})
     try:
         started = time.process_time()
         try:
@@ -24442,10 +24449,11 @@ def judge_in_process(command, cwd):
             pass
         took = time.process_time() - started
     finally:
-        if saved is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = saved
+        for name in names:
+            if saved[name] is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = saved[name]
     text = printed.getvalue().strip()
     if not text:
         return "allow", "", took
@@ -27283,6 +27291,246 @@ for _label, _check in (
     ("handoff-unread: importing reread_check does not end the process when precompact_handoff cannot import",
      hu_import_check),
 ):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# =========================================================================== encoded retry after refusal
+# A refusal is final. An agent that re-sends a refused command in another form gets around it, so a Bash call that
+# decodes text and runs it, or whose command word is an ANSI-C $'...' word with escapes, is refused when its session had
+# a refusal shortly before. The refusal is a row in the session's refusal state file (refusal_note.py writes it;
+# shared_names.refusals_path names the one path to it), or a deny row in guard.log (guard_core.record writes it: six
+# tab-separated fields, the session last). A row counts inside ten minutes. A refusal row that names an agent counts only
+# for that agent's calls. A guard.log row names no agent, so it counts for the whole session. The hook reads its clock
+# through local_time.clock(), so these cases pin it with LOCAL_TIME_NOW.
+import shared_names  # noqa: E402  the one home of the refusal state path (hooks/shared_names.py)
+
+FAMILY = "encoded-retry-after-refusal"
+ENC_RULE = "encoded-retry-after-refusal"
+ENC_SID = "5e1c0a7f-3d2b-4c6e-9a18-0b7d4e2f1a6c"        # the session these calls belong to
+ENC_OTHER_SID = "8a4f2d6e-1c9b-4e7a-b305-7f2e9d1c4a88"  # a second session
+ENC_AGENT = "b7e2d9c4a1f08365e"                          # an agent's id on the payload, in the shape AGENT_ID accepts
+ENC_OTHER_AGENT = "c4a9f1e7d2b08356a"
+ENC_T0 = datetime(2026, 11, 8, 21, 40, tzinfo=timezone.utc)  # 15:40 CST: the hook's clock in these cases
+ENC_CLOCK = {"LOCAL_TIME_NOW": ENC_T0.isoformat()}
+ENC_FRESH = ENC_T0 - timedelta(minutes=2)
+ENC_INSIDE = ENC_T0 - timedelta(minutes=8)  # inside the window, with a margin
+ENC_STALE = ENC_T0 - timedelta(minutes=15)  # outside it, with a margin
+ENC_MANY = 300  # refusal rows in the full-size state file
+# A refusal names no encoding, and no way to run the command, as its remedy (decision git-remedy-never-names-target).
+ENC_LACKS = ("base64", "printf", "eval", "echo -e", "| sh", "| bash", "\\x", "$'", 'source "$(')
+
+# Forms that decode text or read escapes into a command, as (label, command). Each is refused after a refusal and
+# allowed without one.
+ENC_DECODE_RUN = (
+    ("base64 -d into sh", "echo ZWNobyBoaQ== | base64 -d | sh"),
+    ("base64 -d into bash", "echo ZWNobyBoaQ== | base64 -d | bash"),
+    ("base64 --decode into sh", "echo ZWNobyBoaQ== | base64 --decode | sh"),
+    ("printf hex escapes into sh", "printf '\\x65\\x63ho hi' | sh"),
+    ("printf hex escapes into bash", "printf '\\x65\\x63ho hi' | bash"),
+    ("echo -e hex escapes into sh", "echo -e '\\x65\\x63ho hi' | sh"),
+    ("echo -e hex escapes into bash", "echo -e '\\x65\\x63ho hi' | bash"),
+    ("printf octal escapes into sh", "printf '\\145\\143ho hi' | sh"),
+    ("echo -e octal escapes into bash", "echo -e '\\145\\143ho hi' | bash"),
+    ("eval of base64 -d", 'eval "$(echo ZWNobyBoaQ== | base64 -d)"'),
+    ("source of base64 -d", 'source "$(echo ZWNobyBoaQ== | base64 -d)"'),
+    ("a lone quote earlier in the text", 'echo "don\'t"; echo ZWNobyBoaQ== | base64 -d | sh'),
+)
+# An ANSI-C $'...' word with escapes in command position: the command word is built from escapes, so it runs text
+# the command never wrote in plain form. It is refused after a refusal and allowed without one.
+ENC_ANSI_RUN = (
+    ("ANSI-C hex command word", "$'\\x63d' /some/dir && ls"),
+    ("ANSI-C octal command word", "$'\\143d' /some/dir && ls"),
+    ("ANSI-C command word after &&", "ls && $'\\x63d' /some/dir"),
+    ("ANSI-C command word after ;", "ls; $'\\x63d' /some/dir"),
+    ("ANSI-C command word after |", "echo hi | $'\\x63at'"),
+    ("command substitution printing an escaped command word", "$(printf '\\x63d') /some/dir && ls"),
+)
+ENC_FORMS = ENC_DECODE_RUN + ENC_ANSI_RUN
+# Calls that do not decode and run: allowed even after a fresh refusal, and reading no refusal state.
+ENC_PLAIN = (
+    ("a base64 decode into a variable", "TOKEN=$(cat t | base64 -d)"),
+    ("a base64 decode into a file", "base64 -d f > out.bin"),
+    ("a base64 decode into jq", "cat f | base64 -d | jq ."),
+    ("printf with an ANSI colour escape", "printf '\\x1b[1m hi'"),
+    ("python decodes base64 and prints it", "python3 -c \"import base64; print(base64.b64decode('ZWNobyBoaQ==').decode())\""),
+    ("an ANSI-C tab in an argument", "echo $'a\\tb'"),
+    ("ANSI-C hex escape as a printf argument", "printf '%s\\n' $'\\x41'"),
+    ("an ANSI-C tab as a grep pattern", "grep $'\\t' f"),
+    ("the form inside double quotes", 'echo "echo ZWNobyBoaQ== | base64 -d | sh"'),
+    ("the form after a comment", "echo ok # echo ZWNobyBoaQ== | base64 -d | sh"),
+    ("the form in a heredoc body", "cat > notes.txt <<'EOF'\necho ZWNobyBoaQ== | base64 -d | sh\nEOF"),
+    ("the form in a multi-line quoted string", 'echo "first line\necho ZWNobyBoaQ== | base64 -d | sh"'),
+)
+
+
+def enc_append(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def enc_refusal(folder, session, when, agent_id=None):
+    """One refusal row, in refusal_note.py's shape, in the session's state file under `folder`."""
+    row = {"ts": when.isoformat(timespec="seconds"), "tool_name": "Bash",
+           "reason": "Auto mode refused this call.", "tool_use_id": "toolu_enc"}
+    if agent_id:
+        row["agent_id"] = agent_id
+    with hu_config(folder):
+        path = shared_names.refusals_path(session)
+    enc_append(path, json.dumps(row) + "\n")
+
+
+def enc_log(folder, session, when):
+    """One guard.log deny row, in guard_core.record's shape: six tab-separated fields, the session last."""
+    fields = [when.isoformat(timespec="seconds"), "Bash", "deny", "kill", "pkill -f node", session]
+    enc_append(os.path.join(folder, "guard.log"), "\t".join(fields) + "\n")
+
+
+def enc_raw(folder, session, text):
+    """One line of text in the session's state file, as it is."""
+    with hu_config(folder):
+        path = shared_names.refusals_path(session)
+    enc_append(path, text + "\n")
+
+
+def enc_empty(folder, session):
+    """An empty state file for the session: present, with no rows."""
+    with hu_config(folder):
+        path = shared_names.refusals_path(session)
+    enc_append(path, "")
+
+
+def enc_scenario(name, steps):
+    """The config folder of one state, built the first time a case names it, from `steps`: (step, args) pairs."""
+    folder = os.path.join(ROOT, "enc", name)
+
+    def build():
+        os.makedirs(folder, exist_ok=True)
+        for step, args in steps:
+            step(folder, *args)
+    build.__name__ = "enc_build_" + name.replace("-", "_")
+    lazy_fixture([folder], build)
+    return folder
+
+
+E_NONE = enc_scenario("none", [])
+E_ROW_FRESH = enc_scenario("row-fresh", [(enc_refusal, (ENC_SID, ENC_FRESH))])
+E_PLAIN_FRESH = enc_scenario("plain-fresh", [(enc_refusal, (ENC_SID, ENC_FRESH))])
+E_LOG_FRESH = enc_scenario("log-fresh", [(enc_log, (ENC_SID, ENC_FRESH))])
+E_ROW_STALE = enc_scenario("row-stale", [(enc_refusal, (ENC_SID, ENC_STALE))])
+E_LOG_STALE = enc_scenario("log-stale", [(enc_log, (ENC_SID, ENC_STALE))])
+E_ROW_OTHER_SID = enc_scenario("row-other-session", [(enc_refusal, (ENC_OTHER_SID, ENC_FRESH))])
+E_LOG_OTHER_SID = enc_scenario("log-other-session", [(enc_log, (ENC_OTHER_SID, ENC_FRESH))])
+E_ROW_INSIDE = enc_scenario("row-inside", [(enc_refusal, (ENC_SID, ENC_INSIDE))])
+E_AGENT_RED = enc_scenario("agent-red", [(enc_refusal, (ENC_SID, ENC_FRESH, ENC_AGENT))])
+E_AGENT_ORCH = enc_scenario("agent-orchestrator", [(enc_refusal, (ENC_SID, ENC_FRESH, ENC_AGENT))])
+E_OTHER_AGENT = enc_scenario("agent-other", [(enc_refusal, (ENC_SID, ENC_FRESH, ENC_OTHER_AGENT))])
+E_EMPTY = enc_scenario("empty-state", [(enc_empty, (ENC_SID,))])
+E_MANY = enc_scenario("many-rows", [(enc_refusal, (ENC_SID, ENC_STALE))] * ENC_MANY
+                      + [(enc_raw, (ENC_SID, '{"ts": "2026-11-08T21:'))]  # a truncated line, which is skipped
+                      + [(enc_refusal, (ENC_SID, ENC_FRESH))])             # the fresh row is the last line
+
+FIRST_DECODE_LABEL, FIRST_DECODE = ENC_DECODE_RUN[0]
+for _label, _command in ENC_FORMS:
+    sh("encoded retry: %s is refused after a fresh refusal row" % _label, _command, "deny", rule=ENC_RULE,
+       cwd=NOGIT, session=ENC_SID, config=E_ROW_FRESH, env=ENC_CLOCK, carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is refused after a fresh guard.log deny row" % _label, _command, "deny", rule=ENC_RULE,
+       cwd=NOGIT, session=ENC_SID, config=E_LOG_FRESH, env=ENC_CLOCK, carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is allowed with no refusal" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_NONE, env=ENC_CLOCK, silent=True)
+    sh("encoded retry: %s is allowed when the refusal row is 15 minutes old" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_ROW_STALE, env=ENC_CLOCK, silent=True)
+    sh("encoded retry: %s is allowed when the refusal row belongs to another session" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_ROW_OTHER_SID, env=ENC_CLOCK, silent=True)
+# The window, the agent and the guard.log scope, for one decode-and-run form and one ANSI-C form each.
+for _label, _command in (ENC_DECODE_RUN[0], ENC_ANSI_RUN[0]):
+    sh("encoded retry: %s is refused when the refusal row is 8 minutes old, inside the window" % _label,
+       _command, "deny", rule=ENC_RULE, cwd=NOGIT, session=ENC_SID, config=E_ROW_INSIDE, env=ENC_CLOCK,
+       carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is refused for the agent that was refused" % _label, _command, "deny",
+       rule=ENC_RULE, cwd=NOGIT, session=ENC_SID, agent_id=ENC_AGENT, config=E_AGENT_RED, env=ENC_CLOCK,
+       carries=("report",), lacks=ENC_LACKS)
+    sh("encoded retry: %s is allowed when the guard.log deny is 15 minutes old" % _label, _command,
+       "allow", cwd=NOGIT, session=ENC_SID, config=E_LOG_STALE, env=ENC_CLOCK, silent=True)
+    sh("encoded retry: %s is allowed when the guard.log deny belongs to another session" % _label,
+       _command, "allow", cwd=NOGIT, session=ENC_SID, config=E_LOG_OTHER_SID, env=ENC_CLOCK, silent=True)
+    sh("encoded retry: %s is allowed when the refusal row names another agent" % _label, _command,
+       "allow", cwd=NOGIT, session=ENC_SID, agent_id=ENC_OTHER_AGENT, config=E_OTHER_AGENT, env=ENC_CLOCK,
+       silent=True)
+    sh("encoded retry: %s is allowed for the orchestrator when the refusal row names an agent" % _label,
+       _command, "allow", cwd=NOGIT, session=ENC_SID, config=E_AGENT_ORCH, env=ENC_CLOCK, silent=True)
+    sh("encoded retry: %s is allowed on an empty state file" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_EMPTY, env=ENC_CLOCK, silent=True)
+# The state file's full-size edge: stale rows, a truncated line and the fresh row last. One decode-and-run form.
+sh("encoded retry: %s is refused behind 300 stale rows, a truncated line and a fresh row last" % FIRST_DECODE_LABEL,
+   FIRST_DECODE, "deny", rule=ENC_RULE, cwd=NOGIT, session=ENC_SID, config=E_MANY, env=ENC_CLOCK,
+   carries=("report",), lacks=ENC_LACKS)
+for _label, _command in ENC_PLAIN:
+    sh("encoded retry: %s is allowed after a fresh refusal row" % _label, _command, "allow",
+       cwd=NOGIT, session=ENC_SID, config=E_PLAIN_FRESH, env=ENC_CLOCK, silent=True)
+
+
+def enc_judge(command, folder):
+    """Judge one Bash call in this process, with `folder` as its config and ENC_SID as its session. Returns (decision,
+    the paths the guard opened). The spy wraps the real open, so every read still happens."""
+    real_open = open
+    with mock.patch("builtins.open", wraps=real_open) as spy:
+        decision, _reason, _took = judge_in_process(command, NOGIT, config=folder, session=ENC_SID, env=ENC_CLOCK)
+    return decision, [str(call.args[0]) for call in spy.call_args_list if call.args]
+
+
+def enc_fresh_folder(name):
+    """A config folder of its own for one spy check, emptied first, so a rerun reads its own rows only."""
+    folder = os.path.join(ROOT, "enc", name)
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    return folder
+
+
+def enc_scope_case():
+    """The spy sees a file the guard reads or writes: a deny writes its guard.log row. Without this, the no-read check
+    below could pass with a spy that sees nothing."""
+    folder = enc_fresh_folder("spy-scope")
+    decision, opened = enc_judge("pkill -f node", folder)
+    if decision != "deny":
+        return False, "the scope call got %s, want deny" % decision
+    if not any(path.endswith("guard.log") for path in opened):
+        return False, "the spy saw no guard.log write on a deny, so the read checks prove nothing"
+    return True, "the spy sees the guard.log write of a deny"
+
+
+def enc_no_read_case():
+    """A call that does not decode and run is allowed, and the guard reads no refusal state for it, even after a
+    fresh refusal row."""
+    folder = enc_fresh_folder("spy-plain")
+    enc_refusal(folder, ENC_SID, ENC_FRESH)
+    for label, command in ENC_PLAIN:
+        decision, opened = enc_judge(command, folder)
+        if decision != "allow":
+            return False, "%s got %s, want allow" % (label, decision)
+        if any("refusals" in path for path in opened):
+            return False, "%s read the refusal state, which only a decode-and-run call reads" % label
+    return True, "%d calls that do not decode and run read no refusal state" % len(ENC_PLAIN)
+
+
+def enc_reads_case():
+    """A decode-and-run call reads its session's refusal state."""
+    folder = enc_fresh_folder("spy-decode")
+    enc_refusal(folder, ENC_SID, ENC_FRESH)
+    decision, opened = enc_judge(FIRST_DECODE, folder)
+    if not any("refusals" in path for path in opened):
+        return False, "the guard never read the refusal state for a decode-and-run call (decision %s)" % decision
+    return True, "a decode-and-run call reads the refusal state of its session"
+
+
+for _label, _check in (
+        ("encoded-retry-after-refusal: the spy sees the guard.log write of a deny, so the read checks mean something",
+         enc_scope_case),
+        ("encoded-retry-after-refusal: a call that does not decode and run reads no refusal state",
+         enc_no_read_case),
+        ("encoded-retry-after-refusal: a decode-and-run call reads the refusal state of its session",
+         enc_reads_case)):
+    FIXTURELESS_CHECKS.add(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
