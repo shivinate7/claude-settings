@@ -2858,15 +2858,23 @@ def brief_claim_hit(tool: str, tool_input) -> list:
 # builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
 # scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
 # Each part is cut by the shell guard's own `split_segments` and judged by its own `shared_tree_match`, so this rule holds
-# no verb list. A brief has no tree, so no subject is read and the match alone decides. Four passes mirror the shell
-# guard or keep the brief honest: a part whose `git -C` or `cd` target is under a session scratchpad (a private repo);
-# a line with `Must deny:` or `Add a case:` before the part (case data for a test-author); a part with never, do not,
-# don't or no in its own clause, within 4 words before it (a prohibition); and every part that is no discard. A Workflow
-# script is read through `spawn_inputs`, as the role and Opus checks read it. Cost: pure text work inside the one guard
-# call. No process, no file.
+# no verb list. A brief has no tree, so no subject is read and the match alone decides. Only a working-tree discard counts:
+# the branch and worktree deletes `shared_tree_match` also returns stay with the shell guard. Only a writing role is
+# judged: READ_ONLY in hooks/agent_brief.py is the one home of the read-only roles. Passes: a segment whose own
+# `git -C` target, else the `cd` before it, is under ANY session's scratchpad (parent ruling 11:42 CST; the shell guard
+# passes only the calling session's own); a line with `Must deny:` or `Add a case:` before the part (case data for a
+# test-author); a part with a negator in its own clause, within 4 words before it (a prohibition); and a bullet under a
+# heading line that ends with ":" and holds a negator. A Workflow script is read through `spawn_inputs`, as the role and
+# Opus checks read it. Cost: pure text work inside the one guard call. No process, no file.
+from agent_brief import READ_ONLY  # noqa: E402  the one home of the read-only roles, shared with the SubagentStart hook
 BRIEF_DESTRUCTIVE_SPAN = re.compile(r"(`+)(.+?)\1(?!`)")
+BRIEF_DESTRUCTIVE_INLINE = re.compile(r"(`{3,})[^`].*?\1")
 BRIEF_DESTRUCTIVE_CASE_DATA = re.compile(r"must deny:|add a case:", re.IGNORECASE)
-BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "don’t", "do-not")
+BRIEF_DESTRUCTIVE_NEGATORS = ("never", "no", "don't", "do-not", "shouldn't", "mustn't", "can't", "cannot", "avoid",
+                              "without")
+BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
+BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
     "The brief orders a command that throws away work in a checkout other sessions share, and no step puts it back. "
     "Drop the order from the brief, or move that work to a scratch repo under the session's scratchpad. "
@@ -2874,61 +2882,67 @@ BRIEF_DESTRUCTIVE_REASON = (
 )
 
 
+def _brief_negators(text: str, last: int = 0) -> bool:
+    """True when a negator is among the words of `text`, or among its last `last` words when `last` is set."""
+    text = BRIEF_DESTRUCTIVE_NOT.sub("do-not", text.replace("’", "'"))
+    words = [w.strip("\"'()[]*_:").lower() for w in text.split()]
+    return any(w in BRIEF_DESTRUCTIVE_NEGATORS for w in (words[-last:] if last else words))
+
+
 def _brief_commands(prompt: str):
-    """Yield (command text, line text before it) for each command-shaped part of a brief: a backtick span, a line
-    in a fence, and a line led by `$ `. A lone backtick opens nothing."""
-    fenced = False
+    """Yield (command text, line text before it, covered) for each command-shaped part of a brief: a backtick span, a
+    line in a fence, and a line led by `$ `. `covered` is true for a part on a bullet under a negating heading line.
+    A lone backtick opens nothing, and a line that is one span closed on itself is no fence."""
+    fenced, covered = False, False
     for line in prompt.replace("\x00", " ").splitlines():
         stripped = line.strip()
-        if stripped.startswith("```"):
+        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.fullmatch(stripped):
             fenced = not fenced
             continue
         if fenced:
-            yield stripped, ""
+            yield stripped, "", False
             continue
+        bullet = bool(BRIEF_DESTRUCTIVE_BULLET.match(line))
+        if not bullet:
+            covered = stripped.endswith(":") and _brief_negators(stripped)
         if stripped.startswith("$ "):
-            yield stripped[2:], ""
+            yield stripped[2:], "", False
         for span in BRIEF_DESTRUCTIVE_SPAN.finditer(line):
-            yield span.group(2).strip(), line[:span.start()]
+            yield span.group(2).strip(), line[:span.start()], bullet and covered
 
 
 def _brief_prohibits(before: str) -> bool:
-    """True when never, do not, don't or no sits in the same clause as the command, within 4 words before it."""
+    """True when a negator sits in the same clause as the command, within 4 words before it."""
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
-    clause = re.split(r"[;.,]", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))[-1]
-    clause = re.sub(r"\bdo\s+not\b", "do-not", clause, flags=re.IGNORECASE)
-    words = [w.strip("\"'()[]*_:").lower() for w in clause.split()]
-    return any(w in BRIEF_DESTRUCTIVE_NEGATORS for w in words[-4:])
+    return _brief_negators(re.split(r"[;.,]", BRIEF_DESTRUCTIVE_SPAN.sub("X", before))[-1], 4)
 
 
-def _brief_in_scratchpad(segments) -> bool:
-    """True when the command's `git -C` target, else the `cd` before it, is under a session scratchpad."""
-    moved = None
-    for segment in segments:
-        words = segment_tokens(segment) if segment.strip() else None
-        if not words:
-            continue
-        target = _segment_git_c_target(words)
-        if target is None:
-            moved = _segment_cd_target(words) or moved
-            target = moved
-        if target is not None and in_any_session_scratchpad(shell_abs(target, None) or target):
-            return True
-    return False
+def _brief_target(segment: str, moved):
+    """(this segment's own target, the `cd` target in force after it): its `git -C` path, else the `cd` before it."""
+    words = segment_tokens(segment) if segment.strip() else None
+    if not words:
+        return moved, moved
+    own = _segment_git_c_target(words)
+    moved = _segment_cd_target(words) or moved
+    return (moved if own is None else own), moved
 
 
 def brief_destructive_hit(tool: str, tool_input) -> str:
     """The first command an Agent, Task or Workflow brief orders that discards a working tree, or ""."""
+    read_only = {role.lower() for role in READ_ONLY}
     for spawn in spawn_inputs(tool, tool_input):
         prompt = spawn.get("prompt")
-        if not isinstance(prompt, str):
+        if not isinstance(prompt, str) or role_key(spawn.get("subagent_type")) in read_only:
             continue
-        for command, before in _brief_commands(prompt):
-            if BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
+        for command, before, covered in _brief_commands(prompt):
+            if covered or BRIEF_DESTRUCTIVE_CASE_DATA.search(before) or _brief_prohibits(before):
                 continue
-            segments = split_segments(command)
-            for segment in segments:
-                if segment.strip() and shared_tree_match(segment) and not _brief_in_scratchpad(segments):
+            moved = None
+            for segment in split_segments(command):
+                target, moved = _brief_target(segment, moved)
+                match = shared_tree_match(segment) if segment.strip() else None
+                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP \
+                        and not (target is not None and in_any_session_scratchpad(shell_abs(target, None) or target)):
                     return command
     return ""
 
