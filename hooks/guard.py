@@ -127,10 +127,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        skipped, and a label inside such a span is no label occurrence. Outside the spans no other role's
                        label may sit in the gap. The text before the gap's last colon is free (a field name); the text
                        after it, or all of the gap with no colon, holds only digits, whitespace, punctuation, markdown
-                       and the words in guard_merge.ROLE_GAP_WORDS (is, id, session), in any case (lane rulings
-                       2026-11-08 10:03 and 10:15 CST). An unclosed quote or paren is no
-                       span. So prose such as `Triage the failing test in session_01Q.` names no Triage id, and a
-                       roster title such as "cs coordinator, triage backup" still passes. cost: message text only.
+                       and the words in guard_merge.ROLE_GAP_WORDS (is, id, session), in any
+                       case (decision session-tiers). An unclosed quote or paren is no span. So prose such as `Triage the
+                       failing test in session_01Q.` names no Triage id, and a roster title such as "cs coordinator, triage backup" still passes. cost: message text only.
                        A message without the marker reads no transcript. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
