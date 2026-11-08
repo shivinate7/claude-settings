@@ -5483,6 +5483,15 @@ sh("git-after-cd: a check, then || an echo piped to cat and && a git push -u, is
 sh("git-after-cd: a check, then || cat of a log file and && a git push -u, is refused",
    "pytest -q || cat log && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&",))
+# A `||` TAIL THAT CANNOT FAIL, BEHIND `command` OR A SUBSHELL. `command true` and `(true)` exit 0 whatever make did, so
+# the `|| exit 1` after them never fires, and the push after `;` runs on a failed make. Bash runs the push on that
+# failure, so both are refused, as `echo bad` is.
+sh("git-after-cd: a make a, then || command true, then || exit 1 and ; a git push -u, is refused",
+   "make a || command true || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a make a, then || (true), then || exit 1 and ; a git push -u, is refused",
+   "make a || (true) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 # A SUBSTITUTION ASSIGNED TO A NAME, AND A TEST OF GIT STATUS. The assignment's status is its substitution's, so the
 # `|| exit 1` runs when make fails and the push after `;` is never reached. The test is true only on a clean tree, so
 # the `|| exit 1` stops the push on a dirty one. Both push forms pass.
