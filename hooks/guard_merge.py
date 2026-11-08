@@ -949,8 +949,8 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     else one parse, one read of the origin and one transcript read.
 
     A redirection (`2>&1`, `> run.log`) belongs to the shell, not to the merge tool, so the parser reads the segment without them
-    (strip_redirections, the one reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer tokenizes once they are gone (a `>` inside a quoted
-    value), the merge is denied, never skipped."""
+    (strip_redirections, the quote-aware reader of their shape; a quoted `<` or `>` is text and stays). When the segment no longer
+    tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
     return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""

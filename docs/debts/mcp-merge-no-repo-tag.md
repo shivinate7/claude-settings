@@ -6,4 +6,4 @@
 
 **Decision.** merge-confirm-repo (a cloud merge acts only in a repo its own record names).
 
-**Retire.** A cloud call of the MCP merge tool naming an `owner/repo` that no cs-repo tag of the own newest get_session record names is denied, and one that a tag names is allowed. A case in `hooks/test_guard.py` shows both, with a record that lacks the tag and one that has it.
+**Retire.** In a cloud session, the MCP merge tool is denied for an `owner/repo` that no cs-repo tag of the own newest get_session record names. It is allowed for one that a tag names. A case in `hooks/test_guard.py` shows both, with a record that lacks the tag and one that has it.

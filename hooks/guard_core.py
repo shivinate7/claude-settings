@@ -925,12 +925,26 @@ def strip_redirections(segment: str) -> str:
     """`segment` with each UNQUOTED redirection (REDIRECTION's shapes) cut to one space; a `>` or `<` inside quotes is text and stays.
     The target is one shell word: a quoted target (`> "run log"`) goes whole, an unquoted one up to the next space, as REDIRECTION
     reads it. Quote state comes from walk_quotes, the one quote walk. A quote left open stays open, so segment_tokens returns None
-    for the result and its caller can refuse."""
-    marks = list(walk_quotes(segment))
-    out, index, size = [], 0, len(segment)
+    for the result and its caller can refuse.
+
+    One walk step can span several characters (an escape `\\x`, a `$'` opener), so each character takes the quote state of the step
+    it falls in, and only a step's first character can start a redirection or end a target word: an escaped `>` or space is text."""
+    size = len(segment)
+    quotes, step_starts = [""] * size, [False] * size
+    steps = [(at, quote) for at, _char, quote in walk_quotes(segment)]
+    for (at, quote), (after, _next) in zip(steps, steps[1:] + [(size, "")]):
+        step_starts[at] = True
+        for inside in range(at, min(after, size)):
+            quotes[inside] = quote
+
+    def unquoted_space(at: int) -> bool:
+        return step_starts[at] and not quotes[at] and segment[at].isspace()
+
+    out, index = [], 0
     while index < size:
-        char, quote = marks[index][1], marks[index][2]
-        starts = not quote and (char in "<>&" or (char.isdigit() and (index == 0 or segment[index - 1].isspace())))
+        char, quote = segment[index], quotes[index]
+        word_start = index == 0 or unquoted_space(index - 1)
+        starts = not quote and step_starts[index] and (char in "<>&" or (char.isdigit() and word_start))
         operator = REDIRECTION.match(segment, index) and _REDIRECT_OPERATOR.match(segment, index) if starts else None
         if not operator:
             out.append(char)
@@ -941,7 +955,7 @@ def strip_redirections(segment: str) -> str:
         if fd:
             end = fd.end()
         else:
-            while end < size and (marks[end][2] or not segment[end].isspace()):
+            while end < size and not unquoted_space(end):
                 end += 1
         out.append(" ")
         index = max(end, index + 1)
