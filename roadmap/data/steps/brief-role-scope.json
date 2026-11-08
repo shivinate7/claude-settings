@@ -1,0 +1,11 @@
+{
+  "title": "A spawn warns when the brief asks a role to edit a path it cannot write",
+  "why": "A test-author briefed to edit docs/debts/notes.md is refused by its role guard, which wastes one agent round and leaves the step half done.",
+  "note": "Filed 09:26 CST Nov 8 from lane timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf, its own mistake, twice today). Guard idea: when the Agent tool is called with subagent_type test-author or builder and the brief names a docs/ or record path to edit, warn the orchestrator before the spawn. One home: read the role's write paths from the same constants the role guard uses.",
+  "phase": "guards",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 700,
+  "updatedAt": "2026-11-08T09:26:00-06:00"
+}

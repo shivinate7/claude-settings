@@ -1,11 +1,11 @@
 {
   "phase": "guards",
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
   "status": "todo",
   "title": "The question form refuses a command line that ends in a backslash after git, gh or npm",
   "why": "A command block line ending `origin\\` passes today, so the owner gets a block that breaks when pasted.",
-  "note": "Filed 09:23 CST Nov 8 from lane notes-fix-page (review note 49, measured by #2074's round-1 reviewer on main e2703c611). hooks/question_form.py:407; #1785 at ad6274e3d pins it as passing (test_question_form.py:1110-1112). Fix: refuse a backslash line end only after git, gh or npm; `cd C:\\repo\\` keeps passing. Red case first.",
+  "note": "Filed 09:23 CST Nov 8 from lane notes-fix-page (review note 49, measured by #2074's round-1 reviewer on main e2703c611). hooks/question_form.py:407; #1785 at ad6274e3d pins it as passing (test_question_form.py:1110-1112). Fix: refuse a backslash line end only after git, gh or npm; `cd C:\\repo\\` keeps passing. Red case first. Lane notes-fix-page takes it (09:26 CST): a follow-up PR with Merge after: #1785, started when its machine's load allows.",
   "order": 697,
-  "updatedAt": "2026-11-08T09:23:00-06:00"
+  "updatedAt": "2026-11-08T09:26:00-06:00"
 }
