@@ -1249,6 +1249,11 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     if row["not_run"] == row["made"]:
         row["reason"] = "no mutant ran (%d not run)" % row["not_run"]
         return row
+    if parse_errors:
+        # a rate over the files that parsed would read as the whole pull request's
+        row["reason"] = "%d file(s) did not parse and were skipped (%s): no rate" % (
+            len(parse_errors), ", ".join(sorted(parse_errors)))
+        return row
     row["status"] = "OK"
     return row
 

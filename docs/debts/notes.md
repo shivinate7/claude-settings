@@ -94,7 +94,7 @@
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
 - guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes)
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
-- guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
+- guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json) Fix: none — owner decides: main has 72 guard rule ids with no row in lint/rule_mechanisms.json, and rows key on CLAUDE.md anchors (options: a guards section keyed by rule id; a multi-mechanism row; an exempt list)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)
 - haiku-counter-files-not-purged: nothing purges state/; one file of at most 70 bytes stays per session (Stop reply judge hook)
 - haiku-counter-lost-updates: heavy parallel calls of one session lose counter updates; the loss errs toward judging (Stop reply judge hook)
@@ -189,7 +189,6 @@
 - override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
 - override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
-- override-veto-no-mutants: no mutant covers never_lifted, take or the veto path. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)
@@ -1410,7 +1409,6 @@
 - test-author-run-forms-refused: a test-author cannot add `pytest tests/`, `python -m pytest`, `npm test`, or a step with an `env:` key. `workflow_run_is_test` accepts only an interpreter and a test path. `workflow_test_step` accepts only the keys in `WORKFLOW_STEP_KEYS`. A builder may add them (hooks/guard.py `workflow_run_is_test`, `workflow_test_step`). Decision: builders-cannot-edit-tests.
 - verdict-log-path-space: VERDICT_LOG_RE reads `log=(\S+)`, so a verdict log path with a space is not matched and that run's log is not read (lint/report_guard.py VERDICT_LOG_RE).
 - shared-tag-pin-partial: SharedTagNames pins REPO_TAG, STEP_TAG and repo_tag_names by identity only, so a local copy of TOPIC_TAG, BUILD_TAG or lane_head_refs stays green (skills/roadmap/test_build.py SharedTagNames).
-- guard-merge-tag-literals: hooks/guard_merge.py keeps the literals `cs-build:` (ROLE_TAG_PREFIX) and `cs-topic:` (TOPIC_TAG_PREFIX) instead of importing hooks/shared_names.py.
 - roadmap-page-date-untested: skills/roadmap/tests/page.test.mjs has no case for index.html's date and time labels (`when`, `timeLabel`, lines 452-455).
 - test-build-pin-comment-stale: skills/roadmap/test_build.py line 60 says "the page the old script used"; that comment is stale.
 - stalled-hold-missed-forms: the hold's build match (BUILD_CALL_RE, lint/report_guard.py) misses `python3 -X utf8 build.py`, a quoted path, `bash -c`, and a background run. A crashed build prints no stalled line, so it reads clean.
