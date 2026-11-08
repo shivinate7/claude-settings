@@ -437,9 +437,9 @@ const PH = [
   {k:'cleanup',n:'Clean up'},{k:'organize',n:'Organize'},{k:'design',n:'Design'},{k:'rollout',n:'Roll out'},{k:'later',n:'Later'}
 ];
 const ORDER = ['todo','active','done','blocked'];
-// one cell per step: done, then in progress, then blocked, then the rest
+// one cell per step, in this order: done, in progress, stalled, paused, blocked, to do
 const segs = (c,n) => { const m=c.done+c.act+c.stl+c.pzd+c.blk; return ['done','act','stl','pzd','blk'].map(k=>`<i class="${k}"></i>`.repeat(c[k])).join('') + '<i></i>'.repeat(Math.max(0,n-m)) + (n?'':'<i></i>'); };
-// The bar's cell counts for a phase's steps, one per cell kind; every read of a step's drawn state goes through shownState.
+// The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
 const tally = ss => ({ done:ss.filter(s=>s.status==='done').length, act:ss.filter(s=>shownState(s)==='active').length, stl:ss.filter(s=>shownState(s)==='stalled').length, pzd:ss.filter(s=>shownState(s)==='paused').length, blk:ss.filter(s=>s.status==='blocked').length });
 // The bar's words, such as "4 done, 1 in progress, 1 stalled, 1 paused, 5 to do"; a kind with no steps is left out.
 const barWords = (c,n) => [[c.done,'done'],[c.act,'in progress'],[c.stl,'stalled'],[c.pzd,'paused'],[c.blk,'blocked'],[n-c.done-c.act-c.stl-c.pzd-c.blk,'to do']].filter(x=>x[0]>0).map(x=>x[0]+' '+x[1]).join(', ');
@@ -587,7 +587,7 @@ function renderRail(){
   $('#rail').innerHTML = PH.map(p=>{
     const ss=byPhase(p.k), c=tally(ss), d=c.done;
     const w=n=>ss.length?n/ss.length*100:0;
-    return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${c.stl?', '+c.stl+' stalled':''}${c.pzd?', '+c.pzd+' paused':''}${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
+    return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${c.stl?', '+c.stl+' stalled':''}${c.pzd?', '+c.pzd+' paused':''}${c.blk?', '+c.blk+' blocked':''}${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
       <div class="bar">${segs(c,ss.length)}</div></button>`;
   }).join('');
 }
@@ -950,6 +950,8 @@ function unavailable(){
   const stalledIds = new Set(read ? read.steps.map(x => x.id) : []), pausedIds = new Set(read ? read.paused : []);
   let pzOpen = null;
   const step = id => steps.find(x => x.id === id) || {};
+  /* The band takes a listed step only when shownState says it is that kind. A listed id with no step in the plan stays. */
+  const holds = (id, k) => { const s = steps.find(x => x.id === id); return !s || shownState(s) === k; };
   const title = id => step(id).title || 'Untitled step';
   const draw = () => {
     if(!read){
@@ -957,7 +959,7 @@ function unavailable(){
       el.innerHTML = `<p class="nr"><span class="lh">Stalled steps</span> <span class="unk">not read: ${esc(why[0])}</span></p><details><summary class="muted" style="padding:0 12px;cursor:pointer">What the build said</summary><pre>${esc(reason(why[1]))}</pre></details>`;
       return;
     }
-    const items = read.items, n = read.steps.length + (items ? items.length : 0);
+    const items = read.items, stl = read.steps.filter(x => holds(x.id, 'stalled')), pzd = read.paused.filter(id => holds(id, 'paused')), n = stl.length + (items ? items.length : 0);
     el.className = 'stall' + (n ? ' hot' : '');
     const head = n ? `<div class="sth"><h3>${mark('stalled')}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
       : items ? `<div class="sth calm"><h3>${glyph('done')}No stalled step</h3></div>`
@@ -967,12 +969,12 @@ function unavailable(){
       if(m.length) return `<span class="fx land">done: landed in ${esc(m.join(', '))}</span>`;
       return Object.prototype.hasOwnProperty.call(read.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(read.bad[x.id])}.</span>` : '';
     };
-    const rows = read.steps.map(x => `<li><span class="id">${esc(x.id)}</span><span><button class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join('');
+    const rows = stl.map(x => `<li><span class="id">${esc(x.id)}</span><span><button class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join('');
     const itemPart = !items ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk">not read: no item carries its lane yet</span>${reason(read.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(read.itemsWhy))}</pre></details>` : ''}</li></ul>`
       : items.length ? `<h4>Waiting items</h4><ul>${items.map(it => `<li class="it"><span>Item <span class="num">${esc(it.n)}</span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join('')}</ul>` : '';
-    const stepPart = read.steps.length ? (items && !items.length ? `<ul>${rows}</ul>` : `<h4>Steps</h4><ul>${rows}</ul>`) : '';
+    const stepPart = stl.length ? (items && !items.length ? `<ul>${rows}</ul>` : `<h4>Steps</h4><ul>${rows}</ul>`) : '';
     const open = pzOpen == null ? !n : pzOpen;
-    const pz = read.paused.length ? `<details class="pz"${open ? ' open' : ''}><summary>${mark('paused')}Paused: <span class="num">${read.paused.length}</span></summary><ul>${read.paused.map(id => {
+    const pz = pzd.length ? `<details class="pz"${open ? ' open' : ''}><summary>${mark('paused')}Paused: <span class="num">${pzd.length}</span></summary><ul>${pzd.map(id => {
       const p = step(id).paused || {}, d = p.at ? new Date(p.at) : null, who = DECIDES[p.decides];
       const line = [who ? who + ' decides' : '', !d || isNaN(d) ? '' : 'paused <span class="num">' + esc(d.toLocaleString('en-US', {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})) + '</span>'].filter(Boolean).join('; ');
       return `<li><span class="id">${esc(id)}</span><span><button class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ''}${line ? `<span class="fx">${line}</span>` : ''}</span></li>`;

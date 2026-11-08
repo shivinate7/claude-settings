@@ -2,7 +2,7 @@
 
 Mockup: `status-stalled-paused.html`. Drawn from `skills/waiting-page/page.html` at 38a463f8e (the
 branch of PR #1522, stalled and paused steps stop reading "In progress"). The page CSS in the mockup is
-the page's own style block, copied unchanged. Sizes: Phone 390 and Wide 1280, the brief's sizes. This
+the page's own style block at that commit; the page's later `.grp` nowrap rule is not in it. Sizes: Phone 390 and Wide 1280, the brief's sizes. This
 repo's device list reads "unknown". Themes: light and dark. Sample data: a phase of 12 steps and a
 phase of 30 steps.
 
@@ -21,7 +21,7 @@ stalled mark is already red.
    Gain: the cells read as the roadmap's, one family. Stalled differs from solid red blocked, and
    paused from solid grey to do, by shape.
    Loss: every `.segbar` here is `aria-hidden`, so the colour-alone rule does not require the shape.
-   In a rail chip at 390 a cell is 1 to 2 px wide, and the ring fades to a grey line there.
+   In a rail chip at 390 a cell is 2.25 px wide at 13 steps and 0 px at 30, and the ring fades to a grey line there.
    Pick: yes, so both pages draw one bar.
 
 2. **Bar cells, option Tint.** Stalled is `color-mix(in srgb, var(--holds) 45%, transparent)`, paused
