@@ -1191,7 +1191,7 @@ def report_lines(*deviations):
 
 
 REPORT_BOTH_NONE = report_lines("Recovered: none", "Handoff gave: none")
-REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR 978 (git); fact Y (page)", "Handoff gave: none")
+REPORT_BOTH_SOURCED = report_lines("Recovered: ruling X from PR #978 (git); fact Y (page)", "Handoff gave: none")
 
 
 class CompactionCarryTests(unittest.TestCase):
