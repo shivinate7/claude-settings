@@ -645,3 +645,13 @@ test('23j. the id reads each map line\'s decisions line, not the cites in the so
   const expected = ['src/cache.ts — Holds the cache size.', ...D7_ROWS.slice(1)];
   assert.deepEqual(linesOf(r.stdout).sort(), [...expected].sort(), `D7 must print the map lines whose decisions line cites it: src/cache.ts, and not src/retry.ts\n${dump(r)}`);
 });
+
+// A non-code file that no record names is out of scope for an id too: its decisions line may hold the id, and the id still lists no such line (decision `map-lists-record-named`).
+test('23k. a decision id does not list a non-code file that no record names, though its decisions line holds the id', () => {
+  const dir = withBadge(['- `assets/badge.svg` — Holds the badge.', '  - Decisions: `D7`']);
+  const r = show(['D7'], dir);
+  // The scope first: D7 names a record and the code lines that cite it must print, or "no svg" holds for a command that printed nothing.
+  assert.equal(r.status, 0, `D7 names a record and is cited by code lines, so it must exit 0\n${dump(r)}`);
+  assert.ok(r.stdout.includes('src/retry.ts — Holds the retry wait.'), `D7 must print the map line of src/retry.ts\n${dump(r)}`);
+  assert.ok(!r.stdout.includes('assets/badge.svg'), `assets/badge.svg is named by no record, so D7 must not list it, though its decisions line holds D7\n${dump(r)}`);
+});
