@@ -1158,7 +1158,7 @@ OWED_REASON = (
 )
 OWED_UNREAD_REASON = (
     "owed-record-unread: the guard could not read whether a review record is owed (%s), so this push would move past "
-    "a reviewed head unchecked. Remedy: fix the read, or confirm this push."
+    "a reviewed head unchecked. Remedy: fix the read, or confirm this push. (decision push-owes-review-record)"
 )
 
 
@@ -1336,14 +1336,10 @@ def _owed_scan(where, names, pairs, find, repo=None, memo=None):
     return None
 
 
-def _owed_gate(where, names):
-    """None when the repo at `where` uses the merge tool, so the check goes on. Else the answer: an owed-record-unread
-    ask (a tuple) when the stamp.json is unreadable and an entry is this repo's, or False to skip the check."""
-    if uses_merge_tool(where):
-        return None
-    if _stamp_unreadable(where) and _in_repo(where, names):
-        return _owed_unread("the repo's stamp.json could not be read")
-    return False
+def _owed_off_tool(where, names):
+    """The answer for a repo that does not use the merge tool: an owed-record-unread ask (a tuple) when the
+    stamp.json is unreadable and an entry is this repo's, else None to skip the check."""
+    return _owed_unread("the repo's stamp.json could not be read") if _stamp_unreadable(where) and _in_repo(where, names) else None
 
 
 def owed_record_hit(args, where, overrides=None, cwd=""):
@@ -1362,9 +1358,8 @@ def owed_record_hit(args, where, overrides=None, cwd=""):
     try:
         if not where or not os.path.isdir(where):
             return _owed_unread("the push's directory could not be read") if _in_repo(cwd, names) else None
-        gate = _owed_gate(where, names)
-        if gate is not None:
-            return gate or None
+        if not uses_merge_tool(where):
+            return _owed_off_tool(where, names)
         dests = push_destinations(args, where, overrides, True)
         if None in dests:
             return _owed_unread("the push's destination could not be read") if _in_repo(where, names) else None
@@ -1379,7 +1374,7 @@ def owed_record_hit(args, where, overrides=None, cwd=""):
 def owed_record_pr_hit(tool_input, cwd):
     """(matched, reason) when the MCP base merge of a pull request moves its head branch past a head a reviewer read
     and nobody recorded, else None. The new commit is GitHub's, so the source is unknown and counts as new. The
-    same entry, gate, read and fail-closed rules as owed_record_hit; the branch is read from the pull request."""
+    same entry, merge-tool test, read and fail-closed rules as owed_record_hit; the branch is read from the pull request."""
     try:
         names = _owed_entries()
     except OSError as e:
@@ -1389,9 +1384,8 @@ def owed_record_pr_hit(tool_input, cwd):
     try:
         if not cwd or not os.path.isdir(cwd):
             return _owed_unread("the working directory could not be read") if _in_repo(cwd, names) else None
-        gate = _owed_gate(cwd, names)
-        if gate is not None:
-            return gate or None
+        if not uses_merge_tool(cwd):
+            return _owed_off_tool(cwd, names)
         owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
         if not (isinstance(number, int) and not isinstance(number, bool)):
             return _owed_unread("the pull request number could not be read") if _in_repo(cwd, names) else None
