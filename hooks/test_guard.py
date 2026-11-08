@@ -14970,7 +14970,7 @@ def ors_scope_problem(ctx, red):
             problem = "scope: origin's lane ref still holds the head, so the rewrite did not happen"
     elif not ors_holds(ctx["main"], ctx["head"]):
         problem = "scope: origin's lane ref does not hold the head the case reviews"
-    elif red and ors_head(ctx["lane"]) == ctx["head"]:
+    elif red and not ctx.get("chained") and ors_head(ctx["lane"]) == ctx["head"]:   # a chain is judged before its commit runs
         problem = "scope: the push source is the reviewed head, so the push owes nothing"
     elif ctx["scope"]:
         problem = ctx["scope"](ctx)
@@ -15430,6 +15430,60 @@ ors_allow("push-owes-review-record: G1 the reviewer stopped at a head on main, t
 ors_allow("push-owes-review-record: G2 an entry at H0 never got a record, then H1 is recorded: a push is allowed silently",
           ors_g2)
 ors_asks_rule("push-owes-review-record: G2c the newest entry at H1 has no record: asks", ors_g2c)
+
+
+def ors_chain(label, command, recorded=False):
+    """A chained command judged with the lane still at the reviewed head H: the entry is at H, and the command runs
+    a HEAD-moving step before its push. `recorded` posts a record at H."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ctx["chained"] = True
+    ctx["command"] = command
+    ctx["scope"] = lambda c: ("" if ors_head(c["lane"]) == c["head"] else
+                              "scope: the lane moved off the reviewed head before the command was judged")
+    comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "PASS")])]} if recorded else None
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["note"] = "a chained command judged at H"
+    return ctx
+
+
+def ors_h1(label):
+    """H1, a commit then a push in one command."""
+    return ors_chain(label, VCS + " commit -am fix && " + ORS_PUSH)
+
+
+def ors_h1c(label):
+    """H1c, the same chain with a record at H."""
+    return ors_chain(label, VCS + " commit -am fix && " + ORS_PUSH, recorded=True)
+
+
+def ors_h2(label):
+    """H2, a merge then a push in one command."""
+    return ors_chain(label, VCS + " merge origin/main && " + ORS_PUSH)
+
+
+def ors_h3(label):
+    """H3, a rebase then a push in one command."""
+    return ors_chain(label, VCS + " pull --rebase && " + ORS_PUSH)
+
+
+def ors_h4(label):
+    """H4, a commit then a push, separated by a semicolon."""
+    return ors_chain(label, VCS + " commit -m x; " + ORS_PUSH)
+
+
+def ors_h5(label):
+    """H5, a status check then a push: no step moves HEAD, and HEAD is at H, the remote's tip."""
+    return ors_chain(label, VCS + " status && " + ORS_PUSH)
+
+
+ors_red("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: asks", ors_h1)
+ors_allow("push-owes-review-record: H1c the same chain with a record at H: allowed silently", ors_h1c)
+ors_red("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: asks", ors_h2)
+ors_red("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: asks", ors_h3)
+ors_red("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: asks",
+        ors_h4)
+ors_allow("push-owes-review-record: H5 a status check then a push, HEAD at H and the remote at H: allowed silently", ors_h5)
 
 
 def ors_entries_scope(c):
