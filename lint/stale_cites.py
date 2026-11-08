@@ -249,7 +249,7 @@ class BlobReader:
 
     def root_folders(self, rev):
         """The names of the folders in the root tree of `rev`, read through this same process: no `ls-tree` start.
-        A submodule or a symlink is no folder, as `tracked_entries` leaves them out."""
+        Only a tree entry counts, so a submodule or a symlink is no folder."""
         found = self._ask("%s^{tree}" % rev)
         if found is None:
             return set()

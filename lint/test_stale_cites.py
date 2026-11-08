@@ -3444,8 +3444,8 @@ class NameCiteTests(StaleCase):
         self.assertIn("stale-cites: PASS", out)
         self.assertEqual(parse(out), [], out)
         subs = [command.split()[0] for command in commands]
-        # The four starts of a Markdown range, and no fifth: the cited folder is read through the one cat-file batch
-        # the check already holds (a tree reads as no blob, a missing path as None), so no ls-tree is started.
+        # The four starts of a Markdown range, and no fifth: the root tree is read through the one cat-file batch
+        # the check already holds, so no ls-tree is started.
         self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
         self.assertEqual(whole_tree_listings(commands), [], commands)
 
