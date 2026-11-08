@@ -98,6 +98,9 @@ SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
+PROSE_SECRET = "correcthorsebatterystaple"  # letters only, no digit, symbol or hump: only the prose rule can refuse it
+# A digit at index 256 is the last one the credential-name lookahead reads (VALUE_LOOKAHEAD_MAX is 256 characters before it).
+CAP_LAST_DIGIT = "abcdefgh" * 32 + "1"
 # A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
 # scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
 RUN_N = 20000
@@ -263,6 +266,11 @@ RED = [
     ("letters-only secret after a plain word and a semicolon",
      "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
+    # A comma does not end the prose: a letters-only secret after a comma, with prose before it, is one.
+    ("letters-only secret after prose and a comma", "password: none for the admin account, " + PROSE_SECRET, PROSE_SECRET),
+    # The digit lookahead of the credential-name shape reads VALUE_LOOKAHEAD_MAX characters before a digit. A digit at index
+    # 256 is the last one it reads, so this value is refused.
+    ("digit at index 256 of a credential value", "API_KEY=" + CAP_LAST_DIGIT, CAP_LAST_DIGIT),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
