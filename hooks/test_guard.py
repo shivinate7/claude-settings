@@ -8605,6 +8605,23 @@ sh("env-child: allow, awk print $1 reads a field of a file, uv run",
 sh("env-child: allow, docker compose --env-file up runs the stack, the control for config",
    "docker compose --env-file " + ENV + " up", "allow", cwd=NOGIT)
 
+# The substitution reader must find a $( ) past a quote, a # inside quotes and a line break. A # outside
+# quotes starts a shell comment, so the $( ) after it never runs. The echo deny is the twin of echo $(date).
+sh("env-child: deny, a # inside double quotes does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls \"#\" $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a # inside a quoted word does not hide a later $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"a # b\"; ls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, double quotes do not hide a $( ) that runs env in cd, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cd \"$(env)\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a lone quote in text does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c \"echo don't; ls $(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break in a shell string starts a segment whose $( ) runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'npm ci\nls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, echo prints the output of a $( ) that runs env, the twin of echo $(date), uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a # outside quotes starts a shell comment, so the $( ) after it never runs, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls # $(env)'", "allow", cwd=NOGIT)
+
 # A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
 # is a child the scan must read. Each deny is one such child that prints the environment.
 sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
