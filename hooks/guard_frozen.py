@@ -930,7 +930,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     each substitution's inner command as a command of its own, then the command once more as
     `_fed_command` rewrites it. It only adds refusals, except for a `cp` source that is a whole
     substitution (`cp $(find tests -name x) /tmp/`): that is a read (`_copy_outer`). The builder test
-    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_test_hit`), so
+    check asks for it, from rule 7c and from `never_lifted` (both call `builder_shell_hit`), so
     no other caller's verdict moves."""
     def scan(text, fed=None, copy_outer=False):
         return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,

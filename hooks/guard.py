@@ -1966,7 +1966,7 @@ def builder_repo_rel(path: str, cwd: str):
 
 def builder_test_path(path: str, cwd: str) -> bool:
     """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
-    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
+    tools (`role_write_hit`) and a shell write (`builder_shell_hit`) both ask. Test config that
     disables tests is judged on content, so only the Edit tools read it."""
     rel = builder_repo_rel(path, cwd)
     return rel is not None and is_test_rel(rel)
@@ -1977,7 +1977,12 @@ def builder_shell_path(path: str, cwd: str) -> bool:
     command cannot be judged on a workflow's content, as the Edit tools judge it (`workflow_pairs` in
     `role_write_hit`), so every shell write to one is refused and its reason points to the Edit tool."""
     rel = builder_repo_rel(path, cwd)
-    return rel is not None and (is_test_rel(rel) or is_workflow_rel(rel))
+    if rel is None:
+        return False
+    # A folder is judged by the file a writer could put in it, as a test folder holds any name: the
+    # workflow folder holds `*.yml`, so the folder and the probe `<folder>/_` (`_holds`) read as `_.yml` in it.
+    return (is_test_rel(rel) or is_workflow_rel(rel)
+            or is_workflow_rel((rel[:-2] if basename(rel) == "_" else rel).rstrip("/") + "/_.yml"))
 
 
 def builder_shell_hit(raw: str, stripped: str, cwd: str):
@@ -1996,11 +2001,6 @@ def builder_shell_hit(raw: str, stripped: str, cwd: str):
     if not hit or builder_test_path(hit, cwd) or scan(builder_test_path):
         return hit, BUILDER_TEST_REASON if hit else ""
     return hit, BUILDER_WORKFLOW_SHELL_REASON
-
-
-def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
-    """The test or workflow path a builder's shell command writes, else '' (`builder_shell_hit`)."""
-    return builder_shell_hit(raw, stripped, cwd)[0]
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -4785,7 +4785,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
-                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
+                    or (agent_role(payload) == BUILDER_ROLE and builder_shell_hit(raw, stripped, cwd)[0]))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
         if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
