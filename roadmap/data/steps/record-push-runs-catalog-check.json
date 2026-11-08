@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool's review-record post runs the hook catalog check on the head and refuses to post on red",
+  "phase": "now",
+  "status": "todo",
+  "order": 269.21,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
+  "why": "A stale hook catalog reaches the batch with a review record on it, and CI then turns the whole batch red.",
+  "note": "Run `python3 lint/hook_catalog.py --check` on the head, as the post now runs ste-lint (decision ste-lint-at-push). Incident: #1687 got a review record and went to runner 8 with the catalog check red (coordinator, 19:36 CST Nov 7). Given to lane lint-before-record-push, still open, 19:36 CST; status todo until the lane starts it.",
+  "updatedAt": "2026-11-07T19:36:00-06:00"
+}
