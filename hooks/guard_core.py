@@ -374,6 +374,7 @@ WRAPPER_VALUE_FLAGS = {
 # them. Their value flags sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    "ionice": {"-c", "--class", "-n", "--classdata", "-p", "--pid", "-P", "--pgid", "-u", "--uid"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -684,8 +685,10 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|py|perl|ruby|node"
-_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+# The Windows launcher `py` heads a heredoc only as a whole command word: `cat > gen.py <<EOF` writes a file and
+# `app.py -` is no run, so a `.`, `/` or `-` before it is no word start. Not in `_INTERPRETERS`: `_RUNNER` reads that.
+_INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS + r"|(?<![\w./-])py")
 
 
 def SHELL_HEREDOC(text: str) -> bool:
@@ -812,7 +815,7 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
 _RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh|uv|npx|tsx|ts-node|bun|deno|pytest|stdbuf|setsid)(?:\.exe|\.cmd)?").fullmatch
+                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
 
 
 def _plain_words(words):
@@ -1814,7 +1817,7 @@ def ssh_remote_script(tokens) -> str:
 
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
-    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
+    `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `ionice`, `unbuffer`,
     `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word == "kubectl" and "exec" in rest and "--" in rest:
@@ -1837,7 +1840,7 @@ def wrapped_commands(tokens, at: int):
         rest, skip = rest[1:], 1   # the container
     elif word == "flock":
         skip = 1   # the lock file
-    elif word not in ("stdbuf", "unbuffer", "caffeinate"):
+    elif word not in ("stdbuf", "ionice", "unbuffer", "caffeinate"):
         return []
     index, _ = _wrapper_flags(word, rest, 0)
     inner = rest[index + skip:]

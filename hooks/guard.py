@@ -1649,12 +1649,13 @@ WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeou
 WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
 WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
 WORKFLOW_INTERPRETERS = {"python", "python3", "py", "node", "bash", "sh", "pwsh"}
-# Flags whose next token is their value, not the script: an interpreter's (`python -X utf8`, `node -r
-# ts-node/register`) and pytest's (`pytest -k expr F`, `-m mark`, `-c cfg`, `-p plugin`).
-WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o",
-                        "-k", "-m", "-p", "-c", "--rootdir", "--deselect", "--ignore", "--ignore-glob",
-                        "--confcutdir", "--basetemp", "--junitxml", "--maxfail", "--durations", "--tb",
-                        "--import-mode", "--cache-dir"}
+# Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
+WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+# pytest's own value flags (`pytest -k expr F`, `-m mark`, `-c cfg`, `-p plugin`), read only when the runner is
+# pytest: `bash -k F` and `bash -p F` take no value, so F is their script.
+WORKFLOW_PYTEST_VALUE_FLAGS = {"-k", "-m", "-p", "-c", "--rootdir", "--deselect", "--ignore", "--ignore-glob",
+                               "--confcutdir", "--basetemp", "--junitxml", "--maxfail", "--durations", "--tb",
+                               "--import-mode", "--cache-dir"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 # Not so for pytest, whose `-m` and `-c` take a value (`python -m pytest -m mark F`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
@@ -1701,7 +1702,7 @@ def workflow_script_index(args, runner=None):
         elif arg.startswith("-"):
             if arg in WORKFLOW_NO_PATH_FLAGS and not pytest:
                 return None
-            index += 2 if arg in WORKFLOW_VALUE_FLAGS else 1
+            index += 2 if arg in WORKFLOW_VALUE_FLAGS or (pytest and arg in WORKFLOW_PYTEST_VALUE_FLAGS) else 1
         else:
             break
     return index if index < len(args) else None
@@ -4869,7 +4870,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
             command, found = strip_heredoc_bodies(command), {}
 
             def in_scratchpad(word, at, verb=None):
-                if verb is None:   # `_copy_reads` asks with two arguments, about a `cp` source: a read, not a write
+                if verb is None:   # `_copy_reads` asks with two arguments, about the `cp` target: no, so the sources are only read; `scratchpad_copies` judges the destination
                     return False
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
@@ -4971,23 +4972,58 @@ def scratchpad_stdin(args):
     return kept, stdin
 
 
+# The words the scratchpad-owner check reads as running a file. A second set, not `_RUNNER`: `_runs_written_file`
+# reads `_RUNNER` as "this word runs a file argument", so a word added there makes a heredoc written to a file
+# count as run when a command names that file. This check asks only whether a recorded scratchpad file is
+# reached, so it adds the runners and wrappers that reach one (a verb, flags and values of their own).
+SCRATCHPAD_RUNNER = re.compile(
+    r"(?:" + _RUNNER.__self__.pattern + r"|uv|npx|tsx|ts-node|bun|deno|pytest|stdbuf|ionice|setsid|py)"
+    r"(?:\.exe|\.cmd)?").fullmatch
+# Runners that take test or script files anywhere in their arguments (`pytest -n 2 F`, `uv run --with x F`):
+# a flag's value cannot be told from a file, so every argument after the verb is judged.
+SCRATCHPAD_FILES_ANYWHERE = ("pytest", "py.test")
+
+
+def scratchpad_files_start(name, args):
+    """The index in `args` from which every plain argument may be a file the runner runs, else None: from the
+    start for pytest, past the verb for `uv run`, `bun run`, `deno run` and `npx tsx`, past the module for
+    `python -m pytest`."""
+    if name in SCRATCHPAD_FILES_ANYWHERE:
+        return 0
+    for at, arg in enumerate(args):
+        if arg in WORKFLOW_RUNNER_VERBS.get(name, ()):
+            return at + 1
+        if arg == "-m" and args[at + 1:at + 2] and args[at + 1] in WORKFLOW_RUNNER_MODULES:
+            return at + 2
+    return None
+
+
 def scratchpad_script(word, args):
-    """(the file the command `word args` runs, the file it reads its script from stdin, whether it reads its
-    script from stdin). A run is an interpreter or runner word (`_RUNNER`) with the file as its first plain
-    argument (past the flags and words `workflow_script_index` reads), or the file as the command word. A
-    runner word that starts another command (`uv run python F`) is read again for that command."""
+    """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
+    script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
+    plain argument (past the flags and words `workflow_script_index` reads), or the file as the command word.
+    A runner that takes files anywhere in its arguments (`scratchpad_files_start`) names each plain argument
+    it has. A runner word that starts another command (`uv run python F`) is read again for that command."""
     name = basename(word)
-    if not _RUNNER(name):
+    if not SCRATCHPAD_RUNNER(name):
         word = re.sub(r"^(?:\$?\()+", "", word).rstrip(")`")   # a glued group mark is no part of the path
-        return (word if "/" in word else ""), "", False
+        return ([word] if "/" in word else []), "", False
     args, stdin = scratchpad_stdin(args)
+    start = scratchpad_files_start(name, args)
+    if start is not None:
+        files = [arg for arg in args[start:] if not arg.startswith("-")]
+        for at in range(start, len(args)):
+            if SCRATCHPAD_RUNNER(basename(args[at])) and name in WORKFLOW_RUNNER_VERBS:
+                inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
+                files += inner[0] + ([inner[1]] if inner[1] else [])
+        return files, "", False
     at = workflow_script_index(args, name)   # past the interpreter's flags and their values
     # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
     script = args[at] if at is not None and "-" not in args[:at] else ""
-    if script and _RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
+    if script and SCRATCHPAD_RUNNER(basename(script)) and name in WORKFLOW_RUNNER_VERBS:
         return scratchpad_script(script, args[at + 1:])
     reads = not script and not any(flag in args for flag in WORKFLOW_NO_PATH_FLAGS)
-    return script, (stdin if reads else ""), reads
+    return ([script] if script else []), (stdin if reads else ""), reads
 
 
 def scratchpad_piped_files(segments, ends, number, cwd):
@@ -5020,8 +5056,8 @@ def scratchpad_run_files(text: str, cwd: str, depth: int = 0):
             continue
         where = dir_before_segment(segments, number, cwd, ends)
         for word, args in scratchpad_command_words(tokens):
-            script, stdin, reads = scratchpad_script(word, args)
-            named = [shell_abs(script or stdin, where)] if script or stdin else []
+            scripts, stdin, reads = scratchpad_script(word, args)
+            named = [shell_abs(file, where) for file in (scripts or ([stdin] if stdin else []))]
             if reads and not stdin and number and ends[number - 1] == "|":
                 named = scratchpad_piped_files(segments, ends, number, cwd)
             yield from (full for full in named if full)
