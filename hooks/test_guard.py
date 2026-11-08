@@ -13502,6 +13502,32 @@ sendto_allow("an empty transcript names no spawn, so a builder's id passes", SEN
 # Allowed: mutation tests (hooks/mutate_*.py) stay a builder's. A builder adds a mutant.
 sendto_allow("a mutant added to hooks/mutate_guard.py, sent to a builder, is allowed",
              SENDTO_BUILDER, "Add a mutant to hooks/mutate_guard.py.", T_SENDTO_BUILDER)
+# Review round 2. Each case here is a gap the guard leaves open today: a negated verb, a green word before a path, a
+# nodeid with `::`, a noun `fix` and a read verb, a reference path after a clause, and a path carried across a sentence.
+sendto_allow("a negated change to a test is no edit, and a fix to guard.py is allowed to a builder",
+             SENDTO_BUILDER, "Do not change tests/test_app.py. Fix guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit of a test is no edit for a builder",
+             SENDTO_BUILDER, "Don't edit tests/test_app.py.", T_SENDTO_BUILDER)
+sendto_allow("a fix to guard.py that passes a test names the test as the goal, not an edit, for a builder",
+             SENDTO_BUILDER, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a fix to guard.py that matches a test names the test as the goal, not an edit, for a builder",
+             SENDTO_BUILDER, "Fix guard.py to match tests/test_guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit of product code is no edit for a test-author",
+             SENDTO_AUTHOR, "Never edit hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_allow("a product path named as the source of a rule is no edit for a test-author",
+             SENDTO_AUTHOR, "Add a case to tests/test_guard.py for the rule in hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_refuse("a test nodeid with :: is a test path: a fix of it to a builder is refused, naming test-author",
+              SENDTO_BUILDER, "Fix tests/test_app.py::test_case_3 so it passes.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a fix made in a test path, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Make the fix in tests/test_app.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a test path read in one clause and fixed in the next, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Look at tests/test_app.py, then fix it.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a path read in one sentence is carried to Replace it in the next, to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Replace it with the fix.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
