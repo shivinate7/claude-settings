@@ -9377,6 +9377,22 @@ for _name, _command in (
 ):
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A backtick span in a python body is text: python runs no shell from it, so a python run of that body is
+# allowed. A file run by an unrecognised runner word drops its body, as on main. Only a wrapper (`env`,
+# `sudo`, `timeout`) or a `./f` run keeps the body in view, so its span is refused. The two deny cases pin
+# what the head does for those forms.
+PY_TICK_BODY = 'd = {"why": "open the PR with `gh pr create` after review"}'
+sh("draft-pr: a python body with a backtick gh pr create span, fed to python3, is allowed",
+   "\n".join(["python3 - <<'EOF'", PY_TICK_BODY, "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: a python file from a quoted heredoc, with a backtick gh pr create span, run by python3, is allowed",
+   "\n".join(["cat > f.py <<'EOF'", PY_TICK_BODY, "EOF", "python3 f.py"]), "allow", cwd=NOGIT)
+for _name, _command in (
+    ("a body file run as ./f, with a backtick span", "\n".join(["cat > f <<'EOF'", PY_TICK_BODY, "EOF", "./f"])),
+    ("env python3 runs the body file, with a backtick span",
+     "\n".join(["cat > f.py <<'EOF'", PY_TICK_BODY, "EOF", "env python3 f.py"])),
+):
+    sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A backtick span in a body that perl, ruby or node runs is a shell command, so it is judged. A written
 # file run by its interpreter and a body fed to it both reach the span, so each form is refused.
 TICK_BODY = {
@@ -9393,6 +9409,48 @@ for _lang in ("perl", "ruby", "node"):
     sh("draft-pr: a %s body with a backtick gh pr create span, fed to %s, is refused" % (_lang, _lang),
        "\n".join(["%s - <<'EOF'" % _lang, TICK_BODY[_lang], "EOF"]), "deny", "draft-pr",
        cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A python body is text, but a perl body beside it is judged on its own span, so the span still denies when the
+# two bodies run in one call. The harmless python line carries no backtick, so only the perl span can deny.
+PY_PLAIN_BODY = 'print("open the pull request after review")'
+sh("draft-pr: a python body fed to python3 beside a perl body fed to perl, whose backtick span holds gh pr create, is refused",
+   "\n".join(["python3 - <<'A'", PY_PLAIN_BODY, "A", "perl - <<'B'", TICK_BODY["perl"], "B"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a python file and a perl file written in one call, the perl file's backtick span holds gh pr create, is refused",
+   "\n".join(["cat > a.py <<'A'", PY_PLAIN_BODY, "A", "cat > b.pl <<'B'", TICK_BODY["perl"], "B", "python3 a.py && perl b.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a body written to f.py and run by perl, whose backtick span holds gh pr create, is refused",
+   "\n".join(["cat > f.py <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.py"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A python word in a write path is no runner. `cat > python/t.pl` writes a file that perl runs, so its backtick
+# span is a shell command and is judged. A python-named path that python runs keeps its span as text. `python3.pl`
+# is judged already, and stays a pin.
+sh("draft-pr: a perl file written to python/t.pl, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python/t.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl python/t.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a node file written to python/t.js, whose execSync span holds gh pr create, run by node, is refused",
+   "\n".join(["cat > python/t.js <<'EOF'", TICK_BODY["node"], "EOF", "node python/t.js"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file written to python3.pl, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python3.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl python3.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file written to a bare python3 path, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python3 <<'EOF'", TICK_BODY["perl"], "EOF", "perl python3"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a python file written to python/t.py, whose backtick span holds gh pr create, run by python3, is allowed",
+   "\n".join(["cat > python/t.py <<'EOF'", PY_TICK_BODY, "EOF", "python3 python/t.py"]), "allow", cwd=NOGIT)
+# A heredoc's header judges only its own body. A python word elsewhere on the header line, or beside a second
+# heredoc, does not make a perl body read as python: the perl span is a shell command, so its gh call is refused.
+sh("draft-pr: a perl body with a backtick gh pr create span, under a python3 -V header, run from a written file, is refused",
+   "\n".join(["python3 -V && cat > f.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body and a python body share one header line, the perl body's backtick span holds gh pr create, "
+   "run from a written file, is refused",
+   "\n".join(["cat > g.pl <<'B' && python3 - <<'A'", TICK_BODY["perl"], "B", PY_PLAIN_BODY, "A", "perl g.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Pins the fed form under the same python header: perl reads the body, so the span stays in view and is refused.
+sh("draft-pr: a perl body fed to perl under a python3 -V header, whose backtick span holds gh pr create, is refused",
+   "\n".join(["python3 -V && perl - <<'EOF'", TICK_BODY["perl"], "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A `$( )` or `<( )` nested in a backtick span is a shell substitution, and perl, ruby and node run the span
 # as a shell, so the gh call inside it runs. Each body carries the gh call only in that nested form.
 sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, fed to perl, is refused",
@@ -9406,6 +9464,29 @@ sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run 
    "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("draft-pr: a perl body whose backtick span nests <( ) with gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `cat <(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a node body whose backtick span nests $( ) with gh pr create, fed to node, is refused",
+   "\n".join(["node - <<'EOF'", "execSync(`echo $(gh pr create -t x)`)", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby body whose backtick span nests $( ) with gh pr create, run from a written file, is refused",
+   "\n".join(["cat > f.rb <<'EOF'", "puts `echo $(gh pr create -t x)`", "EOF", "ruby f.rb"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a node body whose backtick span nests $( ) with gh pr create, run from a written file, is refused",
+   "\n".join(["cat > f.js <<'EOF'", "execSync(`echo $(gh pr create -t x)`)", "EOF", "node f.js"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A backslash at a line's end inside a backtick span joins the next line, so the span runs on to the backtick
+# that closes it. perl, ruby and node run that span as a shell, so a `$(` on the next line is a substitution
+# and its gh call runs. A body fed to the interpreter and a written file both reach it.
+sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline into $( with gh pr create, "
+   "fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo \\", "$(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline into $( with gh pr create, "
+   "run from a written file, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "print `echo \\", "$(gh pr create -t x)`;", "EOF", "perl f.pl"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A lone backtick inside a quoted string opens no span. The span rule must not pair it with the next backtick, or the
 # real span after it goes unread. Each body below holds such a stray backtick before a real span with the gh call.
