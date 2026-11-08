@@ -712,10 +712,15 @@ def _paren_end(text, at):
     return -1
 
 
+_PS_NAME_OPEN = re.compile(r"\$\{(?=\w)")
+
+
 def _strip_closers(tok):
     """Strip the trailing `}` and `)` that close the opener, but keep a `}` that closes a
-    braced name: `${env:X}` has as many `}` as `${`."""
-    while tok.endswith((")", "}")) and (tok[-1] == ")" or tok.count("}") > tok.count("${")):
+    braced name: `${env:X}` has as many `}` as `${`. A `${` counts only when a name character
+    follows it, so the `${` inside a string (`"${"`) opens no name."""
+    while tok.endswith((")", "}")) and (
+            tok[-1] == ")" or tok.count("}") > len(_PS_NAME_OPEN.findall(tok))):
         tok = tok[:-1]
     return tok
 
