@@ -9448,6 +9448,9 @@ ROLE_LINES = {
     "roots-runner-empty": role_call("g1", ROOTS_EMPTY_TAGS),
     "roots-runner-five": role_call("g1", ROOTS_FIVE_TAGS),
     "roots-runner-spaced": role_call("g1", ROOTS_SPACED_TAGS),
+    # A non-runner with two repo tags: a bare --reviewed passes, since only a batch runner's roots are compared.
+    "roots-lane-two": role_call("g1", ["cs-build:lane", "cs-repo:o/alpha", "cs-repo:o/bravo"]),
+    "roots-coord-two": role_call("g1", ["cs-build:coordinator", "cs-repo:o/alpha", "cs-repo:o/bravo"]),
     # A turn starts with a user message or a cross-session message. Its record is stale until a get_session follows it.
     # A tool result is a user line too, but it starts no turn.
     "roots-turn-owner": role_call("g1", ROOTS_RUNNER_TAGS) + [role_said("merge the batch now")],
@@ -9515,17 +9518,30 @@ role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner
 role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
           role_path("quoted"))
 # The command forms the merge tool answers to, bare and after `cd somewhere &&`, judge as the shim does. A script named
-# with no folder, after `cd merge`, reads its parent folder as "", so that form is the merge tool too. Both loops use this list.
-MERGE_CALL_FORMS = [(prefix, form) for prefix in ("", "cd somewhere && ")
+# with no folder, after `cd merge`, reads its parent folder as "", so that form is the merge tool too. A python option that
+# takes a value (-X, -W) skips that value, and the `py` launcher is python. A shell wrapper (`bash -c "..."`, `sh -c '...'`)
+# holds the call inside its quotes, so each entry is (prefix, form, close): close ends the quote after the arguments.
+# The wrapper's inner word is bare `merge`. Both loops use this list.
+MERGE_CALL_FORMS = [(prefix, form, "") for prefix in ("", "cd somewhere && ")
                     for form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py")]
-MERGE_CALL_FORMS += [("cd merge && ", "python3 merge.py"), ("cd merge && ", "python3 launch.py")]
-for _role_prefix, _role_form in MERGE_CALL_FORMS:
-    _role_cmd = _role_prefix + _role_form + " --role batch-runner"
+MERGE_CALL_FORMS += [("cd merge && ", "python3 merge.py", ""), ("cd merge && ", "python3 launch.py", "")]
+MERGE_CALL_FORMS += [(prefix, form, "") for prefix in ("", "cd somewhere && ")
+                     for form in ("python3 -X dev merge/merge.py", "python3 -W ignore merge/merge.py",
+                                  "py merge/merge.py", "py -3 merge/merge.py")]
+MERGE_CALL_FORMS += [(prefix, wrap, close) for prefix in ("", "cd somewhere && ")
+                     for wrap, close in (('bash -c "merge', '"'), ("sh -c 'merge", "'"))]
+for _role_prefix, _role_form, _role_close in MERGE_CALL_FORMS:
+    _role_cmd = _role_prefix + _role_form + " --role batch-runner" + _role_close
     role_allow(_role_cmd + " allows its own record", _role_cmd, role_path("runner"))
     role_refuse(_role_cmd + " is refused on a lane record", _role_cmd, role_path("lane"))
     # decision session-tiers: the coordinator never merges, in any form, even on its own record
-    _coord_cmd = _role_prefix + _role_form + " --role coordinator"
+    _coord_cmd = _role_prefix + _role_form + " --role coordinator" + _role_close
     role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
+# Text that names the merge tool is not a call. A python -c string ends option parsing, so the merge/merge.py after it is
+# an argument, not a script; an echo is text. A misread of either would judge the call and refuse it.
+role_allow("a python -c that prints merge is not a merge call, even with merge/merge.py after it",
+           "python3 -c \"print('merge')\" merge/merge.py --role batch-runner", role_path("lane"))
+role_allow("an echo of merge --role batch-runner is text", "echo merge --role batch-runner", role_path("lane"))
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
@@ -9580,16 +9596,19 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # read by repo_tag_names (the exact prefix, no strip, owner/name without case). A tagged repo with no --root is missing,
 # and the reason names it. A --root with no tag is extra, and the reason names it. The own record is read as
 # merge-role-proof reads it: a record that is not a batch runner's is not compared, and an own record that cannot be read
-# refuses. A `--reviewed` with no `--root` is not this rule's. A session with no session id in its env is a local session:
-# it has no cs tags, so it is no batch runner and its --root allows. A record read before the turn's last user or
-# cross-session message is stale, since a tag another session added since is unseen, so it refuses with the remedy.
+# refuses. A bare `--reviewed` (no `--root`) is read the same way, and its record is judged the same way: a runner with two or
+# more repo tags is refused, and the reason says to pass one --root per tag; a runner with one tag or none may run it. A
+# session with no session id in its env is a local session: it has no cs tags, so it is no batch runner and its calls allow.
+# A record read before the turn's last user or cross-session message is stale, since a tag another session added since is
+# unseen, so it refuses with the remedy.
 ROOTS_RULE = "merge-roots-cover"
 ROOTS_REMEDY = "run get_session (no argument) alone in its own turn, then retry"
 
 
-def roots_cmd(names, prefix="", form=MERGE_SHIM, flags=" --reviewed"):
-    """A merge call with `flags` and one `--root NAME=DIR` for each OWNER/NAME in `names`, in the order given."""
-    return prefix + form + flags + "".join(" --root %s=/work/%s" % (name, name.split("/")[1]) for name in names)
+def roots_cmd(names, prefix="", form=MERGE_SHIM, flags=" --reviewed", close=""):
+    """A merge call with `flags` and one `--root NAME=DIR` for each OWNER/NAME in `names`, in the order given. `close` ends
+    a shell wrapper's quote after the last argument."""
+    return prefix + form + flags + "".join(" --root %s=/work/%s" % (name, name.split("/")[1]) for name in names) + close
 
 
 def roots_refuse(name, command, transcript, env=ROLE_ENV, carries=(), lacks=(), **kw):
@@ -9635,37 +9654,55 @@ roots_allow("a lane whose title holds cs-build:batch-runner is a lane, so it all
 # A local session has no session id in its env, so it has no cs tags and is not a batch runner: its --root allows.
 roots_allow("a local session with no session id in the env has no cs tags, so its --root allows, even one its tags would refuse",
             ROOTS_BOTH, role_path("roots-runner"), env=None)
-# A record read before the turn's last user or cross-session message is stale: the runner must read it again first.
-roots_refuse("a runner whose record came before the turn's user message is refused, with the remedy", ROOTS_BOTH,
-             role_path("roots-turn-owner"), carries=(ROOTS_REMEDY,))
-roots_refuse("a runner whose record came before a cross-session message of its turn is refused, with the remedy", ROOTS_BOTH,
-             role_path("roots-turn-peer"), carries=(ROOTS_REMEDY,))
+# A fresh record allows the exact roots, and a bare call from the same runner is judged on its tags, not the remedy.
 roots_allow("a runner that reads its record after the turn's user message allows the exact roots", ROOTS_BOTH,
             role_path("roots-turn-then-read"))
 roots_allow("a runner's newer record after the turn's user message is the one read, so the exact roots allow", ROOTS_BOTH,
             role_path("roots-stale-then-read"))
 roots_allow("a tool result after the runner's record starts no turn, so the record still allows", ROOTS_BOTH,
             role_path("roots-read-then-tool"))
-# No own record that can be read: refused, with the remedy to run get_session alone in its own turn, then retry.
-roots_refuse("no get_session record in the transcript is refused, with the remedy", ROOTS_BOTH, role_path("no-record"),
-             carries=(ROOTS_REMEDY,))
-roots_refuse("a get_session result whose text is not JSON is refused, with the remedy", ROOTS_BOTH, role_path("not-json"),
-             carries=(ROOTS_REMEDY,))
-roots_refuse("a transcript of junk lines is refused, and a record cut short never allows", ROOTS_BOTH, role_path("junk-only"),
-             carries=(ROOTS_REMEDY,))
-roots_refuse("a transcript_path that names no file is refused, with the remedy", ROOTS_BOTH, role_path("missing"),
-             carries=(ROOTS_REMEDY,))
-roots_refuse("a transcript_path that cannot be read is refused, with the remedy", ROOTS_BOTH, role_path("unreadable"),
-             carries=(ROOTS_REMEDY,))
-roots_refuse("a payload with no transcript_path is refused, with the remedy", ROOTS_BOTH, None, carries=(ROOTS_REMEDY,))
-roots_refuse("a record of another session is ignored, so the runner's roots are refused, with the remedy", ROOTS_BOTH,
-             role_path("other-session"), carries=(ROOTS_REMEDY,))
-roots_refuse("a list_sessions result that holds the runner tags is ignored, with the remedy", ROOTS_BOTH, role_path("list-runner"),
-             carries=(ROOTS_REMEDY,))
-# A `--reviewed` with no `--root`, and a `--root` with no `--reviewed`, are not this rule's: they pass whatever the record says.
-roots_allow("a merge --reviewed with no --root is not this rule's, with no own record", MERGE_SHIM + " --reviewed", role_path("no-record"))
-roots_allow("a merge --reviewed with no --root is not this rule's, beside a runner with no repo tag", MERGE_SHIM + " --reviewed",
-            role_path("roots-runner-empty"))
+# A record that cannot be read, or is stale, refuses with the remedy, for a --root call and a bare call alike. This list is the
+# one home of those cases: both calls read it.
+ROOTS_UNREADABLE = [
+    ("no get_session record in the transcript", role_path("no-record")),
+    ("a get_session result whose text is not JSON", role_path("not-json")),
+    ("a transcript of junk lines, a record cut short", role_path("junk-only")),
+    ("a transcript_path that names no file", role_path("missing")),
+    ("a transcript_path that cannot be read", role_path("unreadable")),
+    ("a payload with no transcript_path", None),
+    ("a record of another session only", role_path("other-session")),
+    ("a list_sessions result that holds the runner tags", role_path("list-runner")),
+    ("a record read before the turn's user message", role_path("roots-turn-owner")),
+    ("a record read before a cross-session message of the turn", role_path("roots-turn-peer")),
+]
+for _label, _transcript in ROOTS_UNREADABLE:
+    roots_refuse("a runner's --root call with " + _label + " is refused, with the remedy", ROOTS_BOTH, _transcript,
+                 carries=(ROOTS_REMEDY,))
+    roots_refuse("a runner's bare --reviewed with " + _label + " is refused, with the remedy", roots_cmd([]), _transcript,
+                 carries=(ROOTS_REMEDY,))
+# A bare `--reviewed` is this rule's too. A runner with two or more repo tags names them with one --root each, so its bare call
+# is refused, and the reason names each tag and says to pass one --root per tag. One repo tag, or none, is no second repo to name.
+ROOTS_BARE_CARRIES = ("OWNER/NAME=DIR per tag", "o/alpha", "o/bravo")
+roots_refuse("a batch runner with two repo tags running a bare --reviewed is refused, and the reason says to pass one --root per tag",
+             roots_cmd([]), role_path("roots-runner"), carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
+roots_refuse("a batch runner tagged with five repos running a bare --reviewed is refused, and the reason names all five",
+             roots_cmd([]), role_path("roots-runner-five"), carries=("OWNER/NAME=DIR per tag",) + tuple(ROOTS_FIVE),
+             lacks=(ROOTS_REMEDY,))
+roots_allow("a batch runner with one repo tag running a bare --reviewed allows", roots_cmd([]), role_path("runner"))
+roots_allow("a batch runner with no repo tag running a bare --reviewed allows", roots_cmd([]), role_path("roots-runner-empty"))
+# A non-runner is not compared, however many repo tags it holds: a lane and a coordinator each allow a bare call.
+roots_allow("a lane with two repo tags running a bare --reviewed allows", roots_cmd([]), role_path("roots-lane-two"))
+roots_allow("a coordinator with two repo tags running a bare --reviewed allows", roots_cmd([]), role_path("roots-coord-two"))
+roots_allow("a local session with no session id in the env running a bare --reviewed allows, though its tags would refuse",
+            roots_cmd([]), role_path("roots-runner"), env=None)
+# A fresh record of a runner with two repos refuses a bare call with the tags, not the remedy: the record is current, so the
+# remedy would send it to re-read a record it has already read.
+for _fresh_label, _fresh in (("read after the turn's message", "roots-turn-then-read"),
+                             ("re-read after a stale one", "roots-stale-then-read"),
+                             ("followed by a tool result", "roots-read-then-tool")):
+    roots_refuse("a batch runner with two repo tags, its record " + _fresh_label + ", refuses a bare --reviewed with the tags",
+                 roots_cmd([]), role_path(_fresh), carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
+# A --root with no --reviewed is not this rule's: it passes whatever the record says.
 roots_allow("a --root with no --reviewed is not this rule's", MERGE_SHIM + " --root o/alpha=/work/alpha", role_path("roots-runner-empty"))
 # The --root=NAME=DIR form is the same value, read the same way.
 roots_refuse("--root=NAME=DIR names its repo as --root NAME=DIR does: a missing repo is refused",
@@ -9673,13 +9710,30 @@ roots_refuse("--root=NAME=DIR names its repo as --root NAME=DIR does: a missing 
 roots_allow("--root=NAME=DIR with the exact two roots allows",
             MERGE_SHIM + " --reviewed --root=o/alpha=/work/alpha --root=o/bravo=/work/bravo", role_path("roots-runner"))
 # The command forms judge as the merge tool's own parser reads them (MERGE_CALL_FORMS, shared with merge-role-proof).
-# Each form refuses a missing repo, and allows the exact set.
-for _roots_prefix, _roots_form in MERGE_CALL_FORMS:
+# Each form refuses a missing repo, and allows the exact set. A bare call refuses a runner with two tags, and allows one tag.
+for _roots_prefix, _roots_form, _roots_close in MERGE_CALL_FORMS:
     _roots_name = (_roots_prefix + _roots_form).strip()
     roots_refuse(_roots_name + " --reviewed with one of two tagged repos is refused",
-                 roots_cmd(["o/alpha"], _roots_prefix, _roots_form), role_path("roots-runner"), carries=("o/bravo",))
+                 roots_cmd(["o/alpha"], _roots_prefix, _roots_form, close=_roots_close), role_path("roots-runner"),
+                 carries=("o/bravo",))
     roots_allow(_roots_name + " --reviewed with the exact two roots allows",
-                roots_cmd(["o/alpha", "o/bravo"], _roots_prefix, _roots_form), role_path("roots-runner"))
+                roots_cmd(["o/alpha", "o/bravo"], _roots_prefix, _roots_form, close=_roots_close), role_path("roots-runner"))
+    roots_refuse(_roots_name + " --reviewed bare, with two tagged repos, is refused, and the reason says to pass one --root per tag",
+                 roots_cmd([], _roots_prefix, _roots_form, close=_roots_close), role_path("roots-runner"),
+                 carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
+    roots_allow(_roots_name + " --reviewed bare, with one tagged repo, allows",
+                roots_cmd([], _roots_prefix, _roots_form, close=_roots_close), role_path("runner"))
+# A shell wrapper's script is scanned like any command text. A comment opener inside its quotes never hides the call after it,
+# and a `#` in its script opens a comment that hides the call after it.
+roots_refuse("a bash -c script whose comment opener sits inside a string does not hide the merge call after it",
+             'bash -c "echo \'#\' && merge --reviewed --root o/alpha=/work/alpha"', role_path("roots-runner"), carries=("o/bravo",))
+roots_allow("a bash -c script whose merge call follows a comment mark is text",
+            'bash -c "echo done # merge --reviewed --root o/alpha=/work/alpha"', role_path("roots-runner"))
+# Text that names the merge tool is not a call: a python -c string ends option parsing, so the merge/merge.py after it is an
+# argument, and an echo is text. A runner with two repo tags would be refused by a bare call, so a misread shows here.
+roots_allow("a python -c that prints merge is not a merge call, even with merge/merge.py after it",
+            "python3 -c \"print('merge')\" merge/merge.py --reviewed", role_path("roots-runner"))
+roots_allow("an echo of merge --reviewed is text", "echo merge --reviewed", role_path("roots-runner"))
 # The rule fires on a call only. Text that names the form is data: a grep, a comment, a heredoc body or a quote. The runner here has
 # no repo tag, so text read as a call would name an extra repo and refuse.
 ROOTS_TEXT = MERGE_SHIM + " --reviewed --root o/alpha=/work/alpha"
