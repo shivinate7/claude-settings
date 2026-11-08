@@ -8478,6 +8478,37 @@ for shape, cond, decls in (
     sh("env: interpreter code follow-ups: allow, node -e, " + shape + ", then a read of each file the name test keeps",
        node_loop(cond, decls), "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, seventh set: a negated name test that sits under a
+# second negation, or beside an unknown flag in a comparison or a bitwise or, does not rule the file out, so these
+# are denies. The flag `a` is never declared, so the guard cannot see its value. The allows negate the test once at
+# the top of the condition, with `?.` and `??` beside it, which are no ternary. The traps put a template literal and
+# a `//` comment with a lone quote ahead of the plain test. Names share "a negated name test", so MUTATE_ONLY can
+# pick this set out.
+for shape, cond in (
+    ("a negated name test under a negation over an and with an unknown flag", '!(a && !(f.startsWith("' + ENV + '")))'),
+    ("a name test negated twice in extra parens", '!((!(f.startsWith("' + ENV + '"))))'),
+    ("a negated name test under a negation over an and with a grouped or", '!((a || b) && !(f.startsWith("' + ENV + '")))'),
+    ("a negated name test compared with an unknown flag", '!(f.startsWith("' + ENV + '")) == a'),
+    ("a negated name test on the right of an identity test", 'a === !(f.startsWith("' + ENV + '"))'),
+    ("a negated name test in a bitwise or with an unknown flag", '!(f.startsWith("' + ENV + '")) | a'),
+):
+    sh("env: interpreter code follow-ups: deny, node -e, " + shape + ", then a read of each file",
+       node_loop(cond), "deny", "env-file", cwd=NOGIT)
+for shape, cond in (
+    ("a negated name test, then a `?.` member test", '!f.startsWith("' + ENV + '") && f?.length'),
+    ("a negated name test, then a `??` fallback", '!f.startsWith("' + ENV + '") ?? x'),
+):
+    sh("env: interpreter code follow-ups: allow, node -e, " + shape + ", then a read of each file the name test keeps",
+       node_loop(cond), "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a template literal holding a negation, an or and a ternary mark, "
+   "then a read of each file the name test keeps",
+   node_loop('!f.startsWith("' + ENV + '")', decls="const t = `!(\n|| ?\n`; "), "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a line comment with a lone quote ahead of a negated name test, "
+   "then a read of each file the name test keeps",
+   "node -e \"const fs=require('fs');\n// don't\nfor (const f of fs.readdirSync('.')) "
+   "if (!f.startsWith('" + ENV + "')) console.log(fs.readFileSync(f,'utf8'))\"",
+   "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
