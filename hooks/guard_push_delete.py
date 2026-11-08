@@ -9,6 +9,7 @@ import re
 import stat
 
 import guard_core
+from guard_env import _substitutions
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
@@ -891,6 +892,13 @@ def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
                 return segment
         if depth < 3:
             for inner in inner_commands(tokens):
+                found = _gh_pr_create_segment(inner, tool, depth + 1)
+                if found:
+                    return found
+            # `_substitutions` (hooks/guard_env.py, the one home) cuts each `$(...)`, backtick pair and
+            # process substitution met outside single quotes, so an assigned or double-quoted one is read as a
+            # command. A single-quoted one is text and is not cut. The last text is the segment itself.
+            for inner, _in_message in _substitutions(segment, powershell=tool == "PowerShell")[0][:-1]:
                 found = _gh_pr_create_segment(inner, tool, depth + 1)
                 if found:
                     return found
