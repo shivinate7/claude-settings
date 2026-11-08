@@ -3568,6 +3568,14 @@ def git_reads_ancestor_shallow_case():
     return False, "branch_is_ancestor(HEAD, pin) in a shallow clone reads %r, want None (unknown)" % (got,)
 
 
+def git_reads_origin_one_segment_case():
+    """An origin path with one segment names no owner, so origin_slug reads None. A pin of the current parse."""
+    got = _load_git_reads().origin_slug("https://host/r")
+    if got is None:
+        return True, "an origin whose path has one segment, https://host/r, reads None"
+    return False, "origin_slug('https://host/r') reads %r, want None (no owner segment)" % (got,)
+
+
 def _branch_delete_in(where, branch):
     """Claude's `git branch -D <branch>` in `where`, decided by the guard under its own config folder. Returns
     (decision, reason, config folder); the folder holds the guard.log that the call wrote."""
@@ -15994,6 +16002,7 @@ for _label, _check in (
         ("git_reads: branch_is_ancestor reads None for an unknown revision", git_reads_ancestor_unknown_rev_case),
         ("git_reads: branch_is_ancestor reads None, not False, in a shallow clone that cuts the path",
          git_reads_ancestor_shallow_case),
+        ("git_reads: origin_slug reads None for a one-segment origin (https://host/r)", git_reads_origin_one_segment_case),
         ("branch delete, shallow clone: the only copy is denied", git_reads_branch_only_copy_shallow_case),
         ("branch delete, shallow clone: the on-remote proof allows", git_reads_branch_on_remote_shallow_case)):
     FIXTURELESS_CHECKS.add(_check)

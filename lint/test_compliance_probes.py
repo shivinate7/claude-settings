@@ -377,6 +377,10 @@ class Ios(unittest.TestCase):
         body = "".join("\t%s\n" % line for line in recipe.split("\n"))
         return self.edit(self.gold(), "Makefile", "phone:\n", "ui-run:\n" + body + "\nphone:\n")
 
+    def flagged(self, definitions, recipe="xcodebuild test -scheme X $(FLAGS)"):
+        """The gold with `recipe` as the ui-run recipe, and `definitions` (Makefile lines) above the phone target."""
+        return self.edit(self.make_run(recipe), "Makefile", "phone:\n", definitions + "\nphone:\n")
+
     def diag_pass(self, repo):
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
@@ -464,6 +468,14 @@ class Ios(unittest.TestCase):
             with self.subTest(run=run):
                 self.red(self.make_run(run), self.diag_gap("Makefile"))
 
+    def test_a_recipe_prefix_does_not_hide_an_xcodebuild_test_run(self):
+        # `@` silences a recipe line and `-` ignores its exit code. Neither hides the run from the probe.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap", "scope: the run is read")
+        for run in ("@xcodebuild test -scheme X", "-xcodebuild test -scheme X"):
+            with self.subTest(run=run):
+                self.assertEqual(self.grade(self.make_run(run), "test diagnostics"), "gap",
+                                 "a recipe prefix hides the run, so its missing flag is not read")
+
     def test_a_hash_inside_quotes_does_not_cut_the_flag(self):
         for run in ('xcodebuild test -scheme "a #b" -collect-test-diagnostics never',
                     "xcodebuild test -scheme 'a #b' -collect-test-diagnostics never",
@@ -478,6 +490,113 @@ class Ios(unittest.TestCase):
         repo = self.make_run("xcodebuild test -scheme X").write(script, "#!/bin/sh\nxcodebuild test -scheme Tally\n")
         self.red(repo, self.diag_gap("Makefile", script))  # one line, the files in tracked order
         self.diag_pass(self.gold().write("docs/testing.md", "Run `xcodebuild test -scheme Tally` by hand.\n"))  # prose is no run
+
+    def test_a_flag_in_a_make_variable_is_no_gap(self):
+        # The recipe passes the flag through `$(FLAGS)`, and the Makefile sets FLAGS to it: the run does carry the flag.
+        self.diag_pass(self.flagged("FLAGS = -collect-test-diagnostics never\n"))
+
+    # Each case below reads the run's grade. The first line is the scope: with the variable unset, the run is read and
+    # carries no flag, so the grade is gap. Without it, a run that is not read would grade pass and the case would pass for nothing.
+    def test_a_later_equals_replaces_the_make_variable(self):
+        first = "FLAGS = -collect-test-diagnostics never\n"
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged(first), "test diagnostics"), "pass", "control: the first value holds the flag")
+        self.assertEqual(self.grade(self.flagged(first + "FLAGS = -quiet\n"), "test diagnostics"), "gap",
+                         "a later = replaces the value, so the run gets -quiet and no diagnostics flag")
+
+    def test_a_question_equals_applies_only_when_the_variable_is_unset(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "control: FLAGS is unset, so ?= sets it")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "gap", "?= does nothing once FLAGS is set to -quiet")
+
+    def test_a_plus_equals_appends_to_the_make_variable(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS += -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "+= appends the flag after -quiet")
+
+    def test_a_backslash_continued_make_value_is_read_whole(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet \\\n\t-collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "the continuation line is part of FLAGS, so the run carries the flag")
+
+    def test_a_three_level_make_chain_resolves(self):
+        recipe = "xcodebuild test -scheme X $(DIAG_A)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = -collect-test-diagnostics never\n", recipe), "test diagnostics"),
+                         "pass", "control: one level")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = $(DIAG_B)\nDIAG_B = $(DIAG_C)\nDIAG_C = -collect-test-diagnostics never\n",
+                                                 recipe), "test diagnostics"), "pass",
+                         "A = $(B), B = $(C), C = the flag: the run carries the flag through three levels")
+
+    def test_an_export_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("export FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "export FLAGS = is an assignment, so the run carries the flag")
+
+    def test_an_override_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("override FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "override FLAGS = is an assignment, so the run carries the flag")
+
+    def test_a_double_colon_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ::= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "FLAGS ::= is an assignment, so the run carries the flag")
+
+    def test_a_colon_equals_expands_the_make_variable_at_assignment(self):
+        # `:=` expands $(FLAGS) when it is read, so FLAGS keeps the flag and -quiet joins it. The run carries the flag.
+        recipe = "xcodebuild test $(FLAGS)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "control: one level")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\nFLAGS := $(FLAGS) -quiet\n", recipe),
+                                    "test diagnostics"), "pass",
+                         "the := value holds the flag, so the -quiet append keeps it")
+
+    def test_a_lone_quote_in_a_make_comment_is_no_gap(self):
+        # The apostrophe is text in a comment: it opens no string, so the flag before the comment still counts.
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never # the team's flag\n"), "test diagnostics"),
+                         "pass", "the flag before a comment that holds a lone quote still counts")
+
+    def test_a_make_comment_is_cut_from_a_variable_value(self):
+        # Make cuts `# x` from F's value, so F is `-quiet` and the run's own flag after $(F) is not in the comment.
+        recipe = "xcodebuild test $(F) -collect-test-diagnostics never"
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F)"), "test diagnostics"), "gap",
+                         "scope: the run is read, and no diagnostics flag is in it")
+        self.assertEqual(self.grade(self.flagged("F = -quiet\n", recipe), "test diagnostics"), "pass",
+                         "control: no comment, so $(F) expands and the run keeps its flag")
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", recipe), "test diagnostics"), "pass",
+                         "the comment ends at F's value, so the run keeps its own diagnostics flag")
+
+    def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
+        recipe = 'xcodebuild test -scheme "a #b" $(FLAGS)'
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "a # inside quotes in the recipe is text, so the variable's flag still counts")
+
+    def test_a_quoted_never_is_no_gap(self):
+        # The shell reads `"never"` and `'never'` as `never`, so the run does carry the flag.
+        for run in ('xcodebuild test -scheme X -collect-test-diagnostics "never"',
+                    "xcodebuild test -scheme X -collect-test-diagnostics 'never'"):
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_step_name_naming_xcodebuild_test_is_no_test_run(self):
+        # A step's name is text: no xcodebuild test runs in this step, so neither item may read it as one.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         "run: make app-build\n      - name: xcodebuild test (slow tests)\n        run: echo done")
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
+    def test_an_echo_naming_xcodebuild_test_is_no_test_run(self):
+        # An echo prints text: `xcodebuild test` inside its quotes runs nothing, so neither item may read it as a run.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         'run: make app-build\n      - run: echo "xcodebuild test -scheme Tally"')
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
 
     def test_workflow_runs_are_read(self):
         flow = ".github/workflows/ios.yml"
