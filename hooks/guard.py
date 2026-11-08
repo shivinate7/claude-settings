@@ -121,12 +121,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   message-time-matches-clock
-                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 3 words,
-                       `,` or `:`, an optional date, then `HH:MM CST|CDT`, after optional markdown lead characters. The
-                       refusal fires when the stamp is more than 1 minute ahead of the clock (local_time.clock); a stamp
-                       behind passes. A dated stamp is an instant with its zone's offset; an undated one is a signed
-                       minute-of-day offset mod 1440. The reason prints the real time. No transcript, file or process; a missing clock module
-                       passes the message. An override lifts it.
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript, file or process; a missing clock module passes the message. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)

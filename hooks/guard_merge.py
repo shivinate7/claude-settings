@@ -1138,24 +1138,33 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
-STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused. A stamp behind always passes
-# A header is a label of 1 to 3 words, `,` or `:`, an optional date, then `HH:MM CST|CDT`. Anything may follow.
+STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
+STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
+# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
+# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
 _STAMP_HEADER = re.compile(
-    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,2}[,:]\s*(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
-    r"(?P<hour>\d{2}):(?P<minute>\d{2})\s+(?P<zone>CST|CDT)\b")
+    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
-    "this message's header stamp is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "this message's header stamp is wrong for the clock: {why}. "
     "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
-    "someone else's time in header form, open the message with your own label first."
+    "someone else's time in header form, open the message with your own label first. "
+    "(decision local-time-central, sessions speak times in US Central)"
 )
+STAMP_AHEAD_WHY = "it is {off} minutes ahead, and the limit is " + str(STAMP_LIMIT_MINUTES)
+STAMP_ZONE_WHY = "it says {zone}, and the clock's zone now is {name}"
 
 
 def stamp_hit(tool: str, tool_input):
-    """Return (matched, reason) when this send_message opens with a header stamp more than STAMP_LIMIT_MINUTES
-    ahead of the clock, else None. A stamp behind the clock passes. Only the first non-blank line is read, and only
-    its header stamp. A dated stamp is compared as an instant with its zone's offset; an undated one as a signed
-    minute-of-day offset modulo 1440 in [-720, 720), in its own zone.
+    """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
+    None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
+    zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
+    stamp is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
+    An undated stamp is between STAMP_LIMIT_MINUTES (exclusive) and STAMP_QUOTE_MINUTES (inclusive) ahead, as a
+    signed minute-of-day offset modulo 1440 in [-720, 720). An undated stamp further ahead is read as a quote from
+    an earlier day and passes, as does any stamp behind the clock.
     The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
     clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
     advice about a time, so a missing clock module or an impossible date lets the message through."""
@@ -1169,19 +1178,27 @@ def stamp_hit(tool: str, tool_input):
     try:
         import local_time
         now = local_time.clock().replace(second=0, microsecond=0)  # whole minutes: both forms compare one way
-        zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[found.group("zone")]))
+        clock_zone = local_time.central_hhmm(now).split()[1]
+        stamp_zone = found.group("zone").upper()
         hour, minute = int(found.group("hour")), int(found.group("minute"))
-        if found.group("date"):
-            stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
-            off = int((stamped - now).total_seconds() // 60)
-        else:
-            if hour > 23 or minute > 59:
-                return None
-            there = now.astimezone(zone)
-            off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
-        if off <= STAMP_LIMIT_MINUTES:
+        if hour > 23 or minute > 59:
             return None
-        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(off=off, now=local_time.central_hhmm(now))
+        if stamp_zone != clock_zone:
+            why = STAMP_ZONE_WHY.format(zone=stamp_zone, name=clock_zone)
+        else:
+            zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[stamp_zone]))
+            if found.group("date"):
+                stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+                off = int((stamped - now).total_seconds() // 60)
+                late = off > STAMP_LIMIT_MINUTES
+            else:
+                there = now.astimezone(zone)
+                off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+                late = STAMP_LIMIT_MINUTES < off <= STAMP_QUOTE_MINUTES
+            if not late:
+                return None
+            why = STAMP_AHEAD_WHY.format(off=off)
+        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(why=why, now=local_time.central_hhmm(now))
     except (ImportError, ValueError, OverflowError):
         return None
 
