@@ -13958,7 +13958,7 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 # =========================================================================== reviewed-head-push
 #
 # Rule reviewed-head-push. The incident: a lane pushed onto the head of a reviewed pull request whose one fix check
-# was already used. The merge tool writes one fix check per record, so it could write no record for the new head, and
+# was already used. The merge tool writes one fix check per record, so it can write no fix check for the new head, and
 # the lane hand-wrote one. A `git push` that would land on the head of an open pull request ASKS, when that head's
 # newest review record is done and already carries its fix check. The ask says to stack the change on a new branch.
 # The reader is guard_merge's helper, on the merge tool's own parser and state rule. Every record a case reads is
@@ -14178,6 +14178,11 @@ def rpush_push_default_repo():
         ("remote", "add", "fork", RPUSH_FORK), ("config", "remote.pushDefault", "fork")))
 
 
+def rpush_named_fork_repo():
+    """A checkout with a remote named fork beside origin, and no branch config. The push names fork itself."""
+    return rpush_repo("named-fork", git=(("remote", "add", "fork", RPUSH_FORK),))
+
+
 def rpush_origin_branch_repo():
     """The lane checked out, with branch.<lane>.remote set to origin: a bare push goes to origin. The control."""
     return rpush_repo("origin-branch", branch=RPUSH_BRANCH, git=(
@@ -14204,6 +14209,9 @@ rpush_case("reviewed-head-push: a bare push from a branch whose remote is fork, 
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
 rpush_case("reviewed-head-push: a bare push with remote.pushDefault set to fork allows, with no gh read",
            "allow", (), repo=rpush_push_default_repo, command=VCS + " push",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a push that names the fork remote for the lane's branch allows, with no gh read",
+           "allow", (), repo=rpush_named_fork_repo, command=VCS + " push fork HEAD:" + RPUSH_BRANCH,
            comments=rpush_record_comments({"fix": RPUSH_FIX}))
 rpush_case("reviewed-head-push: a bare push from a branch whose remote is origin asks, after both reads",
            "ask", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " push",
