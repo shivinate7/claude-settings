@@ -4822,6 +4822,42 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_apostrophes_do_not_hide_admission_blocks(self):
         self.assert_blocked(mg_report("I didn't check; I clobbered the lane's notes."))
 
+    def test_mg_red_lone_apostrophe_does_not_hide_admission_blocks(self):
+        # A lone apostrophe with a space before it reads as an opening quote. The admission after it still counts.
+        for text in ("I waited 'til the lane ended, and I broke the batch.' Nothing else.",
+                     "I ran it 'cause the lane was slow, and I clobbered the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_elided_opener_does_not_hide_admission_blocks(self):
+        # An elided word after an apostrophe ('em, 'round, 'tis, 'kay) is no opening quote, so the admission after it
+        # still counts. Each text holds one lone elision and a later apostrophe that could close a span.
+        for text in ("I told 'em to wait, then I broke the lanes' notes.",
+                     "I waited 'round the lanes, then I clobbered the notes.' Nothing else.",
+                     "The lane said 'tis fine, and I broke the batch.' Nothing else.",
+                     "I called it 'kay, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_capitalised_elision_does_not_hide_admission_blocks(self):
+        # A capitalised elision ('Cause, 'Til) opens no quote either: the admission after it still counts.
+        for text in ("I ran it 'Cause the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "I waited 'Til the lanes ended, and I broke the batch.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_year_elision_does_not_hide_admission_blocks(self):
+        # A year elision ('25) opens no quote either: the admission after it still counts.
+        self.assert_blocked(mg_report("Back in '25 I broke the lanes' notes."))
+
+    def test_mg_pin_listed_elisions_do_not_hide_admission_blocks(self):
+        # Green now: 'cos, 'twas and 'nuff are listed elisions. Each text holds one and a later apostrophe.
+        for text in ("I waited 'cos the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "The lane said 'twas fine, and I broke the batch.' Nothing else.",
+                     "I told them 'nuff, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
     # Green: each of these must pass.
     def test_mg_green_inbox_admission_with_fence_step_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
@@ -4846,6 +4882,13 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_quoted_owner_phrase_passes(self):
         self.assert_allowed(mg_report('Owner said "I broke it, own up to a mistake".'))
+
+    def test_mg_green_single_quoted_owner_phrase_passes(self):
+        self.assert_allowed(mg_report("Owner said 'I broke it, own up to a mistake'."))
+
+    def test_mg_green_elision_closed_at_once_stays_quoted_passes(self):
+        # 'em' closed at once is quoted text, so the quote after it pairs as usual and 'I broke it' stays quoted.
+        self.assert_allowed(mg_report("Owner said 'em' and 'I broke it'."))
 
     def test_mg_green_admission_in_done_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
