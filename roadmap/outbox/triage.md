@@ -18,3 +18,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - red-run-marker-forms (lane notes-fix-large-3, #1745 round 3, Nov 7 21:17 CST): list-marker forms outside the set, such as `(1) mutant A`, `[x] mutant A`, `a) mutant`, `• mutant` and `step 1: mutant A`, still pass, and the record's "Limits that stay" omits them (lint/check_red_run.py:88-91). A debt after a real incident.
 - red-run-record-cite (same source): record item 1a cites 457071b62 for `(mutant: code_check.py:266 ...)`; the text is in 29816b9f5.
 - red-run-strip-wording (same source): the docstring and the record say list markers strip "from both ends", but `-` and `+` strip only at the start (lint/check_red_run.py:122).
+- merge-reads-ci-job-stdout (lane lane-lint-no-silent-pass, #1756, Nov 7 21:26 CST): merge/merge.py lines 1690 and 1818 read ci-job stdout outside ci_job_run, a second reader of one output.
+- skipped-line-parse-unpinned (same source): no test pins the moved skipped-line parse.

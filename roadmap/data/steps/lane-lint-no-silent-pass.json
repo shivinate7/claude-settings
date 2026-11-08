@@ -1,11 +1,11 @@
 {
   "title": "lane_lint fails a skipped required lint step",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.61,
   "owner": "coordinator",
   "lane": "session_013NEJL2Xmid8Pt8sh5sDtSw",
   "why": "A required lint step that is skipped must fail the lane lint, not pass it silently.",
-  "note": "Stacked on #1741 (batch-local-checks-cmd). Title and lane from the coordinator, 20:35 and 20:37 CST Nov 7; filed 20:37 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:37:00-06:00"
+  "note": "Stacked on #1741 (batch-local-checks-cmd). Title and lane from the coordinator, 20:35 and 20:37 CST Nov 7; filed 20:37 CST Nov 7. Built as draft #1756 (head c2c7325ea, stacked on #1741); with runner 8. Ruling recorded in decision lanes-run-no-full-ci-job (commit 378bc82ff). The lane asked for done; it stays ready until the merge. Updated 21:27 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:27:00-06:00"
 }
