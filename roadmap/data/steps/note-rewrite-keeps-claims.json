@@ -1,0 +1,11 @@
+{
+  "title": "A rewrite of one notes line cannot drop a sentence that is still true",
+  "phase": "guards",
+  "status": "todo",
+  "order": 671,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "Twice today a rewrite or fold of a docs/debts/notes.md line dropped one sentence that was still true (#1958 d4163eceb, #2002 6c8b057cb). Each time a haiku fix check caught it and forced a new review chain (timing-tests lane, session_013NEJL1jPC89ae6X6Pa4jmf, 08:19 CST Nov 8). A true limit can vanish from the debt store, and the lane pays a full re-review.",
+  "note": "Check idea: when a commit removes a note line and adds one under the same or a folding id, list each removed sentence with no close match in the added lines, and require a Drops-lines reason that names it. Today the silent-undo check takes one trailer for the whole file. Home: the lost-lines part of lint/check_silent_undo.py, not revived_notes (lane lint-uses-pinned-tools, 08:23 CST Nov 8). Not part of notes-trailer-per-slug, which judges whole notes by slug. Done check: a red test where a rewritten note line that drops a still-present sentence, with no Drops-lines reason naming it, fails. Build lane. Filed by triage 08:22 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:22:00-06:00"
+}

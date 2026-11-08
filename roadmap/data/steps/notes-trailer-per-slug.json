@@ -1,11 +1,11 @@
 {
   "title": "A Drops-lines trailer on docs/debts/notes.md excuses only the note it names",
   "why": "A `Drops-lines` trailer on docs/debts/notes.md excuses every revived note, not only the one it names (debt note notes-trailer-whole-file in #1943; lane lint-uses-pinned-tools, 06:44 CST Nov 8).",
-  "note": "Fix: the silent-undo check matches a notes.md trailer to the slug it names; red case first. Doing in lane lint-uses-pinned-tools (session_013NEJL1N3YkCMouc1pELXyu) on branch notes-trailer-per-slug, Merge after: #1943. #1943 cites `Fix: step:notes-trailer-per-slug`. Folded in proposed step note-rewrite-keeps-claims (timing-tests lane, session_013NEJL1jPC89ae6X6Pa4jmf, 08:19 CST Nov 8): twice today a rewrite or fold of a notes.md line dropped one sentence that was still true (#1958 d4163eceb, #2002 6c8b057cb), and each time a haiku fix check caught it and forced a new review chain. Check idea: when a commit removes a note line and adds one under the same or a folding id, list each removed sentence with no close match in the added lines and require a Drops-lines reason that names it. Same home: the silent-undo Drops-lines check on notes.md.",
+  "note": "Fix: the silent-undo check matches a notes.md trailer to the slug it names; red case first. Doing in lane lint-uses-pinned-tools (session_013NEJL1N3YkCMouc1pELXyu) on branch notes-trailer-per-slug, Merge after: #1943. #1943 cites `Fix: step:notes-trailer-per-slug`. Built as #1973 at 12be3d668, after round 3 and a fix check (lane, 08:23 CST Nov 8).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 636,
   "owner": "triage",
   "lane": "session_013NEJL1N3YkCMouc1pELXyu",
-  "updatedAt": "2026-11-08T08:20:00-06:00"
+  "updatedAt": "2026-11-08T08:22:00-06:00"
 }
