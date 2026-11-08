@@ -5477,6 +5477,19 @@ sh("narrate: scanner: a pipe and a # inside the tee's quoted file name is no fol
 sh("narrate: scanner: a tee and tail pipe quoted as text is no follow",
    'echo "merge 12 --confirm | tee x | tail -3"', "allow", cwd=NOGIT)
 
+# --- a filter between the wait and tail or head (extends the live-stream rule)
+#
+# A filter such as grep or sed cuts the heartbeat as a tee does, so a tail or head after it is refused too.
+# A filter with nothing after it, and a preview with no --confirm, stay allowed.
+sh("narrate: a grep, then tail, after merge --confirm is refused",
+   "merge --confirm | grep FAIL | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a sed, then head, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | sed -n 1,99p | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: merge --confirm through grep with no tail or head is allowed",
+   "merge --confirm | grep FAIL", "allow", cwd=NOGIT)
+sh("narrate: a grep, then tail, on a merge preview without --confirm is allowed",
+   "merge 12 | grep x | tail -3", "allow", cwd=NOGIT)
+
 # --- a pipe out of a verdict stage (extends the live-stream rule)
 #
 # verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
