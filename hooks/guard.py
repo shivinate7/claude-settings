@@ -3516,32 +3516,43 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
+    calls = []
+    # Every branch the whole command deletes, per directory and remote: in `delete b && delete
+    # archive/b` each push alone sees the other's ref as the tip's holder.
+    gone = {}
     for segment in split_segments(stripped):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
-            verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
-            if verdict == "ask":
-                ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
-            elif verdict:
-                refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
-            elif subcommand == "push" and not read_verb("push", args):
-                # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
-                # implied destination off the branch's upstream. A dry run writes nothing.
-                kind = push_ask_hit(args, where, overrides)
-                if kind == "main":
-                    ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
-                                "push to the default branch")
-                elif kind == "stray":
-                    ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
-                                "push to a stray branch")
+            deletes = None
             if subcommand == "push" and not read_verb("push", args):
-                # A dry run deletes nothing, so it passes the design check as it passes the asks above.
-                remote, names = push_delete_names(args, where, overrides)
-                design = design_push_delete_verdict(where, remote, names, design_folder()) if names else ""
-                if design == "ask":
-                    ask_command("shared-trees-archive-then-delete", DESIGN_DELETE_ASK_REASON, "git push " + " ".join(args), "remote branch delete")
-                elif design:
-                    refuse(tool, design, "shared-trees-archive-then-delete", DESIGN_DELETE_REFUSE_REASON, "git push " + " ".join(args))
+                # A dry run deletes nothing, so it passes the design check as it passes the asks below.
+                deletes = push_delete_names(args, where, overrides)
+                gone.setdefault((where, deletes[0]), []).extend(deletes[1])
+            calls.append((subcommand, args, where, overrides, deletes))
+    for subcommand, args, where, overrides, deletes in calls:
+        verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
+        if verdict == "ask":
+            ask_command("force-push", PUSH_ASK_REASON, "git push " + " ".join(args), "forced push")
+        elif verdict:
+            refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
+        elif subcommand == "push" and not read_verb("push", args):
+            # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
+            # implied destination off the branch's upstream. A dry run writes nothing.
+            kind = push_ask_hit(args, where, overrides)
+            if kind == "main":
+                ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
+                            "push to the default branch")
+            elif kind == "stray":
+                ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
+                            "push to a stray branch")
+        if deletes is not None:
+            remote, names = deletes
+            design = design_push_delete_verdict(
+                where, remote, names, design_folder(), gone[(where, remote)]) if names else ""
+            if design == "ask":
+                ask_command("shared-trees-archive-then-delete", DESIGN_DELETE_ASK_REASON, "git push " + " ".join(args), "remote branch delete")
+            elif design:
+                refuse(tool, design, "shared-trees-archive-then-delete", DESIGN_DELETE_REFUSE_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)

@@ -373,21 +373,23 @@ def design_files(where: str, tip: str, folder: str, base=None):
     a name that is not UTF-8 (a Latin-1 mockup) reads as U+FFFD, a path no tree holds: a `:(literal)`
     pathspec built from it matched nothing and the only copy went unseen. Both lists replace the same
     way, so a replaced name still meets itself. Two distinct non-UTF-8 names can collapse to one
-    string; that only over-includes, which asks or denies."""
+    string; that only over-includes, which asks or denies. `folder` is repo-relative, so every read names
+    it from the repo root (`--full-tree`, `:(top)`): run from a subfolder, a cwd-relative path names
+    no folder and the only copy reads as none."""
     if base is None:
-        answer = _git(where, "ls-tree", "-r", "--name-only", tip, "--", folder + "/")
+        answer = _git(where, "ls-tree", "--full-tree", "-r", "--name-only", tip, "--", folder + "/")
         if answer is None or answer.returncode != 0:
             return None
         return [line for line in answer.stdout.splitlines() if line.strip()]
     changed = _git(where, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=AM",
-                   base + "..." + tip, "--", ":(icase)" + folder + "/")
+                   base + "..." + tip, "--", ":(top,icase)" + folder + "/")
     if changed is None or changed.returncode != 0:
         return None
     paths = {path for path in changed.stdout.split("\0") if path}
     if not paths:
         return []
     differs = _git(where, "diff", "-z", "--name-only", "--no-renames", base, tip, "--",
-                   ":(icase)" + folder + "/")
+                   ":(top,icase)" + folder + "/")
     if differs is None or differs.returncode != 0:
         return None
     return [path for path in differs.stdout.split("\0") if path in paths]
