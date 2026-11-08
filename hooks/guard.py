@@ -3943,7 +3943,7 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 # `Invoke-Expression` takes it as its argument, and a `(` may open it. `[scriptblock]::Create(` builds a block
 # from it. A pwsh or powershell launch ends in `-Command` or `-c`. After it, the closing parens of such a call,
 # then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A closing
-# paren on a stage word is dropped (`$(@"…"@ | iex)`, `(@"…"@ | Out-String) | iex`). A
+# paren on the last word of a stage is dropped (`$(@"…"@ | iex)`, `(@"…"@ | Out-String) | iex`). A
 # here-string given to Set-Content matches neither. Nor does one held in a variable that no word on its own
 # line runs. A later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
 # The before side keeps its own word list for the PowerShell forms. `nested_script` (guard_core.py) answers a
