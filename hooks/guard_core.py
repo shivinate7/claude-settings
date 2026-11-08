@@ -372,6 +372,20 @@ WRAPPER_VALUE_FLAGS = {
              "--close-from", "-D", "--chdir", "-R", "--chroot", "-T", "--command-timeout",
              "-r", "--role", "-t", "--type", "-U", "--other-user"},
 }
+# Every option of `uv run` that takes a value as the NEXT word, global and run options both, read from
+# `uv run --help` (the lines that show `<VALUE>`) on uv 0.11.32. `uv [flags] run [flags] cmd` reads one table for both
+# flag runs. Refresh it when `uv --version` moves: a missing flag reads its value as the command word.
+UV_RUN_VALUE_FLAGS = {
+    "--allow-insecure-host", "--cache-dir", "--color", "--config-file", "--config-setting",
+    "--config-settings-package", "--default-index", "--directory", "--env-file", "--exclude-newer",
+    "--exclude-newer-package", "--extra", "--extra-index-url", "--find-links", "--fork-strategy", "--group",
+    "--index", "--index-strategy", "--index-url", "--keyring-provider", "--link-mode", "--no-binary-package",
+    "--no-build-isolation-package", "--no-build-package", "--no-editable-package", "--no-extra", "--no-group",
+    "--no-sources-package", "--only-group", "--package", "--prerelease", "--project", "--python",
+    "--python-platform", "--refresh-package", "--reinstall-package", "--resolution", "--upgrade-group",
+    "--upgrade-package", "--with", "--with-editable", "--with-requirements",
+    "-C", "-P", "-f", "-i", "-p", "-w",
+}
 # Runners that `wrapped_commands` reads, and the value flags of `stdbuf` (also a wrapper above) and of
 # the runners that are no `COMMAND_WRAPPERS` entry. They sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
@@ -380,11 +394,7 @@ WRAPPER_VALUE_FLAGS.update({
     # word, skipped in `_walk_wrappers`), but `chrt` has deadline times. `uv` reads only `uv [flags] run [flags] cmd`.
     "taskset": set(), "chrt": {"-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"},
     "fakeroot": {"-l", "--lib", "-f", "--faked", "-i", "-s", "-b"}, "pkexec": {"-u", "--user"},
-    "uv": {"--directory", "--project", "--config-file", "--cache-dir", "--color", "--python", "-p",
-           "--with", "--with-editable", "--with-requirements", "--env-file", "--group", "--extra",
-           "--package", "--index", "--default-index", "--index-url", "-i", "--extra-index-url",
-           "--find-links", "-f", "--upgrade-package", "-P", "--exclude-newer", "--only-group",
-           "--no-group", "--constraints", "-c", "--overrides"},
+    "uv": UV_RUN_VALUE_FLAGS,
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -541,6 +551,8 @@ POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged
 
 # A redirect ahead of the command (`2>/dev/null cp`, `>f cp`, `<f cat`, `&>log cp`), glued to its target or
 # not. `>(` and `<(` open a process substitution, which holds a command, so they are no redirect.
+# The word after a spaced `>&`: a descriptor to dup (`1`, `2-`) or `-` to close. Any other word is a file.
+DESCRIPTOR_WORD = re.compile(r"\d+-?|-")
 LEADING_REDIRECT = re.compile(r"^(?:\d*|&)(?:>>?\|?|<)(?!\()(.*)$")
 # A function header ahead of its body: `f()` or `f(){` as one word, and `function f`.
 FUNCTION_HEADER = re.compile(r"^[A-Za-z_][\w.:-]*\(\)(\{?)$")
@@ -591,7 +603,10 @@ def _skip_assignments_and_keywords(tokens, index=0):
             continue
         if redirect:
             # `2>` and `>` alone take the next word as their target; `2>&` takes the descriptor after it.
-            index += 2 if redirect.group(1) in ("", "&") else 1
+            # The tokenizer splits `2>& 1` into `2>` `&` `1`: bash reads that as one dup, so all three go.
+            spaced_dup = (redirect.group(1) == "" and tuple(tokens[index + 1:index + 2]) == ("&",)
+                          and index + 2 < end and DESCRIPTOR_WORD.fullmatch(tokens[index + 2]))
+            index += 3 if spaced_dup else 2 if redirect.group(1) in ("", "&") else 1
             continue
         header = FUNCTION_HEADER.match(token)
         if header and (header.group(1) or tuple(tokens[index + 1:index + 2]) in (("{",), ("(",))):

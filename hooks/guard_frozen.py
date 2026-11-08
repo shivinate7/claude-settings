@@ -337,6 +337,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     target = re.escape(path)
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
+    # `>&WORD` and `N>&WORD`, spaced or glued (the tokenizer shows `> &WORD` or `> & WORD`), open WORD for
+    # writing unless it is a descriptor (digits, `-`): bash reads it as `&>WORD`.
+    if not re.fullmatch(r"\d+-?|-", path) and re.search(r"\d?>\s*&\s*['\"]?" + target, cmd):
+        return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     sed_in_place = r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target
@@ -510,7 +514,10 @@ def _writes_a_file(words) -> bool:
     """True when the segment redirects output onto a file, not a null device or a descriptor."""
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
-            target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
+            after = index + 2 if words[index + 1:index + 2] == ["&"] else index + 1   # `> & 1`: the dup's word
+            target = words[after].strip("'\"").lower() if after < len(words) else ""
+            if after != index + 1 and re.fullmatch(r"\d+-?|-", target):
+                continue
             if target not in _NULL_TARGETS and not re.fullmatch(_DESCRIPTOR, target):
                 return True
     return False
@@ -737,6 +744,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         head_script = []
         leading = True   # no command word yet: an assignment here sets the command's environment
         for index, word in enumerate(raw):
+            kept = scripts[number][index]
+            if (index and word[:1] == "&" and len(word) > 1 and raw[index - 1].endswith(">")
+                    and _is_redirect(raw[index - 1]) and not re.fullmatch(_DESCRIPTOR, word)):
+                # `>&WORD` with a non-descriptor WORD opens WORD for writing: judge WORD, not `&WORD`.
+                word, kept = word[1:], kept[1:]
             # An assignment stays one word in `heads` wherever the resolver reads one: ahead of the command
             # and behind a wrapper (`env -i FOO="a b" cp`). Only a leading one sets the environment and drops.
             held_whole = bool(_ASSIGNMENT.match(word))
@@ -763,7 +775,6 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 heads.extend([_unquoted(word)] if held_whole else pieces)
                 if "'" in word or '"' in word:
                     held.extend(_quoted_commands(word))
-                kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
                 head_script.extend([_unquoted(kept)] if held_whole else
                                    _words_of(kept) if "'" in kept or '"' in kept else [kept])
