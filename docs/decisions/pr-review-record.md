@@ -65,7 +65,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
-- Rule `review-record-after-round`: one transcript read per judged call, no `gh` call, no file, no process.
+- Rule `review-record-after-round`: one transcript read per judged call. The judged call loads `merge/merge.py` once (a file read, no write, no process, no `gh` call), only when a reviewer spawn is found.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -74,7 +74,9 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
-- Rule `review-record-after-round` does not judge a builder resumed by SendMessage. A lane that never reviews is caught only downstream, because `merge --reviewed` needs a done record.
+- Rule `review-record-after-round` judges the remote `send_message` and the built-in `SendMessage` alike. A builder resumed by `SendMessage` is a handoff to it. A lane that never reviews is caught only downstream, because `merge --reviewed` needs a done record.
+- A Bash post whose body comes from a file (`-F body=@file`, `--body-file`, stdin) counts on its shape, because the guard cannot read the file. An inline body must hold the marker (lane pick). A read that only names the marker is no record.
+- Spawns made through the Workflow tool are not seen.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
 
