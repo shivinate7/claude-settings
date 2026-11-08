@@ -70,17 +70,25 @@ guard rule, so the watcher does the waiting and the session is told once.
   it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
   verdict heartbeat, plus one per ci-job step that runs (never under `--plan`). The watcher reads it on each 0.2 s loop pass.
-- The job removes its log and beat file when it ends, also after a STALL report (the job keeps writing
-  until then, so nothing is removed at stall time), and when the original calls `exit N` (the exit code is
-  kept). The wrapper creates both files and opens both before the job starts. The watcher inherits those
-  handles, so a job that ends at once loses no output, and the STALL report reads its tail from the
-  handle. An EXIT trap in the job does the removal. The job runs as a `( )` subshell because bash 3.2
-  (macOS `/bin/sh` and `/bin/bash`) runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap, and
-  so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps its pid, so
-  the report still lists one process. A stalled job of that kind leaves its two files. A job killed before it can run its
-  trap leaves them too. A job that never stalls is cleaned by the wrapper after `wait`. The report's
-  `Log:` line says the file is usually removed when the job ends. Cost: two small files created per job
-  and two held handles in the watcher, no new process. In a wrapped run the watcher no longer polls for the beat file. Run by hand with no beat handle, it still tries one open a second.
+- The job removes its beat file when it ends, and its log too unless it stalled (owner, item 405 a,
+  2026-11-08 06:09 CST: "Keep a stalled job's log for 7 days"). Reason: a stalled job keeps writing after
+  its STALL report, and that final output was lost when the job ended. On a stall the watcher writes a
+  marker, `LOG.stalled`, beside the log before it exits 3. At the job's end the trap keeps the log if the
+  marker is there. Each `--hook` call then removes, from the log folder, every stall-watch log not written
+  for 7 days with its marker, and no other file. No timer runs and no process starts. A job that never
+  stalls leaves no files. The wrapper creates both files and opens both before the job starts. The watcher
+  inherits those handles, so a job that ends at once loses no output, and the STALL report reads its tail
+  from the handle. An EXIT trap in the job does the removal, also when the original calls `exit N` (the
+  exit code is kept). The job runs as a `( )` subshell because bash 3.2 (macOS `/bin/sh` and `/bin/bash`)
+  runs an EXIT trap at a subshell's normal end only there. Limits: an original that execs drops the trap,
+  and so does one that sets its own EXIT trap. The exec'd command replaces the job's subshell and keeps
+  its pid, so the report still lists one process. A stalled job of that kind leaves its beat file, and its
+  log and marker stay for the prune. A job killed before it can run its trap leaves its files too. A job
+  that never stalls is cleaned by the wrapper after `wait`. The report's `Log:` line says the file is kept
+  7 days. Cost: two small files created per job and two held handles in the watcher, no new process. A
+  stalled job keeps one log and one marker for 7 days, removed by the first background call after that.
+  The prune costs one folder listing per background call. In a wrapped run the watcher no longer polls
+  for the beat file. Run by hand with no beat handle, it still tries one open a second.
 
 ## The Stop-time check
 
