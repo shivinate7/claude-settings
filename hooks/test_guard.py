@@ -10103,10 +10103,13 @@ FAMILY = "lane-one-topic"
 # record is a lane whose cs-topic differs from the brief's Topic, or a lane with a cs-topic when the brief names no
 # Topic. A lane with no cs-topic (an older lane) is judged by its cs-step tags: the brief's step must be one of them.
 # A brief that clears those checks is refused too when it does not name a session id for each of Coordinator, Triage and
-# Batch runner. A label starts and ends at a word boundary, in any case. Between a label and its id, up to 80 characters
-# on the same line may sit, and that gap holds no other role label (word-bounded) and no `session_`. So a number
-# (`Batch runner 8`), a colon, markdown, parentheses or a word such as `is` may sit there, and the colon is optional. An
-# id is `session_` then letters and digits, and it must hold a digit, so a placeholder such as session_TBD names no role.
+# Batch runner. A label starts and ends at a word boundary, in any case, and a label inside a closed quoted or
+# parenthetical span is no label occurrence. Between a label and its id, up to 80 characters on the same line may sit,
+# with no `session_` in it. Outside each closed span (straight or curly quotes, or parentheses), the text before the
+# gap's last colon is free. The rest of the gap, all of it when no colon sits there, holds only the words `is`, `id` and
+# `session`, digits, spaces, punctuation and markdown. So a number (`Batch runner 8`), a field name (`Coordinator IDs:`),
+# a colon, markdown, a quoted title or the word `is` may sit there. An id is `session_` then letters and digits, and it
+# must hold a digit, so a placeholder such as session_TBD names no role.
 # The refusal names the missing roles, the expected form `Coordinator: session_<id>; Triage: session_<id>; Batch runner:
 # session_<id>`, and the gap limit. Why: a lane reaches its coordinator, its triage session and its batch runner through
 # those ids, so a brief without one leaves the lane unable to reach that role. Presence and form only: no id is matched to
@@ -10138,11 +10141,12 @@ BRIEF_ROLE_FORM = ("Coordinator: session_", "Triage: session_", "Batch runner: s
 ROLE_CARRIES = ("Coordinator: session_", "; Triage: session_", "; Batch runner: session_", "80 char")
 
 
-def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER):
+def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER, lacks_more=()):
     """A marker brief to a lane that clears the topic and step checks, and misses a role id: refused. The reason names
-    each missing role outside the form, carries the form and the gap limit, and names none of the test's ids."""
+    each missing role outside the form, carries the form and the gap limit, and names none of the test's ids. The
+    `lacks_more` fragments are ones the reason must not hold either, such as the id of a role the brief does name."""
     step_refuse(name, transcript, message, target=target, carries=ROLE_CARRIES,
-                lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID), names=missing)
+                lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID) + tuple(lacks_more), names=missing)
 
 
 def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), names=()):
@@ -10486,6 +10490,55 @@ step_refuse("a brief with no role ids and an unreadable transcript keeps the no-
 # The brief template: filled, it is allowed; with its id placeholders unfilled, it is refused for each missing role.
 roles_refuse("the brief template with its session id placeholders unfilled is refused for the missing roles",
              role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE), ["Coordinator", "Triage", "Batch runner"])
+
+# Allowed, the colon rule: the text before a gap's last colon is free, so a field name may sit there. Only the text after
+# that colon must be filler words, digits and punctuation. Each case keeps the other two roles valid.
+step_allow("a Coordinator field name before its colon, Coordinator's session id: session_01A, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator's session id: session_01A" + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Coordinator field name before its colon, Coordinator IDs: session_01A, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator IDs: session_01A" + TRIAGE_LINE + RUNNER_LINE)
+step_allow("a Batch runner field name before its colon, Batch runner, child repos: session_01C, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nBatch runner, child repos: session_01C")
+# The child-repos line of the Standing sessions roster, verbatim: a quoted title sits after its colon, a since-date after its id.
+step_allow("the child-repos Batch runner line of the Standing sessions roster, verbatim, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\n- Batch runner, child repos: \"batch runner 9 (child repos)\", "
+           "session_013NEJKymmzw37seAr3Qq5nv, since 2026-11-03 15:39 CST.")
+
+# Curly quotes close a span as straight quotes do, so a title in them is skipped. An unclosed curly quote is no span.
+step_allow("a Coordinator title in curly quotes, Coordinator: “Claude settings coordinator handoff”, session_01A, is allowed",
+           role_path("step-topic-lane"),
+           ROLE_TOP + "\nCoordinator: “Claude settings coordinator handoff”, session_01A" + TRIAGE_LINE + RUNNER_LINE)
+roles_refuse("a Coordinator with an unclosed curly quote, Coordinator “cs notes, session_A1, is refused: no span is closed",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator “cs notes, session_A1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+
+# A label inside a closed span is no label occurrence, so a Triage word in parentheses or quotes names no Triage id. The
+# Coordinator id on the same line still counts, so only Triage is missing.
+roles_refuse("a Triage label in parentheses in the Coordinator's gap, Coordinator (with Triage): session_01A, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator (with Triage): session_01A" + RUNNER_LINE,
+             ["Triage"], lacks_more=("id for Coordinator",))
+roles_refuse("a Triage label in quotes in the Coordinator's gap, Coordinator \"cs triage\" session_01A, is refused",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator \"cs triage\" session_01A" + RUNNER_LINE,
+             ["Triage"], lacks_more=("id for Coordinator",))
+
+# Refused: after a colon, the text must be filler words, digits and punctuation. Prose there names no role id.
+roles_refuse("a Triage note before its colon with prose after it, Triage note: the failing test in session_01Q, is refused",
+             role_path("step-topic-lane"),
+             ROLE_TOP + COORD_LINE + "\nTriage note: the failing test in session_01Q" + RUNNER_LINE, ["Triage"])
+
+# A dotted capital I (İ) lowers to two characters, so an index taken from the lowered text is off by one. The allow cases
+# read their id one character early and are refused. The refusal case is the crash pin: a crash fails open and prints
+# nothing, so only a refusal that must hold catches it.
+step_allow("a Triage label with a dotted capital I before its colon, Triage İ: session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage İ: session_01A" + RUNNER_LINE)
+step_allow("a Triage label with a dotted capital I in quotes before its id, Triage \"İ\" session_01A, is allowed",
+           role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage \"İ\" session_01A" + RUNNER_LINE)
+roles_refuse("a Triage label with a dotted capital I and no colon, Triage İ session_01A, is refused: İ is a word",
+             role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage İ session_01A" + RUNNER_LINE, ["Triage"])
 
 
 # =========================================================================== 5d. cite by id
