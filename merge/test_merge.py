@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, hashlib, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -11347,7 +11347,7 @@ class MergeRoleCheck(CloudSession):
         # names the review record and says the batch runner finds the PR. It does not hand over the number and the head.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
-        # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
+        # Ruling 113 a, pr-review-record: the text that gave the batch runner the pull request number and its head is retired. The lint step is not.
         self.assertRegex(err, r"(?i)review record")
         self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
@@ -12140,6 +12140,14 @@ class ReviewStampForm(unittest.TestCase):
         self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
                          "the Stamp line is not review_stamp of the lines above it:\n" + text)
 
+    def test_the_stamp_is_the_sha256_of_the_salt_and_the_lines_above_it(self):
+        # the expected value is computed here, not through review_stamp: a review_stamp without the salt would agree with itself
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        i = stamp_index(self, text)
+        want = hashlib.sha256("\n".join(["claude-settings review record stamp v1", *(line.rstrip() for line in lines[:i])]).encode("utf-8")).hexdigest()[:16]
+        self.assertEqual(lines[i].split(": ", 1)[1], want, "the Stamp line is not sha256 of the salt and the lines above it:\n" + text)
+
     def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
         # the MCP tool may add spaces at a line's end. This case spaces the body lines; the marker line has its own case below.
         text = record_text(rounds=REVIEW_PASS)
@@ -12703,7 +12711,7 @@ class ReviewFixBase(ReviewEnv):
 
 class ReviewLaneLint(ReviewEnv):
     """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
-    head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
+    head. The incident: a pull request was given to the batch runner with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
     no network, no worktree. A record whose newest round fails still prints, whatever the lint says."""
 
     @contextlib.contextmanager
@@ -12720,16 +12728,16 @@ class ReviewLaneLint(ReviewEnv):
         with unittest.mock.patch.object(merge, "lane_lint", stub):
             yield calls
 
-    def assert_held(self, rc, out, err, calls):
+    def assert_refused(self, rc, out, err, calls):
         self.assertNotEqual(rc, 0, "a PASS record printed although its lint fails:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a held PASS record still printed its body")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused PASS record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
         self.assertTrue(calls, "the record did not ask lane_lint about its head")
 
     def test_a_pass_record_whose_lint_fails_is_refused_and_names_the_lane_lint_step(self):
         with self.lint("FAIL") as calls:
             rc, out, err = self.run_args("7", "--review-record", *self.flags())
-        self.assert_held(rc, out, err, calls)
+        self.assert_refused(rc, out, err, calls)
 
     def test_a_fix_pass_record_whose_lint_fails_is_refused_and_names_the_lane_lint_step(self):
         host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))),
@@ -12738,7 +12746,7 @@ class ReviewLaneLint(ReviewEnv):
                  "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
         with self.lint("FAIL") as calls:
             rc, out, err = self.run_args("7", "--review-record", *flags, host=host)
-        self.assert_held(rc, out, err, calls)
+        self.assert_refused(rc, out, err, calls)
 
     def test_a_pass_record_whose_lint_passes_prints_its_body(self):
         with self.lint("PASS") as calls:
@@ -12767,13 +12775,13 @@ class ReviewLaneLint(ReviewEnv):
         with unittest.mock.patch.object(merge, "lane_lint", stub):
             yield calls
 
-    def assert_unknown_held(self, error, liftable):
+    def assert_unknown_refused(self, error, liftable):
         """An unknown lint refuses the record and names merge --lane-lint. A liftable unknown names --lint-unknown-ok "REASON" as the way
         through, and no line says no override lifts it. A plain unknown has no flag that lifts it, so its refusal keeps the generic line."""
         with self.lint_raising(error) as calls:
             rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertNotEqual(rc, 0, "an unknown lint printed a PASS record:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a held PASS record still printed its body")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused PASS record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
         if liftable:
             self.assertIn('--lint-unknown-ok "REASON"', out + err, "the refusal does not name --lint-unknown-ok \"REASON\" as the way through:\n" + out + err)
@@ -12785,12 +12793,12 @@ class ReviewLaneLint(ReviewEnv):
 
     def test_an_unknown_lint_that_lifts_names_the_unknown_ok_flag_as_the_way_through(self):
         # lane_lint raises a Liftable for an unknown step, and --lint-unknown-ok REASON lifts it: the refusal names that way through
-        self.assert_unknown_held(merge.Liftable("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:\n"
+        self.assert_unknown_refused(merge.Liftable("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:\n"
                                                 'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>".'), True)
 
     def test_an_unknown_lint_that_does_not_lift_keeps_the_no_override_line(self):
         # a plain Stop for an unknown step has no flag that lifts it, so its refusal keeps the generic line
-        self.assert_unknown_held(merge.Stop("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:"), False)
+        self.assert_unknown_refused(merge.Stop("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:"), False)
 
     @contextlib.contextmanager
     def lint_lifted_by_reason(self):
@@ -12826,7 +12834,7 @@ class ReviewLaneLint(ReviewEnv):
         with self.lint("FAIL") as calls:
             rc, out, err = self.run_args("7", "--review-record", *self.flags())
         self.assertNotEqual(rc, 0, "a failed lint printed a done record:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused done record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
         self.assertIn("No override lifts this refusal", out + err, "the refusal dropped the generic no-override line:\n" + out + err)
         self.assertTrue(calls, "the done record did not ask lane_lint about its head")
@@ -12866,22 +12874,22 @@ class ReviewLaneLint(ReviewEnv):
         self.assertTrue(all(seen), "lane_lint ran outside release_on_signals")
 
     def test_a_done_record_on_a_failed_round_is_refused_when_lint_fails(self):
-        # a delete-only change with guard no is done after round one whatever its verdict, and a done record is the handoff, so lint must pass
+        # a delete-only change with guard no is done after round one whatever its verdict, and a done record is given to the batch runner, so lint must pass
         flags = ("--kind", "delete-only", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head())
         with self.lint("FAIL") as calls:
             rc, out, err = self.run_args("7", "--review-record", *flags)
         self.assertNotEqual(rc, 0, "a done record printed although its lint fails:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused done record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
         self.assertTrue(calls, "the done record did not ask lane_lint about its head")
 
     def test_a_docs_only_record_with_no_round_is_refused_when_lint_fails(self):
-        # a docs-only record with no round is done, so it is a handoff too
+        # a docs-only record with no round is done, so it is given to the batch runner too
         flags = ("--kind", "docs-only", "--guard", "no", "--head", self.head())
         with self.lint("FAIL") as calls:
             rc, out, err = self.run_args("7", "--review-record", *flags)
         self.assertNotEqual(rc, 0, "a done docs-only record printed although its lint fails:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertNotIn(REVIEW_MARKER, out, "a refused done record still printed its body")
         self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
         self.assertTrue(calls, "the done record did not ask lane_lint about its head")
 
@@ -14017,6 +14025,30 @@ class ReviewCutover(ReviewEnv):
         self.assertEqual(rc, 0, "--fix-check refused an unstamped earlier record created before the cutover:\n" + out + err)
         self.assertIn(REVIEW_MARKER, out, "no record was printed:\n" + out + err)
 
+    def test_fix_check_fetches_the_base_before_it_reads_the_cutover(self):
+        # a stale local origin/<base> would give an old cutover, so --fix-check fetches the base once, before it reads the cutover
+        earlier = without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        host = self.record_host(review_comment(1, 7, earlier, created=REVIEW_BEFORE), head=self.head())
+        flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        events, real = [], merge.git
+
+        def recording_git(cwd, *a, **k):
+            if a[:1] == ("fetch",):
+                events.append("fetch " + " ".join(a))
+            return real(cwd, *a, **k)
+
+        def recording_cutover(root, base):
+            events.append("cutover " + base)
+            return REVIEW_CUTOVER
+
+        with unittest.mock.patch.object(merge, "git", recording_git), unittest.mock.patch.object(merge, "review_stamp_since", recording_cutover):
+            rc, out, err = self.run_args("7", "--review-record", *flags, host=host)
+        self.assertIn("cutover main", events, "--fix-check did not read the cutover of main:\n" + out + err)
+        fetches = [e for e in events if e.startswith("fetch") and "main" in e]
+        self.assertEqual(len(fetches), 1, "--fix-check did not fetch origin/main once before it read the cutover; events: %r" % (events,))
+        self.assertLess(events.index(fetches[0]), events.index("cutover main"), "the fetch came after the cutover read: %r" % (events,))
+
 
 class ReviewStampSince(unittest.TestCase):
     """review_stamp_since is the committer time of the first first-parent commit on origin/<base> whose merge/merge.py holds the salt line.
@@ -14027,13 +14059,14 @@ class ReviewStampSince(unittest.TestCase):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(text)
-        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+        # the author time is earlier than every committer time, so a read of author time gives another cutover
+        env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-01 09:00:00 +0000", "GIT_COMMITTER_DATE": date}
         subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
         subprocess.run(["git", "-C", root, "commit", "-q", "-m", f"commit {n}"], check=True, capture_output=True, env=env)
 
     def repo(self, salt_at):
         """origin/main at commit 3. Commit 1 has no salt line. Commit `salt_at` (2, or None for none) adds it, and commit 3 keeps it.
-        Committer times are fixed: commit 1, then the salt commit, then commit 3."""
+        Committer times are fixed: commit 1, then the salt commit, then commit 3. Author times are all 2026-10-01, earlier than those."""
         root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
         self.addCleanup(shutil.rmtree, root, True)
         subprocess.run(["git", "-C", root, "init", "-q"], check=True, capture_output=True)
@@ -14108,6 +14141,15 @@ class ReviewStampSince(unittest.TestCase):
             second = fn(root, "main")
         self.assertEqual(first, second)
         self.assertEqual(len(argvs), 1, "two calls with the same root and base ran git %d times:\n%r" % (len(argvs), argvs))
+
+    def test_a_stacked_base_without_the_salt_commit_uses_the_default_branch_cutover(self):
+        # the stacked base feat has no salt commit and the default branch main has one: the cutover is main's, not a None that reads every record as old
+        root = self.repo(salt_at=2)
+        first = subprocess.run(["git", "-C", root, "rev-parse", "HEAD~2"], check=True, capture_output=True, text=True).stdout.strip()
+        self.git_at(root, "2026-10-20 10:00:00 +0000", "update-ref", "refs/remotes/origin/feat", first)
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda root: "main"):
+            got = review_fn(self, "review_stamp_since")(root, "feat")
+        self.assertEqual(got, "2026-10-21T15:04:05Z", "the stacked base feat has no salt commit, and its cutover is %r, not the default branch's" % (got,))
 
 
 if __name__ == "__main__":
