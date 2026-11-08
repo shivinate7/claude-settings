@@ -29,7 +29,7 @@ Use "(not pinned)" only where a figure was measured. Use "(unmeasured)" where it
 
 PR #1850 (judge an MCP write or merge by the repo it names) had a Cost line that said the guard reads `lint/layout.json` once. It was written from memory, and no test pinned it. Three fix-check passes followed.
 
-Mistake: a Cost line stated as fact with no test behind it. Hand-written read counts in ruling 12 of `sim-test-is-the-one-boot-path` failed review four times on PR #2061.
+Mistake: a Cost line stated as fact with no test behind it. Hand-written read counts in the drive-lease ruling of `sim-test-is-the-one-boot-path`, on PR #2061 (tests for a hold drive with no device list), failed review four times.
 
 Harm: a false Cost line misleads every session that trusts it. The owner trusts an unmeasured number or file claim, and a wrong one costs review rounds.
 
@@ -42,6 +42,7 @@ Cost: one python start per CI run, and no file written (unmeasured). It reads `l
 ## Known limits
 
 - A bound passes a count unread.
+- A test named in the sentence pins nothing unless the counted thing is a code span it holds; a sentence that only names the test needs a mark.
 - The check does not tell "(not pinned)" from "(unmeasured)". The writer picks the mark.
 - A count whose noun comes first, as in "starts one `git diff`", is missed.
 - A leading once, twice or thrice is no claim.
