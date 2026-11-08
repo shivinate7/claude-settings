@@ -588,6 +588,40 @@ class PushCheckTests(unittest.TestCase):
         self.assertTrue(ci_wake.workflow_runs_for(text, ["ab"]),
                         "paths-ignore a**/b dropped ab, though ** is not at a token start, so no run is due for ab")
 
+    def test_paths_with_only_commented_items_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    # - 'docs/**'\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (0, "jobs:"),
+                         "scope: a line sits under `paths:` after its comment is dropped")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths key whose only items are commented out was read as a filter that matches nothing, "
+                        "so no run is due for src/a.py")
+
+    def test_paths_followed_by_branches_key_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    branches: [main]\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (4, "branches: [main]"),
+                         "scope: the line after `paths:` is not `branches: [main]`")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths key with no value, followed by branches, was read as a filter that matches nothing, "
+                        "so no run is due for src/a.py")
+
+    def test_block_item_with_a_tab_after_its_dash_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    -\t'src/**'\n")
+        self.assertIn((4, "-\t'src/**'"), ci_wake._workflow_lines(text),
+                      "scope: the push block holds no item line with a tab after its dash")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a block item with a tab after its dash, at the key's own indent, was read as no item, "
+                        "so no run is due for src/a.py")
+
+    def test_paths_alias_with_a_dot_in_its_name_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: *p.x\n", prefix="x-filters: &p.x ['src/**']\n")
+        self.assertIn((4, "paths: *p.x"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `paths: *p.x` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths alias with a dot in its name was read as the literal pattern *p.x, "
+                        "so no run is due for src/a.py")
+
     # Green pins: these read correctly today and stay green. A `**/` at the start matches a root file.
 
     def test_double_star_slash_under_paths_matches_a_root_file(self):
