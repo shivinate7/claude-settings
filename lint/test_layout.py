@@ -506,6 +506,69 @@ class WaitingCopy(GitTree):
         self.assertNotIn("preview finding", out, "an unread copy reads as a clear preview")
 
 
+class DefaultBranchPage(GitTree):
+    """A checkout with no extras file reads the waiting page from the repo's default branch on origin: the branch
+    origin/HEAD names, else origin/main (skill waiting-page). Incident 2026-11-07: a worktree on the record branch had no
+    extras file, so the page read as unknown and its page checks did not run. The read is of the ref only: no checkout
+    moves and no fetch runs."""
+    URL_MAIN = "https://claude.ai/artifact/fromorigin"
+    URL_LOCAL = "https://claude.ai/artifact/fromlocal"
+    URL_TRUNK = "https://claude.ai/artifact/fromtrunk"
+    REMOTE = "https://github.com/owner/fixture.git"
+    BRIEF = {"briefs/a.md": "# Brief\n"}
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.git("init", "-q")
+        self.record("roadmap", self.BRIEF)
+        self.git("checkout", "-q", "roadmap")  # the checkout is on the record branch, which holds no extras file
+
+    def registry(self, url):
+        """The extras file as main holds it: the page is the registry entry whose role is waiting-page."""
+        return json.dumps({"kinds": {}, "artifacts": [{"id": "queue", "url": url, "role": "waiting-page", "account": "current"}]})
+
+    def old_key(self, url):
+        return json.dumps({"kinds": {}, "waiting-page": url})
+
+    def scope_checkout(self):
+        self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+
+    def scope_origin(self, ref):
+        """The ref holds the extras file, so an unknown page is the read's fault, not the fixture's."""
+        found = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", ref + ":" + EXTRAS], capture_output=True).returncode
+        self.assertEqual(found, 0, "scope: the fixture's %s holds no extras file" % ref)
+
+    def test_origin_main_registry_names_the_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/main holds it")
+
+    def test_origin_main_old_key_names_the_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.old_key(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/main holds it")
+
+    def test_is_waiting_page_url_names_the_origin_main_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN),
+                        "the checkout has no extras file, so its page url reads as unknown and does not name the page")
+
+    def test_the_checkouts_own_extras_file_wins_over_origin(self):
+        self.put(EXTRAS, self.old_key(self.URL_LOCAL))
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds no extras file")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "the page is read from origin, not from the checkout's own extras file")
+
+
 class SetWaitingPage(Tree):
     """Triage makes a repo's waiting page when the repo has none (decision session-tiers). It writes
     only the "waiting-page" key, never marks the repo rolled out, and never overwrites a key already set."""

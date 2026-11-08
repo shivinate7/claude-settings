@@ -1838,6 +1838,28 @@ def test_task_str_replace_renaming_the_label_is_refused():
 
 def test_task_str_replace_prose_label_mention_passes():
     _judged(case_task_str_replace_prose_label_passes)
+
+
+def case_item_stray_field_refused_from_a_record_branch_checkout():
+    """The page checks run from a checkout on the record branch (incident 2026-11-07). Its extras file is on origin/main
+    only, and the page reads it from there (lint/layout.py waiting_page), so an item set with a stray top-level field is
+    refused as item-field-rendered, as at the page's own checkout. Scope first: when the page url reads as unknown, no
+    page check runs and the case stops at that one cause."""
+    repo = tcj.record_branch_checkout()
+    check("scope: the record-branch checkout holds no extras file",
+          not os.path.isfile(os.path.join(repo, ".claude", "layout-extras.json")), "the checkout holds the extras file")
+    tool_input = {"action": "set", "url": PAGE_URL, "collection": tcj.PAGE_ITEMS, "doc_id": DOC, "data": page_item(focus="#fill")}
+    named = call("is_waiting_page", tool_input, repo) is True
+    check("scope: the page url names the page at the record-branch checkout", named,
+          "the page url reads as unknown at a checkout with no extras file, so no page check runs")
+    if not named:
+        return
+    got = call("page_item_hit", tool_input, repo)
+    verdict("page_item_hit at the record-branch checkout: a stray top-level field is refused", got[0], ("item-field-rendered", "focus"))
+    control = call("page_item_hit", dict(tool_input), tcj.PAGE_REPO)
+    verdict("control: the same stray field at the page's own checkout is refused", control[0], ("item-field-rendered", "focus"))
+
+
 # ------------------------------------------------------------------ a decision on another repo is checked with that repo
 #
 # Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
@@ -1993,7 +2015,8 @@ def case_cross_repo_malformed_checked_with():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+    for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
+                 case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
