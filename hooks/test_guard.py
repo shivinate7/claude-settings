@@ -110,6 +110,7 @@ FAMILIES = {
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "report-sha-missing": "an agent's SubagentHandback and its SubagentStop: a sha-like token that does not resolve as a commit in the cwd's repo is refused; a shallow clone and a stop_hook_active stop are allowed and noted; the quoted, quote-line, URL, colour, UUID and upper-case forms are not judged; one git cat-file call per judged hand-back",
+    "message-ref-missing": "a send_message that names a commit, a pull request or a PR comment of the cwd's repo that does not exist is refused, judged with and without an agent_id; a ref of another repo, a bare #N, a failed gh or ls-remote (allowed, the output names the ref) and a message with no ref are allowed; a message with no ref starts no git or gh process, and PRs #7 and #8 start one ls-remote",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
@@ -15412,6 +15413,22 @@ add("report-sha-missing: a 13-character hex token is not a sha",
     message="Token 6c2e9a0f4b7d1 is in the log.")
 
 
+# Decision agent-report-shas-resolve, What counts as a sha: a sha on one side of a range is judged, the blob ids of an
+# index line are skipped, and a word that holds :// is skipped whole.
+add("report-sha-missing: a made-up sha on the far side of main.. is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff main..8c1f0e2a7 is open.", carries=("8c1f0e2a7",))
+add("report-sha-missing: a made-up sha before ..HEAD is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff 8c1f0e2a7..HEAD is open.", carries=("8c1f0e2a7",))
+add("report-sha-missing: the blob ids of an index line are not commits",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff:\nindex 054535674..3e943ee3c\nDone.")
+add("report-sha-missing: the two shas of a compare link to another repo are not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="See https://github.com/other/repo/compare/abc1234...def5678 for the diff.")
+
+
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
 def rsha_mixed_case():
     """One real sha and one made-up sha: the made-up one is named, and the real commit is not."""
@@ -15583,6 +15600,176 @@ LOG_CHECKS_EXTRA.append(("report-sha-missing: a 12-character sha that resolves i
 LOG_CHECKS_EXTRA.append(("report-sha-missing: a clean hand-back from an agent's worktree starts no git process",
                          rsha_agent_clean_cost_case))
 FIXTURELESS_CHECKS.update((rsha_short12_real_case, rsha_agent_clean_cost_case))
+
+
+# =========================================================================== message-ref-missing
+# A send_message to another session names only refs that exist (decision send-message-refs-resolve). A ref is a commit
+# sha (the token rule of agent-report-shas-resolve), a pull request (PR #N, PRs #N and #M, a pull URL) or a PR comment
+# link, and each resolves in the owner/repo of the cwd checkout's origin. The reads go to a local bare repo through
+# insteadOf, and a fake gh comes first on PATH, so no case reaches the network.
+FAMILY = "message-ref-missing"
+MRF_RULE = "message-ref-missing"
+MRF_ORIGIN = "https://github.com/o/r"
+MRF_AGENT = "a632f54b2f884e669"
+MRF_DIR = os.path.join(ROOT, "mrf")
+MRF_BARE = os.path.join(MRF_DIR, "bare.git")          # the origin of MRF_REPO, through insteadOf
+MRF_REPO = os.path.join(MRF_DIR, "repo")              # origin is MRF_ORIGIN, and refs/pull/7/head exists
+MRF_NOORIGIN = os.path.join(MRF_DIR, "noorigin")      # a repo with no origin at all
+MRF_BADREMOTE = os.path.join(MRF_DIR, "badremote")    # origin routed to a bare path that is not there
+MRF_GH_BIN = os.path.join(MRF_DIR, "gh-bin")          # a folder that holds the fake gh
+MRF_GH_LOG = os.path.join(MRF_DIR, "gh-calls.log")    # one line per call the fake gh receives
+MRF_PATH = MRF_GH_BIN + os.pathsep + os.environ.get("PATH", "")
+# The fake gh. Comment 111 exists; any other comment is a 404; FAKE_GH_MODE=error is a 500, the non-404 failure.
+MRF_FAKE_GH = """#!/bin/sh
+[ -n "$FAKE_GH_LOG" ] && printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
+if [ "$FAKE_GH_MODE" = error ]; then
+  echo "gh: HTTP 500: Internal Server Error" >&2
+  exit 1
+fi
+case " $* " in
+  *" repos/o/r/issues/comments/111 "*) printf '%s\\n' '{"id":111}'; exit 0 ;;
+esac
+echo "gh: Not Found (HTTP 404)" >&2
+exit 1
+"""
+
+
+def mrf_build():
+    """The message-ref fixtures, built on first use: a repo whose origin routes to a bare repo holding
+    refs/pull/7/head, a repo with no origin, a repo whose origin routes to a missing path, and the fake gh."""
+    os.makedirs(MRF_DIR, exist_ok=True)
+    _rsha_git(MRF_DIR, "init", "-q", "--bare", MRF_BARE)
+    for where in (MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE):
+        os.makedirs(where, exist_ok=True)
+        _rsha_git(where, "init", "-q", "-b", "main", ".")
+        write(os.path.join(where, "src", "app.py"), "x = 1\n")
+        _rsha_git(where, "add", "-A")
+        _rsha_git(where, *IDENT, "commit", "-q", "-m", "base", date=RSHA_DATE)
+    _rsha_git(MRF_REPO, "remote", "add", "origin", MRF_ORIGIN)
+    _rsha_git(MRF_REPO, "config", "url.%s.insteadOf" % MRF_BARE, MRF_ORIGIN)
+    _rsha_git(MRF_REPO, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _rsha_git(MRF_BARE, "update-ref", "refs/pull/7/head", _rsha_git(MRF_REPO, "rev-parse", "HEAD"))
+    _rsha_git(MRF_BADREMOTE, "remote", "add", "origin", MRF_ORIGIN)
+    _rsha_git(MRF_BADREMOTE, "config", "url.%s.insteadOf" % os.path.join(MRF_DIR, "missing.git"), MRF_ORIGIN)
+    os.makedirs(MRF_GH_BIN, exist_ok=True)
+    gh = os.path.join(MRF_GH_BIN, "gh")
+    write(gh, MRF_FAKE_GH)
+    os.chmod(gh, 0o755)
+
+
+lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE, MRF_GH_BIN], mrf_build)
+
+
+def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
+    """(decision, reason) for one send_message from `cwd`, with an agent_id when `agent` is given."""
+    env = {"FAKE_GH_LOG": MRF_GH_LOG}
+    if mode:
+        env["FAKE_GH_MODE"] = mode
+    return decide({
+        "raw": None, "tool": SEND_MESSAGE, "cwd": cwd, "session": None,
+        "env_path": env_path or MRF_PATH, "config": None,
+        "agent_id": agent, "agent_type": "builder" if agent else None,
+        "tool_input": {"message": message}, "transcript": None, "event": None,
+        "stop_active": False, "env": env, "no_root": False, "guard": None,
+        "temp": None, "max_seconds": None,
+    })
+
+
+def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None):
+    """One send_message case, added once for the main session and once for an agent (decision send-message-refs-resolve)."""
+    env = {"FAKE_GH_LOG": MRF_GH_LOG}
+    if mode:
+        env["FAKE_GH_MODE"] = mode
+    for who, agent in (("main session", None), ("agent", MRF_AGENT)):
+        add("message-ref-missing: %s, %s" % (name, who), expected, MRF_RULE if expected == "deny" else None,
+            tool=SEND_MESSAGE, cwd=cwd, env_path=MRF_PATH, env=env, agent_id=agent,
+            agent_type="builder" if agent else None, carries=carries, message=message)
+
+
+mrf_case("a made-up commit sha is refused", "deny", "Record link: commit 8c1f0e2a7 has the fix.",
+         carries=("8c1f0e2a7",))
+mrf_case("PR #8, which the repo does not have, is refused and named", "deny", "PR #8 has the fix.",
+         carries=("#8",))
+mrf_case("a pull URL of this repo for PR 9 is refused and named", "deny",
+         "See https://github.com/o/r/pull/9 for it.", carries=(("#9", "pull/9"),))
+mrf_case("a comment link to comment 222, which does not exist, is refused and named", "deny",
+         "See https://github.com/o/r/pull/7#issuecomment-222 for the reply.", carries=("222",))
+mrf_case("PR #7, which the repo has, is allowed", "allow", "PR #7 has the fix.")
+mrf_case("a comment link to comment 111, which exists, is allowed", "allow",
+         "See https://github.com/o/r/pull/7#issuecomment-111 for the reply.")
+mrf_case("a bare #8 with no PR word is not judged", "allow", "Item #8 is open.")
+mrf_case("a pull URL of another repo is not judged", "allow",
+         "See https://github.com/x/y/pull/8 for the upstream change.")
+mrf_case("a made-up sha on a line that names x/y is not judged", "allow", "x/y: fixed in 8c1f0e2a7 on main.")
+mrf_case("a PR in a repo with no origin is not judged", "allow", "PR #8 has the fix.", cwd=MRF_NOORIGIN)
+mrf_case("a message with no ref is allowed", "allow", "Verdict: pass, nothing to name.")
+# Fail open: the call is allowed, and the output names each ref it could not check.
+mrf_case("a gh error on comment 222 is allowed, and the output names 222", "allow",
+         "See https://github.com/o/r/pull/7#issuecomment-222 for the reply.", carries=("222",), mode="error")
+mrf_case("an ls-remote that fails is allowed, and the output names PR #7", "allow", "PR #7 has the fix.",
+         cwd=MRF_BADREMOTE, carries=("#7",))
+
+
+def mrf_lines(path):
+    return open(path, encoding="utf-8").read().splitlines() if os.path.exists(path) else []
+
+
+def mrf_stand_in_sees(log, path):
+    """True when the stand-in logs a git call made on its PATH from MRF_REPO, so a count of zero means no call."""
+    if os.path.exists(log):
+        os.remove(log)
+    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=MRF_REPO,
+                   env=dict(os.environ, PATH=path), capture_output=True)
+    return os.path.exists(log)
+
+
+def mrf_cost_run(message):
+    """(problem, (git lines, gh lines)) for one send_message from MRF_REPO, through the stand-in git and the fake gh.
+    A stand-in that sees no call makes the counts meaningless, so that is the problem instead."""
+    materialize(MRF_REPO)
+    log, path = _stand_in_git("mrf_cost")
+    if not path:
+        return "no git on PATH, so the stand-in cannot count", None
+    if not mrf_stand_in_sees(log, path):
+        return "the stand-in git saw no call, so the counts prove nothing", None
+    for name in (log, MRF_GH_LOG):
+        if os.path.exists(name):
+            os.remove(name)
+    mrf_judge(MRF_REPO, message, env_path=MRF_GH_BIN + os.pathsep + path)
+    return "", (mrf_lines(log), mrf_lines(MRF_GH_LOG))
+
+
+def mrf_no_ref_cost_case():
+    """A message with no ref starts no git process and no gh call."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git and a shell fake gh are not reached through CreateProcess"
+    problem, runs = mrf_cost_run("Verdict: pass, nothing to name.")
+    if problem:
+        return False, problem
+    gits, gh = runs
+    if gits or gh:
+        return False, "a message with no ref started %d git and %d gh process(es), want none: %r" % (
+            len(gits), len(gh), (gits + gh)[:2])
+    return True, "a message with no ref starts no git or gh process"
+
+
+def mrf_pr_once_cost_case():
+    """PRs #7 and #8 together start exactly one git ls-remote."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    problem, runs = mrf_cost_run("PRs #7 and #8 are open.")
+    if problem:
+        return False, problem
+    remotes = [line for line in runs[0] if "ls-remote" in line]
+    if len(remotes) != 1:
+        return False, "%d ls-remote call(s) for PRs #7 and #8, want exactly one: %r" % (len(remotes), remotes[:2])
+    return True, "PRs #7 and #8 start exactly one ls-remote"
+
+
+LOG_CHECKS_EXTRA.append(("message-ref-missing: a message with no ref starts no git or gh process",
+                         mrf_no_ref_cost_case))
+LOG_CHECKS_EXTRA.append(("message-ref-missing: PRs #7 and #8 start exactly one git ls-remote", mrf_pr_once_cost_case))
+FIXTURELESS_CHECKS.update((mrf_no_ref_cost_case, mrf_pr_once_cost_case))
 
 
 # =========================================================================== failing open
