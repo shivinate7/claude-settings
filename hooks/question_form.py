@@ -459,7 +459,8 @@ SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "
 # basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
 SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 # A determiner first word marks prose: `the -x flag` names a flag and runs nothing, so the span-flag rule skips it.
-SPAN_DETERMINERS = frozenset(("the", "a", "an", "this", "its"))
+SPAN_DETERMINERS = frozenset(("the", "a", "an", "this", "its", "your", "that", "these", "those", "each", "every", "my",
+                              "our", "some"))
 # The approved PowerShell verbs, the Get-Verb list. A Verb-Noun at an absolute path is a cmdlet only when its verb is one
 # of these, so a folder whose last segment is Title-Hyphen (`~/Documents/Claude-Settings`) is text.
 PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", "Get", "Hide", "Join", "Lock", "Move",
@@ -481,7 +482,12 @@ PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", 
 # backslashes of `C:\tools\Get-Thing` and `~\Get-Item`. Each component ends in a separator, so the run reads in one pass.
 ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/]+[\\/])*"
                              r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+(?=\s|$)")
-SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
+# PowerShell's own pipeline cmdlets, whose verbs are no Get-Verb verbs (so they stay out of PS_VERBS) and which Claude
+# writes in a pipeline (`ForEach-Object { $_ }`). SHELL_CMDLET reads them as a cmdlet verb beside PS_VERBS.
+PS_NONSTANDARD_VERBS = ("ForEach", "Where")
+SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS + PS_NONSTANDARD_VERBS) + r")-[A-Z][A-Za-z]+")
+# What may come before a cmdlet path in a segment: `&`, then any `VAR=value`, `sudo` or `env` words.
+CMDLET_PREFIX = re.compile(r"\s*(?:&\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|sudo|env)\s+)*")
 # What the refusal prints for a Verb-Noun at an absolute path: a folder written with a trailing `/` is text.
 SHELL_LINE_HIT = "step holds a shell line"
 ABS_CMDLET_HIT = SHELL_LINE_HIT + " (a Verb-Noun at a path reads as a cmdlet). If it names a folder, end it with /."
@@ -680,7 +686,7 @@ def _cmdlet_at_path(first, segment) -> bool:
     PS_VERBS verb (see ABS_CMDLET_PATH). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`)
     or a URL names a doc or a module, not a program. The basename keeps its case."""
     return bool(SHELL_CMDLET.fullmatch(first) or ABS_CMDLET_PATH.fullmatch(first)
-                or ABS_CMDLET_PATH.match(segment.lstrip()))
+                or ABS_CMDLET_PATH.match(segment, CMDLET_PREFIX.match(segment).end()))
 
 
 def _shell_line(span, run) -> str:
