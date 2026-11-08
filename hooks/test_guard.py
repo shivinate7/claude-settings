@@ -13614,11 +13614,11 @@ chained_prune("ask-alone: a prune chained after an add, then a push to lane-x, d
               VCS + " add -A && " + PRUNE + " && " + VCS + " push origin lane-x")
 
 # (h) SHAPES THAT RUN A QUOTED HEREDOC BODY. Each body holds a forced push to lane-x inside `$( )`, and a shell
-# runs it. Cases 1 and 5 write the body to a file that sh runs: the written-file arm of without_data_bodies. Case 1
-# names the file x.sh, whose name ends in the shell word sh, so the whole-text arm also denies it; case 5 names run.txt,
-# which no shell word ends, and pins the written-file arm alone. Cases 2 to 4 are a body a shell reads from its
+# runs it. Cases 1 and 2 write the body to a file that sh runs: the written-file arm of _shell_reads_bodies. Case 1
+# names the file x.sh, whose name ends in the shell word sh, so the whole-text arm also denies it; case 2 names run.txt,
+# which no shell word ends, and pins the written-file arm alone. Cases 3 to 5 are a body a shell reads from its
 # header or its pipe: bash, a pipe into sh on the next line, and an eval whose backtick opens on the line before the
-# header: the whole-text SHELL_HEREDOC arm. An eval whose `$(` opens there is denied by the judged text, so it pins
+# header: the SHELL_HEREDOC arm of _shell_reads_bodies. An eval whose `$(` opens there is denied by the judged text, so it pins
 # neither arm. Each denies as a force-push.
 BODY_PUSH = 'x="$(' + FORCE_LANE + ')"'
 sh("ask-alone: a quoted body written to x.sh and run by sh, a forced push in $( ), denies as force-push",
@@ -13680,6 +13680,15 @@ sh("ask-alone: (h) a python body calling os.system around a GIT_DIR set in $( ),
 sh("ask-alone: (h) a python body calling subprocess.run with shell=True around a GIT_DIR set in $( ), denies as git-env-set",
    PY_HEADER + "import subprocess\nsubprocess.run(\"echo " + PY_ENV + "\", shell=True)\nPY", "deny", GIT_ENV_RULE,
    cwd=NOGIT)
+# (h) A LONE SHELL-OUT BODY THAT NAMES A PUSH AS TEXT. The push is prose in an interpreter body, not a `$( )`, and
+# the shell-out runs the build. Run alone, the call asks on the push. The shells-only read must not count the
+# interpreter's shell-out, or the body stays in view and the lone call denies as ask-alone.
+F2_BODY = "import os\nNote: " + VCS + " push --force origin HEAD:main\nos.system(\"python3 roadmap/build.py\")"
+sh("ask-alone: (h) a lone python body that calls os.system and names a forced push to main as text, asks as force-push",
+   PY_HEADER + F2_BODY + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
+sh("ask-alone: (h) a lone python body that calls subprocess.run with shell=True and names a forced push to main as text, asks as force-push",
+   PY_HEADER + "import subprocess\nNote: " + VCS + " push --force origin HEAD:main\n"
+   "subprocess.run(\"python3 roadmap/build.py\", shell=True)\nPY", "ask", "force-push", cwd=PUSHFEAT)
 
 
 # =========================================================================== ordinary work
