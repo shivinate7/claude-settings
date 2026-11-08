@@ -9004,6 +9004,28 @@ sh("env: interpreter code follow-ups: allow, node -e, a line comment with a lone
    "if (!f.startsWith('" + ENV + "')) console.log(fs.readFileSync(f,'utf8'))\"",
    "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, fourth set: a heredoc fed to an interpreter's
+# stdin with a dash and an argument after it, a deno run that reads stdin, and a heredoc written to a file
+# that deno then runs. Each deny reads the file. The controls print 1 or open nothing. Names start
+# "env: interpreter code follow-ups", so MUTATE_ONLY="env: interpreter code" runs them with the block above.
+sh("env: interpreter code follow-ups: deny, cat heredoc piped to python3 - with an argument, an open of the file",
+   "cat <<'PY' | python3 - arg\nopen(\"" + ENV + "\").read()\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, cat heredoc piped to node - with an argument, a readFileSync of the file",
+   "cat <<'JS' | node - arg\nrequire('fs').readFileSync('" + ENV + "', 'utf8')\nJS", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, deno run - with a heredoc, a readTextFileSync of the file",
+   "deno run - <<'JS'\nDeno.readTextFileSync('" + ENV + "')\nJS", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, cat heredoc piped to deno run -, a readTextFileSync of the file",
+   "cat <<'JS' | deno run -\nDeno.readTextFileSync('" + ENV + "')\nJS", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a heredoc written to a js file that deno run reads in the same command",
+   "cat > x.js <<'JS'; deno run x.js\nDeno.readTextFileSync('" + ENV + "')\nJS", "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: control deny, python3 - with an argument, a heredoc that opens the file",
+   "python3 - arg <<'PY'\nopen(\"" + ENV + "\").read()\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: control allow, cat heredoc piped to python3 - with an argument, prints 1",
+   "cat <<'PY' | python3 - arg\nprint(1)\nPY", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: control allow, deno run - with a heredoc that prints 1",
+   "deno run - <<'JS'\nconsole.log(1)\nJS", "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)

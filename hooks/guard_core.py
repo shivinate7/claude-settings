@@ -2659,7 +2659,7 @@ def _interpreter_calls(tokens):
     """[(language, the tokens after the interpreter word)] for each python, node, bun or deno
     command of one segment, looking through the runners of CODE_RUNNERS and their flags. `uv run
     x.py` runs python on that file, so it counts as a python call with the file as its argument.
-    "node" is also the language of `deno eval`."""
+    "node" is also the language of `deno eval`; `deno run` is "deno-run", with the tokens after `run`."""
     found = []
     for at in command_indexes(tokens):
         rest = tokens[at:]
@@ -2677,6 +2677,8 @@ def _interpreter_calls(tokens):
             found.append((language, rest[1:]))
         elif re.sub(r"\.exe$", "", rest[0].rsplit("/", 1)[-1]) == "deno" and rest[1:2] == ["eval"]:
             found.append(("deno", rest[1:]))
+        elif re.sub(r"\.exe$", "", rest[0].rsplit("/", 1)[-1]) == "deno" and rest[1:2] == ["run"]:
+            found.append(("deno-run", rest[2:]))   # `deno run -` reads its code from stdin, `deno run x.js` runs a file
     return found
 
 
@@ -2720,7 +2722,7 @@ def inline_code(tokens):
                     found.append((token.partition("=")[2], "node"))
                 elif (token in JS_EVAL_FLAGS or re.fullmatch(r"-[pe]{2}", token)) and k + 1 < len(rest):
                     found.append((rest[k + 1], "node"))
-        else:
+        elif language == "deno":
             found.extend((code, "node") for code in [t for t in rest[1:] if not t.startswith("-")][:1])
     return found
 
@@ -2749,6 +2751,18 @@ def _code_args(args):
     return kept
 
 
+def _reads_stdin(args) -> bool:
+    """True when the arguments of an interpreter call (without its heredoc token and redirects) hand it no
+    script word and no code: only flags, and `-` for stdin. The scan stops at `-`, so an argument that
+    follows it (`python3 - arg`) is the script's own. A word before `-` is a script, or a flag's value."""
+    for arg in _code_args(args):
+        if arg == "-":
+            return True
+        if not arg.startswith("-"):
+            return False
+    return True
+
+
 def _piped_calls(header: str):
     """[(language, args)] for the interpreter calls that are the stage after the pipe on a heredoc's
     header line (`cat <<'PY' | python3 runner.py`): the stage the body is piped into."""
@@ -2761,8 +2775,7 @@ def _piped_interpreters(header: str):
     """The languages of the interpreter that reads the heredoc body from stdin when the header pipes it
     on (`cat <<'PY' | python3`, `| node`, `| python3 -u -`). The interpreter must take no script file
     or code of its own: only flags, and `-` for stdin. With a script word the body is data."""
-    return [language for language, args in _piped_calls(header)
-            if all(arg.startswith("-") for arg in _code_args(args))]
+    return [language for language, args in _piped_calls(header) if _reads_stdin(args)]
 
 
 def _stdin_languages(header: str):
@@ -2772,7 +2785,7 @@ def _stdin_languages(header: str):
     heredoc itself, so it is no argument."""
     return {language for piece in split_segments(header) if "<<" in piece
             for language, args in _interpreter_calls(segment_tokens(piece) or [])
-            if all(arg.startswith("-") for arg in _code_args(args))}
+            if _reads_stdin(args)}
 
 
 def heredoc_code(cmd: str):
