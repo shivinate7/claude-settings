@@ -257,20 +257,39 @@ def unknown_lines(out):
     return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
 
 
-def parser_script(flags, parents=()):
+def parser_script(flags, parents=(), table=()):
     """A Python script that declares each of `flags` with add_argument, as a CLI does. Each name in `parents` is a
-    parent parser that COMMON defines: the script imports it and takes it as `parents=[name()]`. Never run."""
+    parent parser that COMMON defines: the script imports it and takes it as `parents=[name()]`. Each row of `table`
+    is a (flag, metavar, help) row of a CHECK_FLAGS tuple, which a loop declares, as a CLI's table does. Never run."""
     module = os.path.splitext(os.path.basename(COMMON))[0]
     imports = "".join("from %s import %s\n" % (module, name) for name in parents)
     takes = "parents=[%s]" % ", ".join(name + "()" for name in parents) if parents else ""
-    return "import argparse\n" + imports + "\nparser = argparse.ArgumentParser(%s)\n" % takes + "".join(
-        'parser.add_argument("%s")\n' % flag for flag in flags)
+    constant = "CHECK_FLAGS = (%s\n)\n\n" % "".join('\n    ("%s", "%s", "%s"),' % row for row in table) if table else ""
+    loop = "for flag, _, text in CHECK_FLAGS:\n    parser.add_argument(flag, help=text)\n" if table else ""
+    return ("import argparse\n" + imports + "\n" + constant + "parser = argparse.ArgumentParser(%s)\n" % takes
+            + "".join('parser.add_argument("%s")\n' % flag for flag in flags) + loop)
 
 
 def shared_parser(flags):
     """COMMON's source: `window_parser()`, a parent parser that declares each of `flags`."""
     return ("import argparse\n\n\ndef window_parser():\n    parser = argparse.ArgumentParser(add_help=False)\n"
             + "".join('    parser.add_argument("%s")\n' % flag for flag in flags) + "    return parser\n")
+
+
+def subparser_script(flags, window=False):
+    """A Python script with two subcommands, `a` and `b`. Subcommand `a` declares each of `flags` with add_argument, as
+    a CLI does, or takes the helper `add_window` from COMMON when `window` is set. `b` always takes `add_window`. Never run."""
+    module = os.path.splitext(os.path.basename(COMMON))[0]
+    lines = ["import argparse", "from %s import add_window" % module, "", "parser = argparse.ArgumentParser()",
+             "sub = parser.add_subparsers()", 'a = sub.add_parser("a")']
+    lines += ['a.add_argument("%s")' % flag for flag in flags] + (["add_window(a)"] if window else [])
+    lines += ['b = sub.add_parser("b")', "add_window(b)"]
+    return "\n".join(lines) + "\n"
+
+
+def add_window_source(flags):
+    """COMMON's source: `add_window(parser)`, a helper that a subcommand calls to declare each of `flags`."""
+    return "def add_window(parser):\n" + "".join('    parser.add_argument("%s")\n' % flag for flag in flags)
 
 
 def argument_flags(source):
@@ -1086,6 +1105,54 @@ class FlagTests(StaleCase):
             write(repo, REPORT, head_src)
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: shared_src}), change))
+
+    def assert_control_fires_and_subject_does_not(self, rng, control, subject, flag):
+        """Line `control` cites a flag the range really removed, and STALE007 flags it. Line `subject` cites `flag`, which
+        the script still declares in a form the reader does not take as a literal, and STALE007 must not flag it. The
+        control is asserted first, so the subject is judged on a run the reader really made."""
+        rc, out = self.run_check(rng)
+        self.assertNotIn("Traceback", out, out)  # a crash is not a read
+        self.assertIn("stale-cites: FAIL", out, out)
+        found = [(p, n, c) for p, n, c, _ in parse(out)]
+        self.assertIn((NOTES, control, "STALE007"), found, out)  # control: a removed literal still fires
+        self.assertNotIn((NOTES, subject, "STALE007"), found,
+                         "line %d cites %s, which the script still declares, yet STALE007 flagged it:\n%s"
+                         % (subject, flag, out))
+
+    def test_flag_declared_through_a_loop_over_a_constant_is_not_flagged(self):
+        rows = (("--root", "<repo>", "repo root"), ("--page-url", "<url>", "the page URL"),
+                ("--item", "<id>", "the item id"), ("--fetched", "<dir>", "the fetch folder"))
+        base_src = parser_script(["--pick", "--old"], table=rows)
+        head_src = parser_script([], table=rows + (("--pick", "<key>", "the pick a peer relayed"),))
+        self.assertEqual(argument_flags(base_src), {"--pick", "--old"})  # scope: base declares both as literals
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no literal flag
+        self.assertIn("for flag, _, text in CHECK_FLAGS:", head_src)  # scope: head declares through the loop
+        self.assertIn("--pick", [row[0] for row in module_value(head_src, "CHECK_FLAGS")])  # scope: head's table holds --pick
+        notes = ("# Notes\n\n- report: `tools/report.py --pick KEY`\n"  # line 3: still declared
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_control_fires_and_subject_does_not(
+            self.make_range(base_files(notes, extra={REPORT: base_src}), change), control=4, subject=3, flag="--pick")
+
+    def test_flag_declared_by_an_untouched_helper_called_from_a_subparser_is_not_flagged(self):
+        base_src, head_src = subparser_script(["--between", "--old"]), subparser_script([], window=True)
+        helper_src = add_window_source(["--between"])  # COMMON, untouched by the range, declares --between
+        self.assertEqual(argument_flags(base_src), {"--between", "--old"})  # scope: base declares both as literals
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no literal flag
+        self.assertIn("add_window(a)", head_src)  # scope: head's subcommand a takes its flags from the helper
+        self.assertEqual(argument_flags(helper_src), {"--between"})  # scope: the untouched helper declares --between
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"  # line 3: declared by the helper
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_control_fires_and_subject_does_not(
+            self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: helper_src}), change),
+            control=4, subject=3, flag="--between")
 
 
 class StepTests(StaleCase):
