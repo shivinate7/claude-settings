@@ -4445,8 +4445,10 @@ def _python_write_may_hit(raw: str, where: str) -> bool:
     own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
     if not own_root:
         return False
+    stranded = _clone_scope(None, own_root)[2]
     return bool(interpreter_write_hit(
-        raw, where, lambda path, at: _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)))
+        raw, where,
+        lambda path, at: stranded or _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)))
 
 
 def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
@@ -4486,7 +4488,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
-    refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
+    refused the same way; the clone check spawns no git. A `git -C` verb that changes files is refused
+    into another checkout only for a call with an `agent_id`; a top-level session is refused only into
+    a separate clone. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     moves = []
@@ -4559,7 +4563,9 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             folders = []
 
             def in_other(folder, _at):
-                if elsewhere(folder, folder):
+                # A top-level session keeps the clone-only refusal: a git command run with -C into
+                # another checkout is no write there (decision an-agent-outside-its-home-tree-must-stop).
+                if elsewhere(folder, folder) and (has_agent or clone_hit.get(folder)):
                     folders.append(folder)
                     return True
                 return False
@@ -4588,7 +4594,7 @@ SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (`list`, `show`)
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
-                          "stash", "cherry-pick", "revert", "am", "apply", "clean", "add")
+                          "stash", "cherry-pick", "revert", "am", "apply", "clean", "add", "rm", "mv")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
