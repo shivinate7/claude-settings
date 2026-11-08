@@ -29395,7 +29395,7 @@ LEASE_RULE = "simulator-boot-lease"
 LEASE_CARRIES = ("sim-test", "lease")
 LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
                    "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
-                   "pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3"}   # iPhone 18 Pro
+                   "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
 LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
 LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
 LEASE_PID = os.getpid()    # a live holder for the whole run
