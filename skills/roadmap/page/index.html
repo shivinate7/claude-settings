@@ -106,7 +106,7 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 /* Narrow rule: a bar draws one cell per step while each cell gets 3px or more beside 2px gaps (width >= --n x 5px - 2px). Under that the cells
    clamp to 0px and the .runs layer draws one block per kind, each 4px or wider. The runs clamp(... * 1000000) is a step switch with no script: one layout grid unit under the edge makes it the full bar, and at the edge it is 0px. The cells take the rest of the bar (100% minus the runs width), so the two layers sum to one bar at every zoom and grid size. */
 .bar>i{max-width:calc(100% - clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%))}
-.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%)}
+.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000000),100%)}
 .bar>.runs>i{flex:var(--c) 1 0px;min-width:min(4px,calc((100% - var(--k)*2px + 2px)/var(--k)));height:100%}
 
 /* phase selector */
