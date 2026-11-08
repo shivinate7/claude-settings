@@ -12,6 +12,10 @@ GUARD_FAMILY=<name> runs only one family of cases (FAMILIES, at the top of this 
 name, or a filter that matches no case, fails the run. GUARD_TIMING=1 prints what each fixture
 block cost.
 
+GUARD_HEARTBEAT=<seconds> sets the quiet time after which the run prints a progress line to stderr,
+and appends it to STALL_WATCH_BEAT when that is set (default 60; a number above 0). A run that prints
+nothing for minutes is cut by the stall watch. A malformed value stops the run before a case runs.
+
 GUARD_SHARD=<i>/<n> runs every n-th selected case, starting at the i-th (1-based), after the other
 filters. The n shards of one selection are disjoint and together hold every case, so CI can split
 the suite across jobs and drop none. A malformed value stops the run before a case runs.
@@ -37,6 +41,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -141,6 +146,53 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+
+
+# The progress beat (decision stall-watch: a quiet tool owes a line at least every 120 s). The quiet clock
+# restarts at each line that `say` prints and at each beat. `beat` costs one clock read when the output is
+# not quiet, and needs no thread or timer.
+def parse_heartbeat(value):
+    if not value:
+        return 60.0
+    try:
+        secs = float(value)
+    except ValueError:
+        secs = math.nan
+    if not (math.isfinite(secs) and secs > 0):
+        sys.exit("GUARD_HEARTBEAT=%r is not a number of seconds above 0. Want a float, or unset for 60."
+                 % value)
+    return secs
+
+
+GUARD_HEARTBEAT = parse_heartbeat(os.environ.get("GUARD_HEARTBEAT", ""))
+BEAT_FILE = os.environ.get("STALL_WATCH_BEAT", "")  # the stall watch reads this file (hooks/stall_watch.py)
+QUIET_SINCE = [time.monotonic()]  # the import counts as quiet time, so a slow import is a stretch too
+
+
+def say(line):
+    """Print one line, flushed, and restart the quiet clock. Piped output is block-buffered: without the
+    flush a case line reaches a `| tail` or a file only at exit."""
+    print(line, flush=True)
+    QUIET_SINCE[0] = time.monotonic()
+
+
+def beat(where):
+    """Print a progress line to stderr, and append it to STALL_WATCH_BEAT, when the output has been quiet
+    for GUARD_HEARTBEAT seconds. A caller marks a point where the run may spend that long. The line never
+    starts with PASS, FAIL or ok: mutate_guard.py and test_wrappers.py read those as case lines."""
+    now = time.monotonic()
+    quiet = now - QUIET_SINCE[0]
+    if quiet < GUARD_HEARTBEAT:
+        return
+    QUIET_SINCE[0] = now
+    line = "test_guard: still running, %.0fs quiet, %s" % (quiet, where)
+    print(line, file=sys.stderr, flush=True)
+    if BEAT_FILE:
+        try:
+            with open(BEAT_FILE, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
 
 
 def parse_shard(value):
@@ -1220,7 +1272,9 @@ def lazy_fixture(paths, build):
     def once():
         if not done:
             done.append(1)
+            beat("fixture %s, before it builds" % build.__name__)
             _timed(build.__name__, build)
+            beat("fixture %s, after it built" % build.__name__)
     for path in paths:
         LAZY[slash(path)] = once
 
@@ -2204,6 +2258,7 @@ def _build_links():
 build_fixtures()
 _start_ghdev_check()
 _mark("build_fixtures: eager config, fake gh writes, GHNONE and the link probe")
+beat("eager fixtures at import")
 
 # Each builder runs the first time a case names one of its paths (see lazy_fixture). A builder's
 # list is every path it creates, and the config folders that point into a repo are listed with it,
@@ -2251,6 +2306,7 @@ def build_trap_fixtures():
 
 build_trap_fixtures()
 _mark("build_trap_fixtures, DOTDOTWT and SYMWT")
+beat("trap fixtures at import")
 
 CFG_SETTINGS = slash(os.path.join(CFG, "settings.json"))
 CFG_CLAUDEMD = slash(os.path.join(CFG, "CLAUDE.md"))
@@ -29142,7 +29198,7 @@ SKIP = "skip"
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
-        print("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
+        say("GUARD_TESTS=%r: want unset or 'windows-slice'. Nothing ran." % mode)
         return 2
     fam = GUARD_FAMILY
     cases = [c for c in CASES if (not mode or c["windows"]) and (not fam or c["family"] == fam)]
@@ -29150,18 +29206,18 @@ def run_cases():
             if (not mode or check in WINDOWS_CHECKERS) and (not fam or LOG_FAMILY.get(label) == fam)]
     total = len(cases) + len(logs)
     if mode and not total:
-        print("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
+        say("GUARD_TESTS=windows-slice: no case is tagged. Nothing ran.")
         return 2
     # One list, so a shard takes its share of the log checks too, and the shards stay disjoint.
     picked = shard_of(cases + logs, GUARD_SHARD)
     cases = [c for c in picked if isinstance(c, dict)]
     logs = [c for c in picked if not isinstance(c, dict)]
-    print("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
-    print("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
-          % (mode or "(unset)", fam or "(unset)", total))
-    print("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
-    print("fixtures under " + ROOT)
-    print()
+    say("guard cases, %d in all" % (len(CASES) + len(LOG_CHECKS)))
+    say("GUARD_TESTS=%s GUARD_FAMILY=%s: %d cases selected to run"
+        % (mode or "(unset)", fam or "(unset)", total))
+    say("GUARD_SHARD=%d/%d: %d of those cases run in this shard" % (GUARD_SHARD + (len(picked),)))
+    say("fixtures under " + ROOT)
+    say("")
     failed = 0
     ran = 0
     skipped = 0
@@ -29171,7 +29227,9 @@ def run_cases():
         if only and only not in case["name"]:
             continue
         ran += 1
+        beat("case %d of %d, before it runs" % (ran, len(cases)))
         got, reason = decide(case)
+        beat("case %d of %d, after it ran" % (ran, len(cases)))
         ok = got == case["expected"]
         note = ""
         if ok and case.get("silent") and reason:
@@ -29195,23 +29253,25 @@ def run_cases():
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
         if only and only not in label:
             continue
+        beat("log check, before it runs")
         ok, note = checker()
+        beat("log check, after it ran")
         if ok == SKIP:  # cannot run on this platform: shown and counted, never a PASS, never a failure
             skipped += 1
-            print("SKIP  %s  (%s)" % (label, note))
+            say("SKIP  %s  (%s)" % (label, note))
             continue
         ran += 1
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
-    print()
+    say("")
     shutil.rmtree(ROOT, ignore_errors=True)
     OWNED.kill()
     for orphan in ORPHAN_PIDS:   # the sleeps this file started, by their own pids
@@ -29220,15 +29280,15 @@ def run_cases():
         except OSError:
             pass
     if (mode or fam or only or GUARD_SHARD != (1, 1)) and not ran:
-        print("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
-              "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
-                  mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
-                  skipped))
+        say("test_guard FAIL: ran 0 cases (GUARD_TESTS=%s, GUARD_FAMILY=%s, MUTATE_ONLY=%s, "
+            "GUARD_SHARD=%d/%d matched none, or matched only skips: %d skipped)" % (
+                mode or "(unset)", fam or "(unset)", only or "(unset)", GUARD_SHARD[0], GUARD_SHARD[1],
+                skipped))
         return 1
     if failed:
-        print("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
+        say("test_guard FAIL: %d of %d cases wrong, %d skipped" % (failed, ran, skipped))
         return 1
-    print("test_guard PASS: %d of %d cases right, %d skipped" % (ran, ran, skipped))
+    say("test_guard PASS: %d of %d cases right, %d skipped" % (ran, ran, skipped))
     return 0
 
 
