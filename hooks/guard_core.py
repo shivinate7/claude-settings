@@ -841,7 +841,8 @@ _READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
 # An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file.
 _VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
 _CODE_FLAGS = {"-c", "-e"}
-_SHELL_SCRIPT = re.compile(r"\.(?:sh|bash|zsh)$").search
+# A file named for a shell (`run.sh`, `run.ksh`, a file named `sh`), which a later call may run.
+_SHELL_SCRIPT = re.compile(r"(?:^|[./])(?:" + _SHELLS + r")$").search
 _STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _SUBSTITUTION = re.compile(r"\$\(|<\(|`")
 
@@ -872,7 +873,10 @@ def _holds_shell(line: str) -> bool:
         return True
     for part in re.split(r"[;&|()`]|\$\(|<\(", line):
         words = _plain_words(_WORDS(part))
-        if words[_command_start(words):][:1] == ["."]:
+        start = _command_start(words)
+        while words[start:start + 1] in (["builtin"], ["command"]):
+            start += 1   # `builtin . f` and `command . f` source f as `. f` does
+        if words[start:start + 1] == ["."]:
             return True
         if "xargs" in map(_basename_word, words) and not _reads_only(words):
             return True
@@ -910,6 +914,48 @@ def _stage_runs(words):
         at = next((i for i in range(at + 1, end + 2) if i < len(words) and _RUNNER(_basename_word(words[i]))),
                   len(words))
     return ran, stdin
+
+
+# The flags of `sudo` and `ssh` that take a value, so the word after one is no command.
+_VALUE_FLAGS_OF = {
+    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-T", "-U", "-R"},
+    "ssh": {"-p", "-i", "-l", "-o", "-F", "-J", "-L", "-R", "-D", "-b", "-c", "-e", "-m", "-O", "-Q", "-S", "-w",
+            "-W", "-E", "-B", "-I"},
+}
+
+
+def _stdin_shell(words) -> bool:
+    """True when a stage reads its stdin as a shell: `ssh host` and `sudo -s` with no command after them start a
+    shell, through any wrappers before them (`timeout 5 sudo -s`)."""
+    at = _command_start(words)
+    while at < len(words):
+        name = _basename_word(words[at])
+        if not _RUNNER(name):
+            return False
+        at += 1
+        values = _VALUE_FLAGS_OF.get(name, set())
+        operands = []
+        while at < len(words):
+            if _is_flag(words[at]):
+                at += 2 if words[at] in values else 1
+            elif name in _VALUE_FLAGS_OF:
+                operands.append(words[at])
+                at += 1
+                if name == "sudo":
+                    break   # the first operand of sudo is its command
+                if len(operands) > 1:
+                    return False   # ssh host command: the command reads the stdin
+            else:
+                break
+        if name == "ssh":
+            return len(operands) <= 1
+        if name == "sudo" and not operands:
+            return True
+        if name not in _VALUE_FLAGS_OF and at < len(words) and not _RUNNER(_basename_word(words[at])):
+            at += 1   # a value of the wrapper (`timeout 5 sudo -s`)
+        if name == "sudo":
+            at -= 1   # the command word itself is the next in the chain
+    return False
 
 
 def _reads_only(words) -> bool:
@@ -950,7 +996,7 @@ def _data_positions(words) -> set:
 
 
 def _run_files(text: str, written) -> set:
-    """The files of WRITTEN that a command in TEXT runs. Each one a line names that holds a shell word, as main
+    """The files of WRITTEN that a command in TEXT runs. Each one a pipeline names that holds a shell word, as main
     (`bash f`, `(cat f) | sh`, `xargs -I{} sh -c {}`, `ssh host bash < f`). On any other line: the command
     word (`./f`), a runner's stdin (`python3 < f`), a pipe into a runner (`cat f | python3 -`), a runner's
     substitution (`python3 -c "$(cat f)"`), or a word in a pipeline that holds a runner (`ssh host < f`,
@@ -960,9 +1006,12 @@ def _run_files(text: str, written) -> set:
     ran = set()
     for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
         line_words = _plain_words(_WORDS(line))
-        if _holds_shell(line):
-            ran.update(written.intersection(line_words))
-            continue
+        # A shell word runs the files named in its own pipeline only: `source ./env.sh && cat brief.md` runs env.sh.
+        shell_words = set()
+        for pipeline in re.split(r";|&&|\|\||&", line):
+            if _holds_shell(pipeline):
+                shell_words.update(_plain_words(_WORDS(pipeline)))
+        ran.update(written.intersection(shell_words))
         if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):
             ran.update(written.intersection(line_words))
         # A substitution is a command of its own: `cat f` inside `python3 -c "$(cat f)"` reads f, and the line above
@@ -976,7 +1025,7 @@ def _run_files(text: str, written) -> set:
             for at, (stage, stage_words, only) in enumerate(zip(stages, words, reads)):
                 runs, stdin = _stage_runs(stage_words)
                 ran.update(written.intersection(runs))
-                if stdin:
+                if stdin or _stdin_shell(stage_words):
                     ran.update(written.intersection(_plain_words(_STDIN_FILE.findall(stage))))
                     ran.update(written.intersection(word for earlier in words[:at] for word in earlier))
                 if holds_runner and not only:
