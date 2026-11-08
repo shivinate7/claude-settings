@@ -59,8 +59,8 @@ BRIEF_MARKERS = (
 
 # A reviewer's granted fourth round (decision agent-model-cap, owner item 396 a). It is not a BRIEF_MARKERS row: that
 # table's rows all read `of 3`, and widening them would free more than the one round the owner granted. The brief's
-# first line holds GRANTED_ROUND_MARKER and some line is a valid `Grant: <REVIEW_GRANT>` line, the form the review record
-# takes. Text ahead of the marker on that line (a heading mark, bold) is allowed, as the first-line `Round N of 3` row allows it.
+# first line holds GRANTED_ROUND_MARKER and some line is a valid `Grant: <REVIEW_GRANT>` line: the bare cite, which the review
+# record's Grant line carries after its `#<pr>, ` part. Text ahead of the marker on that line (a heading mark, bold) is allowed, as the first-line `Round N of 3` row allows it.
 GRANTED_ROUND_MARKER = r"(?i).*?\bround[ \t]+4[ \t]+of[ \t]+4\b"
 GRANT_LINE = r"Grant: (.*)"
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past the review cap of three
