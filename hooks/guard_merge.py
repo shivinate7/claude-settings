@@ -1109,7 +1109,7 @@ def _glued_counts(segment: str, args):
 def _merge_words(segment: str):
     """The merge's arguments up to the end of its command, else None when the segment runs no merge. A `$(...)` is one argument, so the
     flags after it are read. Raises _FlagsUnreadable when the closing `)` or `&` cannot be read from the quotes, and when a `$(` stays
-    open to the end of a segment that holds `--confirm` (the splitter cut the substitution at a `|` or `;`)."""
+    open to the end of a segment that holds `--confirm` (the splitter cut the substitution at a `|`, `;`, `&&`, `||` or newline)."""
     args = merge_tool_args(segment)
     if args is None:
         return None
