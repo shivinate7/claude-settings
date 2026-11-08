@@ -66,12 +66,14 @@ Departs from: the batch bodies so far, which took a left-out line with no reason
 
 ## Cost
 
-- Per run: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record. Then one compare per handed PR against the integration head, and one against the base.
-- No new process starts, file is written or timer is set.
+- Per run with a `Lanes:` line: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record.
+- Each compare is one `gh api` call. Against the base: one per open PR on the base that reads done. Against the integration head: one per handed PR, and one per Lanes-named open PR. A handed PR named on `Lanes:` but not in the head is compared twice.
+- A body with no `Lanes:` line: one `git` process, `git log`, in the worktree. No gh call.
+- No long-lived process, no file and no timer.
 
 ## Status
 
-Not built. The roadmap step `runner-drops-handed-lane` builds it on all three paths. Its refusals cite this decision.
+Built in this PR, on all three paths in `merge/merge.py`. The roadmap step `runner-drops-handed-lane` is the build. Its refusals cite this decision.
 
 Kind: process
 Home: merge/merge.py
