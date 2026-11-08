@@ -36,11 +36,16 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
   - record mode: `--record <UDID>` appends one record line for that device, from the same device list
     and launchd_sim read as the hook mode. bin/sim-test calls it after its own boot. It prints nothing
     and exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
+    Its line also carries load1, load5 and load15: the 1-, 5- and 15-minute loads from
+    `sysctl -n vm.loadavg` as JSON numbers (the Mac load at boot). When sysctl exits non-zero or prints
+    anything other than three numbers, the line is still written, with the three loads null. The hook
+    modes' lines are not pinned for the loads.
 
 Each case runs the hook as Claude Code does: one JSON object on stdin. A fake `xcrun` stands first on
 PATH and answers `simctl list devices` from a file the case rewrites between the two events. A fake
 `ps` stands there too, with a launchd_sim row for each UDID. Its argv naming `lstart` answers
-"PID START" lines when the -o list names pid=, else "START" lines.
+"PID START" lines when the -o list names pid=, else "START" lines. A fake `sysctl` stands there
+too: it prints the load the case sets for `-n vm.loadavg`, and logs each argv it runs.
 No environment seam reaches the hook except CLAUDE_CONFIG_DIR and PATH, which Claude Code sets too.
 """
 
@@ -130,6 +135,9 @@ class SimBootRecordTests(unittest.TestCase):
         # A default `ps` with a launchd_sim row for each UDID, so a boot's record can name one.
         self.write_ps([(str(LAUNCHD_PIDS[u]), "1", "0", LAUNCHD_CMD + " " + u)
                        for u in (U1, U2, U3)])
+        self.sysctl = os.path.join(self.bin, "sysctl")
+        self.sysctl_log = os.path.join(self.root, "sysctl-calls.log")  # one argv line per call
+        self.set_loadavg("{ 1.25 2.50 3.75 }\n")  # a healthy sysctl, printed as macOS prints it
 
     # ------------------------------------------------------------------ helpers
 
@@ -234,6 +242,29 @@ class SimBootRecordTests(unittest.TestCase):
             return []
         with open(self.records, encoding="utf-8") as handle:
             return [json.loads(line) for line in handle if line.strip()]
+
+    def set_loadavg(self, out, rc=0):
+        """Make the fake sysctl print OUT for `-n vm.loadavg` and exit RC. Any other argv exits 1.
+        Each call is logged, argv on one line."""
+        assert "'" not in out, "the printf body is single-quoted"
+        script = (
+            "#!/bin/sh\n"
+            "printf '%s\\n' \"$*\" >> '" + self.sysctl_log + "'\n"
+            "case \"$*\" in\n"
+            "  \"-n vm.loadavg\") printf '%s' '" + out + "' ;;\n"
+            "  *) exit 1 ;;\n"
+            "esac\n"
+            "exit " + str(rc) + "\n")
+        with open(self.sysctl, "w", encoding="utf-8") as handle:
+            handle.write(script)
+        os.chmod(self.sysctl, 0o755)
+
+    def sysctl_calls(self):
+        """The argv strings the fake sysctl ran since the last reset, in order."""
+        if not os.path.exists(self.sysctl_log):
+            return []
+        with open(self.sysctl_log, encoding="utf-8") as handle:
+            return handle.read().splitlines()
 
     # ------------------------------------------------------------------ cases
 
@@ -656,8 +687,9 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(len(records), 1, "--record appended %d lines, want one" % len(records))
         record = records[0]
         self.assertEqual(sorted(record), sorted(["udid", "name", "deviceTypeIdentifier", "runtime",
-                                                 "at", "launchd_pid", "launchd_start"]),
-                         "the --record line has other fields than the hook's record line")
+                                                 "at", "launchd_pid", "launchd_start",
+                                                 "load1", "load5", "load15"]),
+                         "the --record line does not hold exactly the record fields and the three loads")
         self.assertEqual(record["udid"], U1)
         self.assertEqual(record["name"], "Idle Pro")
         self.assertEqual(record["deviceTypeIdentifier"], TYPE_PRO)
@@ -696,9 +728,56 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.read_records(), [], "a device was recorded from an unreadable list")
 
+    # The Mac load at boot: a `--record` line carries the 1-, 5- and 15-minute loads of `sysctl -n vm.loadavg`.
+
+    def test_record_mode_reads_the_load_with_sysctl_n_vm_loadavg(self):
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        self.assertEqual(self.run_record(U1).returncode, 0)
+        self.assertEqual(len(self.read_records()), 1, "--record wrote no line to read the load into")
+        self.assertEqual(self.sysctl_calls(), ["-n vm.loadavg"],
+                         "--record did not read the load with one `sysctl -n vm.loadavg` call")
+
+    def test_record_mode_writes_the_three_loads_as_numbers(self):
+        self.set_loadavg("{ 71.04 58.30 40.12 }\n")  # a load in the range of the three Duo crashes
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        self.assertEqual(self.run_record(U1).returncode, 0)
+        records = self.read_records()
+        self.assertEqual(len(records), 1, "--record appended %d lines, want one" % len(records))
+        record = records[0]
+        for key, want in (("load1", 71.04), ("load5", 58.30), ("load15", 40.12)):
+            self.assertIn(key, record, "%s is missing from the --record line" % key)
+            self.assertEqual(record[key], want, "%s is %r, want the number %r" % (key, record[key], want))
+
+    def test_record_mode_writes_null_loads_when_sysctl_exits_non_zero(self):
+        self.set_loadavg("{ 1.23 4.56 7.89 }\n", rc=1)  # valid output, but the exit code says it failed
+        self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+        self.assertEqual(self.run_record(U1).returncode, 0)
+        records = self.read_records()
+        self.assertEqual(len(records), 1, "--record wrote %d lines when sysctl failed, want one" % len(records))
+        for key in ("load1", "load5", "load15"):
+            self.assertIn(key, records[0], "%s is missing from the --record line when sysctl fails" % key)
+            self.assertIsNone(records[0][key], "%s is %r when sysctl exits 1, want null"
+                              % (key, records[0][key]))
+
+    def test_record_mode_writes_null_loads_when_sysctl_prints_something_else(self):
+        for out in ("", "garbage\n", "{ 1.23 4.56 }\n", "{ a b c }\n", "vm.loadavg: { 1.23 4.56 7.89 }\n"):
+            with self.subTest(printed=out):
+                self.tearDown_state()
+                self.set_loadavg(out)
+                self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
+                self.assertEqual(self.run_record(U1).returncode, 0)
+                records = self.read_records()
+                self.assertEqual(len(records), 1, "--record wrote %d lines when sysctl printed %r, want one"
+                                 % (len(records), out))
+                for key in ("load1", "load5", "load15"):
+                    self.assertIn(key, records[0], "%s is missing from the --record line when sysctl prints %r"
+                                  % (key, out))
+                    self.assertIsNone(records[0][key], "%s is %r when sysctl prints %r, want null"
+                                      % (key, records[0][key], out))
+
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
-        for path in (self.calls, self.booted_flag, self.records):
+        for path in (self.calls, self.booted_flag, self.records, self.sysctl_log):
             if os.path.exists(path):
                 os.remove(path)
         for name in os.listdir(self.plans):
