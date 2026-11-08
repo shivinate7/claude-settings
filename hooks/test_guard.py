@@ -15002,10 +15002,16 @@ def ors_silent(decision, reason):
     return ""
 
 
+def ors_slug(label):
+    """The short name a case's folders and session id take: the case's own id, such as r1 or c9. A label holds
+    ':' and spaces, which PATH cannot take and the session id pattern refuses."""
+    return label.split(": ", 1)[1].split(" ", 1)[0].lower()
+
+
 def ors_red(label, build, unread=False):
     """A red case: `build` makes the scenario, then the push must ask."""
     def case():
-        ctx = build(label)
+        ctx = build(ors_slug(label))
         problem = ors_scope_problem(ctx, red=True)
         if problem:
             return False, problem
@@ -15021,7 +15027,7 @@ def ors_red(label, build, unread=False):
 def ors_allow(label, build):
     """A control: `build` makes the scenario, then the push must be allowed and print nothing."""
     def case():
-        ctx = build(label)
+        ctx = build(ors_slug(label))
         problem = ors_scope_problem(ctx, red=False)
         if problem:
             return False, problem
