@@ -11380,6 +11380,15 @@ RR_TAG = os.path.join(RRROOT, "rr-tag")                # a tag on an untrailered
 RR_NOLINT = os.path.join(RRROOT, "nolint")             # a copy of the hooks with no lint folder beside it
 RR_NOLINT_GUARD = os.path.join(RR_NOLINT, "guard.py")
 RR_PARENNONE = os.path.join(RRROOT, "rr-parennone")    # a test commit whose trailer is `none (...)`, no colon after none
+RR_TREEBACK = os.path.join(RRROOT, "rr-treeback")      # a pushed test edit, then a restore of the lines it changed
+RR_LANETREE = os.path.join(RRROOT, "rr-lanetree")      # a lane commit, two unpushed trims, then a restore to the lane commit's tree
+RR_NEARMISS = os.path.join(RRROOT, "rr-nearmiss")      # the same shape, with one more test line in the restore
+RR_SIBLING = os.path.join(RRROOT, "rr-sibling")        # a commit whose tree equals a pushed sibling branch's, not its ancestor
+RR_EDIT_V2 = "def test_x():\n    assert 9 == 9\n"
+RR_FULL = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 3\n"
+RR_TRIM1 = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n"
+RR_TRIM2 = "def test_x():\n    assert 1 == 1\n"
+RR_FULL_PLUS = RR_FULL + "    assert 4 == 4\n"
 
 
 def _rr_run(where, *args):
@@ -11432,6 +11441,30 @@ def _rr_commit(where, files, message):
 def _rr_msg(subject, trailer=None):
     """A commit message: the subject, then the trailer line in its own paragraph when there is one."""
     return subject if trailer is None else subject + "\n\n" + trailer
+
+
+def _rr_tree(where, rev):
+    """The tree of `rev`, as git names it."""
+    return _rr_read(where, "rev-parse", rev + "^{tree}").stdout.strip()
+
+
+def _rr_lane_restore(where, restored):
+    """A lane commit that touches no test file, two unpushed trims of the test file, then one commit that writes
+    `restored` back with no revert line. The push holds all four. Only the trims delete, and the restore adds."""
+    _cmk_pushed(where, {"a.txt": "base\n", RR_TEST: RR_FULL})
+    _rr_commit(where, {"b.txt": "lane\n"}, "lane change")
+    _rr_commit(where, {RR_TEST: RR_TRIM1}, "trim test_x")
+    _rr_commit(where, {RR_TEST: RR_TRIM2}, "trim test_x again")
+    _rr_commit(where, {RR_TEST: restored}, "restore test_x")
+    _rr_must(where, _rr_added(where, "HEAD~3", "HEAD~1") == 0, "the two trims only delete lines")
+    _rr_must(where, _rr_added(where, "HEAD~1", "HEAD") > 0, "the restore adds test lines")
+    _rr_must(where, _rr_subjects(where, "origin/topic..HEAD") ==
+             ["lane change", "trim test_x", "trim test_x again", "restore test_x"],
+             "the push holds the lane's four commits")
+    _rr_must(where, "This reverts commit" not in _rr_read(where, "log", "-1", "--format=%B").stdout,
+             "the restore holds no revert line")
+    _rr_must(where, _rr_tree(where, "origin/main") != _rr_tree(where, "HEAD~3"),
+             "the lane commit's tree differs from main's")
 
 
 def _build_red_run():
@@ -11591,10 +11624,49 @@ def _build_red_run():
     must(RR_NOLINT, os.path.isfile(RR_NOLINT_GUARD) and not os.path.exists(os.path.join(RRROOT, "lint")),
          "a hooks copy with no lint folder beside it")
 
+    # The restore's tree is the base's, the commit before the pushed edit. The push holds the restore alone.
+    _cmk_pushed(RR_TREEBACK, {"a.txt": "base\n", RR_TEST: RR_TEST_TEXT})
+    commit(RR_TREEBACK, {RR_TEST: RR_EDIT_V2}, "tighten test_x")
+    run(RR_TREEBACK, "push", "-q", "origin", "topic")
+    commit(RR_TREEBACK, {RR_TEST: RR_TEST_TEXT}, "restore test_x")
+    must(RR_TREEBACK, _rr_added(RR_TREEBACK, "HEAD~1", "HEAD") > 0, "the restore adds test lines")
+    must(RR_TREEBACK, _rr_tree(RR_TREEBACK, "HEAD") == _rr_tree(RR_TREEBACK, "HEAD~2"),
+         "the restore's tree is the base's")
+    must(RR_TREEBACK, _rr_subjects(RR_TREEBACK, "origin/topic..HEAD") == ["restore test_x"],
+         "the push holds the restore alone")
+    must(RR_TREEBACK, "This reverts commit" not in _rr_read(RR_TREEBACK, "log", "-1", "--format=%B").stdout,
+         "the restore holds no revert line")
+
+    # The restore's tree is the lane commit's tree, three commits back, with two unpushed trims between.
+    _rr_lane_restore(RR_LANETREE, RR_FULL)
+    must(RR_LANETREE, _rr_tree(RR_LANETREE, "HEAD") == _rr_tree(RR_LANETREE, "HEAD~3"),
+         "the restore's tree is the lane commit's tree")
+
+    # The same shape, with one more test line than the lane commit's tree holds. No ancestor's tree matches.
+    _rr_lane_restore(RR_NEARMISS, RR_FULL_PLUS)
+    must(RR_NEARMISS, _rr_tree(RR_NEARMISS, "HEAD") not in
+         _rr_read(RR_NEARMISS, "log", "--format=%T", "HEAD~1").stdout.split(),
+         "the restore's tree matches no ancestor")
+
+    # A sibling branch, pushed, holds the test lines. The lane's commit writes the same lines, so its tree is
+    # the sibling's tree, and the sibling is not an ancestor.
+    _cmk_pushed(RR_SIBLING, {"a.txt": "base\n"})
+    run(RR_SIBLING, "checkout", "-q", "-b", "side", "main")
+    commit(RR_SIBLING, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_SIBLING, "push", "-q", "origin", "side")
+    run(RR_SIBLING, "checkout", "-q", "topic")
+    commit(RR_SIBLING, {RR_TEST: RR_TEST_TEXT}, "add test_x on the lane")
+    must(RR_SIBLING, _rr_tree(RR_SIBLING, "HEAD") == _rr_tree(RR_SIBLING, "side"),
+         "the lane commit's tree is the sibling's")
+    must(RR_SIBLING, _rr_read(RR_SIBLING, "merge-base", "--is-ancestor", "side", "HEAD").returncode != 0,
+         "the sibling is not an ancestor")
+    must(RR_SIBLING, _rr_subjects(RR_SIBLING, "origin/topic..HEAD") == ["add test_x on the lane"],
+         "the push holds the lane commit alone")
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
-              RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE],
+              RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING],
              _build_red_run)
 
 
@@ -11681,6 +11753,19 @@ rr_allow("known limit: git push --tags origin is allowed, though the tag it send
 # The refusal text names no check_red_run.py, and no git switch: the remedy gives the replacement route only.
 add("red-run: the refusal names no check_red_run.py and no git switch", "deny", "red-run", cwd=RR_PLAIN,
     command=VCS + " push", lacks=("check_red_run.py", VCS + " switch"))
+
+# A commit whose tree equals an ancestor's needs no trailer. The restore below writes back the lines a pushed
+# edit changed, so its tree is the base's, outside the push, and it carries no revert line.
+rr_allow("a restore of a pushed test edit, whose tree is the base's, with no revert line", VCS + " push", RR_TREEBACK)
+# A combined restore to an earlier lane commit's tree, with two unpushed trims between. The match is inside the push.
+rr_allow("a combined restore whose tree is an earlier lane commit's, with two unpushed trims in between",
+         VCS + " push", RR_LANETREE)
+# One more test line than that commit's tree holds: no ancestor's tree matches, so the restore is judged.
+rr_refuse("a restore one test line past an earlier lane commit's tree, which matches no ancestor",
+          VCS + " push", RR_NEARMISS)
+# The tree equals a pushed sibling branch's. The sibling is not an ancestor, so the lane commit is judged.
+rr_refuse("a lane commit whose tree equals a pushed sibling branch's, which is not its ancestor",
+          VCS + " push", RR_SIBLING)
 
 
 def rr_nolint_probe_case():

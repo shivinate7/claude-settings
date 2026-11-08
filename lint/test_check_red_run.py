@@ -413,6 +413,19 @@ class CheckCase(Fixture):
         self.assertEqual(rc, 1, out)
         self.assertGap(out, sha, "add widget tests", normal)
 
+    def test_restore_to_an_ancestor_tree_is_not_judged(self):
+        """A restore whose tree is its parent's tree, with no revert line, needs no trailer. The range holds the
+        restore alone, the edit it undoes being pushed already."""
+        rel = "lint/test_trim.py"
+        self.base({rel: "def test_a():\n    assert 1\n"})
+        edit = self.commit("tighten widget assert", {rel: "def test_a():\n    assert 2\n"})
+        self.base_sha = edit  # the range holds only the restore, as a push of the pushed edit would
+        self.commit("restore widget assert", {rel: "def test_a():\n    assert 1\n"})
+        self.assertEqual(self.git("rev-parse", "HEAD^{tree}"), self.git("rev-parse", edit + "~1^{tree}"))
+        self.assertNotIn("This reverts commit", self.git("log", "-1", "--format=%B"))
+        self.assertNotEqual(self.git("diff", "--numstat", edit, "HEAD").split()[0], "0")  # the restore adds a line
+        self.assertClean()
+
 
 if __name__ == "__main__":
     unittest.main()
