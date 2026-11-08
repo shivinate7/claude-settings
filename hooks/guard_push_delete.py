@@ -221,6 +221,25 @@ def push_refspecs(args):
     return remote, plain
 
 
+def push_delete_names(args, cwd: str, overrides=None):
+    """(remote, branch names) a `git push` deletes on its remote: each plain spec of `--delete`/`-d`,
+    and each `:name` spec otherwise. `refs/heads/` is cut off. A tag, a pattern and any other ref
+    kind is skipped. The remote is read as push_verdict reads it, and is `origin` when none answers."""
+    delete, _upstream, remote, plain = _push_parse(args)[6:]
+    if not remote and any(spec.startswith(":") or delete for spec in plain):
+        remote = _push_config(
+            cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
+    names = []
+    for spec in plain:
+        if not (delete or spec.startswith(":")):
+            continue
+        name = spec[1:] if spec.startswith(":") else spec
+        name = name.removeprefix("refs/heads/")
+        if name and "*" not in name and not name.startswith("refs/"):
+            names.append(name)
+    return remote or "origin", names
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 

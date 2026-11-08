@@ -65,6 +65,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+import layout  # noqa: E402  the design folder is the layout's `design` kind, never a literal
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -198,6 +199,8 @@ NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case d
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
 NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
 NO_EXEC_BIT = "Windows git ignores the exec bit (core.filemode is false), so a chmod makes no mode change here"
+NO_LATIN_NAME = ("this platform's file names cannot hold a byte that is not UTF-8, so the Latin-1 mockup "
+                 "cannot be made here")
 
 
 def skip_case(label, reason):
@@ -545,6 +548,23 @@ BRANCHREPO = os.path.join(ROOT, "branchrepo")
 BRANCHFALLBACKMAIN = os.path.join(ROOT, "branchfallbackmain")
 BRANCHFALLBACKMASTER = os.path.join(ROOT, "branchfallbackmaster")
 BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
+
+
+def _latin_name_makeable():
+    """True when this platform's file system makes a file whose name holds a byte that is not UTF-8.
+    Windows names are UTF-16, so the name cannot be made there and the probe answers False. The probe
+    makes one empty file under ROOT and removes it."""
+    try:
+        probe = os.path.join(ROOT, os.fsdecode(b"probe-caf\xe9"))
+        with open(probe, "w"):
+            pass
+        os.remove(probe)
+        return True
+    except (OSError, UnicodeError):
+        return False
+
+
+LATIN_NAME_OK = _latin_name_makeable()
 
 # The push cases. Each is a real checkout, so the default branch is read from git and never
 # guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
@@ -1666,11 +1686,6 @@ def _build_branch():
     write(os.path.join(BRANCHREPO, "r.txt"), "same patch\n")  # identical content, own commit
     run_vcs(BRANCHREPO, "add", "r.txt")
     run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "add r.txt directly on main")
-    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
-    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
-    run_vcs(BRANCHREPO, "add", "u.txt")
-    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
-    run_vcs(BRANCHREPO, "checkout", "-q", "main")
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "pushed-work")
     write(os.path.join(BRANCHREPO, "p.txt"), "pushed to the remote\n")
     run_vcs(BRANCHREPO, "add", "p.txt")
@@ -1698,6 +1713,154 @@ def _build_branch():
         if archive.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: the branch-delete refusal's handed "
                      "push failed. stderr: %s" % archive.stderr.strip())
+    # DESIGN BRANCHES. The design folder is the layout's `design` kind, read through lint/layout.py,
+    # so these cases follow the folder the guard reads. Each design branch is pushed under its own
+    # name, so origin holds its tip: a branch whose remote copy is deleted loses its design file. A
+    # design branch that was never pushed is already refused as the only copy.
+    design = layout.layout()["kinds"]["design"]["path"].strip("/")
+
+    def design_branch(name, rel, text):
+        run_vcs(BRANCHREPO, "checkout", "-q", "-b", name)
+        write(os.path.join(BRANCHREPO, *rel.split("/")), text)
+        run_vcs(BRANCHREPO, "add", rel)
+        run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", name + "'s design file")
+        pushed = run_vcs(BRANCHREPO, "push", "-q", "origin", name)
+        if pushed.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: pushing %s failed. stderr: %s"
+                     % (name, pushed.stderr.strip()))
+        run_vcs(BRANCHREPO, "checkout", "-q", "main")
+
+    picked = design + "/picked.html"
+    landed = design + "/landed.html"
+    design_branch("design-only", picked, "picked, found nowhere on main\n")
+    design_branch("design-archived", design + "/archived.html", "archived by its own push\n")
+    archived = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                       "design-archived:refs/heads/archive/design-archived")
+    if archived.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-archived failed. "
+                 "stderr: %s" % archived.stderr.strip())
+    design_branch("design-landed", landed, "landed on main as a squash\n")
+    # design-local is never pushed: no ref on origin holds its tip, so it is the only copy.
+    local = design + "/local.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-local")
+    write(os.path.join(BRANCHREPO, *local.split("/")), "local only, never pushed\n")
+    run_vcs(BRANCHREPO, "add", local)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-local's design file")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-stale: its archive takes the first draft, then the branch moves on to a second draft,
+    # so the archive does not hold the tip.
+    stale = design + "/stale.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-stale")
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "first draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's first draft")
+    stale_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                            "design-stale:refs/heads/archive/design-stale")
+    if stale_archive.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-stale's first draft "
+                 "failed. stderr: %s" % stale_archive.stderr.strip())
+    write(os.path.join(BRANCHREPO, *stale.split("/")), "second draft\n")
+    run_vcs(BRANCHREPO, "add", stale)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-stale's second draft")
+    stale_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-stale")
+    if stale_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-stale failed. stderr: %s"
+                 % stale_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-taken: its first archive name is taken on origin. archive/design-taken holds the first
+    # draft, so the tip is archived under the next name the rule's remedy allows, archive/design-taken-2.
+    taken = design + "/taken.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-taken")
+    write(os.path.join(BRANCHREPO, *taken.split("/")), "first draft\n")
+    run_vcs(BRANCHREPO, "add", taken)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-taken's first draft")
+    taken_first = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                          "design-taken:refs/heads/archive/design-taken")
+    if taken_first.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-taken's first draft "
+                 "failed. stderr: %s" % taken_first.stderr.strip())
+    write(os.path.join(BRANCHREPO, *taken.split("/")), "second draft\n")
+    run_vcs(BRANCHREPO, "add", taken)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-taken's second draft")
+    taken_tip = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                        "design-taken:refs/heads/archive/design-taken-2")
+    if taken_tip.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-taken's tip under "
+                 "archive/design-taken-2 failed. stderr: %s" % taken_tip.stderr.strip())
+    taken_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-taken")
+    if taken_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-taken failed. stderr: %s"
+                 % taken_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-merged: its tip reaches main as a merge below, and main then renames its file, so the
+    # default branch holds every commit of the tip and lacks the file's old path.
+    merged = design + "/merged.html"
+    design_branch("design-merged", merged, "merged on main, renamed there after\n")
+    # design-landed's file reaches main as its own commit with the same bytes, as a squash merge
+    # leaves it. Made after every design branch above, so none of them inherits it.
+    write(os.path.join(BRANCHREPO, *landed.split("/")), "landed on main as a squash\n")
+    run_vcs(BRANCHREPO, "add", landed)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "landed.html lands on main")
+
+    # design-merged reaches main as a merge, then main renames its file. origin's default branch
+    # holds every commit of the tip and lacks the file's old path.
+    merging = run_vcs(BRANCHREPO, *IDENT, "merge", "-q", "--no-ff", "-m", "merge design-merged",
+                      "design-merged")
+    if merging.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: merging design-merged into main failed. "
+                 "stderr: %s" % merging.stderr.strip())
+    renamed = design + "/merged-renamed.html"
+    moving = run_vcs(BRANCHREPO, "mv", merged, renamed)
+    if moving.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: renaming design-merged's file on main "
+                 "failed. stderr: %s" % moving.stderr.strip())
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "merged.html is renamed on main")
+    # design-modified: main holds the mockup's first bytes, then the branch changes them. The file sits
+    # on both sides, so the branch's change to it is a modification, not an addition. design-same's tip
+    # holds main's mockup bytes unchanged, with a note outside the folder added: the control.
+    modified = design + "/modified.html"
+    write(os.path.join(BRANCHREPO, *modified.split("/")), "on main before the branch\n")
+    run_vcs(BRANCHREPO, "add", modified)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "modified.html is on main")
+    design_branch("design-modified", modified, "changed on the branch, not added\n")
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-same")
+    write(os.path.join(BRANCHREPO, "same-note.txt"), "a note off the design folder\n")
+    run_vcs(BRANCHREPO, "add", "same-note.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-same's note")
+    same_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-same")
+    if same_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-same failed. stderr: %s"
+                 % same_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-forked is cut from main before main edits untouched.html, a mockup the branch never touches.
+    # The branch's own mockup, forked-own.html, gets the same bytes on main later, so it is identical to
+    # main's. Only the branch's change counts: main's later edit to untouched.html is not the branch's.
+    untouched = design + "/untouched.html"
+    write(os.path.join(BRANCHREPO, *untouched.split("/")), "before the fork\n")
+    run_vcs(BRANCHREPO, "add", untouched)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "untouched.html is on main before the fork")
+    forked_own = design + "/forked-own.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-forked")
+    write(os.path.join(BRANCHREPO, *forked_own.split("/")), "the same bytes on main later\n")
+    run_vcs(BRANCHREPO, "add", forked_own)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-forked's own mockup")
+    forked_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-forked")
+    if forked_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-forked failed. stderr: %s"
+                 % forked_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    write(os.path.join(BRANCHREPO, *untouched.split("/")), "main edits it after the fork\n")
+    write(os.path.join(BRANCHREPO, *forked_own.split("/")), "the same bytes on main later\n")
+    run_vcs(BRANCHREPO, "add", untouched, forked_own)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "main edits untouched.html and adds forked-own.html")
+    # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
+    # swapped ancestor test reads it as merged and allows the only copy; the rule must still refuse.
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
+    write(os.path.join(BRANCHREPO, "u.txt"), "found nowhere else\n")
+    run_vcs(BRANCHREPO, "add", "u.txt")
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "unmerged-work's only copy")
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+
     pushm = run_vcs(BRANCHREPO, "push", "-q", "origin", "main")
     if pushm.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: re-pushing main failed. "
@@ -1720,6 +1883,166 @@ def _build_branch():
             "origin/main, so it does not prove the patch-id test. git cherry says: %r"
             % cherry_check.stdout
         )
+
+    # The design cases' scope, read with git before any case relies on it: origin's default branch
+    # holds the squash-landed file and lacks the picked one, and each design branch's origin copy is
+    # its tip, while the stale archive does not contain the tip.
+    def rev(name):
+        return run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", name).stdout.strip()
+
+    def listed(ref, rel):
+        return run_vcs(BRANCHREPO, "ls-tree", "--name-only", ref, "--", rel).stdout.strip()
+
+    if listed("origin/main", picked):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds the picked design file, "
+                 "so design-only would not be a design branch")
+    if not listed("origin/main", landed):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks the squash-landed design "
+                 "file, so design-landed would not be a design branch on the default branch")
+    for name in ("design-only", "design-archived", "design-landed", "design-stale"):
+        if not rev(name) or rev(name) != rev("origin/" + name):
+            sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s"
+                     % (name, name))
+    if rev("origin/archive/design-archived") != rev("design-archived"):
+        sys.exit("fixture setup failed in build_fixtures: the design-archived archive is not its tip")
+    stale_contains = run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-stale",
+                             "origin/archive/design-stale")
+    if stale_contains.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the design-stale archive holds the tip, so "
+                 "it would not be stale")
+
+    if rev("origin/design-local"):
+        sys.exit("fixture setup failed in build_fixtures: origin holds design-local, so it would not "
+                 "be the only copy")
+
+    # The new design cases' scope, read with git before any case relies on it. archive/design-taken-2
+    # holds design-taken's tip, and archive/design-taken holds only the first draft.
+    if rev("origin/archive/design-taken-2") != rev("design-taken"):
+        sys.exit("fixture setup failed in build_fixtures: archive/design-taken-2 is not the tip of "
+                 "design-taken")
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-taken",
+               "origin/archive/design-taken").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: archive/design-taken holds the tip, so the "
+                 "name would not be taken")
+    # design-merged's tip is an ancestor of origin/main, and origin/main lacks the file's old path.
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-merged", "origin/main").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: design-merged is not an ancestor of origin/main")
+    if listed("origin/main", merged) or not listed("origin/main", renamed):
+        sys.exit("fixture setup failed in build_fixtures: origin/main still holds design-merged's old "
+                 "path, or lacks its renamed file, so the file would not be renamed on main")
+    # origin/main must be an ancestor of unmerged-work, or the swapped ancestor mutant survives again.
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "origin/main", "unmerged-work").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: origin/main is not an ancestor of "
+                 "unmerged-work, so a swapped ancestor test would not flip the only-copy case")
+
+    # The modified-mockup scope, read with git before any case relies on it: origin/main holds the
+    # mockup's first bytes, design-modified's tip holds other bytes at that path (so its change is a
+    # modification), and design-same's tip holds main's bytes (the identical-blob control).
+    if not listed("origin/main", modified):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks the mockup design-modified "
+                 "changes, so its change would be an addition")
+    if rev("design-modified:" + modified) == rev("origin/main:" + modified):
+        sys.exit("fixture setup failed in build_fixtures: design-modified's mockup is main's, so its "
+                 "change would not be a modification")
+    if rev("design-same:" + modified) != rev("origin/main:" + modified):
+        sys.exit("fixture setup failed in build_fixtures: design-same's mockup differs from main's, so "
+                 "it would not be the identical-blob control")
+    for name in ("design-modified", "design-same"):
+        if not rev(name) or rev(name) != rev("origin/" + name):
+            sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s" % (name, name))
+    # The forked-branch scope: design-forked is not on main, was cut before main's later edit to
+    # untouched.html, never changed that file, and its own mockup holds the bytes main holds.
+    if rev("origin/design-forked") != rev("design-forked"):
+        sys.exit("fixture setup failed in build_fixtures: origin/design-forked is not the tip of design-forked")
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-forked", "origin/main").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: design-forked is an ancestor of origin/main, so "
+                 "main did not move past its fork")
+    fork = run_vcs(BRANCHREPO, "merge-base", "origin/main", "design-forked").stdout.strip()
+    if rev(fork + ":" + untouched) != rev("design-forked:" + untouched):
+        sys.exit("fixture setup failed in build_fixtures: design-forked changed untouched.html, so the "
+                 "branch would not leave it alone")
+    if rev("origin/main:" + untouched) == rev("design-forked:" + untouched):
+        sys.exit("fixture setup failed in build_fixtures: origin/main did not edit untouched.html after "
+                 "the fork, so the two-dot read would see no edit")
+    if listed(fork, forked_own) or rev("design-forked:" + forked_own) != rev("origin/main:" + forked_own):
+        sys.exit("fixture setup failed in build_fixtures: forked-own.html is not a file design-forked adds "
+                 "with main's bytes")
+
+    # design-unseen is pushed, then this clone drops its tracking ref and local branch, as a clone
+    # that fetched before the push has none. No ref here names it, so no read can list its tip.
+    unseen = design + "/unseen.html"
+    design_branch("design-unseen", unseen, "pushed after this clone's last fetch\n")
+    run_vcs(BRANCHREPO, "update-ref", "-d", "refs/remotes/origin/design-unseen")
+    run_vcs(BRANCHREPO, "branch", "-q", "-D", "design-unseen")
+    if rev("refs/heads/design-unseen") or rev("refs/remotes/origin/design-unseen"):
+        sys.exit("fixture setup failed in build_fixtures: a ref here still names design-unseen, so it "
+                 "would not be unseen")
+    if not run_vcs(BRANCHREPO, "ls-remote", "--heads", "origin", "design-unseen").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin lacks design-unseen")
+
+    # design-torn: its tip is a commit whose tree object is missing from this clone, so the design
+    # read cannot list its files. origin does not hold it; the tracking ref names it, as a damaged
+    # clone's would.
+    missing_tree = "%040d" % 7
+    torn_text = ("tree %s\nparent %s\nauthor cases <cases@example.invalid> 1700000000 +0000\n"
+                 "committer cases <cases@example.invalid> 1700000000 +0000\n\n"
+                 "design-torn: its tree is missing\n") % (missing_tree, rev("main"))
+    made = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], cwd=BRANCHREPO,
+                          input=torn_text, capture_output=True, text=True)
+    torn = made.stdout.strip()
+    if made.returncode != 0 or not torn:
+        sys.exit("fixture setup failed in build_fixtures: writing design-torn's commit failed. "
+                 "stderr: %s" % made.stderr.strip())
+    if run_vcs(BRANCHREPO, "update-ref", "refs/remotes/origin/design-torn", torn).returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: naming design-torn's commit failed")
+    if rev(torn + "^{commit}") != torn:
+        sys.exit("fixture setup failed in build_fixtures: design-torn's tip is not a commit")
+    if (run_vcs(BRANCHREPO, "ls-tree", "-r", "--name-only", torn).returncode == 0
+            or run_vcs(BRANCHREPO, "diff", "--name-only", "origin/main", torn).returncode == 0):
+        sys.exit("fixture setup failed in build_fixtures: design-torn's tree reads, so the design "
+                 "read would not fail")
+
+    # design-latin: its only mockup's name holds a byte that is not UTF-8, and no archive holds its tip. git
+    # prints the name's bytes as they are. design-latin-archived is the control: the same mockup name, with
+    # an archive of its tip under its own name. Both branches are cut from main, where HEAD is now.
+    if LATIN_NAME_OK:
+        latin = design + "/" + os.fsdecode(b"caf\xe9.html")
+        design_branch("design-latin", latin, "a mockup whose name is not UTF-8\n")
+        design_branch("design-latin-archived", latin, "archived by its own push\n")
+        latin_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                                "design-latin-archived:refs/heads/archive/design-latin-archived")
+        if latin_archive.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: archiving design-latin-archived failed. "
+                     "stderr: %s" % latin_archive.stderr.strip())
+        # The Latin-1 scope, read with git before any case relies on it: each branch's origin copy is its
+        # tip, its mockup is on the branch and not on origin's default branch, and only the control has an
+        # archive of its tip.
+        for name in ("design-latin", "design-latin-archived"):
+            if not rev(name) or rev(name) != rev("origin/" + name):
+                sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s" % (name, name))
+        if not rev("design-latin:" + latin):
+            sys.exit("fixture setup failed in build_fixtures: design-latin holds no mockup under its Latin-1 name")
+        if rev("origin/main:" + latin):
+            sys.exit("fixture setup failed in build_fixtures: origin/main holds design-latin's mockup, so the "
+                     "branch would not be the only copy")
+        if rev("origin/archive/design-latin"):
+            sys.exit("fixture setup failed in build_fixtures: origin holds an archive of design-latin, so its "
+                     "delete would not be the no-archive case")
+        if not rev("origin/archive/design-latin-archived") or \
+                rev("origin/archive/design-latin-archived") != rev("design-latin-archived"):
+            sys.exit("fixture setup failed in build_fixtures: archive/design-latin-archived is not the tip of "
+                     "design-latin-archived")
+
+    # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
+    # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
+    run_vcs(BRANCHREPO, "tag", "v1.0", "main")
+    if run_vcs(BRANCHREPO, "rev-parse", "--verify", "-q", "refs/tags/v1.0").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: tagging v1.0 failed")
+    if rev("refs/heads/v1.0") or rev("refs/remotes/origin/v1.0"):
+        sys.exit("fixture setup failed in build_fixtures: a branch named v1.0 exists, so v1.0 would "
+                 "not be a tag-only name")
+    if run_vcs(BRANCHREPO, "ls-remote", "--heads", "origin", "v1.0").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin holds a branch named v1.0")
 
     # A fallback base with no remote at all: only local `main` answers, proving the SECOND step
     # of the resolve order (`origin/HEAD`, then local `main`, then local `master`).
@@ -1761,6 +2084,14 @@ def _build_branch():
     write(os.path.join(BRANCHNOBASE, "o.txt"), "irrelevant to the unreadable case\n")
     run_vcs(BRANCHNOBASE, "add", "o.txt")
     run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-work's commit")
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
+    # A design file on a tip with no readable base: the design read cannot tell whether origin's
+    # default branch lacks it, so the rule asks. orphan-work above holds no design file and stays allowed.
+    run_vcs(BRANCHNOBASE, "checkout", "-q", "-b", "orphan-design")
+    orphan = design + "/orphan.html"
+    write(os.path.join(BRANCHNOBASE, *orphan.split("/")), "design file, no readable base\n")
+    run_vcs(BRANCHNOBASE, "add", orphan)
+    run_vcs(BRANCHNOBASE, *IDENT, "commit", "-q", "-m", "orphan-design's design file")
     run_vcs(BRANCHNOBASE, "checkout", "-q", "trunk")
     base_check2 = run_vcs(BRANCHNOBASE, "rev-parse", "--verify", "-q", "refs/heads/main")
     if base_check2.returncode == 0:
@@ -3290,6 +3621,204 @@ sh("branch: local master's fallback still denies an only-copy branch",
 # denied and never silently passed over an unproven subject.
 sh("branch: no origin/HEAD, no local main, no local master: unreadable, allowed",
    VCS + " branch -D orphan-work", "allow", cwd=BRANCHNOBASE)
+
+# THE DESIGN FILE RULE. A design file on a branch's tip is the only copy of that file when no ref on
+# origin holds the tip. Two acts split the rule:
+#   a local delete (`branch -d/-D`) loses nothing when origin/<branch>, or any archive ref on origin,
+#   holds the tip: the copy stays on origin.
+#   a remote delete (`push --delete`, `push :<branch>`) removes the origin copy, so only
+#   archive/<branch> holding the tip keeps the file.
+# ARCHIVE_RULE is the rule id the guard prints for the remote-delete refusal and for the ask on an
+# unreadable default branch, named once so a rename is one edit (the CHAIN_ASK pattern). A local-only
+# design branch is refused by the old only-copy refusal, rule "shared-tree", which stays right.
+ARCHIVE_RULE = "shared-trees-archive-then-delete"
+sh("branch: a design file origin holds at its tip allows -D",
+   VCS + " branch -D design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -d",
+   VCS + " branch -d design-only", "allow", cwd=BRANCHREPO)
+sh("branch: a design file origin holds at its tip allows -D even when its archive is older",
+   VCS + " branch -D design-stale", "allow", cwd=BRANCHREPO)
+sh("branch: a design file no origin ref holds is the only copy, and -D denies",
+   VCS + " branch -D design-local", "deny", "shared-tree", cwd=BRANCHREPO,
+   lacks=("design-local",))
+sh("branch: a design file whose archive holds its tip allows -D",
+   VCS + " branch -D design-archived", "allow", cwd=BRANCHREPO)
+sh("branch: a design file that origin's default branch also holds allows -D",
+   VCS + " branch -D design-landed", "allow", cwd=BRANCHREPO)
+sh("branch: a design file with no readable default branch asks on -D",
+   VCS + " branch -D orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a design file with no archive holding its tip denies",
+   VCS + " push origin --delete design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+sh("push: a delete refspec of a design file with no archive holding its tip denies",
+   VCS + " push origin :design-only", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-only",))
+# A DRY RUN MOVES NOTHING. `push --dry-run` and `push -n` name the same delete and remove nothing on
+# origin, so the design check must not refuse either. The real delete above stays refused.
+sh("push: a --dry-run --delete of a design file with no archive holding its tip allows",
+   VCS + " push --dry-run origin --delete design-only", "allow", cwd=BRANCHREPO)
+sh("push: a -n --delete of a design file with no archive holding its tip allows",
+   VCS + " push -n origin --delete design-only", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file whose archive is an older commit denies",
+   VCS + " push origin --delete design-stale", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-stale",))
+sh("push: a --delete of a design file whose archive holds its tip allows",
+   VCS + " push origin --delete design-archived", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a pushed branch with no design file allows",
+   VCS + " push origin --delete pushed-work", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file with no readable default branch asks",
+   VCS + " push origin --delete orphan-design", "ask", ARCHIVE_RULE, cwd=BRANCHNOBASE)
+sh("push: a --delete of a branch with no design file and no readable default branch allows",
+   VCS + " push origin --delete orphan-work", "allow", cwd=BRANCHNOBASE)
+# THE REMOTE DELETE'S READS. A remote delete removes origin's copy, so the guard must judge the tip
+# it reads. Each case below is one read that cannot settle the tip, or one archive name the rule
+# allows, that the check must not refuse.
+sh("push: a --delete of a design branch this clone never fetched asks",
+   VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-unseen",))
+sh("push: a --delete through a variable name asks, since no read can name its branch",
+   VCS + " push origin --delete $B", "ask", ARCHIVE_RULE, cwd=BRANCHREPO)
+sh("push: a --delete of a design file whose tip cannot be listed asks",
+   VCS + " push origin --delete design-torn", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-torn",))
+sh("push: a --delete of a design branch already on the default branch, its file renamed, allows",
+   VCS + " push origin --delete design-merged", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a design file whose tip an archive under a new name holds allows",
+   VCS + " push origin --delete design-taken", "allow", cwd=BRANCHREPO)
+# A MODIFIED MOCKUP IS JUDGED LIKE AN ADDED ONE. design-modified changes a mockup that main already holds,
+# at the same path with other bytes. Deleting it removes the only copy of those bytes, so it is refused as
+# an added mockup is. design-same keeps main's bytes: its control allows.
+sh("push: a --delete of a design branch that modifies a mockup main holds, with no archive, denies",
+   VCS + " push origin --delete design-modified", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-modified",))
+sh("push: a --delete of a design branch whose mockup is identical to main's allows",
+   VCS + " push origin --delete design-same", "allow", cwd=BRANCHREPO)
+# A BRANCH CUT BEFORE MAIN'S LATER EDIT ALLOWS. design-forked was cut from main before main changed
+# untouched.html, a mockup the branch never touched. Its own mockup, forked-own.html, holds main's bytes.
+# The read against main's tip sees main's later edit as a change and would refuse; the branch's own change
+# is judged alone, so it allows.
+sh("push: a --delete of a design branch cut before main edited a mockup it never touched allows",
+   VCS + " push origin --delete design-forked", "allow", cwd=BRANCHREPO)
+# A MOCKUP NAME THAT IS NOT UTF-8. git prints a file name's bytes as they are, and the guard decodes git's output
+# with replacement, so a Latin-1 byte in the name reads as U+FFFD: a path no tree holds. The design check then
+# finds no mockup and allows. design-latin's only mockup has such a name and no archive holds its tip, so its
+# remote delete denies. The control, design-latin-archived, holds the same mockup name and an archive of its tip.
+if LATIN_NAME_OK:
+    sh("push: a --delete of a design branch whose only mockup has a Latin-1 name, with no archive, denies",
+       VCS + " push origin --delete design-latin", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+       carries="archive/", lacks=("design-latin",))
+    sh("push: a --delete of a design branch whose only mockup has a Latin-1 name, with an archive "
+       "holding its tip, allows",
+       VCS + " push origin --delete design-latin-archived", "allow", cwd=BRANCHREPO)
+else:
+    skip_case("push: a --delete of a design branch whose only mockup has a Latin-1 name, with no archive, denies",
+              NO_LATIN_NAME)
+    skip_case("push: a --delete of a design branch whose only mockup has a Latin-1 name, with an archive holding "
+              "its tip, allows", NO_LATIN_NAME)
+# A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
+# it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
+# which allows. Its control is the same no-tip read with no tag of that name: that still asks.
+sh("push: a --delete of a name that is only a local tag allows",
+   VCS + " push origin --delete v1.0", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of a name with no ref and no tag still asks, beside the tag allow",
+   VCS + " push origin --delete design-unseen", "ask", ARCHIVE_RULE, cwd=BRANCHREPO,
+   lacks=("design-unseen",))
+
+# AN UNREAD DESIGN FOLDER ASKS, NEVER ALLOWS. With no readable lint/layout.json, design_folder() is None,
+# so neither design check can tell a design file from none. Both must ask (decision
+# design-branch-delete-guard: a read that cannot answer asks, never allows). The layout roots are emptied
+# first, and the scope (no folder) is proven before either check runs.
+DESIGN_UNREAD_BRANCH_LABEL = "branch: an unread design folder asks on a branch -D, never allows"
+DESIGN_UNREAD_PUSH_LABEL = "push: an unread design folder asks on a --delete, never allows"
+
+
+def _unread_design_folder():
+    """The guard, loaded with its layout roots set to an empty folder, and the design folder it reads
+    from them: None."""
+    guard = _load_guard_module()
+    empty = os.path.join(ROOT, "design-no-layout")
+    os.makedirs(empty, exist_ok=True)
+    guard.settings_roots = lambda: [empty]
+    del guard._DESIGN_FOLDER[:]
+    return guard, guard.design_folder()
+
+
+def design_unread_branch_case():
+    materialize(BRANCHREPO)
+    guard, folder = _unread_design_folder()
+    if folder is not None:
+        return False, "scope: the design folder still reads with no layout root, so nothing is unread"
+    if guard.design_branch_delete_ask(["-D", "design-only"], BRANCHREPO, folder) is not True:
+        return False, "branch -D of a design branch with an unread design folder allowed, want ask"
+    return True, "branch -D asks with an unread design folder"
+
+
+def design_unread_push_case():
+    materialize(BRANCHREPO)
+    guard, folder = _unread_design_folder()
+    if folder is not None:
+        return False, "scope: the design folder still reads with no layout root, so nothing is unread"
+    verdict = guard.design_push_delete_verdict(BRANCHREPO, "origin", ["design-only"], folder)
+    if verdict != "ask":
+        return False, "push --delete with an unread design folder gave %r, want ask" % verdict
+    return True, "push --delete asks with an unread design folder"
+
+
+# AN ANCESTOR TIP SPENDS NO DESIGN DIFF. design_files states its cost in `diff` starts. A tip already on the default
+# branch is answered by branch_is_ancestor alone (design_push_delete_verdict's shortcut), so its delete runs no `diff`
+# start and its verdict stays allow. design-merged is such a tip: origin/main holds it. The control is design-only, a
+# tip off main that does reach design_files, so the count proves it sees `diff` starts at all.
+DESIGN_DIFF_COST_LABEL = "push: a --delete of an ancestor design tip spends no design diff start, the shortcut's cost"
+DESIGN_DIFF_CONTROL_LABEL = "push: a --delete of a design tip off main reaches the design diff, the count's control"
+
+
+def _design_delete_diff_starts(branch):
+    """(design folder, verdict, the `diff` starts) of one push --delete of BRANCH to origin, in BRANCHREPO. The
+    count is taken at git_reads._git, the one call every design read makes, so it holds every diff start."""
+    materialize(BRANCHREPO)
+    guard = _load_guard_module()
+    git_reads = sys.modules["git_reads"]
+    folder = guard.design_folder()
+    starts = []
+    real_git = git_reads._git
+
+    def counting_git(where, *args):
+        starts.append(args)
+        return real_git(where, *args)
+
+    git_reads._git = counting_git
+    try:
+        verdict = guard.design_push_delete_verdict(BRANCHREPO, "origin", [branch], folder)
+    finally:
+        git_reads._git = real_git
+    return folder, verdict, [args for args in starts if args and args[0] == "diff"]
+
+
+def design_ancestor_no_diff_case():
+    folder, verdict, diffs = _design_delete_diff_starts("design-merged")
+    if folder is None:
+        return False, "scope: the design folder does not read, so the delete is not judged as a design delete"
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-merged", "origin/main").returncode != 0:
+        return False, "scope: design-merged is not an ancestor of origin/main, so its tip is not an ancestor tip"
+    if verdict != "":
+        return False, "push --delete of an ancestor design tip gave %r, want allow" % (verdict,)
+    if diffs:
+        return False, "%d design diff start(s) for an ancestor design tip, want 0" % len(diffs)
+    return True, "an ancestor design tip allows with no design diff start"
+
+
+def design_diff_control_case():
+    folder, verdict, diffs = _design_delete_diff_starts("design-only")
+    if folder is None:
+        return False, "scope: the design folder does not read, so the delete is not judged as a design delete"
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-only", "origin/main").returncode == 0:
+        return False, "scope: design-only is an ancestor of origin/main, so its tip is not off main"
+    if verdict != "deny":
+        return False, "push --delete of a design tip off main gave %r, want deny" % (verdict,)
+    if not diffs:
+        return False, "no design diff start for a design tip off main, so the count sees nothing"
+    return True, "a design tip off main reads %d design diff start(s)" % len(diffs)
+
 
 # `git worktree remove <path>`. The subject lives at PATH, not at the checkout the command runs
 # in, so every case below runs from WTMAIN and names one of its own linked worktrees.
@@ -13910,6 +14439,16 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The unread-design-folder checks read the design section's fixtures. LOG_CHECKS_EXTRA is defined above,
+# so they register here, and their family is set by hand, as the base-copy cost check's is.
+LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_BRANCH_LABEL, design_unread_branch_case))
+LOG_FAMILY[DESIGN_UNREAD_BRANCH_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_UNREAD_PUSH_LABEL, design_unread_push_case))
+LOG_FAMILY[DESIGN_UNREAD_PUSH_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_DIFF_COST_LABEL, design_ancestor_no_diff_case))
+LOG_FAMILY[DESIGN_DIFF_COST_LABEL] = "branch-worktree"
+LOG_CHECKS_EXTRA.append((DESIGN_DIFF_CONTROL_LABEL, design_diff_control_case))
+LOG_FAMILY[DESIGN_DIFF_CONTROL_LABEL] = "branch-worktree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
