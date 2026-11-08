@@ -1254,8 +1254,9 @@ def build_fixtures():
     """The EAGER fixtures: config folders, fake gh files, message files and the link probe. Each git
     repo is a builder below, and it is built on first use."""
     global LINKS_MADE, SYMWT_MADE
-    # `sub` is the folder a foreground cd reaches from the config folder. A folder that does not exist is never entered.
-    for folder in (CFG, os.path.join(CFG, "sub"), LOGDIR, PROJ, CLONE, NOGIT, os.path.join(UNDERTESTS, ".git"),
+    # `sub` and `docs` are the folders a foreground cd reaches from the config folder. A folder that does not exist is never entered.
+    for folder in (CFG, os.path.join(CFG, "sub"), os.path.join(CFG, "docs"), LOGDIR, PROJ, CLONE, NOGIT,
+                   os.path.join(UNDERTESTS, ".git"),
                    os.path.join(ROOT, "tmp")):   # the temp folder the silent-write cases read
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
@@ -12617,6 +12618,72 @@ sh("frozen shell: cd sub &sed -i on settings.json by its name, from the config f
    "[follow_cd pin]", "cd sub &sed -i s/a/b/ settings.json", "deny", "frozen-path", cwd=CFG)
 sh("frozen shell: cd into the config folder &sed -i on settings.json by its name, from outside, a backgrounded cd, "
    "allows [follow_cd pin]", "cd " + slash(CFG) + " &sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+# F1. A cd inside a backgrounded list applies to the later segments of that same list, so the sed -i after it
+# writes the frozen file in the config folder. `& echo $!` passes detached-launch, so the write reaches this reader.
+sh("frozen shell: F1, cd into the config folder && sed -i on settings.json, backgrounded with a pid, from outside, "
+   "denies [follow_cd red]", "cd " + slash(CFG) + " && sed -i s/a/b/ settings.json & echo $!", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen shell: F1, the same list in a subshell, backgrounded with a pid, from outside, denies [follow_cd red]",
+   "(cd " + slash(CFG) + " && sed -i s/a/b/ settings.json) & echo $!", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F1 control, cd into the config sub folder && sed -i on settings.json, backgrounded with a pid, "
+   "allows [follow_cd control]", "cd " + slash(CFG) + "/sub && sed -i s/a/b/ settings.json & echo $!", "allow",
+   cwd=NOGIT)
+sh("frozen shell: F1 control, the same subshell on notes.txt, backgrounded with a pid, allows [follow_cd control]",
+   "(cd " + slash(CFG) + " && sed -i s/a/b/ notes.txt) & echo $!", "allow", cwd=NOGIT)
+# F2. A cd that may not run. Each command leaves the shell in the config folder when the cd does not run, so the
+# sed -i after it writes the frozen settings.json there. The notes.txt control is the same chain on a file that is
+# not frozen, and it is allowed.
+for _name, _command in (
+    ("ls X || cd docs", "ls X || cd docs; sed -i s/a/b/ settings.json"),
+    ("test -f && cd docs", "test -f /nonexist && cd docs; sed -i s/a/b/ settings.json"),
+    ("if false; then cd docs", "if false; then cd docs; fi; sed -i s/a/b/ settings.json"),
+    ("cd docs with two arguments", "cd docs extra; sed -i s/a/b/ settings.json"),
+    ("bash heredoc holding cd docs", "bash <<'EOF'\ncd docs\nEOF\nsed -i s/a/b/ settings.json"),
+):
+    sh("frozen shell: F2, %s, then sed -i on settings.json, denies [may-not-run red]" % _name, _command, "deny",
+       "frozen-path", cwd=CFG)
+sh("frozen shell: F2 control, ls X || cd docs, then sed -i on notes.txt, allows [may-not-run control]",
+   "ls X || cd docs; sed -i s/a/b/ notes.txt", "allow", cwd=CFG)
+# F4. A subshell that cds into the config folder, backgrounded from outside it. The cd is inside the parens, so the
+# sed -i writes the frozen file. The bare `&` form is refused by detached-launch before this reader, so the form that
+# reaches it carries `& echo $!`; the bare form stays pinned as refused.
+sh("frozen shell: F4, (cd config folder; sed -i on settings.json) & echo $!, from outside, denies [subshell red]",
+   "(cd " + slash(CFG) + "; sed -i s/a/b/ settings.json) & echo $!", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: F4 control, the same subshell on notes.txt with a pid, allows [subshell control]",
+   "(cd " + slash(CFG) + "; sed -i s/a/b/ notes.txt) & echo $!", "allow", cwd=NOGIT)
+sh("frozen shell: F4 pin, the bare & form, (cd config folder; sed -i on settings.json) &, is refused by "
+   "detached-launch first", "(cd " + slash(CFG) + "; sed -i s/a/b/ settings.json) &", "deny", "detached-launch",
+   cwd=NOGIT)
+# F3, cost. A 400-segment command, 399 echo segments of 150 characters and a sed -i on the frozen settings.json, is
+# judged in process. The verdict is checked first, then the CPU seconds of frozen_shell_hit. dir_before_segment reads
+# the segments before each segment, so the cd-following cost grows with the square of the segment count. CPU time is
+# read as judge_in_process reads it. The guard is loaded through _load_guard_module, so a GUARD_UNDER_TEST copy is timed.
+F3_SEGMENTS = 400
+F3_TEXT = "x" * 150
+F3_COMMAND = ('echo "%s"; ' % F3_TEXT) * (F3_SEGMENTS - 1) + "sed -i s/a/b/ settings.json"
+F3_LIMIT_S = 2.0
+
+
+def frozen_cost_case():
+    guard = _load_guard_module()
+    saved = os.environ.get("CLAUDE_CONFIG_DIR")
+    os.environ["CLAUDE_CONFIG_DIR"] = CFG
+    try:
+        started = time.process_time()
+        hit = guard.frozen_shell_hit(F3_COMMAND, CFG)
+        took = time.process_time() - started
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved
+    shape = "%d segments of %d characters" % (F3_SEGMENTS, len(F3_TEXT))
+    if hit != "settings.json":
+        return False, "frozen_shell_hit missed the frozen settings.json in the %s: got %r" % (shape, hit)
+    if took >= F3_LIMIT_S:
+        return False, "frozen_shell_hit took %.2f CPU s on the %s, not under %g s" % (took, shape, F3_LIMIT_S)
+    return True, "frozen_shell_hit took %.2f CPU s on the %s, under %g s" % (took, shape, F3_LIMIT_S)
+
 
 # An output flag writes its file wherever its command runs. A spaced subshell is already read. The subshell
 # glued to its command word, and the text of `sh -c`, are not.
@@ -14724,6 +14791,10 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The frozen cost check is appended here for the same reason. Its family is the frozen section's, set by hand.
+FROZEN_COST_LABEL = "frozen: a 400-segment command is judged in process within 2 s"
+LOG_CHECKS_EXTRA.append((FROZEN_COST_LABEL, frozen_cost_case))
+LOG_FAMILY[FROZEN_COST_LABEL] = "frozen"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
