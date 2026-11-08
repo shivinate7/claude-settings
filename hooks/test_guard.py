@@ -22648,8 +22648,7 @@ GCX_TEMP = os.path.join(ROOT, "gcx_tmp")  # the temp folder the guard reads for 
 GCX_FIX = {}                           # the fixture's paths, built once by _gcx_fixture
 # Each @NAME in a command becomes the folder it names, so a command reads as the shell would type it.
 GCX_TOKENS = (("@SCRATCH_WT", "scratch_wt"), ("@SCRATCH_CLONE", "scratch_clone"), ("@TMP_CLONE", "tmp_clone"),
-              ("@PRIMARY", "primary"), ("@HOME", "home"), ("@SIB", "sib"), ("@RED", "red"), ("@EMPTY", "empty"),
-              ("@LANE", "lane"))
+              ("@PRIMARY", "primary"), ("@HOME", "home"), ("@SIB", "sib"), ("@RED", "red"), ("@EMPTY", "empty"))
 
 
 def _gcx_fixture():
@@ -22837,13 +22836,10 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a clone
 
 # ------------------------------------------------------------------ other-checkout: git -C, round 3
 #
-# Two groups of rows on other_checkout_hit's `git -C` judgment. The verb set leaves out the verbs that change a
-# checkout's files or index without moving a branch (`rm`, `mv`, `update-index`, `read-tree`,
-# `checkout-index`), so `git -C <primary> rm f` passes where `cd <primary> && git rm f` is refused. The rows
-# for that verb set are red on the head. The second group asks that a top-level call's `git -C` into the lane
-# its session record names, from the primary checkout, pass. Today a lone `cd` into that lane passes, and
-# `cd <lane> && git commit` and `git -C <lane> commit` are both refused, so those rows are red for the same
-# reason as the cd form. Whether the chained forms should pass is an open question, not settled by these rows.
+# Rows on other_checkout_hit's `git -C` judgment. The verb set leaves out the verbs that change a checkout's
+# files or index without moving a branch (`rm`, `mv`, `update-index`, `read-tree`, `checkout-index`), so
+# `git -C <primary> rm f` passes where `cd <primary> && git rm f` is refused. Those five rows are red on the
+# head. A `git -C` into a session's recorded lane is refused as its `cd && git` form is, so no row asks it to pass.
 GCX_TOP_SESSION = "gcx-session-0003"  # a session whose top-level call from its own lane records that lane
 
 
@@ -22888,17 +22884,8 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C rev-parse of the pri
                          _gcx_row("allow", "home", "git -C @PRIMARY rev-parse HEAD")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C show of the primary checkout is allowed",
                          _gcx_row("allow", "home", "git -C @PRIMARY show HEAD")))
-# The top-level group: a session's `git -C` into the lane its own session record names, from the primary
-# checkout, and its chained `cd` form, are asked to pass. The negative row is green: a sibling agent's home
-# stays refused under the same record. Scope first: the session's recording call from its lane writes the record.
-LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into the lane its session record names, from the "
-                         "primary checkout, is allowed",
-                         _gcx_row("allow", "primary", "git -C @LANE commit -m x", agent=None,
-                                  session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
-LOG_CHECKS_EXTRA.append(("the cd form of the git -C recorded-lane commit: a top-level cd into the lane its session "
-                         "record names, then git commit, is allowed",
-                         _gcx_row("allow", "primary", "cd @LANE && git commit -m x", agent=None,
-                                  session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
+# A top-level call whose session record names its own lane still gets no exemption for a sibling agent's
+# home: the git -C commit is refused. Scope first: the session's recording call from its lane writes the record.
 LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibling agent's home, with a session record "
                          "naming another lane, is refused",
                          _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
