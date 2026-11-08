@@ -1,11 +1,11 @@
 {
   "title": "The merge tool refuses a review record whose rounds name a head other than --head",
   "why": "Coordinator 13:12 CST Nov 8, from lane agent-report-shas-resolve (session_013NEJL1333yS5ziKFeWsjHC), 13:11 CST: the merge tool accepted a record on #2235 at 660db61b0 whose rounds 1-3 read #1864's heads. The tool must refuse a record whose rounds name a head other than --head, unless it is a tool-checked fix-check chain. Triage checked overlap: review-record-past-head (#2200) covers recording a past round for a head no longer live, and replacement-pr-carries-review (#2207) allows a replacement PR with an identical tree to name the replaced PR's record; neither refuses a mismatched head. This step keeps #2207's identical-tree case as a tool-checked exception.",
-  "note": "Coordinator 13:13 CST Nov 8: routed to lane review-record-past-head (session_013NEJL2WYHwGu4KngBLPUaF). Scope from the coordinator (sent 15:28 CST Nov 8; it asked for step round-lines-carry-head, folded here): each Round line names the head that round read, e.g. `Round 2: reviewer, sonnet, FAIL, 765158ded`, and the merge gate checks only that the last round, or a fix check, read the live head. Rounds on older heads stay allowed (decision pr-review-record). Incident: records on #2224, #2296, #2235 and #2265 were voided for older-head rounds, then the voids were withdrawn; a record does not show which head each round read, so lanes guessed and 7 PRs stalled. Related: record-after-each-round.",
+  "note": "Coordinator 13:13 CST Nov 8: routed to lane review-record-past-head (session_013NEJL2WYHwGu4KngBLPUaF). Scope from the coordinator (sent 15:28 CST Nov 8; it asked for step round-lines-carry-head, folded here): each Round line names the head that round read, e.g. `Round 2: reviewer, sonnet, FAIL, 765158ded`, and the merge gate checks only that the last round, or a fix check, read the live head. Rounds on older heads stay allowed (decision pr-review-record). Incident: records on #2224, #2296, #2235 and #2265 were voided for older-head rounds, then the voids were withdrawn; a record does not show which head each round read, so lanes guessed and 7 PRs stalled. Related: record-after-each-round. Coordinator 15:30 CST Nov 8: lane session_013NEJL2WYHwGu4KngBLPUaF (#2277) has the new scope and restarts at round 1.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2WYHwGu4KngBLPUaF",
-  "status": "todo",
+  "status": "doing",
   "order": 803,
-  "updatedAt": "2026-11-08T15:29:00-06:00"
+  "updatedAt": "2026-11-08T15:31:00-06:00"
 }
