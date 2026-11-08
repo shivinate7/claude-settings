@@ -1034,7 +1034,7 @@ need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
 
-# ---- Cases 81 to 84: the first-frame check after its own boot (owner ruling, 2026-11-08 12:00 CST). It runs
+# ---- Cases 81 to 85: the first-frame check after its own boot (owner ruling, 2026-11-08 12:00 CST). It runs
 # `sim_boot_record.py --check UDID` once, after the record call. A failed check stops the run before any test or hold.
 check_ran_on() { grep -Fxq "simctl bootstatus $1" "$calls" && grep -Fq "simctl io $1 screenshot " "$calls"; }
 no_check_call() { ! grep -Eq '^simctl (bootstatus|io) ' "$calls"; }
@@ -1078,6 +1078,28 @@ need "stderr is one line: first-frame check failed, naming the Duo" check_stderr
 need "lease given" lease_released
 need "lock freed" lock_gone
 end_case "84 --hold own boot, one-colour first frame: no hold child, exit 1, the Duo shut down"
+
+# Case 85: the first-frame check exits 2, which is not the check's own fail code 1. Owner ruling (item 433 a): only exit 1
+# stops the run, so this run passes: it boots, tests and shuts down with xcodebuild's exit code. A python3 shim exits 2 on
+# every `--check` call and runs the real python3 for the rest (the record call), so bin/sim-test runs as it is.
+pyshim_check() {
+  local real_python
+  real_python=$(command -v python3)
+  /bin/mkdir -p "$work/pyshim"
+  cat > "$work/pyshim/python3" <<SH
+#!/bin/sh
+case " \$* " in *" --check "*) echo "\$*" >> "\$RUN/py_check"; exit 2 ;; esac
+exec "$real_python" "\$@"
+SH
+  chmod +x "$work/pyshim/python3"
+}
+
+fresh; pyshim_check; rm -f "$work/py_check"; run PATH="$work/pyshim:$PATH"
+need "the check ran, and it exited 2" test -s "$work/py_check"
+need "exit code is xcodebuild's, 0" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no first-frame failure on stderr" no_check_msg
+end_case "85 own boot, first-frame check exits 2: not the check's fail code, so the run passes and tests run"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail

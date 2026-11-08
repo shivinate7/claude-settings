@@ -992,7 +992,7 @@ class SimBootRecordTests(unittest.TestCase):
         result = self.run_mode("--check")
         self.assertEqual(self.simctl_reads() + len(self.check_calls()), 0,
                          "--check with no UDID called simctl")
-        self.assertNotEqual(result.returncode, 0, "--check with no UDID exited 0, want non-zero")
+        self.assertEqual(result.returncode, 2, "--check with no UDID exited %d, want 2" % result.returncode)
 
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
