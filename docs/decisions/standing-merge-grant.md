@@ -13,7 +13,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - In a cloud session, `merge.py` refuses `--confirm` unless the session recorded a merge role: `batch-runner`, or `solo-owner` for a solo or one-lane session.
 - A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). Its cloud confirm runs under the `solo-owner` role, with no ask only in the repos `SOLO_MERGE_REPOS` names. It widens no grant (decision `session-tiers`, Solo session).
 - A one-lane session that the owner started merges its own lone lane under the same limits (owner, 2026-11-02 15:14 CST; decision `session-tiers`), with the role and scope of a solo session.
-- Ruling a, the solo-owner scope (coordinator, 2026-11-07 18:18 CST): an owner-started session that has started another session (`create_session`) is a coordinator. It never takes `solo-owner`.
+- An owner-started session that has started another session is a coordinator and never takes `solo-owner` (coordinator, 2026-11-07 18:18 CST; ruling a in decision `session-tiers`).
 - A lane session that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
 
