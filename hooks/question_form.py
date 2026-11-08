@@ -1388,40 +1388,51 @@ RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 # not answered, names him in passing and gives no ruling. Two parts, one home:
 # OWNER_MARK_RE, the match: `Owner, <date>`, `owner Nov 1`, `Owner 17:02 CST:`, `the owner's 12:27 CST ruling`,
 # `(shiv, page item 9, a)`, `(shiv; recorded ...)`, `Owner, page item 150`, `Owner item 401 a`, `owner picked a`,
-# `Owner go`, `Owner grant Nov 2`, `Owner answer on page item 257`, `shiv's ruling on c95`, `shiv's grant:`, `shiv
-# approved`, `Your ruling(s) Oct 21`, and a bare `Ruling(s) <date>` that no advisor gave. "owner" right after "no",
-# "not a", "not an" or "waits on" is no mark. Nor is `(owner note ...)`, `(shiv's caution ...)`, "the owner's
-# review", "the owner's grant names it", "the owner has not answered", "Owner item 437 (slug) is open" or "co-owner".
-# NON_RULING_LEAD, the exclude: Incident, Gripe, Deferred, Defect, Risk, Note or Caution as a word in the sentence's
-# first clause, or before the mark in the mark's clause. A clause ends at a colon or semicolon, but not at the colon
-# of a clock time. Such a sentence names the owner as the source of a report, not of an answer.
+# `Owner go`, `the owner's go`, `Owner grant Nov 2`, `Owner answer on page item 257`, `shiv ruling, item 330 b`,
+# `shiv ruling in chat, Nov 2`, `Owner chat Nov 3`, `Owner, Queue item 161 b`, `The owner keeps (a)`, `shiv's ruling
+# on c95`, `shiv's grant:`, `shiv approved`, `Your ruling(s) Oct 21`, a bare `Ruling(s) <date>` that no advisor gave,
+# and a `Rulings:` label that opens a list. "owner" right after "no", "not a", "not an", "waits on" or "waits on the"
+# is no mark. Nor is `(owner note ...)`, `(shiv's caution ...)`, `(owner grant needed ...)`, "the owner's review", "the
+# owner's grant names it", "the owner has not answered", "Owner item 437 (slug) is open" or "co-owner".
+# NON_RULING_LEAD, the exclude: Incident, Gripe, Deferred, Defect, Risk, Note or Caution as the label that opens a
+# clause: at the clause start (after bullet or emphasis marks, with at most two words before it, as in "Second
+# incident"), then a colon, a comma or " (". A lead word inside a hyphenated or dotted word (`notes-fix-large-1`,
+# `notes.md`) or mid-clause is no label. The label bars the sentence's first clause, and the mark's own clause. A
+# clause ends at a colon or semicolon, but not at the colon of a clock time. Such a sentence names the owner as the
+# source of a report, not of an answer.
 # OWNER_RULING_RE joins them. NON_RULING_OPENING_RE is the first-clause test alone, for a unit's tail sentence.
 _WHO = r"(?:owner|shiv)\b"
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
 _CLOCK = r"\d{1,2}:\d{2}"
 _DATE = r"(?:" + _MONTH + r"\s+\d|\d{4}-\d{2}-\d{2})"
-_BARE_WHO = r"(?<![\w'-])(?<!\bno )(?<!\bnot a )(?<!\bnot an )(?<!\bwaits on )" + _WHO
+_BARE_WHO = r"(?<![\w'-])(?<!\bno )(?<!\bnot a )(?<!\bnot an )(?<!\bwaits on )(?<!\bwaits on the )" + _WHO
+_ITEM = r"(?:(?:page|queue)\s+)?item\s+\d"
 # Each form opens with "(", "owner", "shiv", "your" or "ruling": the first-letter lookahead skips other positions
 # fast, which keeps the scan of every step sentence near its old cost.
 _OWNER_MARK = (
-    r"(?=[(osyr])(?:\(\s*" + _WHO + r"(?:'s)?(?=[\s,:;)])(?!\s+(?:note|caution)\b)"
-    r"|" + _BARE_WHO + r"(?:\s*,\s*(?:\d|chat\b|(?:page\s+)?item\s+\d)|\s*,?\s*" + _MONTH + r"\s+\d)"
+    r"(?=[(osyr])(?:\(\s*" + _WHO + r"(?:'s)?(?=[\s,:;)])(?!\s+(?:note|caution|(?:go|grant|answer|ruling)\s+needed)\b)"
+    r"|" + _BARE_WHO + r"(?:\s*,\s*(?:\d|chat\b|" + _ITEM + r")|\s*,?\s*" + _MONTH + r"\s+\d)"
+    r"|" + _BARE_WHO + r"(?:\s+rulings?\s+in)?\s+chat\s*,?\s*" + _MONTH + r"\s+\d"
     r"|" + _BARE_WHO + r"(?:'s)?\s+(?:page\s+)?item\s+\d+\s*,?\s*(?:\(\s*(?:page\s+answer|\d|" + _MONTH + r")"
     r"|\"?(?:[a-e]|pick|picked|done|none|neither)\b)"
     r"|" + _BARE_WHO + r"(?:'s)?\s+" + _CLOCK +
     r"|" + _BARE_WHO + r"\s+(?:picked|pick|chose|ruled|answered|decided|go|pressed|approved|granted|said)\b"
     r"|" + _BARE_WHO + r"(?:'s)?\s+(?:rulings?|grant|answer)(?:\s*[:(]|\s*,?\s*(?:\d|" + _MONTH + r"\s+\d)"
-    r"|\s+(?:on|of|to)\s+\S*\d|\s+(?:on|to)\s+(?:page\s+)?item\s+\d)"
+    r"|\s+(?:on|of|to)\s+\S*\d|\s+(?:on|to)\s+" + _ITEM + r"|\s*,\s*" + _ITEM + r")"
+    r"|" + _BARE_WHO + r"'s\s+go\b"
+    r"|" + _BARE_WHO + r"\s+(?:keeps?|kept)\s+(?:\([a-e]\)|[a-e](?=\s*[.,;:)]|\s*$))"
     r"|(?<![\w'-])your\s+rulings?\b"
-    r"|(?<![\w'-])(?<!advisor )rulings?\s*,?\s+" + _DATE + r"(?![^:]{0,30}\(\s*advisor\b))")
-NON_RULING_LEAD = r"\b(?:incident|gripe|deferred|defect|risk|note|caution)s?\b"
+    r"|(?<![\w'-])(?<!advisor )rulings?\s*,?\s+" + _DATE + r"(?![^:]{0,30}\(\s*advisor\b)"
+    r"|(?<![^\s*_>#+-])(?<![\w,.]\s)rulings?\s*:)")
+NON_RULING_LEAD = (r"[\s*_>#+-]*(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred|defect|risk|note|caution)s?"
+                   r"(?=[*_]*(?:[:,]|\s+\())")
 _CLAUSE_CHAR = r"(?:\d:\d|[^:;])"
-_OPENS_WITH_REPORT = r"\A" + _CLAUSE_CHAR + r"*?" + NON_RULING_LEAD
+_OPENS_WITH_REPORT = r"\A" + NON_RULING_LEAD
 OWNER_MARK_RE = re.compile(_OWNER_MARK, re.I)
 NON_RULING_OPENING_RE = re.compile(_OPENS_WITH_REPORT, re.I | re.S)
 OWNER_RULING_RE = re.compile(
-    r"\A(?!" + _OPENS_WITH_REPORT + r")(?:.*?(?:;|:(?!\d)))??"
-    r"(?:(?!" + NON_RULING_LEAD + r")" + _CLAUSE_CHAR + r")*?" + _OWNER_MARK, re.I | re.S)
+    r"\A(?!" + NON_RULING_LEAD + r")(?:.*?(?:;|:(?!\d)))??(?!" + NON_RULING_LEAD + r")"
+    + _CLAUSE_CHAR + r"*?" + _OWNER_MARK, re.I | re.S)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
