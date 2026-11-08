@@ -168,9 +168,13 @@ def check_stage(segment: str, background: bool) -> str:
 
 
 def _ends_in_ampersand(stages, first: int) -> bool:
-    """Whether the pipeline is backgrounded by a lone `&` word in the stage at `first` or a later one."""
+    """Whether the pipeline is backgrounded by a lone `&` word in the stage at `first` or a later one.
+    split_segments leaves the `&` of `|&` at the head of the next stage; that one is a pipe, not a job
+    (the same reading as background_commands in guard.py), so it is skipped."""
     for segment in stages[first:]:
         tokens = segment_tokens(segment)
+        if tokens and tokens[0] == "&":
+            tokens = tokens[1:]
         if tokens and "&" in tokens:
             return True
     return False
