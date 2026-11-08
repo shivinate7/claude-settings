@@ -12,6 +12,9 @@ Rule `stale-index` in `hooks/guard.py` refuses a `git commit` whose tree is an o
 - Passes: a backward `reset --soft` (C is no ancestor of HEAD), a revert, a file checked out from an older commit, an amend with no move, a repo with no commits, and a checkout whose index already holds HEAD's tree.
 - Judged like `conflict-markers`: only when each earlier segment is a git add, a git read, `true`, `false` or `cd`, and only the first commit of a call. Any other earlier step could fix the index, so the commit is not read.
 - Limits: a path edited after the move whose entry matches neither C nor HEAD is not caught. A HEAD log that cannot be read gives no hit. With no HEAD log of its own, two moves made in other worktrees give only the newest one's C, so the older move's files are missed. Two chained moves, and a move whose target holds a substitution, are not read. A commit in `sh -c` or `eval`, a link or a directory where a file was, a failed read, and paths past the first 1000 are not judged (`guard-guards-mistakes-only`).
+  - A chained move to a target that diverged from HEAD is not judged.
+  - `git fetch && git commit` in one call is not judged, because fetch is not chain-safe.
+  - A read-tree without the reset still refuses a later deliberate `rm`. This is accepted (lane ruling, 12:50 CST Nov 8).
 - Cost: per commit segment, one `git rev-parse` and two small file reads. Only when C exists: one `git merge-base --is-ancestor`, one `git diff-index`, two `git ls-tree`, and one `git ls-files` or `git hash-object`. A chained move adds one `git rev-parse`. Files written: none. `stale_commit_cost_case` in `hooks/test_guard.py` pins the one added spawn for a commit with no move.
 
 Protected by the `stale-index` cases in `hooks/test_guard.py`, red before the rule landed.

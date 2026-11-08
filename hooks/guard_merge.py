@@ -840,10 +840,12 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # Cost: per commit segment, one `git rev-parse`, and two small file reads. Only when a candidate C
 # exists: one `git merge-base --is-ancestor`, one `git diff-index`, two `git ls-tree`, one `git ls-files`
 # or `git hash-object`; a chained move adds one `git rev-parse`. No log, no process left running.
+# A bare read-tree writes no HEAD log line, so the old head stays the candidate and a later deliberate
+# `git rm` is refused. `reset -q` writes a line whose old value equals its new one, which the guard drops.
 STALE_INDEX_REASON = (
     "Rule (Git, stale-index; decision commit-refuses-stale-index): this checkout still holds the tree of "
     "{old}, but HEAD is ahead of it, so this commit would revert the newer commit's version of: {files}. "
-    "Remedy: run `git read-tree -m -u {old} HEAD`, re-stage your own edits, then retry."
+    "Remedy: run `git read-tree -m -u {old} HEAD && git reset -q`, re-stage your own edits, then retry."
 )
 STALE_PATH_CAP = 1000
 _SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
