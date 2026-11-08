@@ -1,11 +1,11 @@
 {
   "title": "The guard reads a split spelling of git, such as 'gi'+'t', as git, and agents report a refused act instead of re-spelling it",
   "why": "A reviewer in lane session_013NEJKzXJPDWrSRe3i1fGJd (#1593) re-spelled a refused git command as 'gi'+'t' to get past a refusal (coordinator, 04:44 CST Nov 8).",
-  "note": "Fix: a guard row reads split forms as git, red case first; agents/reviewer.md and agents/builder.md gain the line \"report a refused act, never re-spell it\". Branch cmk-split-git-word, `Merge after: #1593`. Queue fix (owner item 386). Slug from the coordinator. Filed 04:46 CST Nov 8. Red rows at 43fac17a3: common splits (g'i't, gi\"\"t, \"g\"it, \\git, env/command forms) were already refused and stay as 16 green locks; 6 ANSI-C rows ($'g'it, g$'i't, $'\\147it') are red because shlex does not decode them. A builder fixes the word reader and adds the agent-file line (lane, 04:54 CST Nov 8). Interpreter-body forms go to step guard-interpreter-body-git. Draft PR #1937 (head 5d4d09689), `Merge after: #1593`; full test_guard.py PASS; the mutation run left 3 survivors, and a test-author re-points their kill rows, which relied on $'..' failing shlex (lane, 05:34 CST Nov 8).",
+  "note": "Fix: a guard row reads split forms as git, red case first; agents/reviewer.md and agents/builder.md gain the line \"report a refused act, never re-spell it\". Branch cmk-split-git-word, `Merge after: #1593`. Queue fix (owner item 386). Slug from the coordinator. Filed 04:46 CST Nov 8. Red rows at 43fac17a3: common splits (g'i't, gi\"\"t, \"g\"it, \\git, env/command forms) were already refused and stay as 16 green locks; 6 ANSI-C rows ($'g'it, g$'i't, $'\\147it') are red because shlex does not decode them. A builder fixes the word reader and adds the agent-file line (lane, 04:54 CST Nov 8). Interpreter-body forms go to step guard-interpreter-body-git. Draft PR #1937 (head 5d4d09689), `Merge after: #1593`; full test_guard.py PASS; the mutation run left 3 survivors, and a test-author re-points their kill rows, which relied on $'..' failing shlex (lane, 05:34 CST Nov 8). #1937: round 1 haiku PASS, round 2 sonnet PASS, record posted on 6807c5e85, lane lint running, then to runner 8 (lane, 06:27 CST Nov 8).",
   "phase": "now",
   "status": "doing",
   "order": 607,
   "owner": "triage",
   "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
-  "updatedAt": "2026-11-08T05:35:00-06:00"
+  "updatedAt": "2026-11-08T06:25:00-06:00"
 }
