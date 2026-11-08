@@ -171,6 +171,9 @@ DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
 GREEN_ON_MAIN = re.compile(r"(?<![\w-])(?:green|met) on main(?![\w-])", re.I)
 # A negator before the phrase in its sentence: the check is said not to be green. `\w+n't` covers isn't, wasn't, hasn't.
 NEGATOR = re.compile(r"(?<![\w'-])(?:not|never|no|yet|\w+n['’]t)(?![\w'-])", re.I)
+# A future marker in the same sentence: the green-on-main claim is about a check that is not green yet. `after`
+# counts only when `merge`, `merges` or `lands` follows it (`merged` is past, so it does not).
+FUTURE_MARKER = re.compile(r"\b(?:will|expected|once|pending)\b|\bafter\b.*\b(?:merge|merges|lands)\b", re.I)
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -1310,10 +1313,11 @@ def unfiled(steps, work):
 
 
 def shown_green(sentence):
-    """True when the sentence holds `green on main` or `met on main` with no negator before it in its clause, and a source."""
+    """True when the sentence holds `green on main` or `met on main` with no negator before it in its clause, a
+    source, and no future marker (FUTURE_MARKER) anywhere in the sentence: a forward claim is not shown green."""
     plain = any(not NEGATOR.search(ANSWERED_CLAUSE_BREAK_RE.split(sentence[:m.start()])[-1])
                 for m in GREEN_ON_MAIN.finditer(sentence))
-    return plain and bool(DONE_REF_RE.search(sentence))
+    return plain and bool(DONE_REF_RE.search(sentence)) and not FUTURE_MARKER.search(sentence)
 
 
 def done_without_check(steps):
