@@ -10091,6 +10091,17 @@ PFR_LINES = {
                                    + pfr_post("toolu_c1", PFR_PARTIAL_RECORD),
     "fix-check-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
                         + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
+    # A fix check FAIL, then a fix check PASS whose record is posted. The PASS record clears only its own line.
+    "fix-fail-then-fix-pass": pfr_pr()
+        + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
+        + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), PFR_FINDING), blocks=True)
+        + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "PASS"))),
+    # The control: the same, with the FAIL fix record posted between the two reports.
+    "fix-fail-record-then-fix-pass": pfr_pr()
+        + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
+        + pfr_post("toolu_c2", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL")))
+        + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), PFR_FINDING), blocks=True)
+        + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "PASS"))),
     # A round report is cleared by a Round line only; a Fix check line does not clear it.
     "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                              + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
@@ -10337,6 +10348,12 @@ pfr_allow("a fix check PASS for PR 1464 posted, then a push to a branch whose PR
           pfr_path("fix-pass-other-branch"))
 pfr_allow("a round PASS record with no Fix check line, posted before a push to its head branch", PFR_FIX_PUSH,
           pfr_path("round-record-same"))
+# A fix check FAIL is unrecorded, so a later fix check PASS with its record posted does not clear it. The push
+# goes to another branch, so the head-branch rule above cannot be the cause of the refusal.
+pfr_refuse("a fix check FAIL unrecorded, then a fix check PASS with its record posted, then the push", PFR_NEXT_PUSH,
+           pfr_path("fix-fail-then-fix-pass"))
+pfr_allow("a fix check FAIL recorded, then a fix check PASS recorded, then a push to another branch", PFR_NEXT_PUSH,
+          pfr_path("fix-fail-record-then-fix-pass"))
 
 # =========================================================================== 5g. archive of a lane
 FAMILY = "lane-closes-after-records"
