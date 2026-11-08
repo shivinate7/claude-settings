@@ -8978,8 +8978,9 @@ for _name, _command in (
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A backtick span in a python body is text: python runs no shell from it, so a python run of that body is
-# allowed. A file whose runner is unknown, or run through a wrapper, keeps its body in view, so its span is
-# refused. The two deny cases pin what the head does for those forms.
+# allowed. A file run by an unrecognised runner word drops its body, as on main. Only a wrapper (`env`,
+# `sudo`, `timeout`) or a `./f` run keeps the body in view, so its span is refused. The two deny cases pin
+# what the head does for those forms.
 PY_TICK_BODY = 'd = {"why": "open the PR with `gh pr create` after review"}'
 sh("draft-pr: a python body with a backtick gh pr create span, fed to python3, is allowed",
    "\n".join(["python3 - <<'EOF'", PY_TICK_BODY, "EOF"]), "allow", cwd=NOGIT)
