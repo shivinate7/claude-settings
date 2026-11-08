@@ -1,0 +1,11 @@
+{
+  "title": "Skill test suites that never run on Windows run in the batch's Windows job",
+  "phase": "next",
+  "status": "todo",
+  "order": 264,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "These skill suites never run on Windows, even in a batch: skills/waiting-page/test_stale_pages.py, test_splice.py, test_export_page.py, test_page_grant.py and test_skill_park_relay.py; skills/roadmap/test_build.py; skills/project-ops/tests/test_scaffold.py; skills/roadmap/tests/page.test.mjs and skills/waiting-page/tests/page.test.mjs. Found by lane windows-tests-for-touched-files (coordinator, 23:25 CST Nov 7).",
+  "note": "Done check: the batch Windows job lists each suite, and a red case in one of them turns it red. Not a queue fix; waits under the item 384 hold. Slug and title by triage; no source gave one.",
+  "updatedAt": "2026-11-07T23:28:00-06:00"
+}

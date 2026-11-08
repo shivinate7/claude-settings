@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL4HeTtQTFg5s9G62RY",
   "why": "Lane lint runs on Linux only, and #1543's trigger runs the Windows shards only when guard files change. So a Windows-only red in a skill test reaches the batch run, drops the lane and costs a full rebuild. Incident: #1472 (map import aliases), T11b in skills/plain-english-map/tests/fact-lines.test.mjs line 817, dropped from batch 63 #1782 at 23:12 CST Nov 7 (runner 8; coordinator, 23:21 CST).",
-  "note": "Fix: #1543's trigger, or lane lint, runs on Windows every test file a lane touches. Not folded into step guard-pr-runs-windows-shards: its PR #1543 is open and scoped to guard diffs, and widening it mid-review restarts its review. Build on #1543's trigger after it merges, or stack on it. A queue fix under the item 384 hold. Slug from the coordinator; title by triage. 23:22 CST: lane session_013NEJL4HeTtQTFg5s9G62RY, stacked on #1543.",
-  "updatedAt": "2026-11-07T23:25:00-06:00"
+  "note": "Fix: #1543's trigger, or lane lint, runs on Windows every test file a lane touches. Not folded into step guard-pr-runs-windows-shards: its PR #1543 is open and scoped to guard diffs, and widening it mid-review restarts its review. Build on #1543's trigger after it merges, or stack on it. A queue fix under the item 384 hold. Slug from the coordinator; title by triage. 23:22 CST: lane session_013NEJL4HeTtQTFg5s9G62RY, stacked on #1543. 23:30 CST: the lane waits on owner page item 400 windows-run-per-lane (a draft-only Windows job, a lane-dispatched run, or keep today).",
+  "updatedAt": "2026-11-07T23:28:00-06:00"
 }
