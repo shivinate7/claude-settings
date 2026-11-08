@@ -4297,6 +4297,14 @@ class PastRulingRetryBudgetTests(unittest.TestCase):
                         "PAST_RULING_TIMEOUT (found %r)" % (retry, first))
         self.assertLessEqual(first + retry + start_up_allowance, stop_timeout,
                              "the past-ruling tries and the start-up allowance overrun the Stop hook's timeout")
+        # Owner pick 'a' on page item 379 (past-ruling-check-time), typed in chat, 2026-11-07 21:33 CST.
+        with self.subTest("the first try"):
+            self.assertEqual(first, 25, "call_judge.PAST_RULING_TIMEOUT is %r; the owner's pick is 25 s" % (first,))
+        with self.subTest("the retry"):
+            self.assertEqual(retry, 15, "call_judge.PAST_RULING_RETRY_TIMEOUT is %r; the owner's pick is 15 s" % (retry,))
+        with self.subTest("the Stop hook"):
+            self.assertEqual(stop_timeout, 50, "the report_guard Stop hook timeout is %r; the owner's pick is 50 s"
+                             % (stop_timeout,))
 
 
 class AnsweredNeedsSourceTests(unittest.TestCase):
