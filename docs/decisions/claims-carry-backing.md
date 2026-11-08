@@ -57,7 +57,7 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 Built, report-only. `merge/merge.py` selects prose lines and sends each file to the model once (read merge/merge.py:2459-2496; read merge/merge.py:2559-2575; read merge/merge.py:2599-2641).
 
-- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:613-630). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2483-2489).
+- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2483-2489).
 - Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:2617). The prompt also carries an excerpt of each backticked path a line names but does not cite, when the line also names another backticked name or number: the lines of that file within 3 of each of its lines that holds one of those names (read merge/merge.py:2544-2553; read lint/stale_cites.py:652-681).
 - Cap: 3 files per merge (read merge/merge.py:2454). The lines of a file past the cap read UNKNOWN, counted under "past the call cap" (read merge/merge.py:2571-2572). The report prints each stale or unbacked line, at most 20, then one count line for the rest (read merge/merge.py:2635-2636).
 - Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass. The report prints one UNKNOWN count line for every line not judged, by cause, with no raw error text (read merge/merge.py:2617-2624; read merge/merge.py:2640). A failure of the whole plan prints one UNKNOWN line in place of that count (read merge/merge.py:2633).
@@ -88,7 +88,7 @@ No daemon and no timer.
 - The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:776-797).
 - A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:858-861). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:882-900).
 - When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:855-880; read lint/stale_cites.py:913-916).
-- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:823-853).
+- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py).
 - The merge takes the changed names from a `--name-only` diff (read merge/merge.py:2941). The merge judge runs its own `git diff -U0` (read merge/merge.py:2480) and up to 3 model starts per merge (read merge/merge.py:2454). Its model starts are unmeasured.
 
 ## Owner-only
@@ -101,7 +101,7 @@ Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1327-1345).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1484-1509; read lint/report_guard.py:1944).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1555-1580; read lint/report_guard.py:2111).
 - Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
