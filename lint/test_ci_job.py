@@ -10,7 +10,7 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 PinnedSettings: --step runs each named step in the claude-settings tree the workflow pins (one distinct 40-hex sha on its
 `<owner>/claude-settings/actions/<name>@<ref>` uses: lines); two pins, a ref that is no sha, or an unfetchable sha is unknown.
-A blocked named step stops only itself; under two pins CLAUDE_SETTINGS_DIR is the caller's; one pin builds one tree.
+A blocked named step stops only itself; a named step's CLAUDE_SETTINGS_DIR is its own pin's tree (under two pins too), else the caller's, else the settings clone; one pin builds one tree.
 SettingsPins: settings_pins reads a `#` inside quotes, and a lone quote, as text; a run: block is script, never a pin.
 Run: python3 lint/test_ci_job.py
 """
@@ -1418,7 +1418,8 @@ RUN_SH_B = "#!/bin/sh\necho B > zizmor-B.txt\n"  # pin B's zizmor run.sh
 CODE_CHECK_A = "import pathlib\npathlib.Path('code-check-A.txt').write_text('A\\n')\n"  # pin A's code_check.py
 CODE_CHECK_B = "import pathlib\npathlib.Path('code-check-B.txt').write_text('B\\n')\n"  # pin B's code_check.py
 CODE_CHECK_FAIL_A = "import pathlib, sys\npathlib.Path('code-check-A.txt').write_text('A\\n')\nsys.exit(1)\n"  # pin A's, failing
-RUN_SH_SEEN_B = '#!/bin/sh\necho B > zizmor-B.txt\nprintf "%s" "$CLAUDE_SETTINGS_DIR" > seen-B.txt\n'  # pin B's run.sh: reports its settings dir
+RUN_SH_SEEN_B = ('#!/bin/sh\necho B > zizmor-B.txt\nprintf "%s" "$CLAUDE_SETTINGS_DIR" > seen-B.txt\n'
+                 'git -C "$CLAUDE_SETTINGS_DIR" rev-parse HEAD > head-B.txt 2>/dev/null\n')  # pin B's run.sh: reports its settings dir and commit
 READ_PINNED = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = pinned'
 READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
@@ -1465,8 +1466,8 @@ def line_of(lines, name):
 
 class PinnedSettings(Job):
     """`--step` runs each named step in the claude-settings tree the workflow pins. The fixture: `origin` holds commit A
-    (marker `pinned`), and the clone's HEAD is commit B (marker `local`). CLAUDE_SETTINGS_DIR is set by each run to a decoy
-    that holds `local`, so a step that is not given the pinned tree reads what main reads."""
+    (marker `pinned`), and the clone's HEAD is commit B (marker `local`). Each run sets CLAUDE_SETTINGS_DIR to a decoy
+    that holds `local`, unless its case drops it: a step that is not given the pinned tree reads what main reads."""
 
     def setUp(self):
         super().setUp()
@@ -1499,14 +1500,17 @@ class PinnedSettings(Job):
         self.assertEqual(absent, fetch_only, "the clone holds pin A" if fetch_only else "the clone lacks pin A")
         return self.clone
 
-    def pinned_env(self, clone=None, extra=None):
+    def pinned_env(self, clone=None, extra=None, caller_dir=True):
         """The env of one ci-job run: the decoy and the clone seam are the only settings values, and the run's temp
-        folder is under this run's folder, so a pinned tree a run leaves is swept with the fixture. `extra` is added last."""
+        folder is under this run's folder, so a pinned tree a run leaves is swept with the fixture. `extra` is added last.
+        caller_dir=False leaves the caller without a CLAUDE_SETTINGS_DIR, so the run has no value of its own to pass on."""
         tmp = os.path.join(self.fixture, "tmp")
         os.makedirs(tmp, exist_ok=True)
         env = {k: v for k, v in ENV.items() if k not in ("CLAUDE_SETTINGS_DIR", "CI_JOB_SETTINGS_CLONE", "TMPDIR")}
-        env.update(CLAUDE_SETTINGS_DIR=self.decoy, CI_JOB_SETTINGS_CLONE=self.clone if clone is None else clone,
-                   TMPDIR=tmp, VERDICT_LOG=self.log, **(extra or {}))
+        env.update(CI_JOB_SETTINGS_CLONE=self.clone if clone is None else clone, TMPDIR=tmp, VERDICT_LOG=self.log)
+        if caller_dir:
+            env["CLAUDE_SETTINGS_DIR"] = self.decoy
+        env.update(extra or {})
         return env
 
     def wf_argv(self, text, job, args=()):
@@ -1516,15 +1520,16 @@ class PinnedSettings(Job):
             f.write(text)
         return [sys.executable, CI_JOB, job, "--workflow", path, *args]
 
-    def run_text(self, text, job, args=(), clone=None, env=None):
+    def run_text(self, text, job, args=(), clone=None, env=None, caller_dir=True):
         done = subprocess.run(self.wf_argv(text, job, args), cwd=self.root, capture_output=True, text=True,
-                              env=self.pinned_env(clone, env), timeout=120)
+                              env=self.pinned_env(clone, env, caller_dir=caller_dir), timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
-    def run_pinned(self, *steps, args=(), clone=None, env=None):
-        """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value."""
-        return self.run_text(workflow(*steps), "lane", args, clone, env)
+    def run_pinned(self, *steps, args=(), clone=None, env=None, caller_dir=True):
+        """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value
+        unless caller_dir=False."""
+        return self.run_text(workflow(*steps), "lane", args, clone, env, caller_dir=caller_dir)
 
     def start_pinned(self, *steps, args=()):
         """Start one ci-job run in a process group of its own, output to a file. Cleanup kills the group, so a step a
@@ -1692,6 +1697,20 @@ class PinnedSettings(Job):
             args=("--step", "plain"))
         self.assertEqual((rc, by_step(lines).get("plain")), (0, "PASS"),
                          "with no pin, ci-job must not change CLAUDE_SETTINGS_DIR:\n" + out)
+
+    def test_no_pin_and_no_caller_dir_gives_the_step_the_settings_clone(self):  # red: ci-job leaves the step's value unset
+        self.settings()
+        rc, lines, out = self.run_pinned(
+            step("plain", 'printf "%s" "${CLAUDE_SETTINGS_DIR-unset}" > seen.txt'),
+            args=("--step", "plain"), caller_dir=False)
+        seen_file = os.path.join(self.root, "seen.txt")
+        self.assertTrue(os.path.isfile(seen_file), "precondition: the plain step did not run:\n" + out)
+        with open(seen_file, encoding="utf-8") as f:
+            seen = f.read().strip()
+        self.assertNotEqual(seen, "unset", "with no pin and no caller's CLAUDE_SETTINGS_DIR, ci-job left the step's "
+                            "CLAUDE_SETTINGS_DIR unset; it must be the settings clone:\n" + out)
+        self.assertEqual(os.path.realpath(seen), os.path.realpath(self.clone),
+                         "the plain step's CLAUDE_SETTINGS_DIR is not the settings clone: %r\n%s" % (seen, out))
 
     def test_a_plain_run_with_a_pin_leaves_the_settings_dir_alone(self):  # control: --step alone pins, not a plain run
         self.settings()
@@ -1873,7 +1892,7 @@ class PinnedSettings(Job):
                          "a pin that cannot be fetched must read unknown, not run:\n" + out)
         self.assertEqual(rc, 1, "a FAIL beats unknown, so the run must exit 1:\n" + out)
 
-    def test_under_two_pins_a_pinned_step_sees_the_callers_settings_dir_not_a_tree(self):
+    def test_under_two_pins_a_pinned_step_sees_its_own_pins_tree_not_the_callers_dir(self):
         self.two_pin_settings(run_sh_b=RUN_SH_SEEN_B)
         rc, lines, out = self.run_pinned(*self.two_pin_steps(),
                                          args=("--base", "origin/main", "--step", "code check", "--step", "zizmor"),
@@ -1881,9 +1900,16 @@ class PinnedSettings(Job):
         seen_file = os.path.join(self.root, "seen-B.txt")
         self.assertTrue(os.path.isfile(seen_file), "precondition: pin B's run.sh did not run:\n" + out)
         with open(seen_file, encoding="utf-8") as f:
-            seen = f.read()
-        self.assertEqual(seen, self.decoy, "under two pins ci-job changed CLAUDE_SETTINGS_DIR: the pinned step saw %r, "
-                         "not the caller's value:\n%s" % (seen, out))
+            seen = f.read().strip()
+        head_file = os.path.join(self.root, "head-B.txt")  # the commit of the tree the step saw, read while the run holds it
+        head = open(head_file, encoding="utf-8").read().strip() if os.path.isfile(head_file) else ""
+        self.assertTrue(seen, "under two pins the pinned step saw no CLAUDE_SETTINGS_DIR:\n" + out)
+        self.assertNotEqual(os.path.realpath(seen), os.path.realpath(self.decoy),
+                            "under two pins the pinned step saw the caller's CLAUDE_SETTINGS_DIR, not pin B's tree:\n" + out)
+        self.assertNotEqual(os.path.realpath(seen), os.path.realpath(self.clone),
+                            "under two pins the pinned step saw the settings clone, not pin B's pinned tree:\n" + out)
+        self.assertEqual(head, self.sha_b, "the tree the pinned step saw is at %r, not pin B's commit %s "
+                         "(pin A's or no tree):\n%s" % (head, self.sha_b, out))
 
     def test_two_steps_at_one_pin_share_one_pinned_tree(self):
         self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A, "actions/zizmor/run.sh": RUN_SH_A})
