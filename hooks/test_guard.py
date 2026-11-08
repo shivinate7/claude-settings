@@ -10510,6 +10510,30 @@ add("lane-by-slug: MCP create with a lane number after a closed fence denies", "
 add("lane-by-slug: MCP create with a lane number in a fenced block is allowed", "allow",
     body="title\n\n```\nLane N20 lands\n```", **MCP_DRAFT)
 
+# ---- the MCP update tool sets a pull request's body and title too. The guard judges them with the same cite and
+# lane scans as the create tool above, and each case reuses that create case's text. An update that sets no body or
+# title (a state or draft change only) has nothing to scan, so it stays allowed. Red today: the guard reads no
+# update call, so it allows the denied cases below.
+MCP_UPDATE = dict(tool="mcp__github__update_pull_request", cwd=NOGIT, config=MERGECFG, owner="y", repo="x",
+                  pullNumber=12)
+add("cite-by-id: MCP update with a body that cites a record path denies", "deny", rule="cite-by-id",
+    body="cites " + CITE, **MCP_UPDATE)
+add("cite-by-id: MCP update with a body that cites a layout-path record denies", "deny", rule="cite-by-id",
+    body="cites docs/" + CITE, **MCP_UPDATE)
+add("lane-by-slug: MCP update with a body that names a lane by session number denies", "deny",
+    rule="lane-by-slug", body="lands N16", **MCP_UPDATE)
+add("lane-by-slug: MCP update with a title that names a lane by session number denies", "deny",
+    rule="lane-by-slug", **dict(MCP_UPDATE, title="lane N20"))
+add("cite-by-id: MCP update with a clean body is allowed", "allow", body="fix guard parsing", **MCP_UPDATE)
+add("cite-by-id: MCP update with a body that holds an id is allowed", "allow",
+    body="per D12, short titles for records", **MCP_UPDATE)
+add("lane-by-slug: MCP update with a lane number in a code span is allowed", "allow",
+    body="see `N16` lands", **MCP_UPDATE)
+add("cite-by-id: MCP update with a state change and no body or title is allowed", "allow",
+    state="closed", **MCP_UPDATE)
+add("cite-by-id: MCP update with a draft change and no body or title is allowed", "allow",
+    draft=True, **MCP_UPDATE)
+
 
 # ---- two readings of a lone quote. Bash
 # reads `echo it's` as an open single quote, and the line holding only a quote closes it. The
