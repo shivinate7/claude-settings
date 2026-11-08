@@ -57,7 +57,10 @@ import sys
 top, lint_dir, base = sys.argv[1:4]
 sys.path.append(lint_dir)
 import git_fetch
-ok, message = git_fetch.fetch(top, refs=[base], unshallow=git_fetch.is_shallow(top), timeout=300)
+# An explicit refspec: in a single-branch clone a bare `git fetch origin <base>` writes FETCH_HEAD only, and the
+# range below reads refs/remotes/origin/<base>. That is the ref run.sh reads, whichever remote git_fetch picks.
+spec = "+refs/heads/%s:refs/remotes/origin/%s" % (base, base)
+ok, message = git_fetch.fetch(top, refs=[spec], unshallow=git_fetch.is_shallow(top), timeout=300)
 if not ok:
     print(message)
     sys.exit(1)
