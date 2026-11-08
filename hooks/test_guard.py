@@ -11559,8 +11559,8 @@ cmk_allow("two commits, the first adding a triplet and the second removing it, t
 
 # =========================================================================== 5g. folders through a variable
 # A `cd` or `git -C` through a variable that is set in the guard's environment is read as the value it holds,
-# so the guard judges the folder that value names (owner ruling of 2026-11-08 06:11 CST, page item 413 a). A
-# name that is not set stays unknown, and an unknown folder asks (coordinator ruling of 06:22 CST, item 410 a).
+# so the guard judges the folder that value names. A name that is not set stays unknown, and an unknown folder
+# asks (decision plain-push-asks).
 # Each case sets its variable through `env` to a real fixture folder, so the guard reads that folder.
 FAMILY = "push-variable"
 sh("var-folder: a force push after cd through a set variable naming a feature checkout is refused",
