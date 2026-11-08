@@ -1457,6 +1457,11 @@ def _build_gitmain():
     # The last-bullets cases name README.md as a restore operand. It is tracked and modified in
     # every tree, so each one is a real subject.
     write(os.path.join(GITMAIN, "README.md"), "base\n")
+    # The bare-checkout cases name an extensionless root file, Makefile, and one under a folder,
+    # tools/runner. LICENSE is never modified: it is the clean-path control.
+    write(os.path.join(GITMAIN, "Makefile"), "base\n")
+    write(os.path.join(GITMAIN, "tools", "runner"), "base\n")
+    write(os.path.join(GITMAIN, "LICENSE"), "base\n")
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
@@ -1477,9 +1482,13 @@ def _build_gitmain():
         write(os.path.join(_tree, "b.txt"), "uncommitted\n")
         write(os.path.join(_tree, "hooks", "guard.py"), "uncommitted\n")
         write(os.path.join(_tree, "README.md"), "uncommitted\n")
+        write(os.path.join(_tree, "Makefile"), "uncommitted\n")
+        write(os.path.join(_tree, "tools", "runner"), "uncommitted\n")
         _require_dirty(_tree, "f.txt", "new.txt", "keep.txt")
+        _require_dirty(_tree, "Makefile", "new.txt", "LICENSE")
         for _name in ("fixtures/a.json", "fixtures/media-players.json", "src/app.py",
-                      "a.txt", "b.txt", "hooks/guard.py", "README.md"):
+                      "a.txt", "b.txt", "hooks/guard.py", "README.md", "Makefile",
+                      "tools/runner"):
             if not any(line[:2].strip() == "M" and line[3:].strip() == _name
                        for line in _porcelain(_tree)):
                 sys.exit("fixture setup failed in build_fixtures: %r is not modified in %r"
@@ -2789,6 +2798,32 @@ sh("per-file deny: a double-quoted path in the shared checkout", VCS + ' restore
 # never reads it, and a worktree keeps whatever it does now. This case must pass before and after.
 sh("per-file branch switch: checkout main in a worktree keeps today's answer",
    VCS + " checkout main", "allow", cwd=GITWT)
+
+# BARE CHECKOUT OF AN EXTENSIONLESS FILE. With no `--`, git reads one operand as a path when no
+# branch has that name. checkout_names_a_path reads a single operand as a path only when it has an
+# extension, a leading ./, a backslash or a trailing slash, or when it is a folder. So `checkout
+# Makefile` and `checkout tools/runner` were never judged. Both are modified in the shared checkout
+# and in the hand-made worktree. LICENSE stays clean. Rows marked (pin) pass on main today.
+sh("per-file bare: checkout of an extensionless file in the shared checkout denies",
+   VCS + " checkout Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout of a folder's extensionless file in the shared checkout denies",
+   VCS + " checkout tools/runner", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout -- of an extensionless file in the shared checkout denies (pin)",
+   VCS + " checkout -- Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: restore of an extensionless file in the shared checkout denies (pin)",
+   VCS + " restore Makefile", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: restore of a folder's extensionless file in the shared checkout denies (pin)",
+   VCS + " restore tools/runner", "deny", "shared-tree", cwd=GITMAIN)
+sh("per-file bare: checkout of a clean extensionless file in the shared checkout allows",
+   VCS + " checkout LICENSE", "allow", cwd=GITMAIN)
+sh("per-file bare: restore of a clean extensionless file in the shared checkout allows",
+   VCS + " restore LICENSE", "allow", cwd=GITMAIN)
+sh("per-file bare: checkout of an extensionless file in a hand-made worktree allows",
+   VCS + " checkout Makefile", "allow", cwd=GITWT)
+sh("per-file bare: restore of an extensionless file in a hand-made worktree allows",
+   VCS + " restore Makefile", "allow", cwd=GITWT)
+sh("per-file bare: checkout of a branch name in the shared checkout keeps today's answer",
+   VCS + " checkout agent-x-branch", "allow", cwd=GITMAIN)
 
 # THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
