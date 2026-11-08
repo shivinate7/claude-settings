@@ -16,7 +16,10 @@ CLAUDE.md names, reads the pin check from it, and with no checkout prints one li
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
 Also asserts an uncommitted or untracked markdown file is linted or fails bin/ste-changed, never a plain PASS, a file .gitignore
 matches is not linted, and a clean tree still passes. A non-ASCII untracked name is linted by its own name, a run with no merge
-base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step."""
+base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step.
+Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-cites line, a Markdown file that is untracked and cites
+an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
+a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed"."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -548,6 +551,28 @@ check("ignored control: a markdown file .gitignore matches is not linted, plain 
       rc == 0 and "ste-lint: no markdown changed" in out and "ignored-note.md" not in out and "Traceback" not in out, out)
 
 
+# Another git process holds .git/index.lock (an agent's `git add`) while the tree is dirty. The step must not go silent:
+# one ste-lint line says unknown and names the lock, and the exit is 0, as in the no-merge-base case (decision
+# stale-cites-at-merge, rule verification-report-unknown-reads). Empty output is the bug. The lock is set in the change, so
+# the scope fact is read there (P7).
+lock = {}
+
+
+def edit_data_locked(work):
+    edit_data(work)  # a non-markdown edit, not committed: the tree is dirty
+    path = os.path.join(work, ".git", "index.lock")
+    open(path, "w").close()
+    lock["held"] = os.path.exists(path)
+
+
+at_base, status, rc, out = uncommitted_run(edit_data_locked)
+check("index lock scope: the lock is held, data.txt is modified and HEAD is origin/main",
+      lock.get("held") is True and at_base and " M data.txt" in status, status)
+check("index lock: exits 0, as the no-merge-base case does", rc == 0, out)
+check("index lock: one ste-lint line says unknown and names index.lock",
+      any(l.startswith("ste-lint:") and "unknown" in l and "index.lock" in l for l in out.splitlines()), out)
+
+
 # An uncommitted removal. A tracked doc cites hooks/keep.py, and the working tree deletes it, uncommitted. Once
 # committed, the range removes the path and the cite is STALE001 (CI fails on it). The command read only the committed
 # range, so the uncommitted removal passed. It must fail the same way. The committed removal is the control: CI's check.
@@ -575,6 +600,30 @@ check("committed removal, control: the step fails on the same stale cite, as CI 
       rc == 1 and "docs/guide.md:3: STALE001 " in out, out)
 
 
+# An untracked Markdown file cites a path the working tree removed. The stale-cites check reads Markdown as committed at
+# head, never from the working tree (decision stale-cites-at-merge), so it cannot read cite.md. That read cannot run, so
+# the output names cite.md as unknown and never prints `stale-cites: PASS` (rule verification-report-unknown-reads).
+# No tracked Markdown cites hooks/keep.py, so cite.md is the only cite; the scope fact is read inside the change (P7).
+UNTRACKED_CITE_BASE = {"a.md": "# T\n\nShort line.\n", "hooks/keep.py": "X = 1\n"}
+untracked_cite = {}
+
+
+def remove_keep_untracked_cite(work):
+    remove_keep(work)  # a deletion, not committed
+    write(work, "cite.md", "# Cite\n\n- see `hooks/keep.py`\n")  # a new file, never git-added
+    untracked_cite["cites"] = git_read(work, "grep", "hooks/keep.py", "HEAD", "--", "*.md")
+
+
+at_base, status, rc, out = uncommitted_run(remove_keep_untracked_cite, base=UNTRACKED_CITE_BASE)
+check("untracked cite scope: hooks/keep.py is deleted, not committed, and cite.md is untracked",
+      at_base and " D hooks/keep.py" in status and "?? cite.md" in status, status)
+check("untracked cite scope: no tracked Markdown cites hooks/keep.py", untracked_cite.get("cites") == "",
+      str(untracked_cite))
+check("untracked cite: the output does not print `stale-cites: PASS`", "stale-cites: PASS" not in out, out)
+check("untracked cite: an unknown line names cite.md",
+      any(l.startswith("stale-cites: unknown,") and "cite.md" in l for l in out.splitlines()), out)
+
+
 # A non-ASCII untracked name. git quotes such a name in `git ls-files` output unless -z is passed ("caf\303\251.md"),
 # so the step read a name no file has. The name the file has is listed and linted, and a clean sentence passes. The ASCII
 # name beside it is the control: the same shape, with no quoting to get wrong.
@@ -595,6 +644,28 @@ check("non-ASCII untracked: exits 0 with PASS on a clean sentence", rc == 0 and 
 names, rc, out = untracked_run("clean-note.md", "# Clean\n\nShort line.\n")
 check("ASCII untracked control: clean-note.md is listed, exits 0 and PASSes",
       "clean-note.md" in parts(out)["files"] and rc == 0 and "ste-lint: PASS" in out, out)
+
+
+# A name with a space. git ends the `+++ b/` header of such a name with a tab, so the changed-line map read a name with
+# that tab, no finding landed on a changed line, and the step passed. The name is linted by its own name, and a 42-word
+# sentence in it fails. `space.md` is the control: the same sentence under a name with no space.
+LONG42 = " ".join(["word"] * 41) + " end."  # 42 words, over the STE001 limit of 40
+
+
+def long_sentence(name):
+    def change(work):
+        write(work, name, "# S\n\n" + LONG42 + "\n", "w")
+        git(work, "commit", "-qam", "long")
+    return change
+
+
+rc, out = run("changed", base={"sp ace.md": "# S\n\nShort line.\n"}, change=long_sentence("sp ace.md"))
+check("space in name: sp ace.md is in scope", "sp ace.md" in parts(out)["files"], out)
+check("space in name: exits 1 on the 42-word sentence", rc == 1, out)
+check("space in name: STE001 names sp ace.md:3", "sp ace.md:3: STE001 " in out, out)
+rc, out = run("changed", base={"space.md": "# S\n\nShort line.\n"}, change=long_sentence("space.md"))
+check("space control: space.md with the same sentence exits 1 and names space.md:3",
+      rc == 1 and "space.md:3: STE001 " in out, out)
 
 
 # No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The
@@ -619,6 +690,58 @@ check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): t
       re.search(r"merge[ -]base", out, re.I) is not None, out)
 check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output says the result is unknown",
       "unknown" in out, out)
+
+
+# A push to the default branch whose HEAD is a root commit has no HEAD~1. The step diffs HEAD~1..HEAD, and the stale-cites
+# check reads that base as unknown: decision stale-cites-at-merge exits 0 for `<head>~1` of a root commit, as main does. The
+# output must say `stale-cites: unknown,` in lower case; `stale-cites: UNKNOWN,` with exit 2 is the bug. The tree is
+# clean and HEAD has no parent, both read inside the change (P7). The control has a second commit, so HEAD~1 exists.
+root = {}
+
+
+def root_commit(work):
+    root["parents"] = git_read(work, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    root["status"] = git_read(work, "status", "--porcelain")
+
+
+def second_commit(work):
+    write(work, "b.md", "# B\n\nShort line.\n")
+    git(work, "add", "b.md")
+    git(work, "commit", "-qm", "second")
+
+
+rc, out = run("changed", on_main=True, change=root_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+check("root push scope: HEAD has no parent and the tree is clean",
+      len(root.get("parents", [])) == 1 and root.get("status") == "", str(root))
+check("root push: exits 0, as main does (an unknown base, decision stale-cites-at-merge)", rc == 0, out)
+check("root push: the output says `stale-cites: unknown,` in lower case", "stale-cites: unknown," in out, out)
+rc, out = run("changed", on_main=True, change=second_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+check("root push control: with HEAD~1 present, exits 0 and says `stale-cites: PASS`",
+      rc == 0 and "stale-cites: PASS" in out, out)
+
+
+# The step summary of a run with no merge base. It must say unknown, not "No markdown changed": nothing was read.
+# The summary is read inside the scratch folder, which is removed when the block ends. The control is a committed
+# non-markdown change with a merge base, where "No markdown changed." is the true line.
+def add_notes(work):
+    write(work, "notes.txt", "x\n")
+    git(work, "add", "notes.txt")
+    git(work, "commit", "-qm", "notes")
+
+
+with scratch("summary") as s:
+    summary = os.path.join(s, "sum")
+    rc, out = run("changed", change=unrelated_change, GITHUB_STEP_SUMMARY=summary)
+    text = open(summary, encoding="utf-8").read() if os.path.exists(summary) else ""
+check("no merge base summary: the step summary has its STE lint section", "### STE lint" in text, text)
+check("no merge base summary: it does not say `No markdown changed`", "No markdown changed" not in text, text)
+check("no merge base summary: it says unknown", "unknown" in text.lower(), text)
+with scratch("summary") as s:
+    summary = os.path.join(s, "sum")
+    rc, out = run("changed", change=add_notes, GITHUB_STEP_SUMMARY=summary)
+    text = open(summary, encoding="utf-8").read() if os.path.exists(summary) else ""
+check("summary control: a committed non-markdown change with a merge base says `No markdown changed.`",
+      "No markdown changed." in text, text)
 
 
 # Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
