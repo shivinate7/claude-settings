@@ -1,11 +1,11 @@
 {
   "title": "Guard rule records-page compares a stacked branch's records page against its PR's base, not main",
   "why": "A stacked lane that brings in its base PR's records page byte for byte is refused, because the rule reads main only through resolve_default_base.",
-  "note": "Filed 09:31 CST Nov 8 (coordinator 09:30 CST, under item 410 a). records_page_hit in hooks/guard_merge.py. Red case: lane round-one-reset merged #1957's head into #2062 (stacked on #1957); `git diff origin/fix-chain-fresh-rounds -- docs/records.md` is empty, yet the commit was refused. No lane is in that code, so lane round-one-reset (session_013NEJKzZtu1sv8D47NpC3yx) takes it (coordinator). Work-around today: take main's page and let the merge tool rebuild it.",
+  "note": "Filed 09:31 CST Nov 8 (coordinator 09:30 CST, under item 410 a). records_page_hit in hooks/guard_merge.py. Red case: lane round-one-reset merged #1957's head into #2062 (stacked on #1957); `git diff origin/fix-chain-fresh-rounds -- docs/records.md` is empty, yet the commit was refused. No lane is in that code, so lane round-one-reset (session_013NEJKzZtu1sv8D47NpC3yx) takes it (coordinator). Work-around today: take main's page and let the merge tool rebuild it. Sighting (coordinator 14:59 CST Nov 8; this step owns guard rule records-page, hooks/guard_merge.py RECORDS_PAGE): on #2201 the guard did not refuse the lane's `git add ... docs/records.md && git commit`, a hand edit of the generated records page, later removed in 09b369e58. Unmeasured: reproduce before any fix.",
   "phase": "guards",
   "owner": "claude-settings",
   "lane": "session_013NEJKzZtu1sv8D47NpC3yx",
   "status": "todo",
   "order": 702,
-  "updatedAt": "2026-11-08T09:31:00-06:00"
+  "updatedAt": "2026-11-08T15:02:00-06:00"
 }

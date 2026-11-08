@@ -1,11 +1,11 @@
 {
   "title": "The silent-undo check judges a lane from its merge base, so a branch that predates a main move does not read as undoing it",
   "why": "Coordinator 14:56 CST Nov 8: after batch 65 moved main to 2ac382cc6, lane lint's silent-undo check fails PRs that merely predate the move. #1471 at fae2e9d0b reads \"docs/debts/notes.md: hunk reversed, undoing 2ac382cc6\"; #2024, #2034, #2253 and #1860 will hit it too. Suspected cause: the check compares the lane head with main's tip, not with its merge base. Reproduce first. If so, it is a false-alarm fix: judge the lane's own changes from the merge base, and keep refusing a real undo (a lane that merged main and reverted a hunk). Related: step silent-undo-merged-main.",
-  "note": "Coordinator 14:58 CST Nov 8: the premise is wrong for #1471. A real merge re-adds notes rows that batch 65 retired, so the check is right there (decision silent-undo-check-design). The lane measures #2024, #2034, #2253 and #1860, and closes this step if none is a false alarm.",
+  "note": "Coordinator 14:58 CST Nov 8: the premise is wrong for #1471. A real merge re-adds notes rows that batch 65 retired, so the check is right there (decision silent-undo-check-design). The lane measures #2024, #2034, #2253 and #1860, and closes this step if none is a false alarm. Closed as no-defect (coordinator 14:58 CST Nov 8, measured by lane notes-fix-page): the check passes #2024, #2034, #2253, #1860, #2140 and #2139 against main 2ac382cc6. #1471 fails for a real reason, union-merged notes rows that revive retired lines (step notes-union-batch-revival).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2ofBneBWfDb4x4hMQ",
-  "status": "doing",
+  "status": "done",
   "order": 819,
-  "updatedAt": "2026-11-08T14:58:00-06:00"
+  "updatedAt": "2026-11-08T15:02:00-06:00"
 }
