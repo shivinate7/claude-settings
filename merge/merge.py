@@ -3091,57 +3091,74 @@ def review_stamp_since(root, base):
                              if not c and first and first[0].isdigit() else None)
     return _stamp_since[key]
 
-def parse_review(text, created=None, cutover=None):
-    """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
-    malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
-    `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
-    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. The `Stamp: <16 hex>` line between Net value and
-    the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is None. A body with no Stamp line still parses when its
-    comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must match. With no `created`,
-    as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
+def review_parse(text, created=None, cutover=None):
+    """-> (record, bad). `record` is {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact
+    first line, a field is malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `bad` is None for a
+    record, else (line number, line text) of the first line that broke the parse, 1-based in `text`. The structure is read before the Stamp, so a body
+    with prose after its CI line names the first non-blank line after it, and a well-formed body with no Stamp names the CI line, where the Stamp was owed.
+    `fix` is None, or the one optional `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a
+    (head, role, model, verdict) tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is bad. The `Stamp: <16 hex>`
+    line between Net value and the CI line must equal review_stamp of the lines above it, so a body typed or edited by hand is bad. A body with no Stamp
+    line still parses when its comment's `created` time is before `cutover` (review_stamp_since), or `cutover` is None; a Stamp line that is there must
+    match. With no `created`, as for a new post, the Stamp line is required. Trailing whitespace on a line and trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = [line.rstrip() for line in text.splitlines()]  # trailing spaces and CRLF are no part of a line, the marker's included
     if "---" in lines:
         lines = lines[:lines.index("---")]
     while lines and not lines[-1].strip():
         lines.pop()
-    if len(lines) < 7 or lines[0] != REVIEW_MARKER or lines[-1] != REVIEW_CI_LINE:
-        return None
+    rows = list(enumerate(lines, 1))  # (line number, line): the numbers stay the body's after the stamp line is taken out
+    if not lines or lines[0] != REVIEW_MARKER:
+        return None, (1, lines[0] if lines else "")
+    if lines[-1] != REVIEW_CI_LINE:
+        after = lines.index(REVIEW_CI_LINE) + 1 if REVIEW_CI_LINE in lines else len(lines) - 1  # no CI line: it was owed on the last line
+        return None, next(row for row in rows[after:] if row[1].strip())
+    if len(lines) < 7:
+        return None, rows[-1]
+    stamp = None
     if lines[-2].startswith("Stamp: "):
-        if lines[-2] != f"Stamp: {review_stamp(lines[:-2])}":
-            return None
-        lines = lines[:-2] + lines[-1:]  # the stamp is read; the fields run as before
-    elif created is None or (cutover is not None and created >= cutover):
-        return None
+        stamp, rows = rows[-2], rows[:-2] + rows[-1:]  # the stamp is checked last; the fields run as before
     pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
-    fields = [re.fullmatch(pat, line, re.ASCII) for pat, line in zip(pats, lines[1:5])]
-    net = re.fullmatch(r"Net value: (.+)", lines[-2])
-    if not all(fields) or not net:
-        return None
+    fields = [re.fullmatch(pat, row[1], re.ASCII) for pat, row in zip(pats, rows[1:5])]
+    net = re.fullmatch(r"Net value: (.+)", rows[-2][1])
+    for found, row in zip([*fields, net], [*rows[1:5], rows[-2]]):
+        if not found:
+            return None, row
     n, head, kind, guard = (m.group(1) for m in fields)
-    if kind not in REVIEW_KINDS or guard not in REVIEW_GUARDS or net.group(1) not in REVIEW_NETS:
-        return None
-    if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
-        return None
+    if kind not in REVIEW_KINDS:
+        return None, rows[3]
+    if guard not in REVIEW_GUARDS or (kind == "docs-only" and guard == "yes"):  # docs-only means no guard or check (decision docs-only-prs-skip-review)
+        return None, rows[4]
+    if net.group(1) not in REVIEW_NETS:
+        return None, rows[-2]
     rounds, last, fix = [], 0, None
-    for line in lines[5:-2]:
+    for row in rows[5:-2]:
         if fix:  # nothing follows the fix check line
-            return None
-        f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
+            return None, row
+        f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", row[1], re.ASCII)
         if f:
             if f.group(1) == head:  # the fix diff would be empty
-                return None
+                return None, row
             fix = f.group(1, 2, 3, 4)
             continue
-        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", line, re.ASCII)
+        m = re.fullmatch(rf"Round (\d+): ({'|'.join(REVIEW_ROLES)}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_VERDICTS)})", row[1], re.ASCII)
         if not m:
-            return None
+            return None, row
         i = int(m.group(1))
         if i not in (last, last + 1) or i < 1 or i > REVIEW_LAST_ROUND:
-            return None
+            return None, row
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
+    if stamp:
+        if stamp[1] != f"Stamp: {review_stamp(lines[:stamp[0] - 1])}":
+            return None, stamp
+    elif created is None or (cutover is not None and created >= cutover):
+        return None, rows[-1]
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}, None
+
+def parse_review(text, created=None, cutover=None):
+    """-> the record of review_parse, or None when `text` is not a well-formed record. The one parser is review_parse."""
+    return review_parse(text, created, cutover)[0]
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -3207,8 +3224,10 @@ def reviewed_lines(h, cutover=None):
             bare.append(f"#{n}")
             continue
         created, body = bodies[-1]
-        rec = parse_review(body, created, cutover)
+        rec, bad = review_parse(body, created, cutover)
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        if bad:
+            why += f": line {bad[0]}: {bad[1]}"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
@@ -3408,10 +3427,11 @@ def main(argv, host=None, lock=None):
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 cutover = review_stamp_since(root, info["base"])
-                earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
+                earlier = [review_parse(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
+                last, bad = earlier[-1] if earlier else (None, None)
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                    why = f"the newest earlier review record on this pull request does not parse: line {bad[0]}: {bad[1]}. " if bad else ""
+                    print("merge: --fix-check: " + why + "the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             body = review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)
             if review_state(parse_review(body), a.head)[0] == "done":  # a done record is what the lane gives the batch runner, so the lane lint must pass on the head it names (decision pr-review-record)
@@ -3426,6 +3446,7 @@ def main(argv, host=None, lock=None):
                     raise Stop(f"no done record is printed while the lint of {a.head[:9]} does not pass: {e}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
             say(body.rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
+            print("merge: notes go below a line exactly `---`, with no text between the CI line and it.", file=sys.stderr)
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm

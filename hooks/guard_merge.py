@@ -353,7 +353,7 @@ REVIEW_REASON = (
     "(decision pr-review-record, a review record names the head it reviewed)"
 )
 REVIEW_FORM_REASON = (
-    "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
+    "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record; the parse broke at %s. "
     "`merge --reviewed` cannot read a body that does not parse. "
     "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
     "with no text between the CI line and `---`. "
@@ -435,16 +435,21 @@ def _marked_bodies(bodies):
 
 
 def _unparsed(module, marked):
-    """True when some marked body does not parse. Reads nothing."""
-    return any(module.parse_review(body) is None for body in marked)
+    """Return `line N: <text>` (text cut to 80 characters) for the first line that broke the parse of the first marked body that does not
+    parse, else None. Reads nothing."""
+    for body in marked:
+        record, bad = module.review_parse(body)
+        if record is None:
+            return "line %d: %s" % (bad[0], cap_safe(bad[1], 80))
+    return None
 
 
-def _form_reason(module, selector):
-    """Return (matched, reason) for a record that does not parse. The refusal sits one call below its two callers, so the
-    rule audit reads its reason within its depth limit."""
+def _form_reason(module, selector, broke):
+    """Return (matched, reason) for a record that does not parse, `broke` the line `_unparsed` named. The refusal sits one call below its
+    two callers, so the rule audit reads its reason within its depth limit."""
     named = str(selector).strip()
-    return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
-        module, named if named.isdigit() else "<pr>", "<live head>")
+    return "review record that does not parse", REVIEW_FORM_REASON % (broke, _review_render(
+        module, named if named.isdigit() else "<pr>", "<live head>"))
 
 
 def _edit_reason(module):
@@ -517,8 +522,9 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
     if not found:
         return None
     module, marked = found
-    if _unparsed(module, marked):
-        return _form_reason(module, selector)
+    broke = _unparsed(module, marked)
+    if broke:
+        return _form_reason(module, selector, broke)
     if edit:
         return _edit_reason(module)
     if variable:
