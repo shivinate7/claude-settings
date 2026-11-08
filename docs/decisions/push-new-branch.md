@@ -8,7 +8,7 @@ The mistake: a pull request head's sha pushed to a new branch name instead of to
 
 | Refspec | Outcome |
 |---|---|
-| A new destination, source a sha, a remote-tracking ref (`origin/x`, `refs/remotes/...`) or a revision expression (`HEAD~1`, `<sha>^`), at another branch's tip. A `+` form is judged too. | deny |
+| A new destination, source a sha, a remote-tracking ref (`origin/x`, `refs/remotes/...`) or a revision expression (`HEAD~1`, `<sha>^`, `HEAD@{1}`), at another branch's tip. A `+` form is judged too. | deny |
 | Anything else | main's verdict (`plain-push-asks`) |
 
 Judged only when the source is a sha, a remote-tracking ref or a revision expression. `HEAD`, `@` and a plain local-branch name are left as main treats them: an explicit `HEAD:<branch>` is silent (decision `plain-push-asks`).
@@ -25,7 +25,13 @@ Exempt, each held by its own case in `hooks/test_guard.py`:
 
 Stated limit: `HEAD:<new>` at another branch's tip stays as main allows it (coordinator, 14:45 CST; `plain-push-asks`). A session that pushes `HEAD` to a new name on a PR's head commit is not caught. This rule judges only what it can name by sha or remote ref. It also removes the false alarm on a chain that switches to a new branch, commits, then pushes `HEAD:new`.
 
-Cost: no new process or file. Each judged refspec runs one `rev-parse`. The remote's tips come from the ref files, with `for-each-ref` only for a layout the file read does not know (reftable). The default-branch read (`rev-parse --git-dir`, `symbolic-ref`, then `rev-parse` per candidate) runs once per push, and only when a judged sha sits at a remote tip. It reads local refs only and never the network.
+Stated limit: a short `<other>/x` source from a remote other than the pushed one is not judged. Its full `refs/remotes/<other>/x` form is judged, against the pushed remote's tips.
+
+Stated limit: a stale `refs/remotes/<remote>/*` ref (branch deleted on the remote, not pruned) still counts as a tip. A push of that sha to a new name is refused. The owner's typed `override` lifts it.
+
+Stated limit: with origin/HEAD unset and a trunk named neither main nor master, the trunk's tip is not exempt. The `HEAD:<new>` form is unaffected: it is never judged.
+
+Cost: no long-lived process, no file written. Each judged refspec runs one `rev-parse`. The remote's tips come from the ref files, with `for-each-ref` only for a layout the file read does not know (reftable). The default-branch read (`rev-parse --git-dir`, `symbolic-ref`, then `rev-parse` per candidate) runs once per push, and only when a judged sha sits at a remote tip. It reads local refs only and never the network.
 
 ## The mistakes
 
