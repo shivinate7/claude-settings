@@ -31,7 +31,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
+from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_env, step_key, yaml_scalar  # noqa: E402  the one home of the step parser and its scalar reader
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
 MIN_JOBS = 3
 
@@ -403,17 +403,6 @@ def eval_if(expr, event, flag_value, draft=False):
     e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
     e = re.sub(r"!(?!=)", " not ", e)
     return bool(eval(e, {"__builtins__": {}}))
-
-
-def yaml_scalar(raw):
-    """A YAML value without its trailing comment or outer quotes. `#` starts a comment only after a space and outside
-    quotes, so `'a # b'` and `${{ x == '#' }}` keep their `#`, and a lone quote in plain text (`Don't`) is text."""
-    s = (raw or "").strip()
-    if s[:1] in ("'", '"'):
-        end = s.find(s[0], 1)
-        return s[1:end] if end != -1 else s
-    m = re.search(r"(?:^|\s)#", s)
-    return (s[:m.start()] if m else s).rstrip()
 
 
 def unwrap(raw):
