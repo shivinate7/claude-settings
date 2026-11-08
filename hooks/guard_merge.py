@@ -379,6 +379,7 @@ REVIEW_OLD_UNREAD_REASON = (
 )
 REVIEW_UNREAD_REMEDY = "run the edit again when `gh` can read the comment, or post a new comment."
 REVIEW_LITERAL_ID_REMEDY = "write the literal comment id and repo in the route, not a shell expansion such as $ID, then run the edit again."
+REVIEW_LITERAL_PR_REMEDY = "write the PR number literally, not a shell expansion such as $PR, then run the edit again."
 REVIEW_BODY_FILE_REASON = (
     "Rule (pr-review-record): the new body's file %s could not be read, so the check could not run and the edit is refused. "
     "The body may be a review record. "
@@ -388,7 +389,11 @@ REVIEW_BODY_FILE_REASON = (
 
 
 class _LiteralIdNeeded(RuntimeError):
-    """The comment id is not a number the guard can read, such as a shell variable."""
+    """The comment id or pull request number is not a number the guard can read, such as a shell variable. `remedy` tells the caller what to write."""
+
+    def __init__(self, message, remedy):
+        super().__init__(message)
+        self.remedy = remedy
 
 
 _ANSI_ESCAPE = re.compile(
@@ -475,11 +480,13 @@ def _old_body(host, edit):
         if isinstance(ref, str) and ref.isdigit():
             ref = int(ref)
         if not isinstance(ref, int) or isinstance(ref, bool):
-            raise _LiteralIdNeeded("the comment id or repo is a shell expansion the guard cannot read")
+            raise _LiteralIdNeeded("the comment id or repo is a shell expansion the guard cannot read", REVIEW_LITERAL_ID_REMEDY)
         code, out = host.api("issues/comments/%d" % ref)
         if code:
             raise RuntimeError("reading the comment failed")
         return str(json.loads(out).get("body") or "")
+    if "$" in str(ref) or "`" in str(ref):
+        raise _LiteralIdNeeded("the pull request number is a shell expansion the guard cannot read", REVIEW_LITERAL_PR_REMEDY)
     rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
     return str(rows[-1].get("body") or "") if rows else ""
 
@@ -495,7 +502,7 @@ def _old_body_hit(edit, repo: str, where: str):
             old = _old_body(module.Host(repo=repo or None, cwd=where or None), edit)
     except (Exception, SystemExit) as e:
         why = cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80)
-        remedy = REVIEW_LITERAL_ID_REMEDY if isinstance(e, _LiteralIdNeeded) else REVIEW_UNREAD_REMEDY
+        remedy = e.remedy if isinstance(e, _LiteralIdNeeded) else REVIEW_UNREAD_REMEDY
         return "edit of a comment, old body not read", REVIEW_OLD_UNREAD_REASON % (why, remedy)
     if module.review_marked(old):
         return "edit of a comment that holds a review record", REVIEW_WITHDRAW_REASON % _review_render(module, "<pr>", "<live head>")

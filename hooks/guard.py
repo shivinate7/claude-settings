@@ -1654,9 +1654,13 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             if edit is None:   # the not-checked note is a post's fail-open line; an edit fails closed
                 review_note("the body file " + name + " could not be read")
     unseen = (stdin and not judged_stdin) or _api_input_named(rest)   # an edit's new body the guard cannot see
-    if stdin and not judged_stdin and edit is None:
+    unseen_stdin = stdin and not judged_stdin
+    if unseen_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
-    return review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread)
+    hit = review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread)
+    if unseen_stdin and edit is not None and hit is None:   # an allowed edit's new body was never read; a refused edit prints no note
+        review_note("the body comes from stdin and cannot be read")
+    return hit
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
