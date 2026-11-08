@@ -2313,6 +2313,10 @@ MUTATIONS = [
      '            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))',
      '            pass',
      "guard", "report-sha-missing: an Explore hand-back naming a made-up sha is refused"),
+    ("report-sha-missing: the stop is never blocked for a made-up sha",
+     '            sha_reason = "report-sha-missing: " + REPORT_SHA_STOP_REASON % ", ".join(missing)',
+     '            sha_reason = ""',
+     "guard", "report-sha-missing: a reviewer's first stop naming a made-up sha is blocked"),
 ]
 
 
