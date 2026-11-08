@@ -124,9 +124,10 @@ def assistant_text(text):
 
 
 def background_agent_launch(spawn, n=0):
-    """A spawn that runs in the background and has not finished: its Agent tool_use, then the async-launch
-    result that names the agent. No completion record follows, so the agent is still running at the Stop.
-    The shape is the one hooks/stall_watch.py reads: isAsync, status async_launched, agentId."""
+    """A background spawn's launch: its Agent tool_use with run_in_background, then the async-launch result
+    that names the agent. Its completion, when it has one, arrives later as a notice (background_agent_done).
+    A launch with no notice after it is still running. The shape is the one hooks/stall_watch.py reads:
+    isAsync, status async_launched, agentId."""
     cid = "toolu_bg%d" % n
     aid = "a%016x" % (0x51a7e0000 + n)
     use = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
@@ -136,6 +137,25 @@ def background_agent_launch(spawn, n=0):
          "content": "Async agent launched successfully. agentId: %s." % aid}]},
         "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid}}
     return [use, result]
+
+
+def background_agent_done(n, status="completed"):
+    """The completion notice of background spawn n: a queued_command attachment whose prompt is a task
+    notification. Its tool-use-id is the spawn's own id, and its status is terminal."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    prompt = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+              "<status>%s</status>\n<summary>Agent \"review\" %s</summary>\n</task-notification>"
+              % (aid, cid, status, status))
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
+def keyed_spawn(spawn, n=0):
+    """A finished foreground spawn that carries its tool_use id, answered by a real result."""
+    use = tool_use_msg("Agent", spawn)
+    use["message"]["content"][0]["id"] = "toolu_fg%d" % n
+    return [use, tool_result_msg("toolu_fg%d" % n)]
 
 
 def compact_boundary():
@@ -869,20 +889,10 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=(), running=(), subagent_model="sonnet"):
-        records = [human("do the task")]
-        for spawn in spawns:
-            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
-        for n, spawn in enumerate(running):
-            records += background_agent_launch(spawn, n)
-        for spawn in denied:
-            use = tool_use_msg("Agent", spawn)
-            use["message"]["content"][0]["id"] = "tu_denied"
-            result = tool_result_msg("tu_denied")
-            result["message"]["content"][0]["is_error"] = True
-            records += [use, result]
-        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                    assistant_text(reply)]
+    def stop(self, records, reply, subagent_model="sonnet"):
+        """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
+        records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                             assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
@@ -892,6 +902,20 @@ class DoneNamesModelsTests(unittest.TestCase):
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def verdict(self, reply, spawns, denied=(), running=(), subagent_model="sonnet"):
+        records = [human("do the task")]
+        for spawn in spawns:
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for n, spawn in enumerate(running):  # a background spawn with no completion notice: still running
+            records += background_agent_launch(spawn, n)
+        for spawn in denied:
+            use = tool_use_msg("Agent", spawn)
+            use["message"]["content"][0]["id"] = "tu_denied"
+            result = tool_result_msg("tu_denied")
+            result["message"]["content"][0]["is_error"] = True
+            records += [use, result]
+        return self.stop(records, reply, subagent_model)
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
@@ -1014,6 +1038,54 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku)\n> **Next** Unstarted: none",
             [self.BUILDER, {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}]))
+
+    TEST_AUTHOR_HAIKU = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    TEST_AUTHOR_DONE = "> **Done** BUILT the cases, PR #5 (test-author haiku)\n> **Next** Unstarted: none"
+
+    def background_builder_turn(self, status):
+        """A finished test-author, then a background builder whose completion notice has `status`.
+        `status` None leaves the builder with no notice: still running."""
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0)
+        records += background_agent_launch(self.BUILDER, 0)
+        if status:
+            records.append(background_agent_done(0, status))
+        return records
+
+    def test_dm_red_completed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("completed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a completed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_failed_background_builder_omitted_blocks(self):
+        out = self.stop(self.background_builder_turn("failed"), self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a failed background builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_false_alarm_running_background_builder_omitted_passes(self):
+        out = self.stop(self.background_builder_turn(None), self.TEST_AUTHOR_DONE)
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_finished_keyed_spawn_omitted_blocks(self):
+        # A finished spawn that carries its tool_use id and a real result is required in Done like any other.
+        records = [human("do the task")] + keyed_spawn(self.TEST_AUTHOR_HAIKU, 0) + keyed_spawn(self.BUILDER, 1)
+        out = self.stop(records, self.TEST_AUTHOR_DONE)
+        self.assertIsNotNone(out, "a finished keyed builder that Done omits passed")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_running_reviewer_named_bare_blocks(self):
+        # A Done item that names a role with no model blocks, whether or not that role is still running.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named bare in Done passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_running_reviewer_named_wrong_model_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet)\n"
+                           "> **Next** reviewer round 1 running; Unstarted: none",
+                           [self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNotNone(out, "a running reviewer named with a wrong model passed")
+        self.assertIn("'reviewer sonnet' matches no reviewer spawn, which ran haiku", out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
