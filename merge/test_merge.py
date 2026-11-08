@@ -10508,6 +10508,48 @@ class MainRunsHost(FakeHost, merge.Host):
         return self.jobs[int(m.group(1))]
 
 
+def checks_row(id_, sha, conclusion, created_at):
+    """One run of checks.yml as the workflow runs list gives it: its head, its conclusion and when it was created."""
+    return {"id": id_, "name": "checks", "status": "completed", "conclusion": conclusion, "head_sha": sha,
+            "html_url": f"https://github.com/o/r/actions/runs/{id_}", "created_at": created_at, "run_number": id_}
+
+
+FILTER_THIS, FILTER_OTHER = "c" * 40, "d" * 40  # the head asked about, and another commit's sha
+
+
+class HeadChecksRunRows(merge.Host):
+    """The real Host.head_checks_run over one scripted runs list. `rows` answer every page, whatever head_sha the read asks for,
+    so the filter on each row's head_sha is the function's job, not the API's. No gh call is made: `api` is the stub."""
+    def __init__(self, rows):
+        super().__init__()
+        self.rows, self.reads = rows, []
+
+    def api(self, rel, *extra, method="GET", fields=None):
+        self.reads.append((rel, (fields or {}).get("head_sha")))
+        if rel != "actions/workflows/checks.yml/runs":
+            return 1, "unexpected read %s" % rel
+        return 0, json.dumps([{"total_count": len(self.rows), "workflow_runs": self.rows}])
+
+
+class HeadChecksRunBySha(unittest.TestCase):
+    """head_checks_run(sha) answers for that sha only: the newest checks.yml run whose head_sha is sha, or None when none has it."""
+
+    def test_the_newest_run_on_another_sha_does_not_answer_for_this_head(self):
+        host = HeadChecksRunRows([checks_row(2, FILTER_OTHER, "success", "2026-11-07T20:00:00Z"),
+                                  checks_row(1, FILTER_THIS, "failure", "2026-11-07T19:00:00Z")])
+        self.assertEqual(host.head_checks_run(FILTER_THIS), ("failure", "https://github.com/o/r/actions/runs/1"),
+                         "the newest row, a green run on another sha, answered for this head instead of its own red run")
+
+    def test_no_run_on_this_sha_answers_none(self):
+        host = HeadChecksRunRows([checks_row(2, FILTER_OTHER, "success", "2026-11-07T20:00:00Z")])
+        self.assertIsNone(host.head_checks_run(FILTER_THIS), "a run on another sha answered for this head instead of None")
+
+    def test_the_only_run_on_this_sha_is_its_answer(self):  # control
+        host = HeadChecksRunRows([checks_row(1, FILTER_THIS, "failure", "2026-11-07T19:00:00Z")])
+        self.assertEqual(host.head_checks_run(FILTER_THIS), ("failure", "https://github.com/o/r/actions/runs/1"),
+                         "the one run on this head did not answer for it")
+
+
 class RedMainBrake(Env):
     """c166: no batch merge onto a red main. The red-main check judges main's latest completed run, job by job (decision no-merge-onto-red-main)."""
     def setUp(self):

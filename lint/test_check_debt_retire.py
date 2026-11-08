@@ -425,6 +425,39 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=Runs(("success", side)))
         self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on a commit the head does not contain did not stay red")
 
+    def test_r14_a_green_run_on_an_old_main_commit_is_red_and_not_deferred(self):
+        # Ruling 20:34 CST: only a cited sha the branch holds (in base..head) is deferred. An ancestor of the base is judged as today.
+        self.repo(debts={"d-prose": PROSE})
+        old = self.base  # a main commit that the base and the head both hold
+        self.change(write={"notes/main.txt": "main\n"})
+        self.base = self.head  # the base the PR was cut from: main's tip, one commit on
+        self.change(rm=["docs/debts/d-prose.md"])
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", old)), defer=True)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an old main commit was deferred in CI mode, not judged red")
+            self.assertIn("not on the PR head", found[0].text, "the refusal does not give the cause: not on the PR head")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", old)), head_run=heads)
+            self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an old main commit was deferred in merge mode, not judged red")
+            self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a cite that is not in base..head")
+
+    def test_r15_a_lane_tip_in_base_to_head_still_defers(self):  # control
+        self.repo(debts={"d-prose": PROSE})
+        lane = self.sibling_sha()  # the lane's commit, cut from the base
+        sh(self.dir, "git", "merge", "-q", "--no-ff", "-m", "merge the lane", "side")  # the batch takes the lane in: it is in base..head
+        self.change(rm=["docs/debts/d-prose.md"])
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", lane)), defer=True)
+            self.assertEqual(pairs(found), [], "a lane tip in base..head was not deferred in CI mode")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", lane)), head_run=heads)
+            self.assertEqual(pairs(found), [], "a lane tip in base..head with a green head run was refused in merge mode")
+            self.assertEqual(heads.shas, [self.head], "merge mode did not read the head's checks run for a lane tip in base..head")
+
     def test_r4_an_unreadable_cited_run_is_unknown(self):
         self.closed_prose()
         runs = Runs(RuntimeError("the run read failed: HTTP 502"))
