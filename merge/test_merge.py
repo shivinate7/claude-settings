@@ -13586,6 +13586,7 @@ if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_
     answer(one({"contexts": r["contexts"]}, jq))
 cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
 if method == "GET" and cmp:
+    open(os.path.join(d, "compares.log"), "a").write(rel + "\n")  # a case counts these: the batch line reads git, not compares
     answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
 unexpected(method + " " + rel)
 '''
@@ -13610,6 +13611,33 @@ unexpected(method + " " + rel)
         of its base (None: no branch protection) and the compares, by "first...second"."""
         return {"full_name": full_name, "pulls": list(pulls), "comments": list(comments), "check_runs": check_rows or {},
                 "contexts": None if contexts is None else list(contexts), "compares": compares or {}}
+
+    def lane_commit(self, root, n, parent="main"):
+        """A commit of lane n on `parent` (a branch of the root's origin, or a commit sha), pushed to refs/pull/<n>/head of that origin, as GitHub
+        keeps a pull request's head. The root's own Host fetches it by sha. Each commit adds a file of its own. -> its full sha."""
+        bare, other = os.path.join(os.path.dirname(root), "origin.git"), os.path.join(os.path.dirname(root), "other")
+        sh(bare, "git", "config", "uploadpack.allowReachableSHA1InWant", "true")  # a fetch by sha of a pull request head, as GitHub serves it
+        sh(other, "git", "fetch", "-q", "origin")
+        sh(other, "git", "checkout", "-q", "--detach", parent if re.fullmatch(r"[0-9a-f]{40}", parent) else f"origin/{parent}")
+        put(os.path.join(other, f"lane{n}.txt"), f"lane {n}\n")
+        sh(other, "git", "add", "-A")
+        sh(other, "git", "commit", "-q", "-m", f"lane {n}")
+        sha = sh(other, "git", "rev-parse", "HEAD")
+        sh(other, "git", "push", "origin", f"{sha}:refs/pull/{n}/head")
+        return sha
+
+    def main_sha(self, root):
+        """The commit main is at on the root's origin."""
+        return sh(os.path.join(os.path.dirname(root), "origin.git"), "git", "rev-parse", "refs/heads/main")
+
+    def advance_main(self, root, sha):
+        """Move main on the root's origin to `sha`, a commit on top of main: a fast-forward, as a merge makes it."""
+        sh(os.path.join(os.path.dirname(root), "other"), "git", "push", "origin", f"{sha}:refs/heads/main")
+
+    def compare_routes(self):
+        """The compare routes the per-root fake gh answered, in order: a case that reads git reads none."""
+        p = pathlib.Path(self.state, "compares.log")
+        return p.read_text().splitlines() if p.exists() else []
 
     def base_hosts(self, status, busy=False):
         """alpha: a done ready #5 at head 5, a done draft #6 at head 6, and with `busy`, a ready #8 with its CI running and no record. `status`
@@ -13929,8 +13957,9 @@ unexpected(method + " " + rel)
         # The folder is never created. Today the read of its default branch raises OSError out of merge, so no line prints. The case fails on that
         # escape, named. In both orders the missing root is one `repo DIR: unknown (...)` line at its place, and the good root's block is whole.
         missing = os.path.join(os.path.dirname(self.alpha), "missing")
-        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, hex_head("5"))],
-                                                      comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
+        head5 = self.lane_commit(self.alpha, 5)  # a real commit: the good root's batch line fetches it
+        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)],
+                                                      comments=[record_of(5, head5)], check_rows={head5: green()})})
         for failing_first in (True, False):
             order = (missing, self.alpha) if failing_first else (self.alpha, missing)
             with self.subTest(failing_first=failing_first):
@@ -13947,7 +13976,7 @@ unexpected(method + " " + rel)
         # No host is given, so each root gets a real Host(cwd=root), and gh answers for the folder each call runs in. alpha and bravo each name their
         # own repo and hold their own pull request. The folder the test runs in (o/self, #7) reaches neither block: a Host built from the process
         # cwd would read it.
-        head5, head9 = hex_head("5"), hex_head("9")
+        head5, head9 = self.lane_commit(self.alpha, 5), self.lane_commit(self.bravo, 9)  # real commits: the real Host fetches each head by sha
         self.per_root_gh({
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
             self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
@@ -13993,7 +14022,7 @@ unexpected(method + " " + rel)
     def test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines(self):
         # alpha's base has no branch protection, so its required checks cannot be named. The stop comes from the batch line's CI read (ready_busy):
         # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
-        head5, head9 = hex_head("5"), hex_head("9")
+        head5, head9 = self.lane_commit(self.alpha, 5), self.lane_commit(self.bravo, 9)  # real commits: the batch lines fetch them
         self.per_root_gh({
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()},
                                         contexts=None),
