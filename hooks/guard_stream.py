@@ -125,6 +125,8 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
         return word
     if interpreter_only:
         script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        if not script and word.endswith(".py"):
+            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(script)
         return ""
