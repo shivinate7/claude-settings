@@ -7473,6 +7473,18 @@ sh("python -c escaped plain push allows (control)",
 sh("python -c escaped forced push still denies (control)",
    r'python3 -c "import os; os.system(\"' + VCS + r' push -f origin x\")"', "deny", "force-push",
    cwd=PUSHFEAT, carries=REMEDY)
+# PRINTED, NOT RUN. A forced push quoted inside a print or an echo is text the interpreter shows, so each
+# allows. The nested reader splits on the escaped quotes and takes the printed text as a command. The
+# control pins a forced push to main that bash -c runs: it asks on the head and on main.
+# MUTATE_ONLY="nested quote" runs these cases alone.
+sh("push: nested quote, python -c prints a forced push, allows",
+   r'python3 -c "print(\"' + VCS + r' push -f\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, echo quotes a forced push in a sentence, allows",
+   r'echo "run \"' + VCS + r' push --force\" later"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote, python -c prints a sentence naming a forced push, allows",
+   r'python3 -c "print(\"use ' + VCS + r' push --force\")"', "allow", cwd=PUSHFEAT)
+sh("push: nested quote control, bash -c runs a forced push to main, still asks",
+   'bash -c "' + VCS + ' push -f origin main"', "ask", "force-push", cwd=PUSHFEAT)
 # The push text reader's scanner shapes. A comment opener or a multi-line string inside quotes is text, so
 # each is an allow control, green today. A lone quote in text opens no string that hides a push: nothing
 # after an unterminated quote runs, so the push-looking text after `it's #` is not a live push.
