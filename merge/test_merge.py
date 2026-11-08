@@ -14234,6 +14234,7 @@ class ReviewFixChainCap(ReviewChainFixture):
 
     HEAD_A, HEAD_B, HEAD_C = "4e" * 20, "5e" * 20, "6e" * 20  # the chain's records, oldest first; the live head is LIVE unless a case names another
     HEAD_D = "8e" * 20  # the record after the chain: a plain copy, or the third fix check of the listing case
+    HEAD_F = "9e" * 20  # the last of three plain records after the chain, each with other Round lines than the one before
     HEAD_E = "7e" * 20  # a second-round record with no Fix check line, after the chain
     FRESH_FAIL = ("Round 1: reviewer, haiku, FAIL",)  # a fresh chain's first round, a line the chain's records do not carry
     ONE_FAIL = ReviewFixRemedies.FAIL_ONE
@@ -14304,6 +14305,19 @@ class ReviewFixChainCap(ReviewChainFixture):
         rc, out, err, _ = self.run_chain(self.HEAD_D, comments, diffs=diffs, rounds=round_args(self.FRESH_FAIL))
         self.assertEqual(rc, 0, "control: a fix check from a fresh chain after two links was refused:\n" + out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_D, "reviewer", "haiku", "PASS"))
+
+    def test_plain_records_that_each_change_the_round_lines_start_a_new_count(self):
+        # control, green on the old code: D, E and F each change the Round lines of the record before them, so F starts a new count and a fix check from F is written
+        comments = (self.chain_link(1, self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
+                    self.chain_link(2, self.HEAD_B, fix_base=self.HEAD_A, rounds=self.ALL_PASS, net="zero"),
+                    self.chain_link(3, self.HEAD_C, fix_base=self.HEAD_B, rounds=self.ALL_PASS, net="zero"),
+                    self.chain_link(4, self.HEAD_D, rounds=self.ONE_FAIL, net="zero"),
+                    self.chain_link(5, self.HEAD_E, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), net="zero"),
+                    self.chain_link(6, self.HEAD_F, rounds=self.ALL_PASS, net="zero"))
+        diffs = {(self.HEAD_F, self.LIVE): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_chain(self.HEAD_F, comments, diffs=diffs, net="zero", rounds=self.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "control: a fix check from F, the last of three plain records after two links, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.HEAD_F, "reviewer", "haiku", "PASS"))
 
     def test_the_listing_of_a_third_fix_check_is_not_done(self):
         # the chain A, B, C, D holds three fix checks, so D's is past the cap. The listing reads the pull request at D's head as not done, and its why names the chain
