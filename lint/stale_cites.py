@@ -74,7 +74,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             file at head: a likely typo of a real file. A folder absent at head that head's history tracked
             (`history_tops`): it moved. A folder that passes neither test stays silent. The top folders and that file
             come from reads of head through the one `cat-file`, so they start no process of their own. The history is
-            one `git log`, started only for a folder at neither place; a failed log is unknown. Fenced lines count as
+            one `git log`, started only for a cite whose first part is no top folder at head and no near-miss typo checked at head (a root symlink or root file is no top folder, so its cite can start it); a failed log is unknown. Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
             leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
@@ -140,7 +140,7 @@ at head through the one `cat-file` the run opens, once per range, plus head's ro
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
 (NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it.
-One more start, a `git log`, runs when an added cite's top folder is absent at head and is no near-miss with its corrected file at head. It runs once per range. A cite led
+One more start, a `git log`, runs when an added cite's first part is no top folder at head and no near-miss typo checked at head; a root symlink or root file is no top folder, so its cite can start it. It runs once per range. A cite led
 by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
@@ -1395,7 +1395,7 @@ def python_cites(text):
 
 def history_tops(rng):
     """The top folders of each path the history of head deleted, or renamed away: one `git log`, cached on `rng`, started
-    only for a cite whose top folder is absent at head. A folder absent at head had every file of it deleted, so the
+    only for a cite whose first part is no top folder at head and no near-miss typo checked at head; a root symlink or root file is no top folder, so its cite can start it. A folder absent at head had every file of it deleted, so the
     deletions name it. Only deletions are listed, so the output stays small, and `--no-renames` makes a rename-from path a
     deletion. `-z` keeps a path unquoted. A log that fails is unknown, and the folder stays silent."""
     if rng.history_tops is None:
