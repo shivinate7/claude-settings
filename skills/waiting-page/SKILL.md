@@ -525,7 +525,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
 re-read `answers/<id>`, then delete it (pinned to its version), or, when the act is not done, reopen the item with `lane` and `lastAnswer`.
 An item with `waits` is never named: no delete happens during a wait.
-A `kept-answer: unknown` line means the check did not run: fetch again.
+A `kept-answer: unknown` line means that the check did not run: fetch again.
 
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
 of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
