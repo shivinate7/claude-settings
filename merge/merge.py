@@ -2527,16 +2527,24 @@ def ci_job_run(wt, *args, pr_body=""):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-PARENT_LINE = re.compile(r"^[ \t]*merge after:?[ \t]*#(\d+)", re.I | re.M)
-REVIEW_RANGE = re.compile(r"`git diff\s+([^\s`]+?)(?:\.\.\.?|\s+)(?!-)[^\s`]+`")
+PARENT_LINE = re.compile(r"merge after(.*)", re.I)
+REVIEW_RANGE = re.compile(r"`git diff\s+([^\s`]+?)(?:\.\.\.?|\s+)(?!-)[^\s`]+[^`]*`")
 
 def parent_prs(body):
-    """The PR numbers of each `Merge after: #N` line in a PR body (case and colon free), in order, once each."""
-    return list(dict.fromkeys(int(n) for n in PARENT_LINE.findall(body or "")))
+    """The PR numbers of each `merge after` line in a PR body, in order, once each: every `#N` after the words on that line (case, colon, `**` and bullet free)."""
+    found = (int(n) for line in (body or "").split("\n") for m in [PARENT_LINE.search(line)] if m for n in re.findall(r"#(\d+)", m.group(1)))
+    return list(dict.fromkeys(found))
 
 def review_range_starts(body):
-    """The start of each backticked `git diff <start> <end>`, `<start>..<end>` or `<start>...<end>` in a PR body. It reads the whole body: the range sits in the first paragraph."""
-    return REVIEW_RANGE.findall(body or "")
+    """The start of each backticked `git diff <start> <end>`, `<start>..<end>` or `<start>...<end>` in a PR body, flags or `-- path` after the end allowed.
+    It reads the whole body: the range sits in the first paragraph. A range in a fenced block is an example and a start holding <>{} is a placeholder: both are skipped."""
+    prose, fenced = [], False
+    for line in (body or "").split("\n"):
+        if line.strip().startswith("```") and line.count("```") == 1:
+            fenced = not fenced
+        elif not fenced:
+            prose.append(line)
+    return [s for s in REVIEW_RANGE.findall("\n".join(prose)) if not re.search(r"[<>{}]", s)]
 
 def check_review_ranges(host, body):
     """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`; a start below the parent's head makes the reviewer re-read
