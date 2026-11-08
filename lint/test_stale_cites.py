@@ -15,7 +15,9 @@ with the decisions whose Home names it and the rows that name it.
 STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
 report only: the exit code does not change (RouteClaimTests).
 STALE009 (range mode only) reports an added decision line that states what code does or does not do (a code subject
-and a behaviour verb) with no bound cite. It is report only too (CodeClaimTests).
+and a behaviour verb) with no cite. It is report only too (CodeClaimTests).
+STALE010 (range mode) is a finding: an added line that cites a Python name the head does not bind, or a file absent
+at head, in a STALE002 form or a node id. A dead cite is STALE010 and never STALE009 (NameCiteTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -72,7 +74,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]) (?P<text>.*)$")  # not STALE005: a report line
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]|STALE010) (?P<text>.*)$")  # not STALE005: a report line
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -333,6 +335,29 @@ class StaleCase(unittest.TestCase):
         self.assertIn("stale-cites: PASS", out)
         self.assertEqual(rc, 0, out)
         self.assertEqual(parse(out), [], out)
+
+    def route_range(self, rows, extra=None, base_notes="# Notes\n", head_extra=None):
+        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. `extra` is committed at base and
+        `head_extra` ({path: text}) at head. Returns (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, NOTES, text)
+            for path, body in (head_extra or {}).items():
+                write(repo, path, body)
+            commit(repo)
+        return self.make_range(base_files(base_notes, extra=extra), change), flagged
+
+    def mjs_and_removal(self, notes, at_head=False):
+        """The range touches hooks/lib.mjs and removes a .py file, so Markdown is read. `notes` is committed at base, or
+        at head when `at_head`, so its cites are added lines."""
+        def change(repo):
+            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
+            os.remove(os.path.join(repo, "hooks", "guard_core.py"))  # a second removal, so Markdown is read
+            if at_head:
+                write(repo, NOTES, notes)
+            commit(repo)
+        return self.make_range(base_files() if at_head else base_files(notes), change)
 
     def run_copy_of_script(self, rng, args):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
@@ -1057,13 +1082,6 @@ class ForeignFileTests(StaleCase):
     """A cite of a JavaScript or shell name prints as unknown, not as a finding, and only when Markdown is already
     read. A lone touched .mjs passes silently."""
 
-    def mjs_and_removal(self, notes):
-        def change(repo):
-            write(repo, "hooks/lib.mjs", LIB + "export const more = 1;\n")
-            os.remove(os.path.join(repo, "hooks", "guard_core.py"))  # a second removal, so Markdown is read
-            commit(repo)
-        return self.make_range(base_files(notes), change)
-
     def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
         rc, out = self.run_check(rng)
@@ -1713,15 +1731,6 @@ class RouteClaimTests(StaleCase):
     holds a capability verb and a route word. It is backed by a premise kind from PREMISE_KINDS with its source, or by a
     route id that is a row of hooks/route_rows.json. The exit code never changes."""
 
-    def route_range(self, rows, extra=None, base_notes="# Notes\n"):
-        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. Returns (range, flagged lines)."""
-        text, flagged = rows_text(rows)
-
-        def change(repo):
-            write(repo, NOTES, text)
-            commit(repo)
-        return self.make_range(base_files(base_notes, extra=extra), change), flagged
-
     def assert_route_claims(self, rng, expected, path=NOTES):
         """Scope first: the range touched `path`. Then the exit is 0, the verdict is PASS, and the STALE005 lines that
         name `path` are exactly `expected`. Returns the output."""
@@ -1959,7 +1968,11 @@ class RouteClaimTests(StaleCase):
         self.assertIn("hooks/guard.py", tracked, "scope: the backing that exists is tracked at head")
         self.assertNotIn("hooks/gone.py", tracked, "scope: the read backing is absent at head")
         self.assertNotIn("lint/test_gone.py", tracked, "scope: the test backing is absent at head")
-        out = self.assert_route_claims(rng, flagged)
+        self.assertIn(NOTES, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)  # the node id is a dead cite, so its finding is STALE010 and the exit is 1
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[1], "STALE010")], out)
+        self.assertEqual(stale005_lines(out, NOTES), flagged, out)  # both dead backings keep their STALE005 report
         texts = {number: text for path, number, text in stale005_hits(out) if path == NOTES}
         self.assertIn("hooks/gone.py", texts.get(flagged[0], ""), out)  # the report names the file it cannot find
         self.assertIn("lint/test_gone.py", texts.get(flagged[1], ""), out)
@@ -2833,6 +2846,7 @@ NEW_CITED = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/mer
 DEAD_PAREN = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/merge.py no_such_name);")
 DEAD_TICK = INCIDENT.replace("reads no CI state;", "reads no CI state, as `merge/merge.py` `no_such_name` shows;")
 GONE_FILE = INCIDENT.replace("reads no CI state;", "reads no CI state (merge/gone.py lane_lint);")
+UNCITED = "The guard refuses a push to main."  # a code claim with no cite: STALE009 still reports it
 CLAIM = re.compile(r"^stale-cites: report, (?P<path>[^\s:]+):(?P<line>\d+): STALE009 (?P<text>.*)$", re.M)
 
 
@@ -2843,8 +2857,9 @@ def code_claims(out):
 
 class CodeClaimTests(StaleCase):
     """STALE009, range mode only, report only. An ADDED line of a decision record that states what code does or does
-    not do (a code subject and a behaviour verb) must cite a name bound in its file at head, in a STALE002 form.
-    The exit code never changes (decision source-prose-lint-ships-dark)."""
+    not do (a code subject and a behaviour verb) must carry a cite, in a STALE002 form. A cite that names nothing
+    bound at head is STALE010 (NameCiteTests), not a report here. The exit code never changes (decision
+    source-prose-lint-ships-dark)."""
 
     def rows_range(self, rows, head_extra=None):
         """A range that rewrites DECISION as `rows` ((text, flagged) pairs) over a base of a heading and the
@@ -2886,13 +2901,20 @@ class CodeClaimTests(StaleCase):
         self.assertIn(DECISION, touched(rng))
         self.assert_code_claims(rng, [(DECISION, 1)])
 
-    def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_reported_as_a_dead_symbol(self):
+    def test_a_cite_to_a_name_unbound_in_its_file_at_head_is_stale010_and_no_stale009_report(self):
         cited = [(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
-        rng, flagged = self.rows_range([("- " + text, True) for text, _ in cited])
+        rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
-        out = self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
-        for (_, _, text), (_, name) in zip(code_claims(out), cited):
-            self.assertIn(name, text, out)
+        self.assertIsNone(binding_kind(LANE_LINT, "no_such_name"))  # scope: the head file never binds the name
+        self.assertNotIn("merge/gone.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)),
+                         [(DECISION, 1, "STALE010"), (DECISION, 2, "STALE010"), (DECISION, 3, "STALE010")], out)
+        found = {n: text for _, n, _, text in parse(out)}
+        for line, (_, name) in enumerate(cited, 1):
+            self.assertIn(name, found[line], out)  # the finding names the cited name or file
+        self.assertEqual(sorted((p, n) for p, n, _ in code_claims(out)), [(DECISION, 4)], out)  # the uncited claim only
 
     def test_sentences_with_no_code_subject_or_no_behaviour_verb_are_not_reported(self):
         rows = [
@@ -2940,7 +2962,7 @@ class CodeClaimTests(StaleCase):
         self.assert_code_claims(rng, [(DECISION, 2)])
 
     def test_report_lines_leave_the_exit_code_at_zero_and_the_verdict_at_pass(self):
-        rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + DEAD_PAREN, True)])
+        rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
         self.assertEqual(rc, 0, out)
@@ -3011,6 +3033,144 @@ class CodeClaimTests(StaleCase):
         rng, flagged = self.rows_range(rows)
         self.assertIn(DECISION, touched(rng))
         self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+
+STALE_FIXTURE = "lint/stale_cites.py"  # the file the incident line cites; the fixture lacks CODE_CLAIM unless a case binds it
+LACKS_CODE_CLAIM = "def check():\n    return 3\n\n\ndef scan():\n    return 4\n"
+BINDS_CODE_CLAIM = LACKS_CODE_CLAIM + 'CODE_CLAIM = "x"\n'
+INCIDENT_LINE = (  # the line PR #1553 added to docs/debts/notes.md, verbatim
+    '- stale009-idiom-false-alarms: STALE009 fires on idioms such as "tool calls", "calls for" and "check runs" '
+    "(docs/decisions/hook-inputs-carry-token-counts.md:64). Round 1 of #1539 sampled 10 of 226 full-tree hits: "
+    "8 real, 1 borderline, 1 false (lint/stale_cites.py `CODE_CLAIM`). Decision: claims-carry-backing "
+    "(the claim-backing record)."
+)
+
+
+class NameCiteTests(StaleCase):
+    """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form, or a node id, is
+    flagged when its file is absent at head or the name is not bound there at head (names_in). A cite of a JavaScript
+    or shell file keeps the unknown form. A fenced cite counts as prose, as STALE002 reads fences (its docstring)."""
+
+    def test_the_incident_line_is_flagged_while_its_name_is_unbound_and_silent_once_it_is_bound(self):
+        rng, _ = self.route_range([(INCIDENT_LINE, True)], extra={STALE_FIXTURE: LACKS_CODE_CLAIM})
+        self.assertIsNone(binding_kind(LACKS_CODE_CLAIM, "CODE_CLAIM"))  # scope: the fixture lacks the name
+        self.assertIn(NOTES, touched(rng))  # scope: a Markdown-only range, the shape of the incident
+        self.assertNotIn(STALE_FIXTURE, touched(rng))
+        found = self.assert_flags(rng, [(NOTES, 1, "STALE010")])
+        self.assertIn("CODE_CLAIM", found[0][3])
+        rows = [(INCIDENT_LINE, False), (INCIDENT_LINE.replace("`CODE_CLAIM`", "`CODE_CLAIM_OLD`"), True)]
+        rng, _ = self.route_range(rows, extra={STALE_FIXTURE: BINDS_CODE_CLAIM})
+        self.assertEqual(binding_kind(BINDS_CODE_CLAIM, "CODE_CLAIM"), "assign")  # scope: the fixture binds the name
+        self.assertNotIn(STALE_FIXTURE, touched(rng))
+        self.assert_flags(rng, [(NOTES, 2, "STALE010")])  # the bound cite on line 1 is silent; the other name is not
+
+    def test_a_cite_to_a_py_file_absent_at_head_is_flagged_in_each_form_and_a_bound_name_in_a_present_file_is_silent(self):
+        rows = [
+            ("- (lint/gone.py lane_lint)", True),
+            ("- `lint/gone.py` `lane_lint`", True),
+            ("- (lint/x.py check)", False),
+            ("- Open a comment with `<!--` and cite `lint/gone.py` `lane_lint`.", True),  # a comment opener in a span
+            ("- Don't count on `lint/gone.py` `lane_lint`.", True),  # a lone apostrophe before the cite
+        ]
+        rng, _ = self.route_range(rows)
+        self.assertNotIn("lint/gone.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the present file binds the name
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in (1, 2, 4, 5)])
+
+    def test_a_node_id_whose_class_lacks_the_method_is_flagged_and_one_the_class_has_is_silent(self):
+        cls = "class Cls:\n    def present(self):\n        return 1\n"
+        rows = [
+            ("- the case is `lint/x.py::Cls::missing_method`", True),
+            ("- the case is `lint/x.py::Cls::present`", False),
+            ("- the class is `lint/x.py::Cls`", False),
+        ]
+        rng, _ = self.route_range(rows, extra={"lint/x.py": cls})
+        self.assertEqual(binding_kind(cls, "Cls"), "def")  # scope: the class is bound at module level
+        self.assertIsNone(binding_kind(cls, "missing_method"))  # scope: no module-level name has that name
+        self.assert_flags(rng, [(NOTES, 1, "STALE010")])
+
+    def test_a_name_bound_only_in_a_comment_or_a_string_at_head_is_flagged_and_a_def_the_range_adds_is_bound(self):
+        head = ('# CODE_CLAIM is named in this comment\n'
+                'NOTE = "# CODE_CLAIM"\n'
+                'DOC = """\nCODE_CLAIM\n"""\n\n\n'
+                'def check():\n    return 3\n\n\n'
+                'def new_one():\n    return 5\n')
+        rows = [
+            ("- `lint/x.py` `CODE_CLAIM`", True),
+            ("- `lint/x.py` `check`", False),
+            ("- `lint/x.py` `new_one`", False),
+        ]
+        rng, _ = self.route_range(rows, head_extra={"lint/x.py": head})
+        self.assertIsNone(binding_kind(head, "CODE_CLAIM"))  # scope: a comment and strings name it, nothing binds it
+        self.assertEqual(binding_kind(head, "new_one"), "def")  # scope: a def the range adds
+        self.assertIn("lint/x.py", touched(rng))
+        self.assert_flags(rng, [(NOTES, 1, "STALE010")])
+
+    def test_a_line_the_range_does_not_add_is_silent_and_the_copy_the_range_adds_is_flagged(self):
+        old = "- old `lint/x.py` `gone_one`"
+        rng, _ = self.route_range([(old, False), ("- new `lint/x.py` `gone_two`", True)], base_notes=old + "\n")
+        self.assertEqual(git(rng.repo, "show", "%s:%s" % (rng.base, NOTES)).split("\n")[0], old)  # scope: line 1 at base
+        self.assertIn(NOTES, touched(rng))
+        self.assert_flags(rng, [(NOTES, 2, "STALE010")])
+
+    def test_a_line_marked_ste_disable_line_stale010_is_left_out_and_a_mark_for_another_code_is_not(self):
+        rows = [
+            ("- `lint/x.py` `gone_three` <!-- ste-disable-line STALE010 -->", False),
+            ("- `lint/x.py` `gone_three` <!-- ste-disable-line STALE002 -->", True),
+            ("- `lint/x.py` `gone_three`", True),
+        ]
+        rng, _ = self.route_range(rows)
+        self.assert_flags(rng, [(NOTES, 2, "STALE010"), (NOTES, 3, "STALE010")])
+
+    def test_a_cite_of_a_javascript_file_prints_unknown_and_no_stale010_and_a_python_cite_beside_it_is_flagged(self):
+        js = "# Notes\n\n- `hooks/lib.mjs` `refusals`\n"
+        rng = self.mjs_and_removal(js, at_head=True)
+        self.assertIn("hooks/lib.mjs", touched(rng))  # scope: the range touches the JavaScript file
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)  # the unknown form keeps the exit at 0
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(unknown_lines(out), [
+            "stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
+            "JavaScript and shell names are not checked",
+        ], out)
+        rng = self.mjs_and_removal(js + "- `lint/x.py` `gone_four`\n", at_head=True)
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 4, "STALE010")], out)
+        self.assertEqual(len(unknown_lines(out)), 1, out)  # the JavaScript line keeps its one unknown line
+
+    def test_a_dead_cite_in_a_fence_is_flagged_since_stale002_reads_fences_as_prose_and_a_bound_one_is_silent(self):
+        rows = [
+            ("```", False),
+            ("(lint/x.py check)", False),  # bound at head: silent inside the fence too
+            ("(lint/x.py gone_six)", True),  # a fenced dead cite: a finding, as STALE002 reads a fence as prose
+            ("```", False),
+        ]
+        rng, _ = self.route_range(rows)
+        self.assert_flags(rng, [(NOTES, 3, "STALE010")])
+
+    def test_tree_mode_prints_no_stale010_and_the_range_that_adds_the_same_cite_does(self):
+        cite = "# Notes\n\n- (lint/x.py gone_seven)\n"
+        self.assert_tree_passes(self.tree(cite))  # the whole-tree read judges no name: range mode only
+
+        def change(repo):
+            write(repo, NOTES, cite)
+            commit(repo)
+        self.assert_flags(self.make_range(base_files(), change), [(NOTES, 3, "STALE010")])
+
+    def test_a_name_cited_in_an_empty_py_file_or_a_full_size_one_is_judged_by_what_the_file_binds(self):
+        big = "".join("def f%d():\n    return %d\n\n\n" % (i, i) for i in range(300))
+        rows = [
+            ("- (lint/empty.py gone_eight)", True),
+            ("- (lint/big.py f299)", False),
+            ("- (lint/big.py f300)", True),
+        ]
+        rng, _ = self.route_range(rows, extra={"lint/empty.py": "", "lint/big.py": big})
+        self.assertGreater(len(big), 8192)  # scope: the full-size file
+        self.assertEqual(binding_kind(big, "f299"), "def")  # scope: the last def the file binds
+        self.assertIsNone(binding_kind(big, "f300"))
+        self.assertIsNone(binding_kind("", "gone_eight"))  # scope: the empty file binds nothing
+        self.assert_flags(rng, [(NOTES, 1, "STALE010"), (NOTES, 3, "STALE010")])
 
 
 if __name__ == "__main__":
