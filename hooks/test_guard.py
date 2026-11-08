@@ -9004,6 +9004,36 @@ sh("env: interpreter code follow-ups: allow, node -e, a line comment with a lone
    "if (!f.startsWith('" + ENV + "')) console.log(fs.readFileSync(f,'utf8'))\"",
    "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, eighth set: a read that runs only when the name is
+# ruled out by a negated startsWith test is allowed. The test is the first conjunct of an and, the condition of a
+# ternary, or the first conjunct of an else arm. Each deny is the same shape without the negation, so the read runs
+# for the name. Names share "startsWith test as", so MUTATE_ONLY="startsWith test as" runs this set alone.
+sh("env: interpreter code follow-ups: allow, node -e, a negated startsWith test as the first conjunct of an and, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) !f.startsWith('\" + ENV + \"') && "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a negated startsWith test as a ternary condition in a forEach arrow, then a read",
+   "node -e \"const fs=require('fs'); fs.readdirSync('.').forEach(f => !f.startsWith('\" + ENV + \"') ? "
+   "console.log(fs.readFileSync(f,'utf8')) : 0)\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a negated startsWith test as a ternary condition in a const, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) { const s = !f.startsWith('\" + ENV + \"') ? "
+   "fs.readFileSync(f,'utf8') : ''; }\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a negated startsWith test as the first conjunct of an else arm, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (x) 0; else !f.startsWith('\" + ENV + \"') && "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "allow", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: deny, node -e, a startsWith test as the first conjunct of an and, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) f.startsWith('\" + ENV + \"') && "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a startsWith test as a ternary condition in a forEach arrow, then a read",
+   "node -e \"const fs=require('fs'); fs.readdirSync('.').forEach(f => f.startsWith('\" + ENV + \"') ? "
+   "console.log(fs.readFileSync(f,'utf8')) : 0)\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a startsWith test as a ternary condition in a const, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) { const s = f.startsWith('\" + ENV + \"') ? "
+   "fs.readFileSync(f,'utf8') : ''; }\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a startsWith test as the first conjunct of an else arm, then a read",
+   "node -e \"const fs=require('fs'); for (const f of fs.readdirSync('.')) if (x) 0; else f.startsWith('\" + ENV + \"') && "
+   "console.log(fs.readFileSync(f,'utf8'))\"", "deny", "env-file", cwd=NOGIT)
+
 # Decision env-file-stays-unread, "Interpreter code", follow-ups, fourth set: a heredoc fed to an interpreter's
 # stdin with a dash and an argument after it, a deno run that reads stdin, and a heredoc written to a file
 # that deno then runs. Each deny reads the file. The controls print 1 or open nothing. Names start
