@@ -8993,6 +8993,20 @@ for _lang in ("perl", "ruby", "node"):
     sh("draft-pr: a %s body with a backtick gh pr create span, fed to %s, is refused" % (_lang, _lang),
        "\n".join(["%s - <<'EOF'" % _lang, TICK_BODY[_lang], "EOF"]), "deny", "draft-pr",
        cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A `$( )` or `<( )` nested in a backtick span is a shell substitution, and perl, ruby and node run the span
+# as a shell, so the gh call inside it runs. Each body carries the gh call only in that nested form.
+sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby body whose backtick span nests $( ) with gh pr create, fed to ruby, is refused",
+   "\n".join(["ruby - <<'EOF'", "puts `echo $(gh pr create -t x)`", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run from a written file, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "print `echo $(gh pr create -t x)`;", "EOF", "perl f.pl"]), "deny",
+   "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl body whose backtick span nests <( ) with gh pr create, fed to perl, is refused",
+   "\n".join(["perl - <<'EOF'", "print `cat <(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
