@@ -889,7 +889,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def stop(self, records, reply, subagent_model="sonnet"):
+    def stop(self, records, reply, agent_model="sonnet"):
         """Run the Stop hook over the turn's records, with the reply as its last text. Return its verdict or None."""
         records = records + [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                              assistant_text(reply)]
@@ -897,13 +897,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
-        if subagent_model:
-            env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
+        if agent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = agent_model
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def verdict(self, reply, spawns, denied=(), running=(), subagent_model="sonnet"):
+    def verdict(self, reply, spawns, denied=(), running=(), agent_model="sonnet"):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
@@ -915,7 +915,7 @@ class DoneNamesModelsTests(unittest.TestCase):
             result = tool_result_msg("tu_denied")
             result["message"]["content"][0]["is_error"] = True
             records += [use, result]
-        return self.stop(records, reply, subagent_model)
+        return self.stop(records, reply, agent_model)
 
     BUILDER = {"subagent_type": "builder", "prompt": "build it"}
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
@@ -1002,9 +1002,9 @@ class DoneNamesModelsTests(unittest.TestCase):
         def reply(model):
             return "> **Done** BUILT the cases, PR #5 (%s %s)\n> **Next** Unstarted: none" % (role, model)
 
-        out = self.verdict(reply(pin), [spawn], subagent_model=None)
+        out = self.verdict(reply(pin), [spawn], agent_model=None)
         self.assertIsNone(out, out and out["reason"])
-        out = self.verdict(reply(wrong), [spawn], subagent_model=None)
+        out = self.verdict(reply(wrong), [spawn], agent_model=None)
         self.assertIsNotNone(out, "a %s spawn with no model field ran %s, yet Done naming %s passed"
                              % (role, pin, wrong))
         self.assertIn("'%s %s' matches no %s spawn, which ran %s" % (role, wrong, role, pin), out["reason"])
