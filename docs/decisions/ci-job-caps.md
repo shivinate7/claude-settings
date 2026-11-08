@@ -31,7 +31,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 | checks-windows-merge (window of 2026-11-06, off pull_request) | windows | 24 | 11.8 | 13.6 | 15 | 22 | 62 | 0 | yes |
 | checks-windows-merge-2 to -5 (window of 2026-11-06) | windows | 23 to 25 | 10.8 to 13.5 | 12.2 to 14.5; at least 15.2 in the cap end | 15 | 22 | 55 to 66; 69 for the cap end | 1, run 42282722326 (checks-windows-merge-2), against the cap in force (15); 2 more after the window (checks-windows-merge-5) | yes |
 | pointer-windows | windows | 30 | 3.8 | 4.2 | 10 | 10 | 42 | 0 | yes |
-| checks-mutate-guard | ubuntu | 30 | 3.7 | 3.9 (old window; see the note below) | 10 | 45 | about 59 (27 projected with the clean-layout controls) | 1, run 41786084869, against the cap in force (10) | projected yes |
+| checks-mutate-guard | ubuntu | 30 | 3.7 | 3.9 (old window; see the note below) | 25 | 45 | about 59 (27 projected with the clean-layout controls) | 1, run 41786084869, against the cap in force (10) | projected yes |
 | checks-windows | windows | 30 | 1.2 | 1.6 | 10 | 10 | 16 | 0 | yes |
 | checks-shoot | ubuntu | 30 | 0.8 | 1.0 | 10 | 10 | 10 | 0 | yes |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 1 (scope), run 42317209568, no step started; see the cap-end bullet | yes |
