@@ -1293,8 +1293,8 @@ RESUME_ASK_REASON = (
 RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule of a send whose transcript could not be read
 RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
 RESUME_UNPARSED_REASON = (
-    "resume-finished-reviewer: the guard could not parse this session's transcript, so it cannot tell whether this "
-    "reviewer or design-reviewer has finished. A finished one has no worktree, so a resume runs with no tree; then "
+    "resume-finished-reviewer: the guard read a record in this session's transcript that has the wrong shape, so it "
+    "cannot tell whether this reviewer or design-reviewer has finished. A finished one has no worktree, so a resume runs with no tree; then "
     "spawn a fresh reviewer and pass it the prior report. Allow this send only if the reviewer is still running. "
     "(rule roles-resume-by-name)"
 )
@@ -1302,13 +1302,14 @@ RESUME_UNPARSED_REASON = (
 
 def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
     """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a
-    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown or the transcript's
-    records cannot be parsed, else ("", "", "", ...).
+    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown or a parsed transcript
+    record has the wrong shape (a line that is not JSON is dropped by the reader, so a half-written last line passes), else ("", "", "", ...).
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
-    the name wins. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
+    the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
+    ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
     to main, a name no spawn holds, a spawn of any other role, a running spawn and a call with an agent_id pass.
     `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
-    be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when the read records cannot be parsed
+    be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
     (it asks). The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one transcript
     read per judged send, shared with review_record_hit (_main_records), no subprocess, no network."""
     target = tool_input.get("to") if isinstance(tool_input, dict) else None
@@ -1316,6 +1317,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
         return "", "", "", ""
     if not transcript:
         return "", "", "", RESUME_UNREAD_NOTE
+    target = re.sub(r" \[[^\[\]]*\]$", "", target)
     try:
         reader = _transcript_reader()
         records = _main_records(transcript)
