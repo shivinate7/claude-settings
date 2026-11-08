@@ -15841,6 +15841,8 @@ BS_UNNAMED = "brief-scope-unnamed"
 BS_UNREAD = "brief-scope-unread"
 # Both must be read: the undo the refusal gives, and the route for a need the brief did not name.
 BS_REMEDY = ("restore", "orchestrator")
+# The push refusal also says to stop and report a change an own commit holds, as builder_diff_reason does.
+BS_STOP_REPORT = "if a commit of yours holds the change, stop and report it"
 BS_TIME = "2026-11-08T10:00:00Z"
 BS_PROJECT = os.path.join(ROOT, "briefscope", "projects", "-briefscope-slug")
 BS_SESSION = "briefscope-session-0001"
@@ -15857,6 +15859,9 @@ BS_BASE = {**BASE_FILES, "src/contest/old.py": "z = 1\n", "src/myapp.py": "m = 1
            "hooks/guard.py": "g = 1\n", "hooks/other.py": "o = 1\n",
            "app/[id]/page.tsx": "export default 1\n", "app/other/index.tsx": "export default 2\n",
            "docs/decisions/x.md": "x\n", "docs/decisions-old/x.md": "y\n",
+           # a cited brief file in the checkout, a file a route path with a dollar sign names, and a pointer misfire's file
+           "docs/decisions/brief-claim-has-probe.md": "Claim has a probe.\nFiles: `hooks/guard.py`.\n",
+           "hooks/agent_brief.py": "a = 1\n", "src/routes/posts.$id.tsx": "route 1\n",
            BS_LONG_NAME: "s\n"}
 BS_NOTES_BASE = {**BASE_FILES, "notes/verdict-1.md": "v1\n", "notes/verdict-2.md": "v2\n",
                  **{name: "t\n" for name in BS_TOOL_NOTES}}
@@ -15874,6 +15879,14 @@ BS_BRIEFS = {
     "bracket": "Task: fix the page.\nFiles: `app/[id]/page.tsx`. Report in 10 lines.",
     "folder": "Task: amend the decisions.\nFiles: `docs/decisions`. Report in 10 lines.",
     "slowglob": "Task: tidy the sources.\nFiles: `src/*a*a*a*a*a*a*a*a*a*a.py`. Report in 10 lines.",
+    "misfire": "Task: fix hooks/agent_brief.py. Governing: docs/decisions/brief-claim-has-probe.md.",
+    "prose": "Task: make the timeout case pass and/or report back. Check I/O and pass/fail in Round 2/3. "
+             "Report in 10 lines.",
+    "dollar": "Task: fix the post route.\nFiles: `src/routes/posts.$id.tsx`. Report in 10 lines.",
+    "abs-other": "Task: fix the guard.\nFiles: " + os.path.join(DIFFROOT, "bs-abs-other-main", "hooks", "guard.py")
+                 + ". Report in 10 lines.",
+    "abs-guard": "Task: fix the guard.\nFiles: " + os.path.join(DIFFROOT, "bs-abs-guard-main", "hooks", "guard.py")
+                 + ". Report in 10 lines.",
 }
 
 
@@ -15900,11 +15913,15 @@ BS_LINES["ptr-abs"] = [_bs_user("Read your full brief at " + BS_POINTER_TARGET)]
 BS_LINES["ptr-repo"] = [_bs_user("Read your full brief at docs/briefs/brief-t7.md")]
 BS_LINES["ptr-missing"] = [_bs_user("Read your full brief at " + BS_POINTER_MISSING)]
 BS_LINES["ptr-chain"] = [_bs_user("Read your full brief at " + BS_POINTER_CHAIN)]
+# A pointer cited inside a message that names its own files: the message's names stand beside the file's.
+BS_LINES["ptr-names"] = [_bs_user("Files: hooks/other.py. Full brief at " + BS_POINTER_TARGET)]
+BS_LINES["ptr-missing-names"] = [_bs_user("Files: `hooks/guard.py`. Full brief at " + BS_POINTER_MISSING)]
 # One id per agent, none a prefix of another. `missing` gets no file; `unreadable` gets a folder.
 BS_IDS = {key: "b5a%013x" % n for n, key in enumerate(
     ["exact", "bare", "dir", "glob", "nopaths", "lone", "author", "notes", "other", "later", "list",
      "ptr-abs", "ptr-repo", "ptr-missing", "ptr-chain", "bracket", "folder", "slowglob",
-     "missing", "unreadable"], 1)}
+     "missing", "unreadable", "misfire", "prose", "dollar", "abs-other", "abs-guard", "ptr-names",
+     "ptr-missing-names"], 1)}
 
 
 def bs_agent(key):
@@ -15955,11 +15972,13 @@ bs_notes_other = bs_repo("notes-other", _write_all(("notes/verdict-1.md", "v1 2\
                          files=BS_NOTES_BASE)
 
 
-def bs_judge(name, expected, repo, role=None, key=None, command=COMMIT, transcript=True, rule=None, lacks=()):
-    """One commit or push by an agent of `role` whose brief is `key`. Role None is the main session."""
+def bs_judge(name, expected, repo, role=None, key=None, command=COMMIT, transcript=True, rule=None, lacks=(),
+             carries=None):
+    """One commit or push by an agent of `role` whose brief is `key`. Role None is the main session.
+    `carries` replaces the fragments a refusal must hold, which are BS_REMEDY when a rule is named."""
     sh(name, command, expected, rule=rule, cwd=repo, agent_id=BS_IDS[key] if key else None,
        agent_type=role, transcript=BS_TRANSCRIPT if transcript else None, lacks=lacks,
-       carries=BS_REMEDY if rule else ())
+       carries=carries if carries is not None else (BS_REMEDY if rule else ()))
 
 
 def bs_stop(name, expected, repo, role, key, stop_active=False, rule=None, lacks=()):
@@ -16038,11 +16057,13 @@ bs_judge("brief-scope: the main session's commit is not judged", "allow", bs_app
 bs_judge("brief-scope: a reviewer's commit is not judged", "allow", bs_app_unnamed, "reviewer", "exact")
 
 
-def bs_history(name, *steps):
+def bs_history(name, *steps, primary=False):
     """A worktree on `work`, cut from a base that is also origin/main, after `steps` (each takes the
-    worktree): the agent's own commits and its uncommitted changes, as the agent leaves them."""
+    worktree): the agent's own commits and its uncommitted changes, as the agent leaves them. `primary`
+    puts the worktree under the main checkout's .claude/worktrees, where an agent's worktree sits."""
     main = os.path.join(DIFFROOT, "bs-" + name + "-main")
-    where = os.path.join(DIFFROOT, "bs-" + name)
+    where = (os.path.join(main, ".claude", "worktrees", "agent-" + name) if primary
+             else os.path.join(DIFFROOT, "bs-" + name))
 
     def build():
         make_repo(main, BS_BASE)
@@ -16122,6 +16143,31 @@ bs_slow_glob = bs_repo("slow-glob", _put(BS_LONG_NAME, "s 2\n"))
 add("brief-scope: a glob with ten stars is judged in under two seconds", "deny", rule=BS_RULE,
     tool="Bash", cwd=bs_slow_glob, agent_id=BS_IDS["slowglob"], agent_type="builder",
     transcript=BS_TRANSCRIPT, max_seconds=2, carries=BS_REMEDY, lacks=BS_LONG_NAME, command=COMMIT)
+
+
+# ---- a cited brief file is read beside the message's own names; a slash word in prose is no path; a path keeps
+# its dollar sign; an absolute path under the primary checkout names its file; the push refusal names the stop
+bs_misfire = bs_repo("misfire", _put("hooks/agent_brief.py", "a = 2\n"))
+bs_dollar = bs_repo("dollar", _put("src/routes/posts.$id.tsx", "route 2\n"))
+bs_abs_other = bs_history("abs-other", _put("hooks/other.py", "o = 2\n"), primary=True)
+bs_abs_guard = bs_history("abs-guard", _put("hooks/guard.py", "g = 2\n"), primary=True)
+bs_judge("brief-scope: a cited brief file that is not the whole brief adds the message's own names: a commit of the "
+         "file the message names is allowed", "allow", bs_misfire, "builder", "misfire")
+bs_judge("brief-scope: a read pointer adds the message's own names: a commit of the file the message names is allowed",
+         "allow", bs_ptr_other, "builder", "ptr-names")
+bs_judge("brief-scope: an unreadable pointer allows a commit of a file the message does not name",
+         "allow", bs_ptr_other, "builder", "ptr-missing-names")
+bs_judge("brief-scope: slash words in prose are not paths: a commit of an unnamed file is allowed", "allow",
+         bs_app_named, "builder", "prose")
+bs_judge("brief-scope: a path with a dollar sign stays whole: a commit of the file it names is allowed", "allow",
+         bs_dollar, "builder", "dollar")
+bs_judge("brief-scope: an absolute path under the primary checkout names the repo-relative file: a commit of another "
+         "file is denied", "deny", bs_abs_other, "builder", "abs-other", rule=BS_RULE, lacks="hooks/other.py")
+bs_judge("brief-scope: an absolute path under the primary checkout names the repo-relative file: a commit of that "
+         "file is allowed", "allow", bs_abs_guard, "builder", "abs-guard")
+bs_judge("brief-scope: a push refusal says to stop and report a change an own commit holds", "deny", bs_app_unnamed,
+         "builder", "exact", command=PUSH, rule=BS_RULE, lacks="src/contest.py",
+         carries=BS_REMEDY + (BS_STOP_REPORT,))
 
 
 def _bs_scope(repo, rel):
@@ -16220,6 +16266,15 @@ def bs_fixture_check():
               (bs_brackets_other, "app/other/index.tsx"), (bs_brackets_named, "app/[id]/page.tsx"),
               (bs_folder_under, "docs/decisions/x.md"), (bs_folder_sibling, "docs/decisions-old/x.md"),
               (bs_slow_glob, BS_LONG_NAME)]
+    wants += [(bs_misfire, "hooks/agent_brief.py"), (bs_dollar, "src/routes/posts.$id.tsx"),
+              (bs_abs_other, "hooks/other.py"), (bs_abs_guard, "hooks/guard.py")]
+    materialize(bs_misfire)
+    if not os.path.isfile(os.path.join(bs_misfire, "docs", "decisions", "brief-claim-has-probe.md")):
+        return False, "the fixture in %s has no cited brief file to read" % bs_misfire
+    for repo in (bs_abs_other, bs_abs_guard):
+        materialize(repo)
+        if os.path.basename(os.path.dirname(os.path.dirname(repo))) != ".claude":
+            return False, "the fixture in %s has its worktree outside the primary's .claude folder" % repo
     for repo, rel in wants:
         materialize(repo)
         problem = _bs_scope(repo, rel)
@@ -16245,6 +16300,18 @@ def bs_pointer_missing_log():
                      _bs_bodies(bs_ptr_other, "builder", "ptr-missing", [COMMIT]), BS_UNREAD)
 
 
+def bs_ptr_missing_names_log():
+    """An unreadable pointer beside the message's own names allows the commit and logs brief-scope-unread."""
+    return bs_logged(os.path.join(ROOT, "briefscope-log-pointer-missing-names"), bs_ptr_other, ["hooks/other.py"],
+                     _bs_bodies(bs_ptr_other, "builder", "ptr-missing-names", [COMMIT]), BS_UNREAD)
+
+
+def bs_prose_log():
+    """A slash word in the prose is no path: the file is allowed and the log holds brief-scope-unnamed."""
+    return bs_logged(os.path.join(ROOT, "briefscope-log-prose"), bs_app_named, ["src/app.py"],
+                     _bs_bodies(bs_app_named, "builder", "prose", [COMMIT]), BS_UNNAMED)
+
+
 LOG_CHECKS_EXTRA.append(("brief-scope: each fixture repo holds the change its cases judge", bs_fixture_check))
 LOG_CHECKS_EXTRA.append(("brief-scope: a new unnamed file is allowed and logged brief-scope-new", bs_new_log))
 LOG_CHECKS_EXTRA.append(("brief-scope: a brief that names no path is allowed and logs brief-scope-unnamed",
@@ -16255,6 +16322,10 @@ LOG_CHECKS_EXTRA.append(("brief-scope: a second stop with an unnamed file is all
                          "line", bs_second_stop_log))
 LOG_CHECKS_EXTRA.append(("brief-scope: a pointer to a missing brief is allowed and logs brief-scope-unread",
                          bs_pointer_missing_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: an unreadable pointer beside the message's own names allows the commit and "
+                         "logs brief-scope-unread", bs_ptr_missing_names_log))
+LOG_CHECKS_EXTRA.append(("brief-scope: a slash word in prose allows an unnamed file and logs brief-scope-unnamed",
+                         bs_prose_log))
 
 
 # =========================================================================== builder refusal
