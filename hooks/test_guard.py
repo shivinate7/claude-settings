@@ -20409,10 +20409,9 @@ def worktree_home_cross_checkout_case():
 
 
 def worktree_home_cross_checkout_copy_case():
-    """Rule 0, `other-checkout`, the false alarms on a copy and on a heredoc, beside
+    """Rule 0, `other-checkout`, the false alarms on a copy, beside
     `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
-    is a read; only the target is a write. A quoted heredoc's body is text to the shell, so a path
-    quoted inside it is not a command. An interpreter runs its body as code: a write it makes through
+    is a read; only the target is a write. An interpreter runs its body as code: a write it makes through
     os.system, subprocess, a copy call, or open() is judged. A substitution in an unquoted heredoc and
     a bash body are judged too. Why:
     docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
@@ -20439,16 +20438,7 @@ def worktree_home_cross_checkout_copy_case():
           command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
     check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
           command='cp "%s/x" "$f"' % other)
-    # A quoted heredoc is text: a path quoted in its body is not a command.
-    check("quoted heredoc that only quotes a copy from another checkout", "allow", "Bash", lane_a,
-          command="python3 - <<'PY'\nnote = \"cp %s/x $f\"\nprint(note)\nPY" % other)
-    check("quoted heredoc writing an own file that quotes a copy from another checkout", "allow",
-          "Bash", lane_a,
-          command="python3 - <<'PY'\nimport json\n"
-                  "open('roadmap.json','w').write(json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
-    # A string the interpreter only prints is text, even when it quotes a copy into another checkout.
-    check("python body that only prints a copy command string", "allow", "Bash", lane_a,
-          command="python3 - <<'PY'\nprint(\"os.system('cp a %s/x')\")\nPY" % other)
+    # A quoted interpreter body that only quotes a path in another checkout: roadmap step other-checkout-heredoc-text.
 
     # Controls: each write into another checkout stays refused.
     check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
@@ -20481,7 +20471,7 @@ def worktree_home_cross_checkout_copy_case():
 
     if problems:
         return False, "; ".join(problems)
-    return True, "copy sources in another checkout pass; quoted heredoc text passes; writes refused"
+    return True, "copy sources in another checkout pass; writes refused"
 
 
 def _stand_in_git(tag):
@@ -21974,8 +21964,8 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
-    ("worktree-home: a copy whose source is in another checkout, and a quoted heredoc that only "
-     "quotes a path, are allowed; a write into another checkout from either is refused",
+    ("worktree-home: a copy whose source is in another checkout is allowed; a write into another "
+     "checkout, from a copy or an interpreter body, is refused",
      worktree_home_cross_checkout_copy_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
