@@ -451,7 +451,7 @@ GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
-def bare_cite(text):
+def bare_record_cite(text):
     """Return the first record id in `text` with no short gloss beside it, else ''."""
     clean = CITE_SKIP_RE.sub(" ", text)
     for m in CITE_ID_RE.finditer(clean):
@@ -465,6 +465,64 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# speak-cite-id-plus-gloss, page item numbers: `item 46`, `items 46 and 47`, `items 46, 47` (an optional `page` or
+# `waiting-page` before). The first cite of a number carries its short name: two words (the record-id rules
+# above) or one hyphenated slug in parentheses, or the item's record before it (`precompact-handoff, item 9`,
+# `x.md item 3`). A later cite of a named number needs none. Each number of a list is judged on its own. A lead
+# gloss ends at a comma or dash, not a colon: `Open: item 46` is a label, not a name.
+ITEM_HEAD_RE = re.compile(r"(?<![\w/.#:$-])items?\s+(\d{1,4})(?![\w]|\.\d)")
+ITEM_NEXT_RE = re.compile(r"(?:\s*\([^)\n]*\))?\s*(?:,\s*(?:and\s+)?|\band\s+|&\s*)(\d{1,4})(?![\w]|\.\d)")
+ITEM_SLUG_AFTER_RE = re.compile(r"^\s*\(\s*\w+(?:-\w+)+\s*\)")
+ITEM_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:,|—|–|--|\s-)\s*$")
+ITEM_PAGE_PREFIX_RE = re.compile(r"(?:waiting-)?page\s+$", re.I)
+# a record before the item: a path or file name with an extension, or a hyphenated slug and a comma
+ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)\w+(?:-\w+)+\s*,\s*$")
+
+
+def _item_named(before, after):
+    """True when an item number has its short name after it, or (`before` given, the head of a list) before it."""
+    if ITEM_SLUG_AFTER_RE.match(after) or GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
+        return True
+    before = ITEM_PAGE_PREFIX_RE.sub("", before)
+    if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+        return True
+    return bool(before and (ITEM_LEAD_RE.search(before) or ITEM_RECORD_RE.search(before)))
+
+
+def bare_item_cite(text):
+    """Return the first page item number in `text` cited with no short name, else ''. A number named at
+    an earlier cite needs none later."""
+    clean = CITE_SKIP_RE.sub(" ", text)
+    named = set()
+    pos = 0
+    while True:
+        head = ITEM_HEAD_RE.search(clean, pos)
+        if not head:
+            return ""
+        before = clean[max(0, head.start() - 80):head.start()]
+        cites = [(head.group(1), head.end(), before)]
+        end = head.end()
+        while True:
+            nxt = ITEM_NEXT_RE.match(clean, end)
+            if not nxt:
+                break
+            cites.append((nxt.group(1), nxt.end(), ""))
+            end = nxt.end()
+        for number, stop, lead_before in cites:
+            if number in named:
+                continue
+            if _item_named(lead_before, clean[stop:stop + 80]):
+                named.add(number)
+            else:
+                return number
+        pos = end
+
+
+def bare_cite(text):
+    """Return the first record id, else the first page item number, in `text` with no short name beside it, else ''."""
+    return bare_record_cite(text) or bare_item_cite(text)
 
 
 # answered-needs-source: a reply line that says "answered" names where the answer came from. The source
@@ -2041,9 +2099,14 @@ def main():
         pass
     cite = bare_cite(text)
     if cite:
-        reasons.append(
-            "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
-            "plus a few words, like \"D12, short titles for records\".")
+        if cite.isdigit():
+            reasons.append(
+                "Cite-gloss guard: page item " + cite + " has no short name. Write the number plus its "
+                "name the first time, like \"item 46 (search pill clear)\", or name its record first.")
+        else:
+            reasons.append(
+                "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
+                "plus a few words, like \"D12, short titles for records\".")
     if refusal:
         reasons.append(refusal)
     if reasons:

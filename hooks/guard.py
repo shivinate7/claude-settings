@@ -243,6 +243,12 @@ Other tools, in `judge` order:
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
+  speak-cite-id-plus-gloss
+                       deny. A Write, Edit or MultiEdit of the session's own handoff that leaves a page item
+                       number (`item 46`, `items 46 and 47`) with no short name at its first cite in the
+                       file as it reads after the call. Judged on the whole file. Another path, a text that
+                       cannot be read or applied, and any error pass. The reason names the number and never
+                       the handoff. An override lifts it. (speak-cite-id-plus-gloss)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -2640,13 +2646,17 @@ ROLE_NO_MODEL_REASON = (
 )
 
 
-def _layout_module():
-    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+def _lint_module(name):
+    """A module of the lint folder beside this file's folder. The one home of the lint import."""
     lint = os.path.join(_HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    import layout
-    return layout
+    return importlib.import_module(name)
+
+
+def _layout_module():
+    """lint/layout.py, imported from the lint folder beside this file's folder."""
+    return _lint_module("layout")
 
 
 def record_branch_of(root):
@@ -4998,6 +5008,10 @@ def judge(payload) -> None:
         # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+    # 7a. The handoff's item numbers: the first time the file names a page item, the number carries its short name.
+    bare_item = handoff_cite_hit(tool, tool_input, session_id_of(payload))
+    if bare_item:
+        refuse(tool, "deny", "speak-cite-id-plus-gloss", HANDOFF_CITE_REASON % bare_item, "item " + bare_item)
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
@@ -5014,6 +5028,40 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
+
+
+HANDOFF_CITE_REASON = (
+    "Rule (cite-gloss): page item %s has no short name in this file as it would read after the "
+    "write. Write the number plus its name the first time it appears, like \"item 46 (search pill clear)\", "
+    "or name the item's record before it, then write again. (rule speak-cite-id-plus-gloss)")
+
+
+def handoff_cite_hit(tool, tool_input, session_id):
+    """The first page item number a write would leave cited with no short name in the session's own handoff,
+    else "". The file is judged as it reads after the call: a Write's content, or the current text with an Edit
+    or MultiEdit applied. A call that is no such write, a text that cannot be read or applied, and any error
+    give "" (the call passes)."""
+    try:
+        path = tool_input.get("file_path")
+        if tool not in ("Write", "Edit", "MultiEdit") or not session_id or not isinstance(path, str) or not path:
+            return ""
+        from reread_check import names_handoff
+        if not names_handoff(path, session_id):
+            return ""
+        if tool == "Write":
+            text = tool_input.get("content")
+        else:
+            with open(os.path.expanduser(path), encoding="utf-8") as handle:
+                text = handle.read()
+            edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
+            for edit in edits:
+                old, new = edit.get("old_string"), edit.get("new_string")
+                if not old or old not in text:
+                    return ""
+                text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
+        return _lint_module("report_guard").bare_item_cite(text) if isinstance(text, str) else ""
+    except Exception:
+        return ""
 
 
 def write_targets(tool_input: dict) -> list:
