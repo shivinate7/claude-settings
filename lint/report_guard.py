@@ -1526,7 +1526,7 @@ _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called 
 CANNOT_RE = re.compile(
     _NOT_NAME + r"(?:%s|can not|could(?:n['’]t| not)|no way (?:to|I can|we can)|not able to|wasn['’]t able to"
     r"|(?:won['’]t|will not) be able to|ha(?:ve|s)(?:n['’]t| not) been able to)(?![\w-])" % _CANT, re.I)
-CANNOT_BREAK_RE = re.compile(r"[.;:!?—–]|\s-{1,2}\s")  # a clause ends here, after the phrase
+CANNOT_BREAK_RE = re.compile(r"\.(?!\w)|[;:!?—–]|\s-{1,2}\s")  # a clause ends here; a dot inside a token (api.github.com) does not
 CANNOT_BEFORE_BREAK_RE = re.compile(r"[.;:!?,—–]|\s-{1,2}\s|\bbut\b", re.I)  # and before it, a comma or but too
 CANNOT_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 CANNOT_COND_RE = re.compile(r"\b(?:if|unless|whether|would)\b", re.I)
@@ -1544,6 +1544,12 @@ CANNOT_FROM_HERE_RE = re.compile(r"\bfrom\s+(?:here|the\s+cloud|this\s+session)\
 CANNOT_SKIP_NEXT_RE = re.compile(
     r"^\s*(?:be\s+(?:undone|reverted|reversed|sure|certain)|tell|say|know|guarantee|promise|recall|wait|help)\b", re.I)
 CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re.I)
+# A gate is a true reason, not a hand-off: the act waits on CI, a review, a hold or a lock, or a rule id follows the act.
+# A connect failure is no gate. A rule id has two hyphens or more, so "(read-only)" is a capability and stays a claim.
+CANNOT_GATE_RE = re.compile(
+    r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?"
+    r"\b(?:CI|checks?|(?:the\s+)?batch(?:\s+run)?|review|hold|grant|lock|freeze|main\s+is\s+protected)\b"
+    r"|\(\s*[a-z][a-z0-9]*(?:-[a-z0-9]+){2,}\s*\)", re.I)
 # A sentence that names a rule states the rule, so it is not the session's claim. A semicolon ends that sentence: the
 # clause after it is judged on its own.
 CANNOT_RULE_RE = re.compile(r"\b(?:rule|ruling|decision|grant)s?\b", re.I)
@@ -1557,9 +1563,9 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+\S+){0,2}\s+%s\b" % _PR, re.I)),
+    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
-    ("push", re.compile(r"^(?:be\s+)?push(?:ed)?\b", re.I)),
+    ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
     ("github-reach", re.compile(
         r"^(?:reach|use|access|connect\s+to)\s+(?:the\s+)?`?(?:mcp__github__\w*|github\b|gh(?![\w-])|api\.github\.com)",
@@ -1587,6 +1593,14 @@ CANNOT_GH_PR_ACTS = {"create": "pr-open", "merge": "pr-merge", "close": "pr-edit
                      "ready": "pr-edit", "edit": "pr-edit"}
 CANNOT_GIT_REACH = {"fetch", "push", "ls-remote"}  # the git calls that reach the remote
 CANNOT_HTTP_TOOLS = {"curl", "wget", "http", "https"}
+# A command or script whose name holds the act word is a route of that act: the repo's merge tool (`merge`) for pr-merge,
+# open-pr.sh for pr-open, push.sh for push. The word is a whole part of the name (split at - _ .), so pushd is no push.
+CANNOT_SCRIPT_ACTS = (
+    ("pr-open", re.compile(r"(?:^|[-_.])(?:open|create)[-_]?(?:pr|pull[-_]?request)(?:[-_.]|$)")),
+    ("pr-merge", re.compile(r"(?:^|[-_.])merge(?:[-_.]|$)")),
+    ("push", re.compile(r"(?:^|[-_.])push(?:[-_.]|$)")),
+)
+CANNOT_INTERPRETERS = {"bash", "sh", "zsh", "python", "python3", "node"}  # a script runs as the word after these
 # The input fields that name a GitHub MCP call's target, read in this order.
 CANNOT_TARGET_FIELDS = ("pullNumber", "pull_number", "branch", "head")
 # A failed try: the result's error flag, an exit code above zero as the shell result reports it, or an HTTP 4xx or 5xx.
@@ -1595,7 +1609,8 @@ CANNOT_FAIL_RE = re.compile(r"^Exit code [1-9]|\bHTTP(?:/[\d.]+)?\s+[45]\d\d\b")
 CANNOT_PULLS_RE = re.compile(r"(?:^|/)pulls(/\d+)?(/merge)?/?(?:\?\S*)?$")
 CANNOT_TEXT_ROUTE_RE = re.compile(r"\bgh pr (create|merge|close|comment|ready|edit)\b|\bgit (push|merge)\b")
 CANNOT_CHECK_RE = re.compile(
-    r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored)\b|\b[45]\d\d\b|\bexit(?: code)? [1-9]",
+    r"`[^`\n]+`|\bmcp__\w+|\b(?:tried|ran|returned|refused|denied|failed|errored"
+    r"|returns|refuses|denies|rejects|fails|errors)\b|\b[45]\d\d\b|\bexit(?: code)? [1-9]",
     re.I)
 CANNOT_HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step): a line says an act cannot be done and "
 CANNOT_NO_TRY = (
@@ -1634,7 +1649,8 @@ def _claim(body, mask, hit, floor):
     sentence; `floor` is where the previous phrase of the sentence ended, so words that condition it do not condition this
     one. Not a claim: a conditional or a negator just before the phrase (since the last comma, but or clause break), a
     subject that is not the writer's own (CANNOT_SUBJECT_RE), a verb of telling or waiting after it, a dependency (until,
-    before, without your) in its clause, a sentence that names a rule, or a verb that names no table act."""
+    before, without your) or a gate (CANNOT_GATE_RE) in its clause, a sentence that names a rule, or a verb that names no
+    table act."""
     start = max((m.end() for m in CANNOT_BEFORE_BREAK_RE.finditer(mask, floor, hit.start())), default=floor)
     brk = CANNOT_BREAK_RE.search(mask, hit.end())
     end = brk.start() if brk else len(mask)
@@ -1643,14 +1659,14 @@ def _claim(body, mask, hit, floor):
     if CANNOT_COND_RE.search(before) or CANNOT_NEGATOR_RE.search(near):
         return None
     words = after.split()
-    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after):
+    if not words or CANNOT_SKIP_NEXT_RE.match(after) or CANNOT_DEPENDENCY_RE.search(after) or CANNOT_GATE_RE.search(after):
         return None
     if not CANNOT_SUBJECT_RE.search(CANNOT_LEAD_RE.sub("", before)) and not (
             after.lstrip().lower().startswith("be ") and CANNOT_FROM_HERE_RE.search(after)):
         return None
-    semis = [m.start() for m in re.finditer(";", mask)]
-    left = max((i + 1 for i in semis if i < hit.start()), default=0)
-    right = min((i for i in semis if i >= hit.end()), default=len(mask))
+    left = mask.rfind(";", 0, hit.start()) + 1  # the sentence part between the semicolons around the phrase
+    right = mask.find(";", hit.end())
+    right = len(mask) if right < 0 else right
     if CANNOT_RULE_RE.search(body[left:right]):
         return None
     window = " ".join(words[:CANNOT_WINDOW])
@@ -1683,12 +1699,13 @@ def cannot_lines(text):
         mask = _mask(body)
         bounds = [0] + [m.end() for m in CANNOT_SENTENCE_RE.finditer(mask)] + [len(body)]
         for begin, stop in zip(bounds, bounds[1:]):
-            sentence, shadow = body[begin:stop].strip(), mask[begin:stop]
+            piece, shadow = body[begin:stop], mask[begin:stop]
+            sentence = piece.strip()
             if sentence.rstrip("*_)\"' ").endswith("?") or CANNOT_UNVETTED_RE.match(sentence):
                 continue
             floor = _report_label_end(body) if begin == 0 else 0  # a report label opens the clause after it
             for hit in CANNOT_RE.finditer(shadow):
-                claim = _claim(body[begin:stop], shadow, hit, floor)
+                claim = _claim(piece, shadow, hit, floor)
                 floor = hit.end()
                 if claim:
                     found.append((sentence, claim[0], claim[1]))
@@ -1702,9 +1719,25 @@ def _pulls_act(token):
     return "" if not hit else "pr-merge" if hit.group(2) else "pr-edit" if hit.group(1) else "pr-open"
 
 
+def _script_tries(tokens):
+    """{(act, key)} when the command word of one shell segment (or the script an interpreter runs) names an act, else
+    empty. The key is the command's name and its first plain argument, so a later success of the same call cancels it."""
+    index = guard.resolve_command(tokens)
+    if index is None:
+        return set()
+    if os.path.basename(tokens[index]).lower() in CANNOT_INTERPRETERS:
+        index = next((i for i in range(index + 1, len(tokens)) if not tokens[i].startswith("-")), None)
+        if index is None:
+            return set()
+    name = os.path.basename(tokens[index]).lower()
+    target = next((t for t in tokens[index + 1:] if not t.startswith("-")), "")
+    return {(act, ("script", name, target)) for act, rx in CANNOT_SCRIPT_ACTS if rx.search(name)}
+
+
 def _segment_tries(segment):
     """{(act, key)} for the routes one shell segment is a try of: gh (every gh call reaches GitHub; gh pr and gh api
-    name table acts), git push, merge, fetch and ls-remote, and curl, wget or httpie to github.com. The key is the
+    name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
+    whose name holds an act word (_script_tries). The key is the
     program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
     a failure of the same call. A segment with --dry-run is no try."""
     tokens = guard.segment_tokens(segment) or segment.split()
@@ -1728,6 +1761,7 @@ def _segment_tries(segment):
             tries.add(("push", key))
         elif subcommand == "merge":
             tries.add(("pr-merge", key))
+    tries |= _script_tries(tokens)
     if any(os.path.basename(t) in CANNOT_HTTP_TOOLS for t in tokens):
         for token in (t for t in tokens if "github.com" in t):
             tries.add((GITHUB_REACH, ("http", token)))
