@@ -573,13 +573,15 @@ class UpkeepFixture(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None):
-        """Write the --live file. The sessions and items keys appear only when given. readAt is five minutes old by default."""
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, closed_pulls=None):
+        """Write the --live file. The sessions, items and closedPulls keys appear only when given. readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
         if sessions is not None:
             value["sessions"] = list(sessions)
         if items is not None:
             value["items"] = items
+        if closed_pulls is not None:
+            value["closedPulls"] = list(closed_pulls)
         self.write_live(value)
         return value
 
@@ -2627,11 +2629,11 @@ class IdleLanes(UpkeepFixture):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
         return session_row(sid, status, "cs-build:lane", "cs-step:" + step, self.REPO, status_bucket=bucket)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=()):
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=(), closed_pulls=None):
         """UpkeepFixture.publish with the items key present: [] unless a case names rows. items=None leaves the key out,
         the file a publisher writes before the waiting page had items."""
         return super().publish(sessions=sessions, pulls=pulls, threads=threads, read_at=read_at,
-                               items=None if items is None else list(items))
+                               items=None if items is None else list(items), closed_pulls=closed_pulls)
 
     def land(self, steps):
         """Write {step id: fields} on the record branch in one commit. Each step is written whole, from STEP."""
@@ -3271,6 +3273,248 @@ class IdleLanes(UpkeepFixture):
             with self.subTest(lane=sid, wait=wait):
                 self.assertEqual([e for e in entries if sid in e], [],
                                  "a lane waiting on %s got a line under its doing steps: %r" % (wait, entries))
+
+
+    # The landed-by-pull rule: a step counts landed when one pull on its lane_head_refs is landed (merged into the default
+    # branch, or its head sha an ancestor of it) and no open pull on them is unlanded. Pulls arrive as closedPulls rows.
+    def closed(self, number, branch, head, base="main", merged=True):
+        """A closedPulls row of the live file: a closed pull with its head sha, base branch and whether it was merged."""
+        return {"number": number, "branch": branch, "head": head, "base": base, "merged": merged}
+
+    def main_sha(self):
+        return git(self.repo, "rev-parse", "main").strip()
+
+    def off_main_sha(self):
+        """A commit main never reaches: the record branch's head, since the record branch is an orphan branch."""
+        return git(self.repo, "rev-parse", "roadmap").strip()
+
+    def test_a_doing_step_lists_its_lane_when_its_only_pull_merged_into_main(self):
+        # The defect. A step still doing on the record, with its one pull merged into main as a squash, so the head sha
+        # is off main. The merged pull is landed, so session_a lists. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a lane whose only pull merged into main is not listed: %r" % (entries,))
+
+    def test_a_merged_pull_into_main_lands_its_lane_even_when_git_cannot_read_its_head(self):
+        # A merged pull into main is landed by its base alone, so an unreadable head sha does not hold it. session_b is the control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(81, "lane/c1", "f" * 40, merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a merged pull into main with an unreadable head did not land its lane: %r" % (entries,))
+
+    def test_a_pull_merged_into_a_batch_branch_lands_its_lane_when_its_head_is_in_main(self):
+        # The integration branch's merge brought the lane's own commit into main, so the head is an ancestor of main.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(82, "lane/c1", self.main_sha(), base="batch-64m", merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a pull merged into a batch branch with its head in main did not land its lane: %r" % (entries,))
+
+    def test_a_closed_unmerged_pull_whose_head_is_in_main_lands_its_lane(self):
+        # The head is already in main through another route, so the closed pull is landed by its head alone. session_b is the control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(83, "lane/c1", self.main_sha(), merged=False)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
+                         "a closed pull whose head is in main did not land its lane: %r" % (entries,))
+
+    def test_a_step_missing_from_the_record_lists_its_lane_when_its_pull_merged_into_main(self):
+        # Neither ghost step is on the record branch, and no Step trailer names them. Each one's merged pull lands it: one on
+        # the bare ref, one on lane/<slug>. session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_orphan2", "ghost2"),
+                               self.lane("session_a", "c1")],
+                     closed_pulls=[self.closed(84, "ghost", off), self.closed(85, "lane/ghost2", off)])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan2"), "session_orphan2 (ghost2; topic -)", entries)
+
+    def test_live_work_keeps_each_closed_pull_under_a_closed_pulls_key(self):
+        # The key is new, so it is asserted first: a miss reads as a failed assert, not a KeyError.
+        self.land({"c1": {"status": "doing", "order": 1}})
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1")], closed_pulls=[self.closed(86, "lane/c1", off, merged=True)])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertIn("closedPulls", work, "live_work has no closedPulls key, so no closed or merged pull reaches idle_lanes")
+        self.assertEqual([{k: row.get(k) for k in ("number", "branch", "head", "base", "merged")} for row in work["closedPulls"]],
+                         [{"number": 86, "branch": "lane/c1", "head": off, "base": "main", "merged": True}])
+
+    def test_thirty_two_lanes_each_landed_only_by_a_merged_pull_are_all_listed(self):
+        # Full size. Each lane's step is still doing. Each lane has a merged pull and a closed unmerged pull, both off main.
+        n_range = range(1, 33)
+        self.land({"L%02d" % n: {"status": "doing", "order": n} for n in n_range})
+        off = self.off_main_sha()
+        closed = []
+        for n in n_range:
+            closed.append(self.closed(100 + n, "lane/L%02d" % n, off, merged=True))
+            closed.append(self.closed(200 + n, "lane/L%02d" % n, off, merged=False))
+        self.publish(sessions=[self.lane("session_%02d" % n, "L%02d" % n) for n in n_range], closed_pulls=closed)
+        count, entries = self.archive()
+        self.assertEqual(count, 32, "32 lanes are landed by merged pulls, %d listed: %r" % (count, entries))
+        self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in n_range))
+
+    def test_a_pull_merged_into_the_default_branch_named_by_main_branch_lands_its_lane(self):
+        # The default branch is renamed trunk. A pull merged into trunk lands its lane. A pull merged into main, which is no
+        # longer the default branch, does not, and its head is off trunk too. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "doing", "order": 3}})
+        git(self.repo, "branch", "-m", "main", "trunk")
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"), self.lane("session_c", "c3")],
+                     closed_pulls=[self.closed(87, "lane/c1", off, base="trunk", merged=True),
+                                   self.closed(88, "lane/c3", off, base="main", merged=True)])
+        entries = build.idle_lanes_report(self.repo, str(self.live), main_branch="trunk")
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual([e for e in entries if "session_c" in e], [],
+                         "a pull merged into main, not the default branch trunk, landed its lane: %r" % (entries,))
+
+    def test_doing_step_under_a_lane_landed_by_a_merged_pull_does_not_hold_it(self):
+        # The analogue of the Step-trailer test above: c2 reads doing, but its one pull merged into main, so it is landed
+        # and not still open under the lane. The scope read is the same file without the closed pull, which holds the lane.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        self.assertEqual(self.idle_direct(), ["hold (step c2 still doing under this lane; lane session_a)"],
+                         "scope: c2 does not hold its lane before its pull is read")
+        self.publish(sessions=[self.lane("session_a", "c1")], closed_pulls=[self.closed(89, "lane/c2", self.off_main_sha())])
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)"],
+                         "a doing step whose pull merged into main still held its lane")
+
+    def test_an_empty_closed_pulls_list_changes_no_lane(self):
+        # Green on the old code. With no closed pull, the doing lane waits and the done lane lists.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")], closed_pulls=[])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_closed_pulls_stay_out_of_the_open_pulls_key(self):
+        # Green on the old code. The pulls key is the open pulls only: the in-progress, stale-draft and red pair rows read it as open.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 62, "title": "lane c2", "branch": "lane/c2"}],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        self.assertEqual([row["number"] for row in work["pulls"]], [62],
+                         "the pulls key holds a closed or merged pull, so the open-pull rows would read it as open")
+
+    def test_the_in_progress_row_still_names_a_doing_step_whose_only_pull_is_closed(self):
+        # Green on the old code. c4 is doing with no live lane, and its only pull is merged, so no open pull holds it.
+        self.land({"c4": {"status": "doing", "order": 4}, "c5": {"status": "done", "order": 5}})
+        self.publish(sessions=[self.lane("session_a", "c5")],
+                     closed_pulls=[self.closed(95, "lane/c4", self.off_main_sha(), merged=True)])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        count, detail = self.row(out, "in progress with no live lane or open PR")
+        self.assertEqual(count, 1, out)
+        self.assertIn("c4", detail, out)
+
+    def test_no_pull_and_no_trailer_keeps_a_doing_lane_off(self):
+        # Green on the old code. session_b is the control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_a_closed_unmerged_pull_does_not_release_its_lane(self):
+        # Green on the old code. A pull closed without merging releases nothing: its head is off main, or git cannot read
+        # its head. session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "doing", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2"), self.lane("session_c", "c3")],
+                     closed_pulls=[self.closed(83, "lane/c1", self.off_main_sha(), merged=False),
+                                   self.closed(84, "lane/c3", "f" * 40, merged=False)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_a_pull_merged_into_a_batch_branch_with_its_head_off_main_does_not_release_its_lane(self):
+        # Green on the old code. Its base is not the default branch, and its head is not in main. session_b is the control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(86, "lane/c1", self.off_main_sha(), base="batch-64m", merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_an_open_unlanded_pull_beside_a_merged_one_keeps_the_lane_off(self):
+        # Green on the old code. The open pull on the same ref is unlanded, so it holds the lane whatever the merged pull says.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 63, "title": "lane c1", "branch": "lane/c1", "head": off, "draft": False}],
+                     closed_pulls=[self.closed(81, "lane/c1", off, merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_an_open_ready_pull_keeps_its_lane_off_even_when_its_head_is_in_main(self):
+        # Green on the old code. The archive guard refuses a ready open pull whatever its head, and releases only an open draft
+        # whose head is in main. The landed rule must not release a ready pull. session_b is the control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     pulls=[{"number": 64, "title": "lane c1", "branch": "lane/c1", "head": self.main_sha(), "draft": False}],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_an_open_page_item_still_holds_a_lane_whose_pull_merged(self):
+        # Green on the old code. The open item names the lane's step, so the lane is still waiting on its own question.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)],
+                     items=[{"n": 1, "status": "open", "home": "step c1", "lane": "c1"}])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
+
+    def test_held_lanes_stay_held_when_an_unrelated_pull_merged(self):
+        # Green on the old code. session_b is the listed control. session_a holds on c3 doing under it, and session_nostep
+        # holds for having no cs-step tag. Neither is released by a merged pull on another branch.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "doing", "order": 3, "lane": "session_a"}})
+        nostep = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO, status_bucket=BUCKET_COMPLETED)
+        off = self.off_main_sha()
+        self.publish(sessions=[self.lane("session_a", "c1"), nostep, self.lane("session_b", "c2")],
+                     closed_pulls=[self.closed(81, "lane/c1", off, merged=True), self.closed(82, "lane/zzz", off, merged=True)])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_a"), "hold (step c3 still doing under this lane; lane session_a)", entries)
+        self.assert_held(self.line_for(entries, "session_nostep"), "session_nostep")
+
+    def test_a_step_missing_from_the_record_with_only_a_closed_unmerged_pull_stays_held(self):
+        # Green on the old code. The pull closed without merging, so the absent step is unproven and its lane holds.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")],
+                     closed_pulls=[self.closed(83, "lane/ghost", self.off_main_sha(), merged=False)])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("ghost", line)
+        self.assertIn("no Step trailer on main", line)
+
+    def test_a_two_step_lane_with_only_one_landed_step_stays_off(self):
+        # Green on the old code. Every step must be landed, not any one: c1 has a merged pull, c2 is doing with no pull.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "doing", "order": 2},
+                   "c3": {"status": "done", "order": 3}})
+        two = session_row("session_two", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-step:c2", self.REPO,
+                          status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[two, self.lane("session_b", "c3")],
+                     closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
+        count, entries = self.archive()
+        self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
 
 class SharedTagNames(unittest.TestCase):
