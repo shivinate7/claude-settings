@@ -6,7 +6,8 @@ Run: python3 merge/test_idle_lanes.py
 WHAT IT PROVES. The command prints one line per lane to archive, then one summary line, then the finished-lanes count line (the count
 the Backlog check reads). It takes its steps, marks and
 repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud
-session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one.
+session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one. An unread archive
+list still prints the finished-lanes line, its count or its unknown form, after its unknown entry, and exits 1.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -75,9 +76,12 @@ class IdleLanesCli(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, sessions=None, read_at=None, pulls=()):
-        """Write the --live file. Its readAt is five minutes old by default. The sessions key is left out when sessions is None."""
-        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": list(pulls), "items": []}
+    def publish(self, sessions=None, read_at=None, pulls=(), items=()):
+        """Write the --live file. Its readAt is five minutes old by default. The sessions key is left out when sessions is None,
+        and the items key when items is None."""
+        value = {"readAt": read_at or roadmap.iso_ago(5), "threads": [], "pulls": list(pulls)}
+        if items is not None:
+            value["items"] = list(items)
         if sessions is not None:
             value["sessions"] = list(sessions)
         self.live.write_text(json.dumps(value), encoding="utf-8")
@@ -154,7 +158,7 @@ class IdleLanesCli(unittest.TestCase):
         _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertNotRegex(out, FINISHED, "a file with no sessions list printed a count: out: %r, err: %r" % (out, err))
 
-    def test_stale_live_file_prints_one_unknown_line_and_no_empty_summary(self):
+    def test_stale_live_file_prints_unknown_lines_and_no_empty_summary(self):
         self.publish([lane("session_a", "c1")], read_at=roadmap.iso_ago(120))
         _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         lines = out.splitlines()
@@ -187,10 +191,37 @@ class IdleLanesCli(unittest.TestCase):
         self.assertNotRegex(out, SUMMARY_LINE)
         self.assertNotRegex(out, FINISHED)
 
-    def test_unreadable_main_exits_1_with_one_unknown_line_and_no_summary(self):
+    def test_an_unread_archive_list_still_prints_the_finished_count(self):
+        # The control is the lane with its page items list: the list prints it, then the summary, then the count. With no items
+        # list the archive list reads unknown, but the count reads from the sessions. The count line still prints, after the
+        # unknown entry and with no summary, and the command exits 1 so the unread list never reads as empty.
+        self.publish([lane("session_a", "c1")], items=[])
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual((code, out.splitlines()[-2:]), (0, [SUMMARY_ONE, finished_line(1)]), "out: %r, err: %r" % (out, err))
+        self.publish([lane("session_a", "c1")], items=None)
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 1, "an unread list exits %d, so a caller reads it as success: err: %r" % (code, err))
+        self.assertTrue(out.startswith("unknown ("), "the archive list is not the unknown entry: out: %r, err: %r" % (out, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
+        self.assertEqual(out.splitlines()[-1:], [finished_line(1)],
+                         "the count line is missing after an unread list: out: %r, err: %r" % (out, err))
+
+    def test_both_unread_reads_print_their_unknown_lines_and_no_summary(self):
+        # The live file has neither list, so the archive list and the count both read unknown for the same reason. The command
+        # prints the unknown entry, then the unknown count line, with no summary and exit 1. Neither reads as a zero.
+        self.publish(None, items=None)
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 1, "an unread list exits %d, so a caller reads it as success: err: %r" % (code, err))
+        self.assertTrue(out.startswith("unknown ("), "the archive list is not the unknown entry: out: %r, err: %r" % (out, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
+        self.assertNotRegex(out, FINISHED)
+        self.assertRegex(out, FINISHED_UNKNOWN,
+                         "the unknown count line is missing after an unread list: out: %r, err: %r" % (out, err))
+
+    def test_unreadable_main_exits_1_with_an_unknown_list_line_and_no_summary(self):
         # The control is the same lane with main read: it is listed, the summary says 1, and the command exits 0. With
-        # main renamed away, no step can be read as landed, so the one unknown line carries the failure and the command
-        # exits 1 with no summary.
+        # main renamed away, no step can be read as landed, so the unknown list line carries the failure and the command
+        # exits 1 with no summary. The count does not read main, so its line still prints.
         self.publish([lane("session_a", "c1")])
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual((code, out.splitlines()[-2:]), (0, [SUMMARY_ONE, finished_line(1)]), "out: %r, err: %r" % (out, err))
@@ -201,7 +232,8 @@ class IdleLanesCli(unittest.TestCase):
                         "an unreadable main prints no unknown line: out: %r, err: %r" % (out, err))
         self.assertEqual(code, 1, "an unreadable main exits %d, so a caller reads the list as read" % code)
         self.assertNotRegex(out, SUMMARY_LINE)
-        self.assertNotRegex(out, FINISHED)
+        self.assertEqual(out.splitlines()[-1:], [finished_line(1)],
+                         "an unreadable main drops the count line: out: %r, err: %r" % (out, err))
 
     def test_idle_lanes_needs_no_merge_role_in_a_cloud_session(self):
         self.publish([lane("session_a", "c1")])
