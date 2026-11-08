@@ -82,6 +82,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
+  linked-node-modules  deny. An `npm install`, `ci`, `update` or `uninstall` whose `node_modules` is a link
+                       into another checkout, or a recursive delete into such a link. A bare delete of
+                       the link itself passes. (guard-linked-node-modules)
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
