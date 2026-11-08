@@ -257,10 +257,9 @@ class Unknowns(Job):
 
 
 class SignalKilled(Job):
-    """A step whose run ends by a signal reads unknown, never FAIL: the tree is not at fault. The live line `FAIL ...
-    (verdict printed no verdict line)` is ci-job's default when verdict prints no verdict line and exits nonzero. verdict
-    prints none when a signal kills it first, so ci-job read the kill as a failure. The kill here is verdict's own: $PPID is
-    the verdict that started this shell."""
+    """A step whose shell a signal kills reads FAIL, as on main: verdict's FAIL line names the signal. Only a verdict that
+    printed no verdict line, with a nonzero exit, reads unknown: the run was cut before it could say what failed. The $PPID
+    case is that one. It kills verdict itself, the verdict that started this shell, so no verdict line prints."""
 
     @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
     def test_a_verdict_killed_before_its_verdict_line_reads_unknown_never_fail(self):
@@ -268,14 +267,16 @@ class SignalKilled(Job):
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
 
     @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
-    def test_a_step_killed_by_sigterm_reads_unknown_never_fail(self):
+    def test_a_step_whose_shell_is_killed_by_sigterm_reads_fail_naming_the_signal(self):
         rc, lines, out = self.run_job(step("term", "kill -TERM $$"))
-        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("killed by signal 15", out, out)  # the shell-kill path, scope before subject
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
     @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
-    def test_a_step_killed_by_sigkill_reads_unknown_never_fail(self):
+    def test_a_step_whose_shell_is_killed_by_sigkill_reads_fail_naming_the_signal(self):
         rc, lines, out = self.run_job(step("kill", "kill -KILL $$"))
-        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
+        self.assertIn("killed by signal 9", out, out)  # the shell-kill path, scope before subject
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
 
 class Conditions(Job):
