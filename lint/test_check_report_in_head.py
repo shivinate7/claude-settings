@@ -47,6 +47,7 @@ WORKTREE = "/home/x/wt"
 ABS_PATH = WORKTREE + "/lint/widget.py"
 A_MD = "a.md"
 LINT_A = "lint/a.py"
+LINT_B = "lint/b.py"
 X_FILE = "lint/x.py"
 X_TEXT = "X = 2\n"
 
@@ -72,6 +73,11 @@ rc = check.main(sys.argv[1:])
 print("GIT_CALLS " + " ".join(calls))
 sys.exit(rc)
 """
+
+
+def close_stdin():
+    """Runs in the child before it execs the check: fd 0 is closed, as `<&-` leaves it."""
+    os.close(0)
 
 
 def setUpModule():
@@ -156,11 +162,11 @@ class Fixture(unittest.TestCase):
         """The paths in the diff from main to `ref`, read with no renames as the check reads it."""
         return self.git("diff", "--name-only", "--no-renames", "main", ref).split()
 
-    def run_check(self, branch, report="", args=(), cwd=None):
+    def run_check(self, branch, report="", args=(), cwd=None, env=GIT_ENV):
         """Run the check for `branch` with `report` on stdin. Returns (exit code, stdout and stderr)."""
         done = subprocess.run([sys.executable, MODULE, "--branch", branch, *args],
                               cwd=cwd or self.work, input=report, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=GIT_ENV)
+                              encoding="utf-8", errors="replace", env=env)
         return done.returncode, done.stdout + done.stderr
 
 
@@ -189,13 +195,20 @@ class CheckCase(Fixture):
             self.assertTrue(any(path in line for line in out.splitlines()),
                             "no output line names missing path %s:\n%s" % (path, out))
 
-    def assertUnknown(self, branch, report, named):
-        rc, out = self.run_check(branch, report)
+    def assertUnknown(self, branch, report, named, args=(), env=GIT_ENV):
+        rc, out = self.run_check(branch, report, args, env=env)
         self.assertEqual(rc, 2, "exit %d, want 2 (UNKNOWN):\n%s" % (rc, out))
         for word in named:
             self.assertIn(word, out, "output names no %r:\n%s" % (word, out))
         for stray in ("can't open file", "usage:", "Traceback"):
             self.assertNotIn(stray, out, "exit 2 from %r, not from the check's UNKNOWN:\n%s" % (stray, out))
+
+    def run_check_closed_stdin(self, branch, args=()):
+        """Run the check with fd 0 closed, as `<&-` leaves it. Returns (exit code, stdout and stderr decoded)."""
+        done = subprocess.run([sys.executable, MODULE, "--branch", branch, *args], cwd=self.work,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              preexec_fn=close_stdin, env=GIT_ENV)
+        return done.returncode, done.stdout + done.stderr
 
     def run_check_bytes(self, branch, data, args=()):
         """Run the check with `data` (bytes) on stdin. Returns (exit code, stdout and stderr decoded)."""
@@ -403,6 +416,94 @@ class CheckCase(Fixture):
         self.assertEqual(done.returncode, 0, "exit %d, want 0:\n%s" % (done.returncode, out))
         calls = [line.split()[1:] for line in done.stdout.splitlines() if line.startswith("GIT_CALLS")]
         self.assertEqual(calls, [["fetch", "rev-parse", "diff"]], "git calls per run, want fetch, rev-parse, diff:\n" + out)
+
+    @unittest.skipIf(os.name == "nt", "closing fd 0 needs POSIX (preexec_fn)")
+    def test_a_closed_stdin_with_no_report_flag_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        rc, out = self.run_check_closed_stdin(BRANCH)
+        self.assertEqual(rc, 2, "exit %d, want 2 (UNKNOWN) with stdin closed and no --report:\n%s" % (rc, out))
+        self.assertIn("UNKNOWN", out, out)
+        self.assertNotIn("Traceback", out, out)
+
+    @unittest.skipIf(os.name == "nt", "closing fd 0 needs POSIX (preexec_fn)")
+    def test_a_closed_stdin_with_a_report_file_reads_the_file(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        path = os.path.join(self.root, "closed-stdin-report.txt")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write("Files: %s\n" % WIDGET)
+        rc, out = self.run_check_closed_stdin(BRANCH, args=("--report", path))
+        self.assertEqual(rc, 0, "exit %d, want 0 with stdin closed and --report naming a file:\n%s" % (rc, out))
+        self.assertNotIn("Traceback", out, out)
+
+    def test_label_range_period_and_semicolon_forms_pass(self):
+        self.pushed_branch(BRANCH, {LINT_A: "X = 1\n", LINT_B: "Y = 2\n"})
+        self.scope(BRANCH, LINT_A, LINT_B)
+        self.assertPasses(BRANCH, "Files: %s\n" % LINT_A)  # control: the plain form passes
+        forms = (
+            "%s (new)" % LINT_A,
+            "%s:10-20 (new)" % LINT_A,
+            "**%s**:10-20" % LINT_A,
+            "%s : 10-20" % LINT_A,
+            "%s (lines 10-20)" % LINT_A,
+            "%s:L10-L20" % LINT_A,
+            "%s." % LINT_A,
+            "%s; %s" % (LINT_A, LINT_B),
+        )
+        for form in forms:
+            with self.subTest(form=form):
+                self.assertPasses(BRANCH, "Files: %s\n" % form)
+
+    def test_a_form_with_a_missing_path_still_fails_and_names_it(self):
+        self.pushed_branch(BRANCH, {LINT_A: "X = 1\n"})
+        self.scope(BRANCH, LINT_A)
+        missing = "lint/never_applied.py"
+        self.assertNotIn(missing, self.diff_names(self.origin_head(BRANCH)))  # scope: the path is not in the diff
+        forms = ("%s (new)" % missing, "%s; %s" % (LINT_A, missing), "**%s**:10-20" % missing, "%s." % missing)
+        for form in forms:
+            with self.subTest(form=form):
+                self.assertFlags(BRANCH, "Files: %s\n" % form, missing=[missing])
+
+    def test_a_files_line_naming_none_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.assertUnknown(BRANCH, "Files: none\n", named=["UNKNOWN"])
+
+    def test_a_missing_report_file_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        path = os.path.join(self.root, "no-such-report.txt")
+        self.assertFalse(os.path.exists(path))  # scope: the report file is absent
+        self.assertUnknown(BRANCH, "", named=["UNKNOWN"], args=("--report", path))
+
+    def test_a_bad_root_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        notrepo = os.path.join(self.root, "notrepo")
+        os.makedirs(notrepo)
+        absent = os.path.join(self.root, "no-such-dir")
+        # the ceiling stops git from finding the repo above the fixture, so notrepo is not in one
+        env = dict(GIT_ENV, GIT_CEILING_DIRECTORIES=self.root)
+        self.assertFalse(os.path.isdir(absent))  # scope: the directory is absent
+        self.assertNotEqual(subprocess.run(["git", "-C", notrepo, "rev-parse"], capture_output=True,
+                                           env=env).returncode, 0, "scope: notrepo is a repo")
+        for label, root in (("no such directory", absent), ("not a repo", notrepo)):
+            with self.subTest(label):
+                self.assertUnknown(BRANCH, "Files: %s\n" % WIDGET, named=["UNKNOWN"],
+                                   args=("--root", root), env=env)
+
+    def test_two_files_lines_are_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        self.assertUnknown(BRANCH, "Files: %s\nFiles: %s\n" % (WIDGET, OTHER), named=["UNKNOWN"])
+
+    def test_a_range_with_no_path_before_it_is_unknown(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        for report in ("Files: 10-20\n", "Files: 10-20, %s\n" % WIDGET):
+            with self.subTest(report=report):
+                self.assertUnknown(BRANCH, report, named=["UNKNOWN"])
 
 
 class ControlCase(Fixture):
