@@ -11993,7 +11993,7 @@ SI_F1CW = os.path.join(STALEROOT, "f1c-wt")         # ... then removes k.py, whi
 SI_F2P = os.path.join(STALEROOT, "f2")              # the primary holds branch next, one commit ahead of topic
 SI_F2A = os.path.join(STALEROOT, "f2-wt")           # a worktree on topic, at the old head
 SI_F2SQ = os.path.join(STALEROOT, "f2sq")           # a clean topic with two commits, for a chained squash
-SI_RNP = os.path.join(STALEROOT, "rn")              # the new remedy: a stale worktree, then read-tree and reset -q
+SI_RNP = os.path.join(STALEROOT, "rn")              # the new remedy: a stale worktree, then read-tree and update-ref
 SI_RNA = os.path.join(STALEROOT, "rn-wt")           # ... then a deliberate rm of h.py, which the moved head added
 SI_ROP = os.path.join(STALEROOT, "ro")              # the old remedy alone: a stale worktree, then read-tree only
 SI_ROA = os.path.join(STALEROOT, "ro-wt")           # ... then the same deliberate rm of h.py
@@ -12194,13 +12194,13 @@ def _build_stale_index():
     _si_proof(SI_F2SQ, [])
 
     # RN and RO: a stale worktree, then a deliberate rm of h.py, which the moved head added. RN runs the new remedy,
-    # read-tree then reset -q. RO runs the old remedy alone.
+    # read-tree then update-ref HEAD HEAD. RO runs the old remedy alone.
     old = _si_base(SI_RNP)
     _cmk_run(SI_RNP, "worktree", "add", "-q", SI_RNA, "topic")
     n = _si_new_head(SI_RNP, NEW_HEAD)
     _cmk_run(SI_RNP, "update-ref", "refs/heads/topic", n)
     _cmk_run(SI_RNA, "read-tree", "-m", "-u", old, "HEAD")
-    _cmk_run(SI_RNA, "reset", "-q")
+    _cmk_run(SI_RNA, "update-ref", "-m", "stale-index: synced to HEAD", "HEAD", "HEAD")
     _cmk_run(SI_RNA, "rm", "-q", "h.py")
     _si_proof(SI_RNA, ["h.py"])
 
@@ -12247,9 +12247,9 @@ lazy_fixture([SI_R1P, SI_R1A, SI_R3P, SI_R3A, SI_R4P, SI_R4A, SI_R4X, SI_R5P, SI
 
 
 def stale_refuse(name, command, cwd, carries=(), lacks=()):
-    # Every refusal names the remedy in full: the read-tree, then the reset that re-syncs the index.
+    # Every refusal names the remedy in full: the read-tree, then the update-ref that re-syncs the index.
     sh("stale-index: %s is refused" % name, command, "deny", STALE_RULE, cwd=cwd,
-       carries=("read-tree", "git reset -q") + tuple(carries), lacks=lacks)
+       carries=("read-tree", "git update-ref") + tuple(carries), lacks=lacks)
 
 
 def stale_allow(name, command, cwd):
@@ -12299,9 +12299,9 @@ stale_allow("a chained backward reset --soft to HEAD~2, then a squash commit",
             VCS + " reset --soft HEAD~2 && " + VCS + " commit -m squash", SI_F2SQ)
 
 
-# 4. The remedy. After the new remedy, the reset leaves a HEAD log line, and a deliberate rm is allowed. The old remedy
-# alone leaves no such line, and the same rm is refused.
-stale_allow("after the new remedy (read-tree, reset -q), a deliberate rm of a file the moved head added, a commit",
+# 4. The remedy. After the new remedy, the update-ref leaves a HEAD log line, and a deliberate rm is allowed. The old
+# remedy alone leaves no such line, and the same rm is refused.
+stale_allow("after the new remedy (read-tree, update-ref), a deliberate rm of a file the moved head added, a commit",
             VCS + " commit -m x", SI_RNA)
 stale_refuse("after the old remedy alone (read-tree), the same deliberate rm, then a commit",
              VCS + " commit -m x", SI_ROA, carries=("h.py",))
