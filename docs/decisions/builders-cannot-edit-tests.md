@@ -55,6 +55,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - Rename or delete product files, and add a dependency or a script to a manifest.
 - Read tests, and keep test changes that the branch inherited or that main brought in a merge. Keeping them needs no edit. A merge conflict in a test file is not the builder's to resolve: resolving it chooses what the test checks, so a test-author resolves it. The refusal says so.
 - Use a name that only looks like a test, such as `src/contest.py`.
+- Add a mutant to `hooks/mutate_guard.py`. A write tool call that removes or changes an existing line of it is refused with `builder-test-edit`, and so is any shell write to it: a test-author makes that change (coordinator pick, 2026-11-07). The same holds for a comment, an import or a helper there, since one edit can weaken every mutant.
 - Write a file in no repository, such as a probe in the session scratchpad, from a call that runs in a repository. A path with no enclosing checkout is no test of the repo. A test path in any repository stays refused, also one in a different repository. A call that runs in no repository still judges the path by its shape.
 - Write a document in a `spec` folder, such as `docs/spec/api.md`. `spec` is a test folder for code and fixtures only. A `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc` file there is a document. `spec/foo_spec.rb` and `src/x.spec.ts` stay refused.
 

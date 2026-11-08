@@ -1532,7 +1532,8 @@ TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", 
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
-# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+# mutate_*.py stays a builder's. They are not test paths, so a builder's edit is not refused by path; a builder
+# may only ADD to hooks/mutate_guard.py (BUILDER_ADD_ONLY). Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
@@ -1958,12 +1959,62 @@ def builder_test_path(path: str, cwd: str) -> bool:
     return is_test_rel(rel)
 
 
+# A builder may ADD to a file here, never remove or change a line of it: one edited helper or import can
+# weaken every mutant the file holds. Named one by one, case folded, as AUTHOR_MUTATION_TESTS is.
+BUILDER_ADD_ONLY = {"hooks/mutate_guard.py"}
+
+
+def builder_add_only_path(path: str, cwd: str) -> bool:
+    """True when `path` is a file a builder may add lines to but not rewrite. A shell write to it is
+    refused outright, since a `sed -i` or a redirect cannot be shown to be add-only."""
+    rel = repo_rel(path, cwd)
+    return rel is not None and norm(rel).lstrip("/").lower() in BUILDER_ADD_ONLY
+
+
+def _lines_kept(old: str, new: str) -> bool:
+    """True when every line of `old` stays in `new`, in order: the change removes and rewrites none."""
+    kept = iter(new.splitlines())
+    return all(any(line == other for other in kept) for line in old.splitlines())
+
+
+def builder_add_only_breach(tool_input, full: str) -> bool:
+    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line of it.
+    The edits are applied to the file on disk, the way the tool would, and the result is read against
+    the disk text. An edit the tool would fail (text not on disk) changes nothing, so it is not judged."""
+    if not isinstance(tool_input, dict):
+        return False
+    try:
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            disk = handle.read()
+    except Exception:
+        disk = ""
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        edits = [tool_input] if "old_string" in tool_input or "new_string" in tool_input else []
+    if isinstance(tool_input.get("content"), str) and not edits:
+        return not _lines_kept(disk, tool_input["content"])
+    result = disk
+    for edit in edits:
+        if not isinstance(edit, dict):
+            return True
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str):
+            return True
+        if not old or old not in result:
+            continue
+        replace_all = bool(edit.get("replace_all", tool_input.get("replace_all")))
+        result = result.replace(old, new) if replace_all else result.replace(old, new, 1)
+    return not _lines_kept(disk, result)
+
+
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
-    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+    def refused(path: str, where: str) -> bool:
+        return builder_test_path(path, where) or builder_add_only_path(path, where)
+    return (_shell_write_hit(stripped, cwd, refused, follow_cd=True, command_position=True)
+            or interpreter_write_hit(raw, cwd, refused))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -1992,6 +2043,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
+        return target
+    if builder_add_only_path(target, cwd) and builder_add_only_breach(tool_input, _expanded(target, cwd)):
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
