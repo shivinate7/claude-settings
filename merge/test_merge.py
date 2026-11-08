@@ -12571,6 +12571,14 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["net"], "negative")
 
+    def test_the_printed_record_is_followed_by_a_stderr_note_on_the_dashes_rule(self):
+        # the note is on stderr and says notes go below a line exactly `---`, so stdout holds the record alone and a lane posts that alone
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue([line for line in err.splitlines() if "below" in line and "---" in line],
+                        "no stderr line says notes go below a line exactly ---:\n" + err)
+        self.assertNotIn("below", out, "the note went to stdout, into the record a lane posts")
+
     def test_a_bad_round_exits_two_and_prints_no_record(self):
         for rnd in ("1:reviewer:sonnet:MAYBE", "4:reviewer:sonnet:PASS", "1:reviewer:PASS", "x:reviewer:sonnet:PASS", "1:qa:sonnet:PASS"):
             with self.subTest(round=rnd):
@@ -12694,6 +12702,15 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+    def test_a_newest_earlier_record_with_prose_after_its_ci_line_says_it_does_not_parse(self):
+        # the newest earlier record does not parse, so the refusal says so and names the prose line, not the Head message alone
+        older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        prose = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS) + "Lane note.\n---\nGenerated with Claude Code\n"
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, review_comment(2, 7, prose)))
+        self.assert_refused(rc, out, err)
+        self.assertIn("does not parse", err, "the refusal does not say the newest earlier record does not parse:\n" + err)
+        self.assertIn("line 10: Lane note.", err, "the refusal does not name the prose line of the newest earlier record:\n" + err)
 
     def test_a_newest_earlier_record_typed_without_a_stamp_is_refused_as_the_base(self):
         # The newest earlier record was typed by hand, so it is not a record and names no reviewed head for the fix diff to start from
@@ -12985,6 +13002,14 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments_error="reading issue comments from GitHub failed")
         self.assertEqual(rc, 1, out + err)
         self.assertEqual(out.strip(), "", out)
+
+    def test_a_newest_record_with_prose_after_its_ci_line_names_that_line(self):
+        # the newest record does not parse, so its line names the prose after its CI line (the first line that broke it), not the bare bad
+        prose = record_text(rounds=REVIEW_PASS) + "Lane note.\n---\nGenerated with Claude Code\n"
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 7, prose)]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("bad: the newest record does not parse: line 10: Lane note.", list_line(self, out, 7))
 
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
         if getattr(merge.Host, "review_comments", None) is None:
@@ -14007,6 +14032,107 @@ class ReviewCutover(ReviewEnv):
             rc, out, err = self.run_args("7", "--review-record", *flags, host=host)
         self.assertEqual(rc, 0, "--fix-check refused an unstamped earlier record created before the cutover:\n" + out + err)
         self.assertIn(REVIEW_MARKER, out, "no record was printed:\n" + out + err)
+
+
+# The bad line (decision pr-review-record). review_parse(text, created=None, cutover=None) -> (record or None, bad): `bad` is None when the record
+# parses, else (line_number, line_text) of the first line that broke the parse, 1-based in the comment body. The structure is read before the
+# Stamp: a record with prose after its CI line names that prose, even when it has no Stamp line either. A blank line is a legal trailing line,
+# so a blank line above prose is not the break; the prose is. Each case reaches review_parse through review_fn, so each fails by name while the
+# name is missing.
+
+SIGHTED_1909_PROSE = ("Earlier chain (step fix-check-chain): round 1, reviewer haiku, FAILED at d4adf8811. That failure is answered by a532aa8c3. "
+                      "This record is a fresh whole-PR review of a476ef100..a532aa8c3 at the live head. Its notes went to triage for debt comment-narration-limits.")
+SIGHTED_1834_PROSE = ("Printed by batch runner 8 with the merge tool. Coordinator yes at 02:33 CST. The verdicts come from lane comment-check-scans-shell "
+                      "(session_013NEJL37UFXTQuAcox7s8fD). Lane lint passed at this head (run by runner 8).")
+# Two live bodies that did not parse, copied verbatim from PR #1909 comment 6720811601 and PR #1834 comment 6719312457: a blank line and a prose
+# paragraph between the CI line and `---`. They hold no secret. hooks/test_guard.py holds the same two bodies: that suite runs the guard as a
+# subprocess and cannot import this one.
+SIGHTED_1909 = "\n".join([
+    "<!-- review-record -->", "PR: #1909", "Head: a532aa8c38ecc4080b9d7a056666c2b226b137d0", "Kind: normal", "Guard or check: yes",
+    "Round 1: reviewer, haiku, PASS", "Net value: not owed", "CI: read live by merge --reviewed", "", SIGHTED_1909_PROSE, "", "---",
+    "_Generated by [Claude Code](https://claude.ai/code)_"])
+SIGHTED_1834 = "\n".join([
+    "<!-- review-record -->", "PR: #1834", "Head: 54ac0ee2bd506366e25b65cbf859a7e8c01ae62f", "Kind: normal", "Guard or check: yes",
+    "Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS", "Net value: positive",
+    "CI: read live by merge --reviewed", "", SIGHTED_1834_PROSE, "", "---", "_Generated by [Claude Code](https://claude.ai/code)_"])
+
+def bad_parse(test, text, created=None, cutover=None):
+    """review_parse of `text` with the comment's created time and the cutover -> (record, bad). A build without the name fails here by name."""
+    return review_fn(test, "review_parse")(text, created=created, cutover=cutover)
+
+class ReviewParseBadLine(unittest.TestCase):
+    """review_parse names the first line that broke a record. Each case builds a record with one defect, so the named line is that defect's line."""
+
+    def test_a_good_record_parses_with_no_bad_line(self):
+        rec, bad = bad_parse(self, record_text(rounds=REVIEW_PASS))
+        self.assertIsNotNone(rec, "review_parse refused a well-formed record")
+        self.assertIsNone(bad, "a record that parsed named a bad line: %r" % (bad,))
+
+    def test_a_record_with_no_stamp_parses_with_no_bad_line_when_it_is_before_the_cutover(self):
+        rec, bad = bad_parse(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, cutover=REVIEW_CUTOVER)
+        self.assertIsNotNone(rec, "an unstamped record created before the cutover was refused")
+        self.assertIsNone(bad, "an unstamped record created before the cutover named a bad line: %r" % (bad,))
+
+    def test_parse_review_is_review_parse_without_the_line(self):
+        for text in (record_text(rounds=REVIEW_PASS), record_text(rounds=REVIEW_PASS) + "Lane note.\n---\nGenerated with Claude Code\n"):
+            with self.subTest(last_line=text.splitlines()[-1]):
+                self.assertEqual(review_fn(self, "parse_review")(text), bad_parse(self, text)[0],
+                                 "parse_review is not review_parse's record")
+
+    def test_a_prose_line_after_the_ci_line_names_that_line(self):
+        text = record_text(rounds=REVIEW_PASS) + "Lane note.\n---\nGenerated with Claude Code\n"
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with prose after its CI line parsed:\n" + text)
+        self.assertEqual(bad, (10, "Lane note."), "the prose line after the CI line is not named:\n" + text)
+
+    def test_a_prose_line_after_the_ci_line_with_no_rule_names_that_line(self):
+        text = record_text(rounds=REVIEW_PASS) + "Lane note after the record.\n"
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with prose after its CI line parsed:\n" + text)
+        self.assertEqual(bad, (10, "Lane note after the record."), "the prose line after the CI line is not named:\n" + text)
+
+    def test_the_first_prose_line_after_the_ci_line_is_the_one_named(self):
+        text = record_text(rounds=REVIEW_PASS) + "Lane note one.\nLane note two.\n---\nGenerated with Claude Code\n"
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with prose after its CI line parsed:\n" + text)
+        self.assertEqual(bad, (10, "Lane note one."), "the first prose line after the CI line is not the one named:\n" + text)
+
+    def test_a_bad_kind_names_the_kind_line(self):
+        text = record_text(rounds=REVIEW_PASS, kind="bogus")
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with a bad Kind parsed:\n" + text)
+        self.assertEqual(bad, (4, "Kind: bogus"), "the bad Kind line is not named:\n" + text)
+
+    def test_a_stamp_mismatch_names_the_stamp_line(self):
+        text = replace_line(self, record_text(rounds=REVIEW_PASS), "Stamp: ", "Stamp: 0123456789abcdef")
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with a wrong Stamp parsed:\n" + text)
+        self.assertEqual(bad, (8, "Stamp: 0123456789abcdef"), "the wrong Stamp line is not named:\n" + text)
+
+    def test_a_missing_marker_names_line_one(self):
+        # the stamp is rebuilt over the new first line, so the marker is the only defect
+        text = record_text(rounds=REVIEW_PASS)
+        i = stamp_index(self, text)
+        lines = text.splitlines()
+        lines[0] = "Review of PR 7, no marker"
+        lines[i] = "Stamp: " + review_fn(self, "review_stamp")(lines[:i])
+        body = "\n".join(lines) + "\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a record with no marker parsed:\n" + body)
+        self.assertEqual(bad, (1, "Review of PR 7, no marker"), "a missing marker does not name line 1:\n" + body)
+
+    def test_a_body_with_no_stamp_names_the_ci_line_where_the_stamp_was_owed(self):
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        rec, bad = bad_parse(self, text)
+        self.assertIsNone(rec, "a record with no Stamp line parsed when no created time is given:\n" + text)
+        self.assertEqual(bad, (8, REVIEW_CI_LINE), "the CI line, where the Stamp was owed, is not named:\n" + text)
+
+    def test_a_sighted_body_names_its_prose_line_not_the_blank_line_above_it(self):
+        for body, want in ((SIGHTED_1909, (10, SIGHTED_1909_PROSE)), (SIGHTED_1834, (12, SIGHTED_1834_PROSE))):
+            with self.subTest(first_line=body.splitlines()[2]):
+                rec, bad = bad_parse(self, body)
+                self.assertIsNone(rec, "a sighted body with prose after its CI line parsed:\n" + body)
+                self.assertEqual(bad, want, "the sighted body does not name its prose line:\n" + body)
 
 
 class ReviewStampSince(unittest.TestCase):
