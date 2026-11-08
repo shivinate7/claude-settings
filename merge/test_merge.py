@@ -13803,10 +13803,11 @@ class ReviewedList(ReviewEnv):
         a, b, c = record_text(rounds=REVIEW_PASS), record_text(n=8, rounds=REVIEW_PASS), record_text(rounds=REVIEW_FAILED_THREE)
         host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {},
                          comments=[review_comment(1, 7, a, created="2026-10-02T00:00:00Z"), review_comment(2, 8, b, created="2026-10-03T00:00:00Z"),
-                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z")])
+                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z", updated="2026-10-05T00:00:00Z")])
         self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"),
-                         {7: [("2026-10-02T00:00:00Z", a), ("2026-10-04T00:00:00Z", c)], 8: [("2026-10-03T00:00:00Z", b)]},
-                         "review_comments gives (created_at, body) pairs per pull request, oldest first")
+                         {7: [(a, "2026-10-02T00:00:00Z", False), (c, "2026-10-05T00:00:00Z", True)], 8: [(b, "2026-10-03T00:00:00Z", False)]},
+                         "review_comments gives (body, time, edited) triples per pull request, oldest first; time is updated_at, else created_at; "
+                         "edited is True when updated_at differs from created_at")
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
