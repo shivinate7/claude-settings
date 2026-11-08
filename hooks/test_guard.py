@@ -15017,6 +15017,54 @@ sh("builder-refuse: a builder that clean-merges a newer main and changes no test
 sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at push",
    PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
 
+
+def _amend_inherited_msg(w):
+    """Cut at main. The builder resets to the lane tip, which holds the test-author's commit, then rewords
+    that commit's message only. The amend's tree is the inherited one, so no test line is the builder's."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "reworded by the builder")
+
+
+def _amend_inherited_edit(w):
+    """Cut at main. The builder resets to the lane tip, then edits the test file to the trimmed text and
+    amends. The amend changes the tree from the inherited commit, so it holds the builder's own edit."""
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(w, TEST_A), TRIMMED)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "reworded with a test edit")
+
+
+def _amend_own_msg(w):
+    """Cut at main. The builder commits its own test edit, then rewords that commit's message only. The
+    own commit is no longer HEAD, but the amend still holds the edit, so the amend is refused."""
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_own():\n    assert 8\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+    _must(w, *IDENT, "commit", "-q", "--amend", "-m", "own test edit, reworded")
+
+
+# Amend: a builder's message-only amend of an inherited test-author commit changes no test. Its tree is
+# the inherited one, so it is allowed. The amend's own change is the reword, and that is no builder edit.
+_bd_amend_msg = diff_repo("bd-amend-inherited-msg", _amend_inherited_msg)
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit is allowed at commit",
+   COMMIT, "allow", cwd=_bd_amend_msg, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of an inherited test-author commit is allowed at push",
+   PUSH, "allow", cwd=_bd_amend_msg, agent_id="bld1", agent_type="builder")
+# Control: an amend of the inherited commit that also edits the test file is the builder's own change.
+_bd_amend_edit = diff_repo("bd-amend-inherited-edit", _amend_inherited_edit)
+sh("builder-refuse: a builder's amend of an inherited test-author commit that also edits a test file is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_edit, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's amend of an inherited test-author commit that also edits a test file is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_edit, agent_id="bld1", agent_type="builder")
+# Control: a message-only amend of the builder's own test commit still holds its own test edit: denied.
+_bd_amend_own = diff_repo("bd-amend-own-msg", _amend_own_msg)
+sh("builder-refuse: a builder's message-only amend of its own test commit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's message-only amend of its own test commit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_amend_own, agent_id="bld1", agent_type="builder")
+
 # Rebase: a builder that rebases onto the lane tip is judged against that tip. A test file written back
 # to main's bytes differs from it, so it is refused. The clean rebase is checked with the log checks below.
 _bd_rebase = diff_repo("bd-rebase-stale", _rebase_then_stale_revert)
