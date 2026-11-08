@@ -8138,12 +8138,69 @@ sh("env: interpreter code: allow, a quoted node heredoc with an existence test t
    "node <<'EOF'\nconst fs=require('fs'), path=require('path');\n"
    "console.log(fs.existsSync(path.join(__dirname, '" + ENV + "')));\nEOF", "allow", cwd=NOGIT)
 
-sh("env: interpreter code: deny, python3 -c, a getsize of the file",
-   "python3 -c \"import os; print(os.path.getsize('" + ENV + "'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a getsize of the file (stat and size read no contents)",
+   "python3 -c \"import os; print(os.path.getsize('" + ENV + "'))\"", "allow", cwd=NOGIT)
 sh("env: interpreter code: deny, python3 -c, a subprocess cat of the file",
    "python3 -c \"import subprocess; subprocess.run(['cat', '" + ENV + "'])\"", "deny", "env-file", cwd=NOGIT)
 sh("env: interpreter code: deny, python3 -c, a write to the file",
    "python3 -c \"open('" + ENV + "','w').write('X=1')\"", "deny", "env-file", cwd=NOGIT)
+
+# Decision env-file-stays-unread, "Interpreter code", follow-ups. Three shapes: a compare that picks the
+# file's name and then opens it; a read of the file's stat, size or listing, which reads no contents; and
+# runners that take interpreter code through their own options. Names start "env: interpreter code
+# follow-ups", so MUTATE_ONLY="env: interpreter code" runs them with the block above.
+sh("env: interpreter code follow-ups: deny, a python heredoc that opens the name it compares equal to the file",
+   "python3 <<'PY'\nimport os\nfor f in os.listdir('.'):\n    if f == '" + ENV + "': print(open(f).read())\nPY",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, python3 -c, a name bound to the file, opened under a membership test",
+   "python3 -c \"f='" + ENV + "'; print(open(f).read()) if f in ('" + ENV + "','x') else 0\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a const equal to the file, read under a strict compare",
+   "node -e \"const n='" + ENV + "'; if (n === '" + ENV + "') console.log(require('fs').readFileSync(n,'utf8'))\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a listing that drops the file name, no open",
+   "python3 -c \"import os; print([f for f in os.listdir('.') if f != '" + ENV + "'])\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a filter that drops the file name, no read",
+   "node -e \"console.log(['a','" + ENV + "'].filter(n => n !== '" + ENV + "'))\"", "allow", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, python3 -c, a listing filtered by startswith of the name",
+   "python3 -c \"import os; print([f for f in os.listdir('.') if f.startswith('" + ENV + "')])\"", "allow",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, readdirSync filtered by startsWith of the name",
+   "node -e \"console.log(require('fs').readdirSync('.').filter(f => !f.startsWith('" + ENV + "')))\"",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, an os.stat size of the file",
+   "python3 -c \"import os; print(os.stat('" + ENV + "').st_size)\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a pathlib stat mtime of the file",
+   "python3 -c \"from pathlib import Path; print(Path('" + ENV + "').stat().st_mtime)\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a join that prints the name among other names",
+   "python3 -c \"print('\\n'.join(['" + ENV + "', 'node_modules']))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, python3 -c, a gitignore append of a join that holds the name",
+   "python3 -c \"open('.gitignore','a').write('\\n'.join(['" + ENV + "','dist']))\"", "allow", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: deny, cat writes a python script that opens the file, uv run executes it",
+   "cat > dbg.py <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY\nuv run dbg.py", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, uvx python -c, an open of the file",
+   "uvx python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, pdm run python -c, an open of the file",
+   "pdm run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, conda run python -c, an open of the file",
+   "conda run -n base python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, npx node -e, a readFileSync of the file",
+   "npx node -e \"console.log(require('fs').readFileSync('" + ENV + "','utf8'))\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, uv run with an index value flag, python -c, an open of the file",
+   "uv run --index-url https://x python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, uv run with an editable value flag, python -c, an open of the file",
+   "uv run --with-editable . python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, a quoted heredoc piped to python3 that opens the file",
+   "cat <<'PY' | python3\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code follow-ups: allow, uv run pytest", "uv run pytest", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, pdm run test", "pdm run test", "allow", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, npx eslint", "npx eslint .", "allow", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
