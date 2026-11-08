@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint parses each changed Python file at the version CI pins",
+  "phase": "next",
+  "status": "todo",
+  "order": 650,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "On #1973 a builder wrote a nested same-quote f-string (merge/merge.py:331), which only Python 3.12 and later accept. CI pins 3.11; local tests on 3.13 passed, and the round-2 reviewer caught it only by running python3.11 by hand (lane lint-uses-pinned-tools, 07:24 CST Nov 8).",
+  "note": "Done check: a red test where lane lint fails a changed .py file that 3.11 cannot parse (ast.parse with feature_version read from the CI pin, not a copied number), and a control where 3.11-valid code passes. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
+  "updatedAt": "2026-11-08T07:22:00-06:00"
+}
