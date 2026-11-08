@@ -14867,8 +14867,8 @@ def _c1_many_clean(w):
 
 def _open_test_conflict_left(w):
     """The open merge of _f2_conflict_open, with the builder's product edit staged. The conflicted test file stays
-    as git's merge wrote it, with its conflict markers: the test-author resolves it next, so the builder may
-    commit now."""
+    as git's merge wrote it, with its conflict markers: a test file that still holds markers is a builder's test
+    change, so the builder's commit is refused until the test-author resolves it."""
     _f2_conflict_open(w)
     _require_conflict(w, TEST_A)
     write(os.path.join(w, "src/app.py"), "x = 7\n")
@@ -14918,6 +14918,16 @@ def _main_test_merge_committed(w):
     _commit_merge(w)
     _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
     write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + MAIN_CASE + BUILDER_CASE)
+
+
+def _main_test_merge_clean_committed(w):
+    """The _main_test_merge_open merge, committed as the builder's merge commit with no builder edit to a test file.
+    The commit is git's merge of its two parents, so it holds main's clean test change and nothing the builder wrote."""
+    _main_test_merge_open(w)
+    _commit_merge(w)
+    _require_says(w, ["show", "HEAD:" + TEST_A], MAIN_CASE)
+    if len(run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()) != 3:
+        sys.exit("fixture setup failed: HEAD in %r is not a merge commit" % w)
 
 
 def _f2_conflict_staged(w):
@@ -15057,7 +15067,7 @@ def _invalid_byte_open(w):
     _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
 
 
-# A gitlink (a submodule entry) and a mode-only change are changes to a test path, refused as on main. merge_resolved
+# A gitlink (a submodule entry) and a mode-only change are changes to a test path, refused as on main. The merge check
 # keeps a path whose mode differs at its two sides, whatever its bytes. A gitlink has no bytes in this repository, and
 # a mode-only change keeps the same bytes, so the mode alone keeps each of these paths: a gitlink to a commit the clone
 # lacks, a gitlink to a commit the clone holds, and a mode-only change. The fixtures read each change back with git
@@ -15133,17 +15143,6 @@ def _cost_files(w):
     write(os.path.join(w, "src/app.py"), "x = 4\n")
     write(os.path.join(w, "tests/test_cost_one.py"), "def test_one():\n    assert 1\n")
     write(os.path.join(w, "tests/test_cost_two.py"), "def test_two():\n    assert 2\n")
-
-
-def _cost_merge_open(w):
-    _clean_merge_open(w)
-    _cost_files(w)
-
-
-def _cost_merge_committed(w):
-    """The _cost_merge_open change, committed as the builder's merge commit."""
-    _cost_merge_open(w)
-    _commit_merge(w)
 
 
 def _g_lane_and_product(w):
@@ -15541,22 +15540,23 @@ diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
 
-# A merge in progress is git's until the builder edits it. The builder's commit of its product edit is allowed when
-# the test file stays as git's merge wrote it, with its conflict markers: the test-author resolves that file next.
-# The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+# Owner, 2026-11-08 12:16 CST, page item 437 a (builder-test-edit-scope): builders never write test content. A test
+# file that still holds git's conflict markers is a builder's test change, so the builder's commit is refused while
+# the file is unresolved, as on main. The test-author resolves that file. The same merge is denied once the builder
+# rewrites the conflicted file to its own side. Both share one setup.
 _bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
 sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
-   "wrote it, is allowed at commit", COMMIT, "allow", cwd=_bd_m_left, agent_id="bld1", agent_type="builder")
+   "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
+   agent_type="builder")
 _bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
 sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
    "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
 
 # The same two merges, run from a subfolder. The guard reads each file from the top of the checkout, whatever folder
-# the command runs in: a conflicted test file left as git wrote it is allowed, and one rewritten to the builder's side
-# is denied.
-sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is allowed at "
-   "commit from a subfolder", COMMIT, "allow", cwd=os.path.join(_bd_m_left, "src"), agent_id="bld1",
-   agent_type="builder")
+# the command runs in: a conflicted test file left as git wrote it is denied, as is one rewritten to the builder's side.
+sh("builder-refuse: a builder's merge in progress, with a conflicted test file left as git wrote it, is denied at "
+   "commit by builder-diff from a subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_left, "src"),
+   agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file is denied at commit from a "
    "subfolder", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_m_edited, "src"), agent_id="bld1",
    agent_type="builder")
@@ -15573,10 +15573,20 @@ sh("builder-refuse: a builder's own case in a test file that main changed and a 
 _bd_m_main_clean = diff_repo("bd-m-main-test-clean", lambda w: _main_test_merge_open(w))
 sh("builder-refuse: a merge in progress where main changed a test file that merged clean, with no builder edit, is "
    "allowed at commit", COMMIT, "allow", cwd=_bd_m_main_clean, agent_id="bld1", agent_type="builder")
+# The same clean change, committed as the builder's merge commit with no builder edit: git's merge of the two parents
+# is the commit's tree, so main's test change is allowed at commit and push, and at the stop.
+_bd_m_main_merge_clean = diff_repo("bd-m-main-test-merge-clean", _main_test_merge_clean_committed)
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at commit", COMMIT, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
+   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries main's clean test change, with no "
+                         "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
+                         clean_builder_case("bd-m-main-test-merge-clean")))
 
-# git's three conflict markers left in a conflicted test file of an open merge are refused by conflict-markers.
-# builder-diff passes that file, since the builder did not change git's bytes. An unmerged file that is not staged is
-# git's own refusal, pinned by the bd-m-test-left row above, so these rows stage the markers before the commit.
+# git's three conflict markers left in a conflicted test file of an open merge are refused by conflict-markers, and
+# builder-diff refuses that file too (page item 437 a). An unmerged file that is not staged is refused by builder-diff,
+# pinned by the bd-m-test-left row above, so these rows stage the markers before the commit.
 _bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
 sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
    "one call, is denied by conflict-markers", VCS + " add -A && " + COMMIT, "deny", rule=CMK_RULE,
@@ -15585,6 +15595,10 @@ _bd_m_markers_staged = diff_repo("bd-m-markers-staged", _f2_conflict_staged)
 sh("builder-refuse: a builder's open merge that stages git's markers in a conflicted test file, then commits, is denied "
    "by conflict-markers", COMMIT, "deny", rule=CMK_RULE, cwd=_bd_m_markers_staged, agent_id="bld1",
    agent_type="builder")
+# The same staged markers behind a leading `echo ok;`: builder-diff refuses the test file at commit by itself.
+sh("builder-refuse: a builder's open merge, with a test file still holding git's markers, staged and committed after "
+   "`echo ok;`, is denied at commit by builder-diff", "echo ok; " + VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
+   cwd=_bd_m_markers_chain, agent_id="bld1", agent_type="builder")
 
 # A builder's resolution of a conflicted test file to main's side, or to a blend of both sides, is refused by
 # builder-diff, as its resolution to its own side is (_open_test_conflict_edited).
@@ -15651,8 +15665,8 @@ sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the de
    agent_type="builder")
 
 # An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
-# under src/ is judged as src/test_x.py. Read as test_x.py, it would be taken for the conflicted top-level file that
-# git's merge left as it wrote it, and allowed.
+# under src/ is judged as src/test_x.py. The conflicted top-level file of that name holds git's markers, so builder-diff
+# refuses it either way: this row does not tell the two readings apart.
 _bd_m_top = diff_repo("bd-m-top-test", _top_test_conflict_open)
 sh("builder-refuse: a builder's merge in progress, with a conflicted top-level test file left as git wrote it and an "
    "untracked test file of the same name under src/, is denied at commit from a subfolder", COMMIT, "deny", rule=BDIFF,
@@ -15743,7 +15757,7 @@ sh("builder-refuse: a builder's merge commit that changes only the mode of a tes
 
 def _reaches_merge_check_case(where, rel, committed):
     """A builder's change to `rel` in a merge reaches the merge check: own_changes answers, and git's diff of the
-    merge's old side lists `rel` before merge_resolved judges it. So a red above fails as the check's drop, and an
+    merge's old side lists `rel` before the merge check judges it. So a deny above comes from the merge check, and an
     allow from an unread change fails here instead."""
     materialize(where)
     guard = _load_guard_module()
@@ -15819,25 +15833,8 @@ def _calls_naming(calls, rels):
     return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
 
 
-def _show_calls_naming(calls, rels):
-    """{rel: how many `git show` calls name rel} for each path in `rels`: the call that reads a path's bytes."""
-    return {rel: sum(1 for args in calls if "show" in args and any(rel in part for part in args)) for rel in rels}
-
-
-def _exact_shows_problem(counts, want):
-    """Why the `git show` counts are not exactly `want` for each path, or '' when they are. A zero is its own cause:
-    the counter missed the reader, or the path was not read at all."""
-    missed = sorted(rel for rel, n in counts.items() if n == 0)
-    if missed:
-        return "no git show names %r: the counter missed the reader, or the path was not read" % (missed,)
-    off = {rel: n for rel, n in counts.items() if n != want}
-    if off:
-        return "git show calls per differing path are %r, want exactly %d" % (off, want)
-    return ""
-
-
 def plain_commit_reads_case():
-    """A builder's plain commit: own_changes reads none of its paths with git, since merge_resolved runs in a merge only."""
+    """A builder's plain commit: own_changes reads none of its paths with git, since the merge check runs in a merge only."""
     where = diff_repo("bd-cost-plain", _cost_files, commit=True)
     materialize(where)
     changes, calls = _counted_own_changes(where)
@@ -15852,40 +15849,8 @@ def plain_commit_reads_case():
     return True, "the plain commit's three paths are read through no git call"
 
 
-def _merge_shows_case(name, change, want):
-    """A builder's merge with three differing paths: git shows each path `want` times, and only those reads count."""
-    where = diff_repo(name, change)
-    materialize(where)
-    changes, calls = _counted_own_changes(where)
-    if changes is None:
-        return False, "own_changes returned None for the merge"
-    found = {path for _old, _new, paths, _kind in changes for path in paths}
-    if found != set(COST_PATHS):
-        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
-    counts = _show_calls_naming(calls, COST_PATHS)
-    problem = _exact_shows_problem(counts, want)
-    if problem:
-        return False, problem
-    return True, "git show calls per differing path %r, exactly %d" % (counts, want)
-
-
-def merge_reads_case():
-    """A builder's merge in progress: one git show per differing path, for the old side. The new side is the
-    working-tree file, which is read without git."""
-    return _merge_shows_case("bd-cost-merge", _cost_merge_open, 1)
-
-
-def merge_commit_reads_case():
-    """A builder's merge commit: two git shows per differing path, for the old side and for the new side."""
-    return _merge_shows_case("bd-cost-merge-commit", _cost_merge_committed, 2)
-
-
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
                          plain_commit_reads_case))
-LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge in progress makes exactly one git show per differing path",
-                         merge_reads_case))
-LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit makes exactly two git shows per differing path",
-                         merge_commit_reads_case))
 
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
