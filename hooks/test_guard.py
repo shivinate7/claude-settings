@@ -10682,6 +10682,9 @@ MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the 
 MTC_BODY = "detail " * 2500                       # a long body after the first line: about 17,500 characters
 MTC_MORNING = "2026-11-08T07:08:00-06:00"        # 07:08 CST, the clock of the header-form, zone and window cases
 MTC_CDT = "2026-10-30T13:22:00-05:00"            # 13:22 CDT, the clock of the CDT-season cases
+# The helper a session reads the time from, later than the stamp. Every message-time refusal names it. The test
+# side holds this one copy: no product constant holds the path alone (local_time's NOW_CENTRAL_POINTER is a sentence).
+NOW_CENTRAL_PATH = "~/.claude/bin/now-central"
 
 
 def mtc_env(clock):
@@ -10690,9 +10693,11 @@ def mtc_env(clock):
 
 
 def mtc_refuse(name, message, clock=MTC_CLOCK, carries=(), lacks=()):
-    """A send_message whose header stamp is off the clock. The guard refuses it, and the reason names the rule."""
+    """A send_message whose header stamp is off the clock. The guard refuses it, and the reason names the rule and
+    the now-central helper."""
     add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=SEND_MESSAGE, cwd=NOGIT,
-        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, carries=carries, lacks=lacks)
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message,
+        carries=tuple(carries) + (NOW_CENTRAL_PATH,), lacks=lacks)
 
 
 def mtc_allow(name, message, clock=MTC_CLOCK, transcript=None):
@@ -10893,10 +10898,10 @@ MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:0
 
 def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=(), **tool_input):
     """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK).
-    A deny must print each of `carries` and none of `lacks`."""
+    A deny must print each of `carries`, the now-central helper's path among them, and none of `lacks`."""
     if expected == "deny":
         add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
-            env=mtc_env(clock), carries=carries, lacks=lacks, **tool_input)
+            env=mtc_env(clock), carries=tuple(carries) + (NOW_CENTRAL_PATH,), lacks=lacks, **tool_input)
     else:
         add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
             env=mtc_env(clock), **tool_input)
@@ -20729,6 +20734,9 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
+    # is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
+    "message-time-matches-clock": (".claude",),
 }
 
 
