@@ -675,7 +675,8 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # through its `each` hook, so it adds no git read: per run and per notes path, the revived check's own reads and no more.
 #
 # A removed note line is paired with the added line of its own slug. With none, a fold target is the added line that holds
-# the most of its clauses, and at least 2. A removed line with no pair is a plain retire and is no finding. The line is cut into clauses at a
+# the most of its clauses, at least 2 and at least half (a lone `Decision:` clause is shared by unrelated notes). A removed
+# line with no pair is a plain retire and is no finding. The line is cut into clauses at a
 # sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
 # judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
 # content words (stopwords out, a trailing `s` off) are among the content words of the pair. A reworded clause keeps most of
@@ -735,9 +736,10 @@ def dropped_clauses(before, after, now):
     for slug, body in gone:
         mine = clauses(body)
         pair = [x for x in added if x[0] == slug]
-        if not pair:  # a fold: the added line that holds the most of the clauses
+        if not pair:  # a fold: the added line that holds the most clauses, at least 2 and at least half of them
             top = max(added, key=lambda x: sum(held(c, content_words(x[1])) for c in mine), default=None)
-            pair = [top] if top and sum(held(c, content_words(top[1])) for c in mine) >= 2 else []
+            n = sum(held(c, content_words(top[1])) for c in mine) if top else 0
+            pair = [top] if n >= 2 and 2 * n >= len(mine) else []
         if not pair:
             continue  # a plain retire
         slugs = {x[0] for x in pair}
@@ -749,10 +751,20 @@ def dropped_clauses(before, after, now):
     return found
 
 
-def lost_sentence_problem(path, slug, folded, clause):
-    return ("%s: note `%s` loses this when a commit rewrites it%s: \"%s\". Put it back. To drop it on purpose, name the note in a %s "
+def gather_dropped(lost, path, found):
+    """Fold dropped_clauses' answer into lost: {(path, slug): (fold slugs, [clause])}, one entry per note, each clause once."""
+    for slug, folded, clause in found:
+        slugs, clauses_ = lost.setdefault((path, slug), (set(), []))
+        slugs.update(folded)
+        if clause not in clauses_:
+            clauses_.append(clause)
+
+
+def lost_sentence_problem(path, slug, folded, dropped):
+    return ("%s: note `%s` loses %s when a commit rewrites it%s. Put %s back. To drop %s on purpose, name the note in a %s "
             "trailer for %s: put `- %s` in the trailer's reason."
-            % (path, slug, " (folded into `%s`)" % "`, `".join(folded) if folded else "", clause, TRAILER, path, slug))
+            % (path, slug, "; ".join('"%s"' % c for c in dropped), " (folded into `%s`)" % "`, `".join(folded) if folded else "",
+               "it" if len(dropped) == 1 else "them", "it" if len(dropped) == 1 else "them", TRAILER, path, slug))
 
 
 # ----------------------------------------------------------------------- modes
@@ -835,7 +847,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     # A trailer excuses a notes path's revival only for the slugs it names, so a revival on a trailer's path skips the path judge.
     kept, lost = [], {}
     revived = revived_notes(cwd, upstream, h, {p: named_slugs(rs) for p, rs in reasons.items()}, kept,
-                            lambda path, sha, before, after, now: [lost.setdefault((path, s, c), f) for s, f, c in dropped_clauses(before, after, now)])
+                            lambda path, sha, before, after, now: gather_dropped(lost, path, dropped_clauses(before, after, now)))
     items += [x for x in revived if x[0] not in ok]
     forced = [x[1] for x in revived if x[0] in ok]
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
@@ -860,12 +872,12 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
     bad = forced + bad
-    for (path, slug, clause), folded in lost.items():  # only a trailer that names the slug excuses a dropped clause, not the path alone
+    for (path, slug), (folded, dropped) in lost.items():  # only a trailer that names the slug excuses a dropped clause, not the path alone
         if slug in named_slugs(reasons.get(path, ())):
             why = next(r for r in reversed(reasons[path]) if slug in named_slugs([r]))
             notes.append("ALLOWED %s: %s (keeps the dropped clause of `%s`)" % (path, why, slug))
         else:
-            bad.append(lost_sentence_problem(path, slug, folded, clause))
+            bad.append(lost_sentence_problem(path, slug, sorted(folded), dropped))
     for path, slug in kept:  # a named revival is an excuse too: one ALLOWED line, with the reason that names the slug
         why = next(r for r in reversed(reasons[path]) if slug in named_slugs([r]))
         notes.append("ALLOWED %s: %s (keeps the revived note `%s`)" % (path, why, slug))
