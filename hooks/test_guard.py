@@ -39,6 +39,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -7960,6 +7961,54 @@ sh("env: a glob that could name a covered backup, cat .env.example*", "cat " + E
    "deny", "env-file", cwd=NOGIT)
 # The envrc candidate in the glob check is the only thing that holds this: the sample names hold no name.
 sh("env: a glob that could name an envrc file, cat .*rc", "cat .*rc", "deny", "env-file", cwd=NOGIT)
+
+# Decision env-file-stays-unread, "Shell form": the script a shell gets with `-c`, or an `eval`, is a
+# command of its own, and the guard judges it as one, recursively, up to ENV_MAX_DEPTH. Every name below
+# starts "env: shell -c", so MUTATE_ONLY="env: shell -c" runs this block alone.
+import guard_env  # noqa: E402  ENV_MAX_DEPTH, the depth the guard reads a nest to
+
+
+def nest_bash(script, levels):
+    """`script` in `levels` layers of `bash -c`. Each layer quotes the one under it, so the text grows fast."""
+    for _ in range(levels):
+        script = "bash -c " + shlex.quote(script)
+    return script
+
+
+for shape, command in (
+    ("bash -c, a double-quoted cat", 'bash -c "cat ' + ENV + '"'),
+    ("sh -c, a single-quoted cat of an envrc", "sh -c 'cat " + ENVRC + "'"),
+    ("zsh -c, a double-quoted cat", 'zsh -c "cat ' + ENV + '"'),
+    ("dash -c, a single-quoted cat", "dash -c 'cat " + ENV + "'"),
+    ("bash -lc, a login flag bundled with -c", "bash -lc 'cat " + ENV + "'"),
+    ("bash -o pipefail -c, an option before -c", "bash -o pipefail -c 'cat " + ENV + "'"),
+    ("bash -c, a redirect onto the file", 'bash -c "echo KEY=1 > ' + ENV + '"'),
+    ("bash -c, git add of the file", 'bash -c "git add ' + ENV + '"'),
+    ("sh -c inside sh -c, two levels", 'sh -c "sh -c \'cat ' + ENV + '\'"'),
+    ("sh -c inside docker exec", "docker exec c sh -c 'cat " + ENV + "'"),
+    ("eval of a double-quoted cat", 'eval "cat ' + ENV + '"'),
+):
+    sh("env: shell -c: deny, " + shape, command, "deny", "env-file", cwd=NOGIT)
+
+# The depth cap: a nest past ENV_MAX_DEPTH is refused though its innermost script is harmless. `eval`
+# adds a level with no quoting, so the text stays short. A pure bash -c nest that deep cannot be
+# written, since each layer doubles the quote marks under it. `eval` runs through the same reader.
+sh("env: shell -c: deny, a nest past ENV_MAX_DEPTH with a harmless script",
+   nest_bash("eval " * (guard_env.ENV_MAX_DEPTH + 2) + "true", 3), "deny", "env-file", cwd=NOGIT)
+sh("env: shell -c: allow, a nest under ENV_MAX_DEPTH with a harmless script",
+   nest_bash("eval " * 10 + "true", 3), "allow", cwd=NOGIT)
+sh("env: shell -c: allow, a three-level bash -c nest with a harmless script",
+   nest_bash("true", 3), "allow", cwd=NOGIT)
+
+for shape, command in (
+    ("bash -c, ls of the file", 'bash -c "ls ' + ENV + '"'),
+    ("bash -c, echo of the name", 'bash -c "echo ' + ENV + '"'),
+    ("bash -c, an existence test of the envrc", 'bash -c "[ -f ' + ENVRC + ' ] && echo yes"'),
+    ("bash -c, a runner loading the file", 'bash -c "node --env-file=' + ENV + ' x.js"'),
+    ("git commit message quoting the form", 'git commit -m "fix: sh -c \'cat ' + ENV + '\' is now refused"'),
+    ("echo of text quoting the form", 'echo "bash -c \'cat ' + ENV + '\'"'),
+):
+    sh("env: shell -c: allow, " + shape, command, "allow", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
