@@ -61,6 +61,7 @@ A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set
 import argparse
 import collections
 import difflib
+import functools
 import os
 import re
 import shutil
@@ -690,8 +691,9 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # A removed note line is paired with each added line under the same slug or under a folding slug: an added line whose text
 # names the removed slug. A removed line with no such pair is paired by text with an added line under a new slug (a rename):
 # one of its clauses, with at least PAIR_WORDS content words and not the `Decision:` tag, is held by the added line at
-# PAIR_HELD, the share of a clause that was reworded and not cut. A note retired in an earlier commit of the branch is paired
-# the same way with a later commit's new notes. Shared topic words, a shared `Decision:` tag or a shared slug prefix never
+# PAIR_HELD, the share of a clause that was reworded and not cut, with generic words (generic_words) out. A note retired in
+# an earlier commit of the branch is paired the same way with a later commit's new notes. Shared topic words, a shared
+# `Decision:` tag or a shared slug prefix never
 # pair (unrelated notes share them). A removed line with no pair is a plain retire and is no finding. The line is cut into clauses at a
 # sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
 # judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
@@ -749,21 +751,24 @@ def names(text, slug):
     return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(slug), text) is not None
 
 
-def renamed_to(body, added, old_slugs):
+def renamed_to(body, added, old_slugs, generic):
     """The added notes (slug, text) under a slug not in `old_slugs` that carry a clause of the removed note's `body`: the clause is
-    no `Decision:` tag, has at least PAIR_WORDS content words, and the added text holds PAIR_HELD of them."""
+    no `Decision:` tag, has at least PAIR_WORDS content words, and the added text, without the `generic` words (generic_words),
+    holds PAIR_HELD of them."""
     mine = [c for c in clauses(body) if not TAG_CLAUSE.match(c) and len(content_words(c)) >= PAIR_WORDS]
-    return [x for x in added if x[0] not in old_slugs and any(held(c, content_words(x[1]), PAIR_HELD) for c in mine)]
+    return [x for x in added if x[0] not in old_slugs and any(held(c, content_words(x[1]) - generic, PAIR_HELD) for c in mine)]
 
 
+@functools.lru_cache(maxsize=1)
 def generic_words(now):
     """The content words that at least GENERIC_SHARE of head's note lines hold, when head has at least GENERIC_MIN of them. Such a
-    word (`merge`, `read`, `name`) shows up in a line that has nothing to do with the clause, so it never says a clause moved."""
+    word (`merge`, `read`, `name`) shows up in a line that has nothing to do with the clause, so it never says a clause moved.
+    Every commit of a run is read against the same head text, so the set is built once per head, not once per pair."""
     notes = note_bodies(counts(now).elements())
     if len(notes) < GENERIC_MIN:
-        return set()
+        return frozenset()
     seen = collections.Counter(w for _, t in notes for w in content_words(t))
-    return {w for w, n in seen.items() if n >= GENERIC_SHARE * len(notes)}
+    return frozenset(w for w, n in seen.items() if n >= GENERIC_SHARE * len(notes))
 
 
 def dropped_in_pair(slug, body, pair, now, moved):
@@ -791,16 +796,17 @@ def dropped_clauses(before, after, now, pending=None):
     added = note_bodies((counts(after) - counts(before)).elements())
     old_slugs = set(note_counts(before))
     here = [content_words(t) for _, t in added]
+    generic = generic_words(now)
     found = []
     for entry in list(pending or ()):  # earlier commits' unpaired notes, against this commit's new notes
         slug, body, moved = entry
         moved += here
-        pair = renamed_to(body, added, old_slugs)
+        pair = renamed_to(body, added, old_slugs, generic)
         if pair:
             pending.remove(entry)
             found += dropped_in_pair(slug, body, pair, now, moved)
     for slug, body in gone:
-        pair = [x for x in added if x[0] == slug or names(x[1], slug)] or renamed_to(body, added, old_slugs)
+        pair = [x for x in added if x[0] == slug or names(x[1], slug)] or renamed_to(body, added, old_slugs, generic)
         if pair:
             found += dropped_in_pair(slug, body, pair, now, here)
         elif pending is not None:
