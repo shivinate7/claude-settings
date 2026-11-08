@@ -33,6 +33,11 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
+The lane session runs the lint, never a builder in an isolated worktree, because Claude Code's worktree
+check refuses it there. An isolated agent runs plain, separate git commands, never git named inside python
+text, and runs no background command.
+A cloud lane session works in its own checkout and never calls EnterWorktree. In the isolated worktree of an agent it spawns,
+Claude Code's worktree check refuses `merge --lane-lint`, git named inside python text, and background commands.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 

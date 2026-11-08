@@ -13552,6 +13552,7 @@ def unexpected(what):
     answer(api_error(404, "fake gh: no answer for " + what), 1)
 
 me = os.path.realpath(os.getcwd())
+open(os.path.join(d, "roots-calls.log"), "a").write(me + "\t" + " ".join(a) + "\n")  # every call, before any answer below: the cost case counts them
 roots = json.load(open(os.path.join(d, "roots.json")))
 if me not in roots:
     unexpected("a call from " + me)
@@ -13604,6 +13605,52 @@ unexpected(method + " " + rel)
         log = pathlib.Path(self.state, "unexpected.log")
         if log.exists():
             self.fail("the merge tool asked gh for a route no case answers: " + log.read_text())
+
+    # The kind of each route the cost formula counts, by the route's path under repos/{owner}/{repo}. Any other route is `unexpected`.
+    KIND_OF_REL = [(r"", "repo"), (r"pulls", "pulls"), (r"issues/comments", "comments"), (r"commits/[^/]+/check-runs", "check runs"),
+                   (r"commits/[^/]+/status", "statuses"), (r"branches/[^/]+/protection/required_status_checks", "protection"),
+                   (r"compare/.+", "compare")]
+
+    def call_kind(self, argv):
+        """-> the kind of one gh call, from its args after `gh`. `run list` is `run list`, whatever its sha."""
+        if argv[:2] == ["run", "list"]:
+            return "run list"
+        route = argv[1] if argv[:1] == ["api"] and len(argv) > 1 else ""
+        rel = route.split("/", 3)[3] if route.count("/") >= 3 else ""
+        for pattern, kind in self.KIND_OF_REL:
+            if re.fullmatch(pattern, rel):
+                return kind
+        return "unexpected " + route
+
+    def gh_calls(self):
+        """-> {folder: {kind: count}} of every gh call the fake gh got, read from its log: PER_ROOT_GH writes one line a call, the folder then the args."""
+        found = {}
+        log = pathlib.Path(self.state, "roots-calls.log")
+        for line in (log.read_text().splitlines() if log.exists() else []):
+            folder, _, args = line.partition("\t")
+            kinds = found.setdefault(folder, {})
+            kind = self.call_kind(args.split(" "))
+            kinds[kind] = kinds.get(kind, 0) + 1
+        return found
+
+    def assert_batch_line_unknown(self, out, root, header, reason, done=(5,)):
+        """The block under `header` (`repo <owner/name>:`) keeps its lines: each number in `done` has one done line in it, and it prints one
+        `batch line unknown (...)` that names `reason`, and no batch line. `root` (the --root as given) never prints as a whole unknown line.
+        -> the block's lines, from its header to the next header."""
+        self.assertNotIn(f"repo {root}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
+        lines = out.splitlines()
+        self.assertIn(header, lines, "no block header " + header + ":\n" + out)
+        start = lines.index(header)
+        end = next((k for k in range(start + 1, len(lines)) if lines[k].startswith("repo ")), len(lines))
+        block = lines[start:end]
+        unknown = [l for l in block if l.startswith("batch line unknown (")]
+        self.assertEqual(len(unknown), 1, f"want one batch line unknown in {header}:\n" + out)
+        m = re.fullmatch(r"batch line unknown \((.+)\)", unknown[0])
+        self.assertTrue(m, "the batch line unknown is not `batch line unknown (...)`:\n" + out)
+        self.assertIn(reason, m.group(1), "the batch line unknown does not give the stop's reason:\n" + out)
+        self.assert_done(block, *done)
+        self.assertEqual(batch_lines_of(block), [], f"{header} names a batch line as well as unknown:\n" + out)
+        return block
 
     def root_state(self, full_name, pulls=(), comments=(), check_rows=None, contexts=("checks",), compares=None):
         """What gh answers for one repo's folder: its name, its open pulls, the repo's comments, the check runs by head, the required checks
@@ -14001,21 +14048,157 @@ unexpected(method + " " + rel)
         })
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
         self.assertEqual(rc, 1, out + err)
-        self.assertNotIn(f"repo {self.alpha}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
+        self.assert_batch_line_unknown(out, self.alpha, "repo o/alpha:", "no branch protection")
         lines = out.splitlines()
-        self.assertIn("repo o/alpha:", lines, out)
         self.assertIn("repo o/bravo:", lines, out)
-        i, j = lines.index("repo o/alpha:"), lines.index("repo o/bravo:")
-        unknown = [k for k, line in enumerate(lines) if line.startswith("batch line unknown (")]
-        self.assertEqual(len(unknown), 1, "want one batch line unknown, in alpha's block:\n" + out)
-        self.assertTrue(i < unknown[0] < j, "the batch line unknown is not in alpha's block:\n" + out)
-        m = re.fullmatch(r"batch line unknown \((.+)\)", lines[unknown[0]])
-        self.assertTrue(m, "the batch line unknown is not `batch line unknown (...)`:\n" + out)
-        self.assertIn("no branch protection", m.group(1), "the batch line unknown does not give the stop's reason:\n" + out)
-        alpha = lines[i:j]
-        self.assert_done(alpha, 5)
-        self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
-        self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
+        self.assertEqual(batch_lines_of(lines[lines.index("repo o/bravo:"):]), ["open batch now: o/bravo #9"], out)
+
+    # The gh calls of each root in the baseline case, by kind (gh_cost_per_root). A variant case changes one kind and says which read did it.
+    COST_ALPHA = {"repo": 1, "pulls": 1, "comments": 1, "check runs": 3, "statuses": 3, "protection": 2, "run list": 2, "compare": 3}
+    COST_BRAVO = {"repo": 2, "pulls": 1, "comments": 1, "check runs": 1, "statuses": 1, "protection": 1}
+
+    def gh_cost_per_root(self, two_runs=False, no_stamp=False, pinned=False):
+        """The gh calls of `merge --reviewed --root alpha --root bravo` on the real Host, by root. alpha has a done pull request, a ready one with
+        no record and a draft. bravo has no done pull request, its one ready pull request has a record, and it has no origin/HEAD, so its default
+        branch comes through gh. The fake gh answers for each folder (per_root_gh). Each option changes one thing from the baseline: `two_runs`
+        gives head 5's check rows two run ids, `no_stamp` removes .github/stamp.json from each base, and `pinned` pins merge.requiredChecks to
+        ["checks"] in each base. -> the two roots' kinds of gh call and the call count."""
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        # run 88 (the draft's) and run 89 (the ready one's) both ran on head 5: superseded reads the run list for a head whose rows link two run ids
+        rows5 = ([{**batch_run("checks", "completed", "success"), "details_url": f"https://github.com/o/r/actions/runs/{n}/job/{n}"}
+                  for n in (88, 89)] if two_runs else green())
+        if two_runs:
+            ids = {re.search(r"/actions/runs/(\d+)/", r["details_url"]).group(1) for r in rows5}
+            self.assertEqual(ids, {"88", "89"}, "head 5's check rows must link two run ids, or superseded reads no run list")
+        self.per_root_gh({
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6), batch_pull(9, head9, draft=True)],
+                                        comments=[record_of(5, head5)], check_rows={head5: rows5}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5, rounds=OPEN_ROUNDS)],
+                                        check_rows={head5: rows5}),
+        })
+        sh(self.bravo, "git", "remote", "set-head", "origin", "-d")  # no origin/HEAD: the default branch is one gh read
+        for root in (self.alpha, self.bravo):
+            if no_stamp:
+                self.set_base_stamp(root, None)
+            if pinned:
+                self.set_base_stamp(root, {**CONFIG, "merge": {**CONFIG["merge"], "requiredChecks": ["checks"]}})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        return self.gh_calls()
+
+    def set_base_stamp(self, root, config):
+        """Make origin's base hold `config` as .github/stamp.json, or no such file when None, in one commit pushed from the root's `other` clone
+        (as make_trunk_default does). load_config reads the base from origin, so the root's own checkout does not matter. The base is checked
+        before a case counts anything."""
+        other = os.path.join(os.path.dirname(root), "other")
+        sh(other, "git", "fetch", "-q", "origin")
+        sh(other, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if config is None:
+            sh(other, "git", "rm", "-q", ".github/stamp.json")
+        else:
+            put(os.path.join(other, ".github/stamp.json"), json.dumps(config))
+        sh(other, "git", "commit", "-qam", "stamp for a gh cost case")
+        sh(other, "git", "push", "-q", "origin", "main")
+        # Keep origin/HEAD as the case left it: git 2.48+ creates a missing one on a plain fetch, which would skip the gh read the case counts.
+        sh(root, "git", "-c", "remote.origin.followRemoteHEAD=never", "fetch", "-q", "origin")
+        listed = sh(root, "git", "ls-tree", "--name-only", "origin/main", "--", ".github/stamp.json")
+        self.assertEqual(bool(listed), config is not None, "origin/main does not hold the stamp file this case names:\n" + listed)
+        if config is not None:
+            self.assertEqual(json.loads(sh(root, "git", "show", "origin/main:.github/stamp.json")), config,
+                             "origin/main holds a stamp other than the one this case names")
+
+    def assert_gh_kinds(self, calls, alpha_want, bravo_want):
+        """Each root's gh calls are exactly the kinds wanted, and no other folder made a call."""
+        alpha, bravo = os.path.realpath(self.alpha), os.path.realpath(self.bravo)
+        self.assertEqual(set(calls), {alpha, bravo}, "a gh call came from a folder that is no root, or a root made none:\n" + repr(calls))
+        for folder, want in ((alpha, alpha_want), (bravo, bravo_want)):
+            self.assertEqual(calls.get(folder), want,
+                             f"the gh calls of {folder} are not the formula's ({sum(want.values())} wanted):\n" + repr(calls))
+
+    def test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr(self):
+        """The fake gh counts each gh call per root (gh_cost_per_root), and the calls match the formula below, bar the two exceptions after it.
+        The formula, per root, with D the done pull requests on
+        the base, R the ready (not draft) ones on it, O the open ones on it, and P 1 when merge.requiredChecks is a list, else 0:
+          repo reads     1, plus 1 when origin/HEAD is unset (the default branch: the same route as the repo name), plus 1 when the base has no
+                         .github/stamp.json (load_config reads the default branch then, even when origin/HEAD is set)
+          list reads     1 (pulls), plus 1 (issues/comments) when a pull request is open
+          pinned list    P: one branch protection read per root (refuse_pinned_mismatch)
+          record reads   3 per ready pull request with a review record, less P for its branch protection read: check runs, statuses, branch protection
+          run list       +1 for each check read of a head whose check rows link two or more run ids (superseded): the record's read and the batch's
+        and, only when D >= 1 (the batch line):
+          batch reads    (1 - P) + 3R when R >= 1 (branch protection, then check runs, statuses and workflow runs of each ready one), else 0
+          compare reads  O per done pull request: one against each other open pull request on the base, and one against the base
+        The batch and compare terms are exact when no done pull request is CI-busy and no compare reads ahead or identical, because `and` and
+        `any` stop at the first hit. alpha: 1 + 2 + 3 + (1 + 3*2) + 1*3 = 16. bravo: 2 + 2 + 3 = 7, with no batch read. o/self, the test's own
+        folder, reads nothing. The three variant cases below change one term each: two run ids on head 5 (18 and 8), no stamp.json (17 and 8),
+        and a pinned list (15 and 7).
+        The two exceptions, both outside the formula: a stamp.json with no defaultBranch adds one repo read (load_config calls
+        host_default_branch for it, as it does for a missing stamp), and each extra page of a list read adds one call (pages asks for
+        page n+1 only while the Link header has rel="next"). Every list here fits on one page, and the stamps the cases write (CONFIG)
+        name defaultBranch, so neither exception applies to a case here."""
+        calls = self.gh_cost_per_root()
+        self.assert_gh_kinds(calls, self.COST_ALPHA, self.COST_BRAVO)
+
+    def test_gh_calls_add_a_run_list_read_when_a_head_links_two_runs(self):
+        """The formula with two run ids on head 5's check rows: a draft run (88) and a ready run (89) share the head, so each check read of
+        head 5 adds one run list read. Those reads are alpha's record read and its batch read, and bravo's record read. alpha: 16 -> 18.
+        bravo: 7 -> 8. The other kinds are the baseline's."""
+        calls = self.gh_cost_per_root(two_runs=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "run list": 4}, {**self.COST_BRAVO, "run list": 1})
+
+    def test_gh_calls_add_a_repo_read_when_the_base_has_no_stamp(self):
+        """The formula with no .github/stamp.json on either base: load_config reads the default branch through gh, one read more per root.
+        alpha keeps its origin/HEAD, so this read is not the origin/HEAD fallback. alpha: 16 -> 17. bravo: 7 -> 8."""
+        self.assertEqual(sh(self.alpha, "git", "rev-parse", "--abbrev-ref", "origin/HEAD"), "origin/main", "the case needs alpha's origin/HEAD set")
+        calls = self.gh_cost_per_root(no_stamp=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "repo": 2}, {**self.COST_BRAVO, "repo": 3})
+
+    def test_gh_calls_one_protection_read_when_required_checks_are_pinned(self):
+        """The formula with merge.requiredChecks pinned to ["checks"], which the base's branch protection holds: refuse_pinned_mismatch reads
+        the protection once per root (P = 1), and the record and batch protection reads drop away. alpha: 16 -> 15. bravo: its record's
+        protection read drops and the pinned read comes in, so it stays at 7."""
+        calls = self.gh_cost_per_root(pinned=True)
+        self.assert_gh_kinds(calls, {**self.COST_ALPHA, "protection": 1}, self.COST_BRAVO)
+
+    def compare_hosts(self, compare_error=None, base_fails=False):
+        """alpha: a done ready #5 with CI green, and a draft #6 with no record, open on the base, so #5 is compared with #6 and with the base.
+        bravo: a done pull request of its own, which prints in full. `compare_error` fails every compare of alpha's host. `base_fails` fails
+        only the compare of a head with the base, compare/<head>...<base>, the read the batch line makes (PullsHost's base_compare_error keys
+        the other order, which the batch line never reads)."""
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        alpha = root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
+                          comments=[record_of(5, head5)], check_rows={head5: green()}, compare_error=compare_error)
+        if base_fails:
+            answer = alpha.gh
+            def gh(args, cwd=None):
+                if args[:1] == ["api"] and len(args) > 1 and args[1].endswith(f"...{alpha.base}"):
+                    return 1, "gh: Not Found (HTTP 404)"
+                return answer(args, cwd)
+            alpha.gh = gh
+        return {self.alpha: alpha,
+                self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()})}
+
+    def test_a_compare_stop_in_the_batch_line_keeps_the_roots_lines(self):
+        """A compare read that stops in the batch line is the same stop as a CI read that stops there
+        (test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines): alpha keeps its lines, prints one `batch line unknown (...)`
+        in place of its batch line, and exits 1, while bravo prints in full. Each compare site raises through holds_head: the done head against
+        another open head, and against the base. Both reasons say `cannot read whether`. The control, with no read failing, names #5 in an open
+        batch line and exits 0."""
+        cases = (("control", {}, 0),
+                 ("the compare with another open head fails", {"compare_error": (1, "gh: Not Found (HTTP 404)")}, 1),
+                 ("the compare with the base fails", {"base_fails": True}, 1))
+        for name, reads, rc_want in cases:
+            with self.subTest(name):
+                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=self.compare_hosts(**reads))
+                self.assertEqual(rc, rc_want, "the exit code is not the stop's:\n" + out + err)
+                if rc_want:
+                    self.assert_batch_line_unknown(out, self.alpha, "repo o/alpha:", "cannot read whether")
+                    blocks = by_repo(self, out, "o/bravo")
+                    self.assert_done(blocks["o/bravo"], 9)
+                    self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
+                else:
+                    blocks = by_repo(self, out, "o/alpha", "o/bravo")
+                    self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
