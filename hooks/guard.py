@@ -2858,7 +2858,7 @@ def brief_claim_hit(tool: str, tool_input) -> list:
 # builder to run a command the shell guard refuses starts a lane that hits the refusal, or one that works around it. The
 # scan reads only the command-shaped parts of a brief: a backtick span, a line inside a fence, and a line led by `$ `.
 # Each part is cut by the shell guard's own `split_segments` and judged by its own `shared_tree_match`, so this rule holds
-# no verb list. A brief has no tree, so no subject is read and the match alone decides. Only a working-tree discard counts:
+# no git verb list. A brief has no tree, so no subject is read and the match alone decides. Only a working-tree discard counts:
 # the branch and worktree deletes `shared_tree_match` also returns stay with the shell guard. Only a writing role is
 # judged: READ_ONLY in hooks/agent_brief.py is the one home of the read-only roles, and a plugin prefix
 # (my-plugin:reviewer) is dropped as the SubagentStart hook drops it. Passes: a segment whose own `git -C` target, else
