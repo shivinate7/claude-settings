@@ -412,9 +412,10 @@ MUTATIONS = [
      'return "stray" if merge != current() and not upstream else ""',
      'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     # push-new-branch (the stray-branch refusal of a push at another branch's tip). Each mutant undoes one
-    # arm of the judgement, and its required case is the allow or deny that arm alone decides. Only a sha or a
-    # remote-ref source is judged (coordinator ruling 14:45 CST), so HEAD, @ and a local-branch source have no arm
-    # here. The HEAD exclusion in the tips read has no mutant: git writes origin/HEAD only as a symref to one of
+    # arm of the judgement, and its required case is the allow or deny that arm alone decides. The source arm
+    # (`_source_is_judged`) judges only a sha, a remote-ref or a revision expression (coordinator ruling 14:45 CST),
+    # so its mutant judges every source: the HEAD case's HEAD sits at a remote tip, and the mutant denies it.
+    # The HEAD exclusion in the tips read has no mutant: git writes origin/HEAD only as a symref to one of
     # the remote's branches, so its sha is already a tip. Only a hand-made origin/HEAD, detached or off the remote, reaches it.
     ("push-new-branch: the call site is never taken",
      'if push_new_branch_hit(args, where, overrides):',
@@ -446,6 +447,14 @@ MUTATIONS = [
      '        if target in DEFAULT_BRANCH_FALLBACK:\n            continue',
      '        if False:\n            continue', "guard",
      "push-new-branch: a remote branch's tip pushed to master asks push-main, not a new branch"),
+    ("push-new-branch: a tag target is judged as a new branch",
+     '        if target.startswith("refs/") and not target.startswith("refs/heads/"):\n            continue',
+     '        if False:\n            continue', "guard",
+     "push-new-branch: a remote branch's tip pushed to a tag is not judged, allows"),
+    ("push-new-branch: a source the arm skips (HEAD, @, a local branch) is judged",
+     '        if not _source_is_judged(source, remote):\n            continue',
+     '        if False:\n            continue', "guard",
+     "push-new-branch: HEAD as the source is not judged, allows"),
     ("env-file: a search command's pattern is read as a path",
      '                if index in patterns:\n                    continue\n',
      '                if False:\n                    continue\n', "guard",

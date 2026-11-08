@@ -7635,8 +7635,8 @@ sh("push-new-branch: a fresh commit chained after a branch switch, pushed to a n
 # none. PUSHTRUNK holds no origin/main, so only the default-branch read can exempt this push.
 sh("push-new-branch: a new branch at the tip of origin/HEAD, which names trunk, allows",
    VCS + " push origin refs/remotes/origin/HEAD:refs/heads/skc-trunk-new", "allow", cwd=PUSHTRUNK)
-# PINS, each held by a mutant in hooks/mutate_guard.py. A tag is no branch. A push that already asks keeps its
-# ask beside a new-branch refspec, and a delete of main is that ask.
+# PINS, each held by a mutant in hooks/mutate_guard.py, which names the case below it that kills it. A tag is no
+# branch. A push that already asks keeps its ask beside a new-branch refspec, and a delete of main is that ask.
 sh("push-new-branch: a remote branch's tip pushed to a tag is not judged, allows",
    VCS + " push origin origin/lane/base:refs/tags/v1", "allow", cwd=PUSHNEWBR)
 sh("push-new-branch: a delete of main beside a new-branch refspec stays ask, not deny",
