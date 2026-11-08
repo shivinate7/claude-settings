@@ -4720,7 +4720,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     lanes = os.path.join(primary, ".claude", "worktrees")
     clone_git = os.path.join(primary, ".git")
 
-    def in_primary(target, at):
+    def in_primary(target, at, _verb=""):
         try:
             resolved = _resolved(target, at)
         except Exception:
@@ -4734,7 +4734,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         verb = session_home_git_hit(command, where, in_primary)
         if verb:
             return "git " + verb + " in the primary checkout"
-        hit = _shell_write_hit(command, where, in_primary, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, in_primary, follow_cd=True, predicate_command=True) if writes else ""
         return "shell write into the primary checkout: " + hit if hit else ""
     for target in targets:
         if in_primary(target, where):
