@@ -8303,6 +8303,35 @@ sh("env-child: allow, docker with no child after the image, so serve is the imag
    "docker run --env-file " + ENV + " --pull always img serve", "allow", cwd=NOGIT)
 sh("env-child: allow, bun x runs vitest, an app's own test command",
    "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
+# Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
+# flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
+# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --dev vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-packages takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --all-packages env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-packages takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-packages vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --upgrade env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --upgrade takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --upgrade vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --refresh env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --refresh vitest env", "allow", cwd=NOGIT)
+# uv's --upgrade-package and --refresh-package take a value, so X is not a flag. The allow is the
+# control: pytest is the child. The deny puts env after X, and env is the child.
+sh("env-child: allow, uv --upgrade-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --upgrade-package X env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
