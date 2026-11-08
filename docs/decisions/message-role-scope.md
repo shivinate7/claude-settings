@@ -87,17 +87,17 @@ Which paths count:
 - A builder: a test path only (`is_test_rel`). The exclusions below do not apply to a builder.
 - A test-author: an edit of a path with a file extension that `author_path_ok` rejects. A Markdown path counts. Unlike a message, the ask says "to a record-writer".
 - Shared with the message rule, these pass for a test-author: a test-noun spec (`Add red cases for ... in hooks/guard.py`), a workflow file, a `../` path, and an extensionless path such as `Makefile`.
+- `only` and `just` keep the object direct: `Edit only X`, `Edit just X` and `Change only X` name X.
+- A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an edit object, so it does not count.
 
 Known gap:
 
-- `Edit only X` and `Edit just X` pass unasked. The reader takes no object after `only` or `just`, so an off-role path in that form is not read. The message rule shares the reader and misses the same form.
+- Open in both rules: `Edit only the path X` passes, because `path` is no object word. A curly apostrophe (`isn’t yours`), or a comma before the hand-back (`X, which is not your job`), asks, a false alarm.
 - The write guard still refuses the agent's own edit. The cost is one wasted turn.
-- The reverse form asks. `Fix hooks/guard.py is not your job` asks, because a negation after the path clears nothing.
-- The first form is filed as a note, `brief-role-edit-only-passes`, with no fix queued.
 
 Check:
 
-- `MUTATE_ONLY=brief-role python3 hooks/test_guard.py` runs the 13 `brief-role` cases: 5 asks and 8 passes. The filter is a substring match on case names.
+- `MUTATE_ONLY=brief-role python3 hooks/test_guard.py` runs the 23 `brief-role` cases: 10 asks and 13 passes. The filter is a substring match on case names.
 - `hooks/mutate_guard.py` has no mutant for this rule.
 
 Cost: no transcript is read. The guard already judges `Agent` and `Task` calls (`settings.json`), so this adds no hook.

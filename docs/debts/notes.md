@@ -21,7 +21,6 @@
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
 - blind-git-fixtures-unaudited: other blind-command fixtures, such as make_blind_git, are not audited for the PATH shim gap (janitor/test_sweep.py)
-- brief-role-edit-only-passes: a brief that says `Edit only X` or `Edit just X` is not read, so an off-role path in that form passes unasked (hooks/guard.py message_edit_paths, brief_role_hit). The write guard still refuses the agent's own edit. Fix: none — the write guard refuses the edit itself, so only a turn is lost. Until: 2026-11-21. Decision: message-role-scope (a message to an agent stays inside its role)
 - builder-fstring-path-unread: an f-string path, such as `open(f'tests/x_{n}.py','w')` in a python body, is not read (hooks/guard_frozen.py _py_hit)
 - builder-join-unresolved-refused: `os.path.join(tmpdir,'tests','test_x.py')` is refused, because an unresolved path part is dropped and the rest reads as a test path. A false alarm (hooks/guard_frozen.py _join_path)
 - builder-patch-format-unread: `patch tests/x.py < d.diff`, `git checkout --theirs tests/x`, `ruff format tests/` and `black .` are not refused for a builder (hooks/guard.py builder_shell_test_hit)
