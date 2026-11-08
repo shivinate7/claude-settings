@@ -4798,6 +4798,41 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
 
+    def test_pe_red_failure_named_as_breaking_or_blocking_is_refused(self):
+        rows = [
+            # Catches: "a pre-existing failure" as the thing that breaks CI passes.
+            "A pre-existing failure breaks CI.",
+            # Catches: "the pre-existing lint failure" as the thing that blocks a merge passes.
+            "The pre-existing lint failure blocks the merge.",
+            # Catches: "the main branch is already red" passes as a claim about the base.
+            "The main branch is already red.",
+            # Catches: "already red on the main branch" passes as a claim about the base.
+            "The lint job is already red on the main branch.",
+            # Catches: "pre-existing failures: none of them are mine" passes as a claim of cause.
+            "Pre-existing failures: none of them are mine.",
+            # Catches: "fails on main, too" with a comma and no sha passes.
+            "Lint fails on main, too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_filed_debts_and_run_shapes_on_main_pass(self):
+        rows = [
+            # Catches: a pre-existing issue filed as a debt, and "does not fail CI", is read as a claim.
+            "Filed the pre-existing issue as a debt; it does not fail CI.",
+            # Catches: a pre-existing bug filed as a debt, which breaks on empty input, is read as a claim.
+            "Found a pre-existing bug in the guard that breaks on empty input; filed as a debt.",
+            # Catches: "on main (commit <sha>)" is refused as no run on main.
+            "Lint fails on main (commit 174b005c1) too.",
+            # Catches: "on main <sha>" with no "at" is refused as no run on main.
+            "Lint fails on main 174b005c1 too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed. The refusals file is written here by hand, so these cases do not depend on
