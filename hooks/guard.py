@@ -399,7 +399,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_CHAIN_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
             conflict_markers_hit, red_run_parts, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
@@ -3862,12 +3862,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
     # A push of a test commit with no Red-run line is refused here too (rule red-run): it shares the
-    # push's range, and adds one `git log` per push.
+    # push's range, and adds one `git log` per push. A push after a commit in the same call that amends
+    # HEAD or stages added test lines is refused as a chain (the range cannot hold that commit yet): at most
+    # one `git diff --numstat` per such commit (an add with pathspecs reads the index too), none for an amend.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel)
     if kind == "red-run":
         flagged, remedy = red_run_parts(matched)
         refuse(tool, "deny", "red-run", RED_RUN_PUSH_REASON.format(flagged=flagged, remedy=remedy),
                cap_safe(matched[0], 120))
+    elif kind == "red-chain":
+        refuse(tool, "deny", "red-run", RED_RUN_CHAIN_REASON, matched)
     elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
