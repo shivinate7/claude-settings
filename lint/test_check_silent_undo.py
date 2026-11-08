@@ -2840,6 +2840,15 @@ class PrBase(unittest.TestCase):
         self.assertEqual([x for x in text.splitlines() if x.startswith("silent-undo: FAIL: ")], expected, "the default run's FAIL lines changed on a lane off main")
         self.assertEqual(rc, 1)
 
+    def test_merge_that_restores_a_line_main_deleted_still_fails_with_the_base_set(self):  # control: the ours merge undoes main
+        self.stack("ours")
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        self.r.sh("merge-base", "--is-ancestor", "origin/pr-base", "HEAD")  # scope: pr-base is the lane's base
+        self.assertTrue(any("main deletes line 1" in p for p in self.explicit("origin/main")), "scope: origin/main should FAIL on the restored line")
+        rc, text = self.run_default()
+        self.assertIn("main deletes line 1", text, "the run with the base set printed no FAIL for a merge that undoes main's deletion")
+        self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
