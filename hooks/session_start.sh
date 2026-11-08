@@ -24,7 +24,10 @@ tier_line() {
 # Cloud containers leave TMPDIR unset, so `$TMPDIR/x` lands at `/x` (incident 2026-11-07, /base_run.txt).
 # The written lines are conditional, so a shell that already has TMPDIR keeps it.
 # CLAUDE_SETTINGS_TMP_CANDIDATE is the seam for the /tmp default.
-if [ -z "${TMPDIR:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+# On Windows (MINGW, MSYS, CYGWIN) /tmp always exists, so nothing is written.
+tmpdir_os=$(uname -s 2>/dev/null)
+case "$tmpdir_os" in MINGW*|MSYS*|CYGWIN*) tmpdir_os=windows ;; esac
+if [ "$tmpdir_os" != windows ] && [ -z "${TMPDIR:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   tmpdir_pick="${CLAUDE_SETTINGS_TMP_CANDIDATE:-/tmp}"
   if ! { [ -d "$tmpdir_pick" ] && [ -w "$tmpdir_pick" ]; }; then
     tmpdir_pick=$(python3 -c 'import tempfile; print(tempfile.gettempdir())' 2>/dev/null)
