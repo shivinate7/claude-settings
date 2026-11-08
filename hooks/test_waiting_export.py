@@ -211,19 +211,19 @@ def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash"):
     return [call(when, tid, name, {"command": command}), result(when + 1, tid, verdict + "\n")]
 
 
-def writer_get(when, writer, tid="m1"):
-    """An ArtifactData get of meta/page and its result, which names the page writer's session."""
-    return [call(when, tid, ARTIFACT_TOOL, {"action": "get", "url": PAGE_URL, "collection": "meta",
+def writer_get(when, writer, tid="m1", url=PAGE_URL):
+    """An ArtifactData get of meta/page on `url` (PAGE_URL by default) and its result, naming the page writer."""
+    return [call(when, tid, ARTIFACT_TOOL, {"action": "get", "url": url, "collection": "meta",
                                             "doc_id": "page"}),
             result(when + 1, tid, json.dumps({"writer": writer}))]
 
 
-def with_writer(records, writer=SESSION):
-    """The records behind a meta/page get that names `writer`, first. A `writer` of None, or no records,
+def with_writer(records, writer=SESSION, url=PAGE_URL):
+    """The records behind a meta/page get of `url` that names `writer`, first. A `writer` of None, or no records,
     returns them unchanged, so the writer is unknown."""
     if writer is None or records is None:
         return records
-    return writer_get(at(18, 30), writer) + records
+    return writer_get(at(18, 30), writer, url=url) + records
 
 
 def transcript(folder, records):
@@ -270,11 +270,13 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             writer_url=PAGE_URL):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown), and `writer_url` is the page whose meta/page get names it.
+    `extra_env` adds variables for this run. No inbox file is written."""
     folder = run_dir(label)
-    records = with_writer(records, writer)
+    records = with_writer(records, writer, writer_url)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
@@ -542,7 +544,15 @@ def queue_repo(name):
                         extras=registry(page_id=QUEUE_ID, page_url=QUEUE_URL))
     check("%s scope: the newest copy commit is the 17:00 one" % name.upper(), newest_copy(root, FOLDER) == at(17),
           newest_copy(root, FOLDER))
+    check("%s scope: the registry names QUEUE_URL as the waiting page" % name.upper(),
+          waiting_url_of(root) == QUEUE_URL, waiting_url_of(root))
     return root
+
+
+def waiting_url_of(root):
+    """The url of the waiting page, as the repo's extras file names it."""
+    with open(os.path.join(root, ".claude", "layout-extras.json"), encoding="utf-8") as f:
+        return next((a.get("url") for a in json.load(f)["artifacts"] if a.get("role") == "waiting-page"), None)
 
 
 def case_n1_non_writer_set_of_an_unexported_collection_passes():
@@ -579,14 +589,14 @@ def case_n6_all_form_verdict_for_the_page_id_passes():
     """export_page.py --all prints `<id>: <verdict>` for each artifact. The waiting page's own line clears a write."""
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
                + export_run(at(19, 5), verdict=QUEUE_ID + ": same", command=EXPORT_ALL))
-    expect_pass("N6", run_stop("n6", queue_repo("n6"), records))
+    expect_pass("N6", run_stop("n6", queue_repo("n6"), records, writer_url=QUEUE_URL))
 
 
 def case_n6b_all_form_verdict_for_another_artifact_blocks():
     """The `--all` line of the reference artifact says nothing about the waiting page."""
     records = ([owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
                + export_run(at(19, 5), verdict=REF_ID + ": same", command=EXPORT_ALL))
-    expect_block("N6b", run_stop("n6b", queue_repo("n6b"), records), (SCRIPT,))
+    expect_block("N6b", run_stop("n6b", queue_repo("n6b"), records, writer_url=QUEUE_URL), (SCRIPT,))
 
 
 def case_n7_powershell_run_with_same_passes():
@@ -658,6 +668,37 @@ def case_n17_writer_write_by_path_to_items_blocks():
     """The writer writes items/5 by its path key, stale: the path prefix names an exported collection."""
     records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="items/5")
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
+
+
+def case_n18_another_pages_writer_get_does_not_block():
+    """The waiting page is QUEUE. Its only meta/page get is on PAGE, another page, and names this session. That get
+    names no writer of the waiting page, so the writer is unknown and the write passes with no note. No export run
+    precedes the write, so export history does not make this session the writer."""
+    root = queue_repo("n18")
+    records = [owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
+    obj = expect_pass("N18 a writer get on another page does not block", run_stop("n18", root, records,
+                                                                                  writer_url=PAGE_URL))
+    check("N18: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n19_waiting_pages_own_writer_get_blocks():
+    """The control for N18: the same records, with the writer's get on QUEUE, the waiting page. This session is the
+    writer, and its stale write blocks."""
+    root = queue_repo("n19")
+    records = [owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL)
+    expect_block("N19", run_stop("n19", root, records, writer_url=QUEUE_URL), (SCRIPT,))
+
+
+def case_n20_newer_get_of_another_page_does_not_overrule_the_writer():
+    """The waiting page's get names another session, at 18:30. A newer get on PAGE names this session, at 18:40.
+    Only the waiting page's get counts, so the writer is the other session and this session passes."""
+    root = queue_repo("n20")
+    records = (writer_get(at(18, 30), "session_other", tid="m1", url=QUEUE_URL)
+               + writer_get(at(18, 40), SESSION, tid="m2", url=PAGE_URL)
+               + [owner(at(18, 50))] + page_write(at(19), url=QUEUE_URL))
+    obj = expect_pass("N20 a newer get on another page does not overrule the writer", run_stop("n20", root, records,
+                                                                                              writer=None))
+    check("N20: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
 
 
 # --------------------------------------------------------------------------- unit cases
@@ -747,6 +788,9 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_another_pages_writer_get_does_not_block,
+    case_n19_waiting_pages_own_writer_get_blocks,
+    case_n20_newer_get_of_another_page_does_not_overrule_the_writer,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
