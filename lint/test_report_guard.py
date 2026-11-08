@@ -1039,7 +1039,9 @@ class DoneNamesModelsTests(unittest.TestCase):
                            earlier=[REVIEWER_PINNED])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    def test_dm_red_haiku_named_across_windows_passes(self):
+    # Ruling: coordinator lane brief, 2026-11-07 18:05 CST, failure class "a bypass where a report names sonnet
+    # for an Opus spawn". The haiku name is the earlier window's; the window's sonnet still needs its own name.
+    def test_dm_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET]),
                       "'reviewer haiku' matches no reviewer spawn")
@@ -1176,6 +1178,38 @@ class DoneNamesModelsTests(unittest.TestCase):
         out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet); rule `reviewer` haiku\n"
                            "> **Next** Unstarted: none", [REVIEWER_HAIKU])
         assert_blocks(self, out, "no model named for reviewer")
+
+
+    def test_dm_false_alarm_model_word_in_code_span_passes(self):
+        # A model word in a code span still names its run: the sonnet builder is named, so no model block.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder `sonnet`)\n> **Next** Unstarted: none",
+                           [BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_dm_pin_role_word_in_code_span_stays_masked(self):
+        # The quoted `reviewer opus` is code. Read as a pair, it matches no reviewer spawn and would block.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet); "
+                           "quoted `reviewer opus`\n> **Next** Unstarted: none", [BUILDER_SONNET, REVIEWER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_dm_false_alarm_two_results_in_one_record_fall_back_to_call_model(self):
+        # One user record holds two tool_result blocks, so its toolUseResult (opus) names neither spawn: a record
+        # with two results cannot say which one ran opus. Each builder falls back to its call model, sonnet, even
+        # though the env names opus (the last source).
+        records = prior_records()
+        for use_id in ("tu_a", "tu_b"):
+            records.append(tool_use_msg("Agent", {"subagent_type": "builder", "model": "sonnet", "prompt": "build"},
+                                        tool_use_id=use_id))
+        shared = tool_result_msg("tu_a")
+        shared["message"]["content"].append({"type": "tool_result", "tool_use_id": "tu_b", "content": "ok"})
+        shared["toolUseResult"] = {"resolvedModel": "claude-opus-5-5"}
+        records += [shared, tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                    assistant_text(NAMED_REPORT % "builder sonnet")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        run = run_guard(REPORT_GUARD, hook, env=agent_env("opus"))
+        self.assertEqual(run.returncode, 0)
+        assert_no_model_block(self, json.loads(run.stdout) if run.stdout.strip() else None)
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1415,7 +1449,9 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                         earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    def test_rw_red_haiku_named_across_windows_passes(self):
+    # Ruling: coordinator lane brief, 2026-11-07 18:05 CST, failure class "a bypass where a report names sonnet
+    # for an Opus spawn". The haiku name is the earlier window's; the window's sonnet still needs its own name.
+    def test_rw_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         self.missing_report_block(later=[REVIEWER_SONNET])
         assert_blocks(self, self.stop(NAMED_REPORT % "reviewer haiku", True, later=[REVIEWER_SONNET]),
