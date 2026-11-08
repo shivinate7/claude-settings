@@ -116,13 +116,25 @@ API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 # Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
-TIGHT_COMPACT = "tight-" + "compact"  # a plain option key: three vowels in twelve letters, and a run that joins at the hyphen
-ICON_COMPACT = "icon-" + "compact"  # a plain option key with four vowels
-MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: fails the word form alone
-CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # lower case with no vowel: on the hyphen path it fails the consonant run alone, not the vowel share
-UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: the share and the joined run both refuse it today; the all-lower gate keeps it off the hyphen path, where each part passes the run
-RUN_PART = "aeixkcdo" + "-uaei"  # eight vowels, and a run of four consonants inside one part: fails the run alone
+TIGHT_COMPACT = "tight-" + "compact"  # a plain option key that passes: each part holds a vowel, and no part has five consonants in a row
+ICON_COMPACT = "icon-" + "compact"  # a plain option key that passes: a vowel in each part
+PAGE_LENGTH_LIMIT = "page-" + "length-limit"  # a plain option key that passes: `length` has four consonants in a row, one short of the five that refuse
+STRENGTH_METER = "strength-" + "meter"  # a plain option key that passes: `strength` has runs of three and four consonants, under the five that refuse
+BRIGHT_LIGHTS_CITY = "bright-" + "lights-" + "city"  # a plain option key that passes: `lights` has four consonants in a row, under the five that refuse
+TIGHT_SNAKE = "tight_" + "compact"  # the snake_case form passes: each part holds a vowel, and no part has five consonants in a row
+PAGE_SNAKE = "page_" + "length_" + "limit"  # the snake_case form passes: no part has five consonants in a row
+MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: refused by the word form alone; the vowel rule reads only all-lower values
+CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # all-lower, no vowel in either part: refused by the run (eight and seven consonants) and by the vowel rule
+UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: refused by the vowel share and by the joined run; the all-lower rules do not reach it
+RUN_PART = "aeibcdfgt" + "-uaei"  # a run of six consonants inside one part, with a vowel in each part: refused by that run alone
 SHORT_VOWELS = "bbabbab" + "bbabbb"  # three vowels in thirteen letters and no run: fails the vowel share alone
+RUN5_HYPHEN = "aeixkcdqo" + "-uaei"  # a run of five consonants inside one part, with a vowel in each part: refused by that run alone
+RUN5_UNDERSCORE = "aeixkcdqo" + "_uaei"  # the same run with an underscore: refused by it, as the hyphen twin is
+FEW_VOWEL_WORD = "bcdafgh" + "ejklomnp"  # lower case, no separator, three vowels in fifteen letters and no run: fails the share alone
+# Each comment names the check the value fails. The vowel rule refuses an all-lower value split on `-` or `_` when a part of
+# four or more letters holds no vowel (a, e, i, o, u or y). A part of one to three letters is exempt from it.
+VOWELLESS_SNAKE = "kqzv_" + "bxjw_" + "tmrl"  # snake_case, four consonants and no vowel in each part: fails the vowel rule
+VOWELLESS_HYPHEN = "kqzv-" + "bxjw-" + "tmrl"  # the hyphen twin, four consonants and no vowel in each of three parts: fails the vowel rule
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -251,17 +263,22 @@ RED = [
     ("api_key of sixteen capitals with four vowels", "api_key: " + FEW_VOWELS_16, FEW_VOWELS_16),
     ("API_KEY of sixteen capitals with an eleven-consonant run", "API_KEY: " + LONG_CONSONANT_RUN_16, LONG_CONSONANT_RUN_16),
     ("api_key set to twelve underscores and no letter", "api_key: " + "_" * 12, "_" * 12),
-    # A `:` value of letters passes only when every words check passes. The mixed-case row fails the word form alone, the
-    # vowel row fails the vowel share alone and the run row fails the consonant run alone, so removing one check turns its
-    # row red. The lower-case row fails the run alone on the hyphen path. The upper-case row has no vowel, and the share
-    # and the joined run both refuse it today; without the all-lower gate the hyphen path's per-part run check passes it,
-    # so that row goes red. The `=` row is refused whatever its value.
+    # A `:` value of letters passes only when every words check passes. The mixed-case row fails the word form alone, and
+    # the vowel row fails the vowel share alone, so removing that check lets its row through. The run row fails the consonant
+    # run alone: each of its parts holds a vowel. The lower-case row is refused by its run and by the vowel rule, so
+    # removing one check does not let it through. The upper-case row has no vowel, and the share and the joined run refuse
+    # it. The `=` row is refused whatever its value.
     ("a key name set with = to a hyphenated word", "key = '" + TIGHT_COMPACT + "'", TIGHT_COMPACT),
     ("secret of mixed-case words joined by a hyphen", "secret: '" + MIXED_HYPHEN + "'", MIXED_HYPHEN),
     ("secret of thirteen letters with three vowels", "secret: '" + SHORT_VOWELS + "'", SHORT_VOWELS),
     ("secret of a consonant run inside one word", "secret: '" + RUN_PART + "'", RUN_PART),
     ("secret of lower-case letters with no vowel", "secret: '" + CONSONANT_HYPHEN + "'", CONSONANT_HYPHEN),
     ("secret of upper-case three-letter parts joined by hyphens", "secret: '" + UPPER_HYPHEN + "'", UPPER_HYPHEN),
+    ("secret of five consonants in one hyphen part", "secret: '" + RUN5_HYPHEN + "'", RUN5_HYPHEN),
+    ("secret of five consonants in one part joined by an underscore", "secret: '" + RUN5_UNDERSCORE + "'", RUN5_UNDERSCORE),
+    ("secret of lower-case letters with few vowels and no separator", "secret: '" + FEW_VOWEL_WORD + "'", FEW_VOWEL_WORD),
+    ("secret of all-lower snake_case parts with no vowel", "secret: '" + VOWELLESS_SNAKE + "'", VOWELLESS_SNAKE),
+    ("secret of all-lower hyphen parts with no vowel", "secret: '" + VOWELLESS_HYPHEN + "'", VOWELLESS_HYPHEN),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -392,6 +409,24 @@ GREEN = [
     ("option key icon-compact", "key: '" + ICON_COMPACT + "'"),
     ("option key tight-compact", "key: '" + TIGHT_COMPACT + "'"),
     ("option key tight-compact in a JS object line", "{ key: '" + TIGHT_COMPACT + "', label: 'Tight' }"),
+    # A hyphen or underscore option key with a word of four consonants, and the snake_case form, is no secret.
+    ("option key page-length-limit", "key: '" + PAGE_LENGTH_LIMIT + "'"),
+    ("option key strength-meter", "key: '" + STRENGTH_METER + "'"),
+    ("option key bright-lights-city", "key: '" + BRIGHT_LIGHTS_CITY + "'"),
+    ("option key tight_compact in snake case", "key: '" + TIGHT_SNAKE + "'"),
+    ("option key page_length_limit in snake case", "key: '" + PAGE_SNAKE + "'"),
+    # A part of one to three letters is exempt from the vowel rule, so `db` and `btn` pass. A part of four or more letters
+    # holds a vowel, and `y` is one, so `lynx` and `sync` pass on their `y`. The values run 12 characters or more, the length
+    # the words check needs to reach them.
+    ("option key db-connection-pool, with a two-letter part", "key: 'db-connection-pool'"),
+    ("option key db_connection_pool in snake case, with a two-letter part", "key: 'db_connection_pool'"),
+    ("option key btn-primary-hover, with a three-letter part", "key: 'btn-primary-hover'"),
+    ("option key lynx_sync_mode, whose parts have y as their only vowel", "key: 'lynx_sync_mode'"),
+    # `text-transform` is the green control beside the red rows: each part holds a vowel, and no part has five consonants in a
+    # row, so it passes. `flex_shrink` is 11 characters, under the 12-character length, so it never reaches the words check and
+    # pins nothing about the vowel rule.
+    ("option key text-transform", "key: 'text-transform'"),
+    ("option key flex_shrink", "key: 'flex_shrink'"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
     ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
