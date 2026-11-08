@@ -13635,6 +13635,26 @@ sendto_refuse("the incident form with a backtick span, to a builder, is refused,
               'merge/test_lane_lint.py ~683: `assertIn("unknown", ...)` holds for any Liftable. '
               'Replace it with an assert on "no lint CI step ran".',
               T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
+# A green word right after an anaphor (`Make them green`), or after `the`/`that` and a test noun, makes the
+# anaphor a goal and clears the carry. A green word further on describes the replacement, so the path still carries.
+sendto_refuse("a green word later in the replacement does not clear the carry: Replace it with a passing assert",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it with a passing assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a failing word later in the replacement does not clear the carry: Rewrite it as a failing case",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Rewrite it as a failing case.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a red word later in the replacement does not clear the carry: Replace it with the red case",
+              SENDTO_BUILDER,
+              "hooks/test_guard.py:683 holds for any input. Replace it with the red case from the brief.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a green word after a second pronoun does not clear the carry: Change it, it passes on the old code",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Change it, it passes on the old code too.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+# Allowed: the same red cases in a test file, when the goal is a green word right after the anaphor or its noun.
+sendto_allow("red cases in a test file, then Make the cases pass, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in tests/x.py. Make the cases pass.", T_SENDTO_BUILDER)
+sendto_allow("red cases in a test file, then Make that case green, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in tests/x.py. Make that case green.", T_SENDTO_BUILDER)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
