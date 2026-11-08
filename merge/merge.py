@@ -111,8 +111,8 @@ FIX_HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier revi
 FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
 FIX_FROZEN_REMEDY = "Pass the old values."
 FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head."
-FIX_FAILED_REMEDY = "Post the next round's record."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
+FIX_MISSING_REMEDY = "Post the round's review record first."
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -3212,8 +3212,8 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def round_floor(earlier, rec):
-    """-> why, when the newest parsed record `rec` breaks a round count set by `earlier` (the parsed records before it on the same PR, oldest first, a
+def floor_problem(earlier, rec):
+    """-> (why, remedy), when the newest parsed record `rec` breaks a round count set by `earlier` (the parsed records before it on the same PR, oldest first, a
     record that did not parse already dropped); else None. Counts never go down on one PR (decision pr-review-record): the floor is the highest, over
     `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. A newest
     record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
@@ -3229,12 +3229,16 @@ def round_floor(earlier, rec):
     if best and last < best[0]:
         floor, failed, e = best
         if failed:
-            return f"a failed fix check on head {e['head'][:9]} counts as round {floor}, but this record's last round is {last}"
-        return f"the record on head {e['head'][:9]} reached round {floor}, so this record's last round {last} is below it; a new lane is a new pull request"
+            return f"a failed fix check on head {e['head'][:9]} counts as round {floor}, but this record's last round is {last}", f"Carry every round up to round {floor}, and make round {floor} a FAIL line: pass each round line with --round."
+        return f"the record on head {e['head'][:9]} reached round {floor}, so this record's last round {last} is below it; a new lane is a new pull request", FIX_FLOOR_REMEDY
     for e in earlier:
         n = max((i for i, *_ in e["rounds"]), default=0)
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
-            return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none"
+            return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none", f"Round {n + 1} needs a FAIL line: pass it with --round."
+
+def round_floor(earlier, rec):
+    """-> the why of floor_problem, or None."""
+    return (floor_problem(earlier, rec) or (None,))[0]
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
@@ -3327,30 +3331,30 @@ def fix_base_record_arg(text):
     return f"{m.group(1)}/{m.group(2)}".lower(), int(m.group(4))
 
 def source_record_problem(h, root, a, own_records):
-    """-> (source record or None, problem or None) for --fix-base-record: the record that stands in for the newest earlier record of a pull request
+    """-> (source record or None, problem or None, remedy) for --fix-base-record: the record that stands in for the newest earlier record of a pull request
     with none of its own. It must be on this repo, parse, name the pull request its comment is on, be the newest record there, and have no Fix check
     line. A failed read raises Stop."""
     repo, cid = a.fix_base_record
     if own_records:
-        return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete"
+        return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete", ""
     try:
         import layout
         mine = (h.repo or layout.repo_name(root) or "").lower()
     except Exception:
         mine = (h.repo or "").lower()
     if not mine or repo != mine:
-        return None, f"--fix-base-record names {repo}, not this repo ({mine or 'unknown'})"
+        return None, f"--fix-base-record names {repo}, not this repo ({mine or 'unknown'})", "Name a review record on this repo."
     c = h.review_comment(cid)
     rec = parse_review(c["body"])
     if rec is None:
-        return None, "--fix-base-record: that comment is not a well-formed review record"
+        return None, "--fix-base-record: that comment is not a well-formed review record", "Name the comment of a review record."
     if rec["n"] != c["issue_number"]:
-        return None, f"--fix-base-record: that record's PR line names #{rec['n']}, but its comment is on #{c['issue_number']}"
+        return None, f"--fix-base-record: that record's PR line names #{rec['n']}, but its comment is on #{c['issue_number']}", "Name a review record on the pull request its PR line names."
     if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
-        return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}"
+        return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}", "Name the newest review record on that pull request."
     if rec["fix"]:
-        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record"
-    return rec, None
+        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record", "Post a review record for this pull request, from round 1."
+    return rec, None, ""
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
@@ -3546,24 +3550,28 @@ def main(argv, host=None, lock=None):
                 problem, earlier = None, []
                 remedy = FIX_HEAD_REMEDY  # a refusal that is not a head refusal sets its own remedy beside its problem
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
-                    last, problem = source_record_problem(h, root, a, recs)
+                    last, problem, remedy = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
                     if not problem:
-                        problem = round_floor([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
-                        remedy = FIX_FLOOR_REMEDY if problem else remedy
+                        problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     if not last:
-                        problem = "the newest earlier review record on this pull request must exist"
+                        problem, remedy = "the newest earlier review record on this pull request must exist", FIX_MISSING_REMEDY
                     elif last["fix"] and last["fix"][3] != "PASS":  # a FAIL is the next round and a WIDE is a new lane; only a passed fix check chains
                         problem = f"the newest earlier review record's Fix check is {last['fix'][3]}, so a new fix check may not follow it"
-                        remedy = FIX_FAILED_REMEDY if last["fix"][3] == "FAIL" else FIX_WIDE_REMEDY
+                        reached = max((i for i, *_ in last["rounds"]), default=0)
+                        if last["fix"][3] == "WIDE":
+                            remedy = FIX_WIDE_REMEDY
+                        elif reached >= REVIEW_LAST_ROUND:  # a FAIL after the final round holds the change, and its finding starts a new lane
+                            remedy = "This FAIL holds the change: its finding starts a new lane at round 1."
+                        else:
+                            remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
-                        problem = round_floor(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
-                        remedy = FIX_FLOOR_REMEDY if problem else remedy
+                        problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 if not problem and last["head"] != a.fix_check[0]:
-                    problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
+                    problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"]), FIX_HEAD_REMEDY
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
                     if found["behind_by"]:
@@ -3576,7 +3584,7 @@ def main(argv, host=None, lock=None):
                         problem = f"the record on head {final['head'][:9]} is at the final round, and a fix check keeps its net value, guard and kind: " + "; ".join(moved)
                         remedy = FIX_FROZEN_REMEDY
                 if problem:
-                    print(f"merge: --fix-check: {problem}. {remedy} " + REVIEW_CITE, file=sys.stderr)
+                    print(f"merge: --fix-check: {problem}. " + (remedy + " " if remedy else "") + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
