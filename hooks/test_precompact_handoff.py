@@ -2544,6 +2544,129 @@ def case_owner_waits_fenced_comment_keeps_section():
         c.cleanup()
 
 
+# --- owner waits: act names, odd transcript lines, tag spelling -----------------------------------
+# The handoff check names a refused act by its first 60 characters. Two commands that share those
+# characters need their whole text named, or one name covers both.
+SAME_HEAD = "cd /home/user/claude-settings/.claude/worktrees/agent-release-candidate && npm publish"
+PUBLISH_A = SAME_HEAD + " a"
+PUBLISH_B = SAME_HEAD + " b --force"
+ONLY_A_SECTION = "- Gate: `%s` waits for the owner's yes." % PUBLISH_A
+ONLY_B_SECTION = "- Gate: `%s` waits for the owner's yes." % PUBLISH_B
+ODD_MESSAGE_LINE = json.dumps({"type": "system", "message": "hello"})
+SPELLED_TAG = "CS-Build:Coordinator "
+NEAR_MISS_TAG = "cs-build:coordinatorx"
+# An assistant text line with the lowercase tag text. The raw read finds it; no record or call carries it.
+TAG_TEXT_LINE = transcript_line("assistant", [{"type": "text", "text": "Tagged cs-build:coordinator on the record."}])
+
+
+def two_refusals(c):
+    """A coordinator's transcript with two unanswered refusals of commands that share their first 60 characters."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-a", PUBLISH_A) + refused_act("tu-b", PUBLISH_B)
+
+
+def case_owner_waits_same_head_acts():
+    coordinator_scope(two_refusals)
+    check("owner waits same head (data): the two refused commands differ and share their first 60 characters",
+          PUBLISH_A != PUBLISH_B and PUBLISH_A[:60] == PUBLISH_B[:60],
+          "A: %r B: %r" % (PUBLISH_A, PUBLISH_B))
+    c = Case("ow_head_only_a")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff(ONLY_A_SECTION)))
+        check("owner waits same head (names A only): a section that names only the first refused command does "
+              "not cover the second, so the Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_head_only_b")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff(ONLY_B_SECTION)))
+        check("owner waits same head (names B only): a section that names only the second refused command does "
+              "not cover the first, so the Stop blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_head_both")
+    try:
+        proc = owner_stop(c, two_refusals(c), handoff=owner_handoff("\n".join([ONLY_A_SECTION, ONLY_B_SECTION])))
+        check("owner waits same head (names both): a section that names both refused commands passes",
+              stop_reason(proc) is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+    finally:
+        c.cleanup()
+    c = Case("ow_head_labels")
+    try:
+        reason = stop_reason(owner_stop(c, two_refusals(c), handoff=owner_handoff("none")))
+        check("owner waits same head (blocks): a section of 'none' with two refusals blocks",
+              reason is not None, "reason: %r" % reason)
+        labels = re.findall(r"Bash `([^`]*)`", reason or "")
+        check("owner waits same head (labels): the block labels the two refused commands with distinct text",
+              len(labels) == 2 and labels[0] != labels[1], "labels: %r" % labels)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_odd_message_line_still_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_odd_message")
+    try:
+        lines = as_coordinator(c, [COORD_TAG]) + [ODD_MESSAGE_LINE] + refused_act("tu-r", REFUSED_CMD)
+        proc = owner_stop(c, lines, handoff=owner_handoff("none"))
+        reason = stop_reason(proc)
+        check("owner waits odd line: a transcript line whose message is a string does not switch the check off, "
+              "so a coordinator's unnamed refusal after it blocks", reason is not None,
+              "reason: %r stderr: %r" % (reason, (proc.stderr or "")[-200:]))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_precheck_reads_any_spelling():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_precheck")
+    try:
+        put(c.handoff_path(), owner_handoff("none"))
+        lines = as_coordinator(c, [SPELLED_TAG]) + plain_lines(50) + refused_act("tu-r", REFUSED_CMD)
+        reason, err, decodes = gap_with_decodes(c, lines)
+        check("owner waits tag spelling (pre-check): a record tagged 'CS-Build:Coordinator ' is read, so the "
+              "transcript is parsed", err is None and decodes > 0,
+              "error: %r decodes: %r reason: %r" % (err, decodes, reason))
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_spelling_record_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_record")
+    try:
+        lines = [TAG_TEXT_LINE] + as_coordinator(c, [SPELLED_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag spelling (record): a get_session record tagged 'CS-Build:Coordinator ' makes the "
+              "session a coordinator, so its unnamed refusal blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_tag_spelling_set_tags_blocks():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_set")
+    try:
+        lines = [TAG_TEXT_LINE] + tagged_by_call(c, [SPELLED_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag spelling (set_session_tags): a call that adds 'CS-Build:Coordinator ' makes the "
+              "session a coordinator, so its unnamed refusal blocks", reason is not None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
+def case_owner_waits_near_miss_tag_stays_quiet():
+    coordinator_scope(coord_refusal)
+    c = Case("ow_tag_near")
+    try:
+        lines = [TAG_TEXT_LINE] + as_coordinator(c, [NEAR_MISS_TAG]) + refused_act("tu-r", REFUSED_CMD)
+        reason = stop_reason(owner_stop(c, lines, handoff=owner_handoff("none")))
+        check("owner waits tag near miss: a record tagged 'cs-build:coordinatorx' is no coordinator, so its "
+              "refusal stays quiet", reason is None, "reason: %r" % reason)
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_precompact_writes_digest_and_state()
     case_precompact_error_is_ok_false()
@@ -2617,6 +2740,12 @@ def main() -> int:
     case_owner_waits_answer_key_is_the_act()
     case_owner_waits_cost_skips_plain_transcripts()
     case_owner_waits_fenced_comment_keeps_section()
+    case_owner_waits_same_head_acts()
+    case_owner_waits_odd_message_line_still_blocks()
+    case_owner_waits_tag_precheck_reads_any_spelling()
+    case_owner_waits_tag_spelling_record_blocks()
+    case_owner_waits_tag_spelling_set_tags_blocks()
+    case_owner_waits_near_miss_tag_stays_quiet()
 
     if FAILED:
         print()
