@@ -12102,6 +12102,19 @@ sh("frozen shell: r5 control, sort -o src/out.txt src/x, allows [r5 control]",
    "sort -o src/out.txt src/x", "allow", cwd=NOGIT)
 sh("frozen shell: r5 control, git diff --output=/tmp/d.patch, allows [r5 control]",
    VCS + " diff --output=/tmp/d.patch", "allow", cwd=NOGIT)
+# Output-flag controls: only sort, less and git diff take an output flag that writes a file. Each shape puts an
+# output-flag spelling on a command that only prints or reads. A check that reads every command's flag as sort's
+# takes the word after the flag as the file written, so a frozen path in that word goes red there.
+sh("frozen shell: output-flag control, grep -o x reads the config settings, allows",
+   "grep -o x " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen shell: output-flag control, grep -o takes the config settings as its pattern, allows",
+   "grep -o " + CFG_SETTINGS + " x", "allow", cwd=NOGIT)
+sh("frozen shell: output-flag control, curl -o /tmp/x downloads to /tmp, allows",
+   "curl -o /tmp/x https://example.com", "allow", cwd=NOGIT)
+sh("frozen shell: output-flag control, echo --output= names the config settings as text, allows",
+   "echo --output=" + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen shell: output-flag control, jq -o x reads the config settings, allows",
+   "jq -o x " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
