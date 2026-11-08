@@ -30,7 +30,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 | checks-windows-merge (window of 2026-11-05) | windows | 26 | 8.2 | 13.6 | 15 | 15 | 90 | 0 | no |
 | checks-windows-merge-2 to -5 (window of 2026-11-05) | windows | 14 each | 10.6 to 13.4 | 12.2 to 14.0 | 15 | 15 | 82 to 94 | 0 | no |
 | pointer-windows | windows | 30 | 3.8 | 4.2 | 10 | 10 | 42 | 0 | yes |
-| checks-mutate-guard | ubuntu | 30 | 3.7 | 3.9 (old window; see the note below) | 10 | 25 | about 64 (16 projected for batch 7) | 1, run 41786084869, against the cap in force (10) | projected yes |
+| checks-mutate-guard | ubuntu | 30 | 3.7 | 3.9 (old window; see the note below) | 10 | 45 | about 59 (27 projected with the clean-layout controls) | 1, run 41786084869, against the cap in force (10) | projected yes |
 | checks-windows | windows | 30 | 1.2 | 1.6 | 10 | 10 | 16 | 0 | yes |
 | checks-shoot | ubuntu | 30 | 0.8 | 1.0 | 10 | 10 | 10 | 0 | yes |
 | scope, ci-done | ubuntu | 30, 19 | 0.1 | 0.1 | 5 | 5 | 3 | 0 | yes |
