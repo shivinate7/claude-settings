@@ -2461,6 +2461,94 @@ class NamedExcerptTests(unittest.TestCase):
         self.assertEqual(got, ["%d: %s" % (n, lines[n - 1]) for n in range(7, 14)],
                          "an unparseable file does not show the three rows around the line that holds run")
 
+    def unrelated_path_file(self):
+        """-> (text, rows). A module-level def path on row 10 with a 16-row body (rows 11 to 26), and os.path called on row 30."""
+        lines = (["pad_%02d = %d" % (n, n) for n in range(1, 10)]
+                 + ["def path(p):"] + ["    step_%02d = p" % n for n in range(1, 17)]
+                 + ["pad_%02d = %d" % (n, n) for n in range(27, 30)]
+                 + ["joined = os.path.join(root, name)"]
+                 + ["pad_%02d = %d" % (n, n) for n in range(31, 81)])
+        return "\n".join(lines) + "\n", lines
+
+    def call_file(self):
+        """-> (text, rows). `run` is called on rows 20, 40, and rows 60 and 70 hold rerun( and run_x(, which must not match it."""
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 81)]
+        lines[19] = "y = run(1)"
+        lines[39] = "run(a, b)"
+        lines[59] = "rerun(x)"
+        lines[69] = "run_x(y)"
+        return "\n".join(lines) + "\n", lines
+
+    def test_a_dotted_name_with_no_owner_class_takes_no_def_body_for_os_path(self):
+        text, lines = self.unrelated_path_file()
+        self.assertEqual(self.stale.defined_line(text, "path"), 10, "scope: path is not defined on row 10")
+        self.assertIn("os.path.join", lines[29], "scope: row 30 is not the os.path row")
+        rows = self.excerpt_rows(["os.path"], text)
+        self.assertNotIn("10: def path(p):", rows, "the def row of an unrelated def path is in the excerpt of os.path: no class owns the prefix")
+        self.assertNotIn("20: " + lines[19], rows, "the body of an unrelated def path is in the excerpt of os.path: no class owns the prefix")
+        self.assertIn("30: " + lines[29], rows, "the window of the os.path row is missing from its excerpt")
+
+    def test_a_dotted_name_with_no_owner_class_takes_no_def_body_for_self_x(self):
+        lines = (["pad_%02d = %d" % (n, n) for n in range(1, 5)]
+                 + ["def x(value):"] + ["    step_%02d = value" % n for n in range(1, 9)]
+                 + ["pad_%02d = %d" % (n, n) for n in range(14, 20)]
+                 + ["class Holder:", "    def get(self):", "        return self.x"]
+                 + ["pad_%02d = %d" % (n, n) for n in range(23, 81)])
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "x"), 5, "scope: x is not defined on row 5")
+        self.assertEqual(lines[21], "        return self.x", "scope: row 22 is not the self.x row")
+        rows = self.excerpt_rows(["self.x"], text)
+        self.assertNotIn("5: def x(value):", rows, "the def row of an unrelated def x is in the excerpt of self.x: no class owns the prefix")
+        self.assertNotIn("10: " + lines[9], rows, "the body of an unrelated def x is in the excerpt of self.x: no class owns the prefix")
+        self.assertIn("22: " + lines[21], rows, "the window of the self.x row is missing from its excerpt")
+
+    def test_a_dotted_name_whose_owner_class_exists_still_shows_its_def(self):
+        # The control: B.run names class B, which defines run, so B's def and its body show.
+        text, lines = self.owner_file()
+        self.assertEqual(lines[50], "    def run(self):", "scope: row 51 is not the def of run in class B")
+        rows = self.excerpt_rows(["B.run"], text)
+        self.assertIn("51: " + lines[50], rows, "the def of B.run is not in its excerpt")
+        self.assertIn("55: " + lines[54], rows, "the body of B.run is not in its excerpt")
+
+    def run_windows_when_parse_raises(self, error_class):
+        """-> (the numbered rows of the excerpt of `run`, lines) for a file whose ast.parse raises error_class."""
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 21)]
+        lines[9] = "value = run(1)"
+        text = "\n".join(lines) + "\n"
+        with unittest.mock.patch.object(ast, "parse", side_effect=error_class("patched")):
+            with self.assertRaises(error_class, msg="scope: the patched ast.parse does not raise %s" % error_class.__name__):
+                ast.parse(text)
+            got = [row for row in self.excerpt_rows(["run"], text) if re.match(r"\d+: ", row)]
+        return got, lines
+
+    def test_a_file_whose_parse_raises_recursion_error_keeps_its_windows(self):
+        got, lines = self.run_windows_when_parse_raises(RecursionError)
+        self.assertEqual(got, ["%d: %s" % (n, lines[n - 1]) for n in range(7, 14)],
+                         "a file whose parse raises RecursionError does not keep the three rows around the line that holds run")
+
+    def test_a_file_whose_parse_raises_memory_error_keeps_its_windows(self):
+        got, lines = self.run_windows_when_parse_raises(MemoryError)
+        self.assertEqual(got, ["%d: %s" % (n, lines[n - 1]) for n in range(7, 14)],
+                         "a file whose parse raises MemoryError does not keep the three rows around the line that holds run")
+
+    def test_a_bare_name_matches_call_rows_but_not_rerun_or_run_x(self):
+        # The pin: `run` matches the call rows, and the word boundary keeps rerun( and run_x( out.
+        text, lines = self.call_file()
+        rows = self.excerpt_rows(["run"], text)
+        self.assertIn("20: " + lines[19], rows, "scope: the call row 20 of run is not in the excerpt of run")
+        self.assertIn("40: " + lines[39], rows, "scope: the call row 40 of run is not in the excerpt of run")
+        self.assertNotIn("60: " + lines[59], rows, "the rerun( row 60 is in the excerpt of run: run matched inside rerun")
+        self.assertNotIn("70: " + lines[69], rows, "the run_x( row 70 is in the excerpt of run: run matched inside run_x")
+
+    def test_a_call_span_with_arguments_matches_call_rows_as_its_bare_name_does(self):
+        text, lines = self.call_file()
+        self.assertIn("20: " + lines[19], self.excerpt_rows(["run"], text), "scope: the call row 20 of run is not in the excerpt of run")
+        rows = self.excerpt_rows(["run()"], text)
+        self.assertIn("20: " + lines[19], rows, "the call row 20, y = run(1), is not in the excerpt of run(): its window is missing")
+        self.assertIn("40: " + lines[39], rows, "the call row 40, run(a, b), is not in the excerpt of run()")
+        self.assertNotIn("60: " + lines[59], rows, "the rerun( row 60 is in the excerpt of run()")
+        self.assertNotIn("70: " + lines[69], rows, "the run_x( row 70 is in the excerpt of run()")
+
 
 if __name__ == "__main__":
     unittest.main()
