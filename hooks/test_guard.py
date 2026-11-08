@@ -22388,6 +22388,8 @@ LANE_ORIGINS = {
 # A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
 RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
 OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+# A lane call names the model it starts on and the repo it starts from. Each allow case below carries both.
+LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
 
 
 def _build_lane_origins():
@@ -22410,7 +22412,8 @@ add("lane-effort-pin: lane tag with /effort high is denied", "deny",
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
     tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
 add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium")
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium",
+    model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
     "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
 add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
@@ -22444,24 +22447,25 @@ add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "den
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
 add("lane-repo-tag: origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"])
+    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
 add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
@@ -22480,14 +22484,14 @@ def _build_lane_no_origin():
 lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
 add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
 add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
@@ -22511,7 +22515,7 @@ add("lane-repo-tag: origin repo tag with a trailing space is denied, from a chec
 # A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
 add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
@@ -22519,13 +22523,13 @@ add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", 
 # The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
 add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
     tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
@@ -22548,7 +22552,7 @@ def _build_lane_extras():
 lazy_fixture([LANE_EXTRAS], _build_lane_extras)
 add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:org/name"])
+    tags=["cs-build:lane", "cs-repo:org/name"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
     "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
     tags=["cs-build:lane", "cs-repo:x/y"])
@@ -22608,13 +22612,91 @@ def lane_cost_check(label, body, want_git, want_decision):
 
 lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
-                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS}}, 1, "allow")
+                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS,
+                                "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
 lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
                  "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
 lane_cost_check("lane-repo-tag: a Read call starts no git process",
                 {"tool_name": "Read", "session_id": "lane-cost-read", "cwd": LANE_REPO,
                  "tool_input": {"file_path": os.path.join(LANE_REPO, "README.md")}}, 0, "allow")
+
+
+# ---- Lane start settings. A create_session that tags a lane names the model the lane starts on and the repo it
+# starts from (`source_url`). A lane call with no model, or no source_url, or either as an empty or blank string or as
+# a value that is not text (null, a number, a list), is denied.
+# A lane call with both passes. A call with no lane tag is never judged by this rule. Each lane case below carries
+# the effort command and the origin repo tag, so the older lane rules pass it and only this rule decides it.
+add("lane-start-settings: lane tag with no model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with no source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS, model="sonnet")
+add("lane-start-settings: lane tag with neither model nor source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS)
+add("lane-start-settings: lane tag with an empty model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with an empty source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url="")
+add("lane-start-settings: lane tag with an empty model and an empty source_url is denied", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="", source_url="")
+add("lane-start-settings: lane tag with a whitespace-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="   ", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=" \t\n ")
+add("lane-start-settings: lane tag with a non-text model (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=None, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=5, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model=["x"], source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text source_url (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=None)
+add("lane-start-settings: lane tag with a non-text source_url (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=5)
+add("lane-start-settings: lane tag with a non-text source_url (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=["x"])
+add("lane-start-settings: lane tag with a no-break-space-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="\u00a0", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a no-break-space-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url="\u00a0")
+add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet")
+add("lane-start-settings: a denied lane with no source_url names source_url in its reason", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", carries="source_url")
+add("lane-start-settings: a denied lane with no model names model in its reason", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    source_url=LANE_SOURCE_URL, carries="model")
+add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
+add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
+add("lane-start-settings: batch-runner call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:batch-runner"], prompt="do the task")
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.

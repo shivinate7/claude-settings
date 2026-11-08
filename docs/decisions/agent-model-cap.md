@@ -142,6 +142,11 @@ Kind of risk: incident. Landed 2026-11-01.
 Incident: 2026-11-01 18:08 CST, lanes tagged with the short repo name made 18 false in-progress flags on
 the roadmap page, because the live check matches the full tag.
 
+**The lane start settings.** Guard rule `lane-start-settings` refuses a `create_session` call tagged `cs-build:lane`
+whose input has no `model` or no `source_url`; an empty or whitespace-only value counts as missing. A lane with no
+repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
+passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it. Likely risk.
+
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
