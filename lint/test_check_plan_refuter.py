@@ -21,6 +21,7 @@ lint/check_plan_refuter.py, by its absolute path, from the fixture. CHECK_PLAN_R
 the module path, which a mutant run uses.
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -115,11 +116,11 @@ class Fixture(unittest.TestCase):
         changed = self.changed()
         self.assertEqual(changed.get(rel), status, "scope: git does not list %s as %s:\n%s" % (rel, status, changed))
 
-    def lint(self, args=None, env=None, cwd=None):
+    def lint(self, args=None, env=None, cwd=None, module=None):
         """Run the check on the fixture repo, or from cwd. Returns (exit code, stdout and stderr)."""
         argv = ["--base", self.base_sha] if args is None else args
-        done = subprocess.run([sys.executable, MODULE, *argv], cwd=cwd or self.tree, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", env=dict(GIT_ENV, **(env or {})))
+        done = subprocess.run([sys.executable, module or MODULE, *argv], cwd=cwd or self.tree, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", env=dict(GIT_ENV, **(env or {})))
         return done.returncode, done.stdout + done.stderr
 
     def assertClean(self, args=None, env=None, cwd=None):
@@ -407,6 +408,36 @@ class PlanRefuterCase(Fixture):
         self.assertEqual(rc, 2, "a --root that names no folder exits %d, not 2:\n%s" % (rc, out))
         self.assertIn("unknown", out.lower(), out)
         self.assertNotIn("Traceback", out, out)
+
+    def test_a_check_whose_hooks_do_not_import_exits_two_as_unknown(self):
+        """The import-failure branch: REFUTER_ROLE is unread, so the check exits 2 and prints UNKNOWN, even on a real
+        finding. Each variant runs a copy of the check beside lint/layout.py, the copy's reader, in a folder of its
+        own. The copy's hooks/ is missing or broken, so the copy cannot read the role from the repo."""
+        rel = PLANS + "/new-plan.md"
+        self.commit("add widget plan", {rel: plan("Body only.")})  # a real finding, so 0 or 1 would be wrong
+        self.assertStatus(rel, "A")
+        variants = {
+            "no hooks folder beside the check": None,
+            "guard_core raises on import": {"guard_core.py": "raise ImportError('broken on purpose')\n",
+                                            "_nowindow.py": "\n"},
+        }
+        for name, hooks in variants.items():
+            with self.subTest(variant=name):
+                home = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="lone_")
+                self.addCleanup(tracked_tree.rm_tree, home)
+                os.makedirs(os.path.join(home, "lint"))
+                shutil.copyfile(MODULE, os.path.join(home, "lint", "check_plan_refuter.py"))
+                for lib in ("layout.py", "layout.json"):
+                    shutil.copyfile(os.path.join(HERE, lib), os.path.join(home, "lint", lib))
+                if hooks is not None:
+                    os.makedirs(os.path.join(home, "hooks"))
+                    for lib, text in hooks.items():
+                        with open(os.path.join(home, "hooks", lib), "w", encoding="utf-8") as f:
+                            f.write(text)
+                rc, out = self.lint(module=os.path.join(home, "lint", "check_plan_refuter.py"))
+                self.assertEqual(rc, 2, "the check exits %d, not 2, when hooks/ does not import:\n%s" % (rc, out))
+                self.assertIn("UNKNOWN", out, out)
+                self.assertNotIn("Traceback", out, out)
 
 
 if __name__ == "__main__":
