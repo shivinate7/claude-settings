@@ -18,11 +18,11 @@ Each check gets COUNT seeded random command strings per env shape (one stream pe
 SEED), built from shell and PowerShell characters, digits and fragments, plus fixed edge inputs. Fragments hold
 CONFIG_TOKEN where the config dir's settings path goes, and run_checks swaps in the run folder when it hands an
 input to a check, so the drawn text is the same on every run. A share of the inputs opens with a kill of one
-pid (`kill <digits>` or `kill -9 <digits>`), the act that reaches pid_is_owned. A share of the payloads holds a
-well-formed decision item in `data`, and another share holds a workflow step (continue-on-error) ahead of the text
-in the content, old and new string keys: the step rides on every tool, not only a Write or an Edit. Each input
-carries one tool: two of every three are Bash or PowerShell, the others go round the rest. A payload carries the
-keys of every tool's shape, filled with random strings, with typed values where a string reaches
+pid (`kill <pid>` or `kill -9 <pid>`, the pid 0, 1, -1 or random digits), the act that reaches pid_is_owned. A share
+of the payloads holds a well-formed decision item in `data`, and another share holds a workflow step (continue-on-error)
+ahead of the text in `content` and `new_string`, with `old_string` empty: the step rides on every tool, not only a Write
+or an Edit. Each input carries one tool: two of every three are Bash or PowerShell, the others go round the rest.
+A payload carries the keys of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
 permissionDecision on stdout. Any other exit, and any raise, is a failure.
 
@@ -34,9 +34,12 @@ foreign_pid_kill takes its no-root return.
 
 Not fuzzed: the parsers of git, gh and ps output. The parent walk of pid_is_owned past its first read
 (ps never answers, so it returns at once). The parent walk of session_root_pid past its first read (ps never
-answers, so the walk returns 0 at once and its loop over each parent's name never runs). The git-backed commit
-reads: own_changes returns None without git, so diff_violation stops before role_offences, and no input here
-reaches role_offences.
+answers, so the walk returns 0 at once and its loop over each parent's name never runs). The rest of
+in_own_agent_worktree past its first line (ps never answers, so it returns False at once, and its cwd read and
+transcript-folder check never run). The rest of foreign_pid_kill past pid_is_owned: _under_init, holds_session_tag
+and the refusal after them (pid_is_owned never says False with ps absent). The git-backed commit reads:
+own_changes returns None without git, so diff_violation stops before role_offences, and no input here reaches
+role_offences.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
@@ -75,7 +78,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  the one home of the run folder (decision test-temp-standard)
 
 SEED = "checks-never-raise"
-COUNT = 1000   # random inputs per check and env shape, on top of the fixed edge inputs below (both shapes: ~65 s)
+COUNT = 1000   # random inputs per check and env shape, on top of the fixed edge inputs below
 GUARD = "guard"
 DISPATCH = ("judge_shell", "judge")      # the two entry points the guard's PreToolUse hook runs
 TOOL_VARIABLES = ("tool", "tool_name")   # the names judge's branches compare a tool by
@@ -197,9 +200,11 @@ CALLABLES = {"record_branch_of": guard.record_branch_of, "read_verb": guard.read
 
 
 def kill_fragment(rng):
-    """`kill <digits>` or `kill -9 <digits>` with a random pid: a kill of one pid, which foreign_pid_kill judges
-    with pid_is_owned once the session root is read. The digits come from rng, so the draw is the same on every run."""
-    return rng.choice(("kill ", "kill -9 ")) + str(rng.randint(2, 99999)) + rng.choice((" ", "; "))
+    """`kill <pid>` or `kill -9 <pid>`: a kill of one pid. The pid is 0, 1 or -1, which foreign_pid_kill returns at once
+    (-1 reads as a pid only after a signal flag, so `kill -9 -1`), or a random pid that pid_is_owned judges once the
+    session root is read. Everything comes from rng, so the draw is the same on every run."""
+    pid = rng.choice((0, 1, -1, rng.randint(2, 99999)))
+    return rng.choice(("kill ", "kill -9 ")) + str(pid) + rng.choice((" ", "; "))
 
 
 def draw_text(rng):
@@ -233,10 +238,12 @@ def decision_item(text):
 
 
 class Env:
-    """The per-call context that is not the command string: tool, folders, session, transcript, role."""
+    """The per-call context that is not the command string: tool, folders, session, transcript, role. `template` is
+    the drawn text before run_checks swaps the run folder in, so a bound drawn from it does not move with the path."""
 
-    def __init__(self, rng, tool):
+    def __init__(self, rng, tool, template):
         self.tool = tool
+        self.template = template
         self.cwd = rng.choice((RUN, CHECKOUT, CHECKOUT, PAGE_CHECKOUT, PAGE_CHECKOUT))
         self.session = rng.choice(("", "sess-1"))
         self.transcript = rng.choice((TRANSCRIPT, EMPTY_TRANSCRIPT, MISSING_TRANSCRIPT, ""))
@@ -324,7 +331,7 @@ def value_for(fn, name, param, rng, text, env, state):
     if name == "number":
         return rng.randrange(len(state("segments")))
     if name == "before":
-        return rng.randint(0, len(text))
+        return rng.randint(0, len(env.template))
     if name == "depth":
         return rng.randint(0, 2)
     if name in BOOL_NAMES or annotation == "bool":
@@ -425,7 +432,7 @@ def run_checks(checks, count, tools, shape=""):
         for index, drawn in enumerate(inputs):
             text = drawn.replace(CONFIG_TOKEN, CONFIG)   # the run folder enters here only, so the draws match on every run
             tool = tool_for(index, shells, others)
-            env = Env(rng, tool)
+            env = Env(rng, tool, drawn)
             guard_core.POWERSHELL_CALL[0] = tool == "PowerShell"
             try:
                 if mode == "judge":
@@ -539,6 +546,22 @@ def root_unpinned():
             os.environ[ROOT_ENV] = before
 
 
+def calls_pid_is_owned(run):
+    """True when `run()` calls guard_kill.pid_is_owned. The real function still answers, and the wrap is undone on exit."""
+    calls, real = [], guard_kill.pid_is_owned
+
+    def recording(pid, root):
+        calls.append(pid)
+        return real(pid, root)
+
+    guard_kill.pid_is_owned = recording
+    try:
+        run()
+    finally:
+        guard_kill.pid_is_owned = real
+    return bool(calls)
+
+
 def _probe(problems, cause, probe):
     """Run one reach probe. A False result or a raise is a problem named by `cause`: a raise is the check failing, so
     it is reported here and the fuzz still runs."""
@@ -576,6 +599,9 @@ def fixture_proof():
         _probe(problems, "CLAUDE_GUARD_ROOT_PID is unset, yet session_root_pid() reads a root with ps absent (the walk "
                          "moved): the no-root return of foreign_pid_kill is not reached",
                lambda: guard_kill.session_root_pid() == 0)
+    _probe(problems, "a kill of one pid under the pinned root does not reach pid_is_owned (the kill path of "
+                     "foreign_pid_kill moved, or the root read did)",
+           lambda: calls_pid_is_owned(lambda: guard_kill.foreign_pid_kill(tokens_of("kill 4242"))))
     _probe(problems, "a drawn fragment holds the run folder's name, so the drawn inputs differ on each run "
                      "(CONFIG_TOKEN moved, or a fragment takes RUN)",
            lambda: not any(os.path.basename(RUN) in piece for piece in [*FRAGMENTS, *CHARS, *WEIGHTED, *EDGE]))
