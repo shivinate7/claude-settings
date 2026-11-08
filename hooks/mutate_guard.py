@@ -246,10 +246,8 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
-     '        return cmd',
-     '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+     '    if read:\n        return cmd  # the body may be executed, so keep it under inspection\n',
+     '    if False:\n        return cmd\n', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
