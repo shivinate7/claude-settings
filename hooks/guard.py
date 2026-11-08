@@ -4856,9 +4856,13 @@ def git_push_after_check_hit(command: str) -> str:
     segments = split_segments(command, ends)
     if len(ends) < len(segments):
         return ""
-    kept =[at for at, segment in enumerate(segments) if segment_tokens(segment) != []]
+    kept = [at for at, segment in enumerate(segments) if segment_tokens(segment) != []]
     segments, ends = [segments[at] for at in kept], [ends[at] for at in kept]
     tails = _push_exit_tails(segments, ends)
+    for segment in segments:
+        script = inline_script(segment_tokens(segment) or [])   # `bash -c "check; git push"` runs its own `;` join
+        if script and git_push_after_check_hit(script):
+            return "push"
     for number, segment in enumerate(segments):
         calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]
         if not any(verb == "push" and git_write_verb(verb, args) for verb, args in calls):
@@ -4879,6 +4883,13 @@ def git_push_after_check_hit(command: str) -> str:
                     break
                 position, first = head, True
                 continue
+            if start in tails and not subshell_depth(segments, start):
+                # the chain starts at the `}` or `fi` that closes an exit tail: `X || { exit 1; } && push`
+                covered, hides = _exit_hides_check(segments, ends, tails[start])
+                if hides:
+                    return "push"
+                position, first = covered, True
+                continue
             if start == 0:
                 break
             if ends[start - 1] not in (";", "\n"):
@@ -4886,6 +4897,14 @@ def git_push_after_check_hit(command: str) -> str:
                     if _push_hidden_by_tail(segments, ends, start, position):
                         return "push"
                     break
+                head = _pipeline_head(segments, ends, start)
+                if (ends[start - 1] == "|" and _push_stops_under_errexit(segments, ends, start)   # the pipe's last stage
+                        and _pipefail_sure(segments, ends, head) and (head == 0 or ends[head - 1] in (";", "\n"))):
+                    # `set -eo pipefail; X | Y; push`: a failed stage fails the pipe and ends the shell
+                    if head == 0:
+                        break
+                    position, first = head - 1, False
+                    continue
                 return "push"
             before = segment_tokens(segments[start - 1])
             if before is None:
@@ -4917,7 +4936,8 @@ def _push_hidden_by_tail(segments, ends, start: int, position: int) -> bool:
       (`_exit_hides_check`).
     - `A || push` and `A || { ...; push; }`: the push is T, or stands in the `{` group that is T, so it runs only
       when A fails. A `{` group that closes before the push is not read.
-    A is a check when its list holds a command that is not inert."""
+    A is a check when its list holds a command that is not inert and not a git call: `git push || git pull
+    --rebase && git push` retries and holds no check (a git call piped to `tail` is none either)."""
     head = start
     while head > 0 and ends[head - 1] in ("&&", "|"):
         head -= 1
@@ -4934,19 +4954,42 @@ def _push_hidden_by_tail(segments, ends, start: int, position: int) -> bool:
     left = head - 1
     while left > 0 and ends[left - 1] in ("&&", "||", "|"):
         left -= 1
-    return any(_push_segment_inert(part) is False for part in segments[left:head])
+    return any(_push_segment_inert(part) is False and not git_calls(part) for part in segments[left:head])
 
 
 def _pipe_hides_check(segments, ends, head: int, position: int) -> bool:
     """True when a `|` stands in the `&&` chain `segments[head:position]` before the push, and a stage before the
     last runs a check: the pipeline's status is its last stage's, so `pytest -q | tail -5 && push` runs the push
-    when pytest failed. `set -o pipefail` sure to run first (`_pipefail_sure`) makes the pipe fail with the check.
-    A call of the version-control tool is no check here: it is the step the chain carries on, as in
+    when pytest failed. A stage that closes a `{ }` group counts when the group runs a check
+    (`{ make check; } | tee l && push`). `set -o pipefail` sure to run first (`_pipefail_sure`) makes the pipe fail
+    with the check. A call of the version-control tool is no check here: it is the step the chain carries on, as in
     `<vcs> commit | tail -1 && <vcs> push`."""
     for at in range(head, position):
-        if ends[at] != "|" or _push_segment_inert(segments[at]) is not False or git_calls(segments[at]):
+        if ends[at] != "|" or git_calls(segments[at]):
             continue
-        return not _pipefail_sure(segments, ends, head)
+        if _push_segment_inert(segments[at]) is False or _group_runs_check(segments, at):
+            return not _pipefail_sure(segments, ends, head)
+    return False
+
+
+def _pipeline_head(segments, ends, at: int) -> int:
+    """The index of the first stage of the `|` pipeline that holds `segments[at]`."""
+    while at > 0 and ends[at - 1] == "|":
+        at -= 1
+    return at
+
+
+def _group_runs_check(segments, close: int) -> bool:
+    """True when `segments[close]` closes a compound (`}`, `fi`, `done`) and a command inside it, found by
+    counting the compounds still open back to its opener, is a check: not inert and not a git call."""
+    if _compound_delta(segments[close], wide=True) >= 0:
+        return False
+    depth = 0
+    for opener in range(close, -1, -1):
+        depth += _compound_delta(segments[opener], wide=True)
+        if depth >= 0:
+            return any(_push_segment_inert(part) is False and not git_calls(part)
+                       for part in segments[opener:close])
     return False
 
 
@@ -4971,11 +5014,15 @@ def _pipefail_sure(segments, ends, upto: int) -> bool:
 
 def _status_is_own(segment: str) -> bool:
     """True when the status of SEGMENT is the status of the substitution it holds, or the substitution's output
-    is only what a test reads: a bare assignment (`out=$(make x)`) and a `[`, `[[` or `test` command. An `exit`
-    on its failure then reads the check's own status."""
+    is only what a test reads: a bare assignment (`out=$(make x)`) and a `[`, `[[` or `test` command whose
+    substitution runs a git call (`[ -z "$(git status --porcelain)" ]`: true only on a clean tree). A test of
+    any other command's output passes when that command fails silently. An `exit` on the failure of either
+    then reads the check's own status."""
     tokens = segment_tokens(segment) or []
     if tokens[:1] in (["["], ["[["], ["test"]):
-        return True
+        texts, too_deep = _substitutions(segment)   # the last text is the segment itself
+        return (not too_deep and len(texts) > 1
+                and all(git_calls(text) for text, _in_message in texts[:-1]))   # `[ -z "$(make x)" ]` reads make's output
     assignment = r"[A-Za-z_]\w*=(?:\"?\$\([^()]*\)\"?|\"?`[^`]*`\"?|[^\s$`()]*)"
     return bool(re.fullmatch(r"\s*(?:%s\s*)+" % assignment, segment))
 
@@ -4983,8 +5030,8 @@ def _status_is_own(segment: str) -> bool:
 def _exit_hides_check(segments, ends, checked: int):
     """For a bare `exit` run on the failure of `segments[checked]`: the index where the list the exit guards
     starts, and whether that exit hides a check. The exit guards the whole `A && B` or `A | B` list before it,
-    and no check before that list. It hides a check when it reads another command's status: a substitution in a
-    covered command (`echo $(make x) || exit 1`: the exit reads echo's status, never make's) unless the command
+    and no check before that list. It hides a check when it reads another command's status: a pipe's last stage
+    (`make check | tee l || exit 1`, `_pipe_hides_check`), a substitution in a covered command (`echo $(make x) || exit 1`: the exit reads echo's status, never make's) unless the command
     holds its status (`_status_is_own`), and a check before a `||` step that cannot fail (`make a || echo bad ||
     exit 1`: the exit runs only when the echo fails too, which it never does). A step that can fail is a
     fallback (`make a || make b || exit 1`), and the exit reads it."""
@@ -4992,6 +5039,8 @@ def _exit_hides_check(segments, ends, checked: int):
     while covered > 0 and ends[covered - 1] in ("&&", "||", "|"):
         covered -= 1
     parts = segments[covered:checked + 1]
+    if _pipe_hides_check(segments, ends, covered, checked):
+        return covered, True
     dead = any(ends[covered + at - 1] == "||" and _cannot_fail(part)
                and any(_push_segment_inert(earlier) is False for earlier in parts[:at])
                for at, part in enumerate(parts) if at)
