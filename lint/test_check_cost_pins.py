@@ -613,6 +613,63 @@ class CostPinTests(unittest.TestCase):
                            "- **Cost:** it writes the file twice.\n")
         self.assert_found([count_row("plain-noun.md", text, "it writes the file twice.")], counts=True)
 
+    def test_count_with_no_non_test_span_is_not_passed_by_a_test_file(self):
+        # A test file passes a count only through a code span it holds. A sentence with no span other than the
+        # test's own name needs a bound or a mark, so the first sentence is flagged though test_x.py exists.
+        self.put("lint/test_x.py", "# x cases\n\nx.json is read\n")
+        self.assert_exists("lint/test_x.py")
+        text = self.decide("no-span.md",
+                           "- **Cost:** It reads the list once, proof `lint/test_x.py`.\n"
+                           "- **Cost:** It reads the list at most once, proof `lint/test_x.py`.\n"
+                           "- **Cost:** It reads the list once, unmeasured.\n"
+                           "- **Cost:** It reads `state/x.json` once, proof `lint/test_x.py`.\n")
+        self.assert_found([count_row("no-span.md", text, "It reads the list once, proof")], counts=True)
+
+    def test_a_single_before_a_cost_noun_is_a_count(self):
+        text = self.decide("single.md",
+                           "- **Cost:** a single read per call.\n"
+                           "- **Cost:** a single file per run.\n")
+        self.assert_found([count_row("single.md", text, "a single read per call."),
+                           count_row("single.md", text, "a single file per run.")], counts=True)
+
+    def test_nx_after_a_verb_of_work_is_a_count(self):
+        text = self.decide("nx.md",
+                           "- **Cost:** It reads the list 2x.\n"
+                           "- **Cost:** It writes the file 3x.\n")
+        self.assert_found([count_row("nx.md", text, "It reads the list 2x."),
+                           count_row("nx.md", text, "It writes the file 3x.")], counts=True)
+
+    def test_stat_and_stats_are_verbs_of_work_in_the_trailing_form(self):
+        text = self.decide("stat.md",
+                           "- **Cost:** It stats the binary once.\n"
+                           "- **Cost:** They stat the binary twice.\n")
+        self.assert_found([count_row("stat.md", text, "It stats the binary once."),
+                           count_row("stat.md", text, "They stat the binary twice.")], counts=True)
+
+    def test_decimal_and_time_unit_numbers_are_not_counts(self):
+        # A decimal, or a number with a time unit, measures a duration. It names no count of work.
+        text = self.decide("duration.md",
+                           "- **Cost:** takes 2.5 s to read the file.\n"
+                           "- **Cost:** takes 300 ms to read the file.\n"
+                           "- **Cost:** takes 2 min to read the file.\n"
+                           "- **Cost:** takes 4 sec to read the file.\n"
+                           "- **Cost:** takes 3 seconds to read the file.\n"
+                           "- **Cost:** takes 5 minutes to read the file.\n"
+                           + CONTROL)
+        self.assert_found([count_row("duration.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_round_n_of_m_is_not_a_count(self):
+        text = self.decide("round.md", "- **Cost:** Round 2 of 3 reads the list.\n" + CONTROL)
+        self.assert_found([count_row("round.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_pr_number_is_not_a_count(self):
+        # "PR 2152" and "PR #2152" name a pull request, not a count of work.
+        text = self.decide("pr.md",
+                           "- **Cost:** PR 2152 reads the list.\n"
+                           "- **Cost:** PR #2152 reads the list.\n"
+                           + CONTROL)
+        self.assert_found([count_row("pr.md", text, CONTROL_NEEDLE)], counts=True)
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
