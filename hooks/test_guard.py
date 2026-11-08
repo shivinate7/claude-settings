@@ -5554,6 +5554,10 @@ sh("git-after-cd: a check protected by || a braced exit 1, then && a git push -u
 # never runs. The control is the `set -o pipefail` pipe pass with `&&`.
 sh("git-after-cd: set -eo pipefail, a check piped to tail, then ; a git push -u, passes",
    "set -eo pipefail; pytest | tail; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# AN APOSTROPHE IN DOUBLE QUOTES BEFORE A PIPE. The quoted text is one word of the echo, so the apostrophe in it opens no
+# quote, and the echo stage of the pipe is inert: the push after `&&` runs with no check before it, and passes.
+sh("git-after-cd: an apostrophe in double quotes of an echo piped to cat, then && a git push -u, passes",
+   'echo "don\'t" | cat && %s push -u origin b' % VCS, "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
