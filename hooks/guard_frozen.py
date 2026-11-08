@@ -232,24 +232,53 @@ _READERS = frozenset((
     "basename", "dirname", "strings", "od", "xxd"))
 
 
-# A test run (`pytest`, `python3 -m pytest -k copy x.py`) reads its path words like a reader. Any other
+# A test run (`pytest`, `python3 -m pytest -k copy x.py`, `uv run pytest`, `npm test`) reads its path words
+# like a reader, and its own flags (`-rA`, `-p`, `-c`) are the runner's, never program text. Any other
 # interpreter run on a file hands its words to a program (`install.py P`, `node cli.js rm P`), so it is
-# read whole. An inline flag (`-c`, `-e`) hands the interpreter program text, so it is read whole too.
+# read whole, and so is any inline flag (`python -c`).
 _PYTHON = re.compile(r"python[\d.]*|py")
 _PY_VERSION = re.compile(r"-\d[\d.]*")
-_INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceEpr][A-Za-z]*|--eval|--print|--command|eval")
 # `git grep -O<cmd>` (`--open-files-in-pager`, any prefix of it) runs a program on the files it finds.
 _GIT_GREP_RUNS = re.compile(r"-[A-Za-z]*O.*|--o.*")
+# `uv run [flags] CMD ...` runs CMD. The flags that take a value are listed so the value is not read as CMD.
+_UV_VALUE_FLAGS = frozenset((
+    "--with", "--with-requirements", "--with-editable", "--project", "--directory", "--python", "-p",
+    "--extra", "--group", "--env-file", "--package", "--no-group", "--only-group", "-w", "--index",
+    "--cache-dir"))
+# A package runner's `test` script hands its words to the project's own test command.
+_TEST_RUNNERS = frozenset(("npm", "pnpm", "yarn"))
+
+
+def _uv_run_index(words) -> int:
+    """The index in `words` (the words after `uv`) of the command `uv run [flags] CMD` runs, else -1."""
+    if words[:1] != ["run"]:
+        return -1
+    index = 1
+    while index < len(words) and words[index].startswith("-"):
+        index += 1 if "=" in words[index] or words[index] not in _UV_VALUE_FLAGS else 2
+    return index if index < len(words) else -1
+
+
+def _uv_inner(words):
+    """(command name, its words) that `uv run [flags] CMD ...` runs, else ('', [])."""
+    index = _uv_run_index(words)
+    return ("", []) if index < 0 else (_name(words[index]), list(words[index + 1:]))
 
 
 def _reads_only(command: str, words) -> bool:
     if command in _READERS:
         return True
     if command == "git":
-        # Only a bare `git grep`: a `-c k=v` before it can set what git runs.
-        return words[:1] == ["grep"] and not any(_GIT_GREP_RUNS.fullmatch(w) for w in words)
-    if any(_INLINE_FLAG.fullmatch(w) for w in words):
-        return False
+        # Only a bare `git grep`, after any `-C dir`: a `-c k=v` before it can set what git runs.
+        rest = list(words)
+        while rest[:1] == ["-C"]:
+            rest = rest[2:]
+        return rest[:1] == ["grep"] and not any(_GIT_GREP_RUNS.fullmatch(w) for w in rest)
+    if command == "uv":
+        inner, inner_words = _uv_inner(words)
+        return bool(inner) and _reads_only(inner, inner_words)
+    if command in _TEST_RUNNERS:
+        return words[:1] == ["test"]
     if command == "pytest":
         return True
     if _PYTHON.fullmatch(command):
@@ -410,6 +439,44 @@ def _is_redirect(word: str) -> bool:
     return bool(word) and set(word) <= _REDIRECT_CHARS
 
 
+# `sed -n 'Np'` and `awk '{print $1}'` read their input and write none of it: they are text filters, as
+# `head` is. Only the plain forms count. `sed -i`, `-e`, `-f`, a `w`, `e` or `r` command, and an awk
+# that calls `system`, `getline` or `close`, redirects, or pipes to a command, can write or run, so they
+# stay programs.
+_AWKS = frozenset(("awk", "gawk", "mawk", "nawk"))
+_SED_FLAGS = re.compile(r"-[nErsz]+|--quiet|--silent|--regexp-extended|--posix|--null-data|--separate")
+_SED_SCRIPT = re.compile(
+    r"(?:(?:[\d$,!\s]|/[^/]*/)*[pdq=][\s;]*|s(.)(?:(?!\1).)*\1(?:(?!\1).)*\1[gpiI\d]*[\s;]*)+")
+_AWK_RUNS = re.compile(r"system|getline|close|[>|<@]|ENVIRON")
+
+
+def _sed_filters(args) -> bool:
+    script = None
+    for arg in args:
+        if arg.startswith("-") and len(arg) > 1:
+            if not _SED_FLAGS.fullmatch(arg):
+                return False
+        elif script is None:
+            script = arg
+    return script is not None and bool(_SED_SCRIPT.fullmatch(script))
+
+
+def _awk_filters(args) -> bool:
+    script, skip = None, False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg == "-F" or arg == "-v":
+            skip = True
+        elif arg.startswith("-F") or (arg.startswith("-v") and "=" in arg):
+            continue
+        elif arg.startswith("-") and len(arg) > 1:
+            return False
+        elif script is None:
+            script = arg
+    return script is not None and not _AWK_RUNS.search(script)
+
+
 def _kind(words, plain: str) -> str:
     """'printer', 'message', 'cd' or '' for one segment."""
     if not words or _GROUP_MARK.search(_FD_DUP.sub("", plain)):
@@ -418,6 +485,10 @@ def _kind(words, plain: str) -> str:
     if (name in _PRINTERS or name in _FILTERS) and re.search(r"[/\\]", words[0]):
         return ""   # `./cat` or `b/echo` is a local program, not the printer (review r2 H3)
     if name in _FILTERS:
+        return "filter"
+    if name == "sed" and _sed_filters([_unquoted(w) for w in words[1:]]):
+        return "filter"
+    if name in _AWKS and _awk_filters([_unquoted(w) for w in words[1:]]):
         return "filter"
     if name in _QUIET:
         return "cd" if name not in _PRINTERS else "printer"
@@ -432,7 +503,11 @@ def _kind(words, plain: str) -> str:
 
 
 def _writes_a_file(words) -> bool:
-    """True when the segment redirects output onto a file, not a null device or a descriptor."""
+    """True when the segment redirects output onto a file, or tees it to one, not a null device or a
+    descriptor."""
+    if words and _name(words[0]) == "tee" and any(
+            not w.startswith("-") and w.strip("'\"").lower() not in _NULL_TARGETS for w in words[1:]):
+        return True
     for index, word in enumerate(words):
         if ">" in word and _is_redirect(word) and not word.endswith("&"):
             target = words[index + 1].strip("'\"").lower() if index + 1 < len(words) else ""
@@ -614,6 +689,50 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+def _parse_call(cmd: str):
+    """(segments, ends, words of each, scan of each, closed, kind of each, may_run) of a command, read
+    once for the data rule. `may_run`: some segment is no printer, filter, `cd` or reader, so it may run
+    a file the call wrote."""
+    ends = []
+    segments = split_segments(cmd, ends)
+    scans = [_scan(segment) for segment in segments]
+    parsed = [_quoted_words(segment) for segment in segments]
+    closed = any(unsafe or _runs_stored_text(segment, words, plain)
+                 for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
+    kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
+    may_run = any(words and kind not in ("printer", "cd", "filter")
+                  and not _reads_only(*_segment_command([_unquoted(w) for w in words]))
+                  for kind, words in zip(kinds, parsed))
+    return segments, ends, parsed, scans, closed, kinds, may_run
+
+
+def _printed_state(number: int, kinds, parsed, ends, may_run):
+    """(runs_nowhere, printed_is_data) for the segment at NUMBER. `runs_nowhere`: the pipe after it
+    ends only in printers and filters. `printed_is_data`: its printed text is data, because it runs
+    nowhere and is not written to a file that a later segment may run (`echo 'rm P' > s.sh && sh s.sh`,
+    `echo 'rm P' | tee s.sh; sh s.sh`). Otherwise the text is read whole, as a script."""
+    last = number
+    while last + 1 < len(kinds) and ends[last] == "|":
+        last += 1
+    chain = range(number, last + 1)
+    runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
+    to_file = any(_writes_a_file(parsed[k]) for k in chain)
+    return runs_nowhere, runs_nowhere and not (to_file and may_run)
+
+
+def written_scripts(cmd: str):
+    """The text of each printer segment whose output may run as a script: it is written to a file that
+    another segment may run, or piped to a program. A caller that reads commands out of text (a git
+    verb) reads these as well as the call itself."""
+    cmd = _resolve_vars(cmd)
+    _segments, ends, parsed, _scans, _closed, kinds, may_run = _parse_call(cmd)
+    out = []
+    for number, raw in enumerate(parsed):
+        if kinds[number] == "printer" and not _printed_state(number, kinds, parsed, ends, may_run)[1]:
+            out.extend(_unquoted(raw[i]) for i in sorted(_data_words("printer", raw)))
+    return out
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                      command_position=False, predicate_command=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
@@ -623,34 +742,23 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     name as a third argument (`''` when none)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
-    ends = []
-    segments = split_segments(cmd, ends)
-    scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment) for segment in segments]
-    closed = any(unsafe or _runs_stored_text(segment, words, plain)
-                 for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
-    kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
-    quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    segments, ends, parsed, scans, closed, kinds, may_run = _parse_call(cmd)
     for number, raw in enumerate(parsed):
         # A segment piped on to a program hands that program its output (`rg -l x P | xargs rm`), so a
         # mutating word or a path in it may run. Only a segment nothing runs the output of is read by its
         # command word alone.
-        last = number
-        while last + 1 < len(kinds) and ends[last] == "|":
-            last += 1
-        chain = range(number, last + 1)
-        runs_nowhere = all(kinds[k] in ("printer", "filter") for k in chain[1:])
+        runs_nowhere, printed_is_data = _printed_state(number, kinds, parsed, ends, may_run)
         piped_to_a_runner = not runs_nowhere
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
-        if kinds[number] in ("printer", "message"):
-            to_file = any(_writes_a_file(parsed[k]) for k in chain)
-            if runs_nowhere and (quiet or not to_file):
-                data = data | _data_words(kinds[number], raw)
-        words, shown = [], []
+        printed = kinds[number] in ("printer", "message")
+        if printed and printed_is_data:
+            data = data | _data_words(kinds[number], raw)
+        words, shown, shown_at = [], [], []
         for index, word in enumerate(raw):
+            shown_at.append(len(shown))
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
@@ -662,13 +770,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
-        text = " ".join(shown)
+        # A leading `NAME=value` is an environment prefix, not a command word: `MUTATE_ONLY=touch python3 t.py`
+        # names `touch` as a value. A caller that reads command position leaves it out of the text.
+        lead = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+        text = " ".join(shown[shown_at[lead]:] if command_position and lead < len(raw) else shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         # A group, a substitution or a `{}` block nests a second command in the segment, so its text is
         # read whole.
         nested = bool(_GROUP_MARK.search(_FD_DUP.sub("", scans[number][1])))
         narrow = command_position and not closed and not piped_to_a_runner and not nested
+        if printed and runs_nowhere and not printed_is_data:
+            narrow = False   # its text is written to a file that a later segment may run
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -895,6 +1008,9 @@ def _inline_scripts(command: str):
         index = resolve_command(tokens) if tokens else None
         if index is None:
             continue
+        if basename(tokens[index]) == "uv":
+            inner = _uv_run_index([str(t) for t in tokens[index + 1:]])
+            index = index + 1 + inner if inner >= 0 else index
         name = basename(tokens[index])
         kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
         flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG

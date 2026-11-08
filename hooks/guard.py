@@ -387,7 +387,7 @@ while True:
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            is_project_config, project_config_shell_hit, written_scripts,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -4682,6 +4682,11 @@ def session_home_git_hit(command: str, where: str, in_primary) -> str:
     """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
     primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
     that holds a variable is unknown and passes."""
+    # Text the call prints into a script that it then runs holds git calls too (`written_scripts`).
+    for script in written_scripts(command) if "git" in command else ():
+        verb = session_home_git_hit(script, where, in_primary)
+        if verb:
+            return verb
     ends = []
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
