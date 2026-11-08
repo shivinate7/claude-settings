@@ -14744,7 +14744,7 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
     pr-review-record). Four things hold together: the --fix-check base is the source's Head; the source Head and the live head have the same tree
     (commit_tree, one read each); the source pull request is closed or merged, or this pull request's body says `replaces #N`; and the other checks
     hold. Then the chained ancestor check is skipped, since equal trees stand in for it. A source with a FAIL or WIDE Fix check refuses as before, and
-    a source with no Fix check line reads no commit and no source pull request. Each refusal runs beside a good run that exits 0 and differs only in
+    a source with no Fix check line reads no commit, and reads its source pull request once to count its chain. Each refusal runs beside a good run that exits 0 and differs only in
     the property the refusal tests, so the good run is the case's red assert on the old code. The chain cap (owner page item 426 a) counts a carry as
     one more link on its source pull request (rule a), and a carried record on this pull request by its trees (rule b). Those cases end the class."""
 
