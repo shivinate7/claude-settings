@@ -814,16 +814,7 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-# A runner starts the command after its own words and flags. Each key is the runner word, each value
-# the words that must follow it before the command: `uv run`, `uv tool run`, `poetry run`,
-# `pipenv run`, `pdm run`, `conda run`, and `uvx` and `npx`, which take none. The code reader
-# (`_interpreter_calls`) unwraps them itself: `wrapped_commands` and `resolve_command` are read by
-# other rules, which test `uv run` as a runner with no skip rule, so a change there would move their
-# verdicts. They are runners of a written file too (`uv run dbg.py`), so `_RUNNER` holds them.
-CODE_RUNNERS = {"uv": (("run",), ("tool", "run")), "poetry": (("run",),), "pipenv": (("run",),),
-                "pdm": (("run",),), "conda": (("run",),), "uvx": ((),), "npx": ((),)}
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + "|" + "|".join(CODE_RUNNERS) +
-                     r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
                      r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
 
 
@@ -867,9 +858,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]) or (
-            not shells_only and any(_piped_interpreters(_without_message_values(header))
-                                    for _, _, header in bodies)):
+            text, [header for _, _, header in bodies]) or (not shells_only and heredoc_code(cmd)):
         return cmd  # the body may be executed, so keep it under inspection
     return "\n".join([dropped] + runs)
 
@@ -1952,7 +1941,13 @@ JS_REGEX_AFTER = frozenset("(,=:[!&|?{};+-*%<>~^}")
 JS_REGEX_WORDS = frozenset({"return", "typeof", "case", "in", "of", "delete", "void", "throw", "new",
                             "else", "do", "yield", "await"})
 JS_DEPTH = 64
-# CODE_RUNNERS (defined with `_RUNNER`, above) is the table `_runner_tail` reads.
+# A runner starts the command after its own words and flags. Each key is the runner word, each value
+# the words that must follow it before the command: `uv run`, `uv tool run`, `poetry run`,
+# `pipenv run`, `pdm run`, `conda run`, and `uvx` and `npx`, which take none. The reader unwraps them
+# itself: `wrapped_commands` and `resolve_command` are read by other rules, which test `uv run` as
+# a runner with no skip rule, so a change there would move their verdicts.
+CODE_RUNNERS = {"uv": (("run",), ("tool", "run")), "poetry": (("run",),), "pipenv": (("run",),),
+                "pdm": (("run",),), "conda": (("run",),), "uvx": ((),), "npx": ((),)}
 CODE_RUNNER_VALUE_FLAGS = frozenset({"--with", "--python", "-p", "--project", "--directory", "--extra",
                                      "--group", "--package", "--with-requirements", "--env-file",
                                      "--index", "--index-url", "--extra-index-url", "--with-editable",
@@ -2374,6 +2369,25 @@ def inline_code(tokens):
 _HEREDOC_PIPE = re.compile(r"<<[^\n|]*\|(?!\|)(.*)")
 
 
+_REDIRECT_TOKEN = re.compile(r"\d*(?:<<-?|&?>>?\|?|>&)")
+
+
+def _code_args(args):
+    """The arguments of an interpreter call without its heredoc token (`<<PY`) and its output
+    redirects (`2>&1`, `> out`, `>out`, `&> out`): none of them gives the interpreter code or a script,
+    so what is left says whether it reads its code from stdin."""
+    kept, skip = [], False
+    for arg in args:
+        redirect = _REDIRECT_TOKEN.match(arg)
+        if skip:
+            skip = False
+        elif redirect:
+            skip = arg == redirect.group(0) and not arg.startswith("<<")   # a bare operator takes the next word
+        else:
+            kept.append(arg)
+    return kept
+
+
 def _piped_interpreters(header: str):
     """The languages of the interpreter that reads the heredoc body from stdin when the header pipes it
     on (`cat <<'PY' | python3`, `| node`, `| python3 -u -`). The interpreter must take no script file
@@ -2385,7 +2399,7 @@ def _piped_interpreters(header: str):
     if not stages:
         return []
     return [language for language, args in _interpreter_calls(segment_tokens(stages[0]) or [])
-            if all(arg.startswith("-") for arg in args)]
+            if all(arg.startswith("-") for arg in _code_args(args))]
 
 
 def _stdin_languages(header: str):
@@ -2395,7 +2409,7 @@ def _stdin_languages(header: str):
     heredoc itself, so it is no argument."""
     return {language for piece in split_segments(header) if "<<" in piece
             for language, args in _interpreter_calls(segment_tokens(piece) or [])
-            if all(arg.startswith("-") or re.match(r"\d*<<", arg) for arg in args)}
+            if all(arg.startswith("-") for arg in _code_args(args))}
 
 
 def heredoc_code(cmd: str):
