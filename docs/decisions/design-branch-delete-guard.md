@@ -18,21 +18,21 @@ Home: hooks/guard_branch_worktree.py
 
 - The tip is not an ancestor of origin's default branch.
 - The branch added or changed a file under the layout's `design` folder since its merge base with the default branch (`base...tip`). The file's bytes at the tip must differ from the default branch's. A mockup the branch modified counts as the only copy, as an added one does. A file the branch never touched does not count, even when the default branch edited, deleted or renamed it after the fork. A file whose bytes the default branch holds does not count. No merge base (a shallow clone, unrelated history) fails the read, so the delete asks.
-- No `archive/*` ref on origin holds the tip. Any archive name counts, not only `archive/<b>`, because the rule allows a new archive name when the first is taken.
+- No `archive/*` ref on origin holds the tip. Any archive name counts, not only `archive/<b>`, because the rule allows a new archive name when the first is taken. A remote delete of an `archive/*` ref never counts itself as a holder: the refs the push removes do not hold the tip.
 
 It asks, never allows, when a read cannot answer. These reads count: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, the default branch is unreadable, or the layout's `design` folder is unread (no readable layout file). A dry run (`--dry-run`, `-n`) removes nothing and is not judged, as main's push asks skip it.
 
 ### A local delete
 
-`git branch -d/-D` leaves origin's copy. It stays allowed while any origin ref holds the tip. It asks only when its subject read is already unreadable (the default branch cannot be read), the tip holds a design file, and no origin ref holds the tip. It also asks when the `design` folder is unread, for any branch named on that unreadable-subject path.
+`git branch -d/-D` leaves origin's copy. It stays allowed while any remote-tracking ref, on any remote, holds the tip. It asks only when its subject read is already unreadable (the default branch cannot be read), the tip holds a design file, and no remote-tracking ref holds the tip. It also asks when the `design` folder is unread, for any branch named on that unreadable-subject path.
 
 ## Cost
 
-The design-file read starts one `diff` for the files the branch changed. When it changed any, a second `diff` compares those files with the default branch's bytes. A branch that changed no design file costs the one start. A remote delete of a design branch that changed a mockup therefore measures 11 git starts, one more than the 10 above. A dry run starts none of this. An unread design folder asks after at most 2 starts per name (tip lookup, tag read).
+The design-file read starts one `diff` for the files the branch changed. When it changed any, a second `diff` compares those files with the default branch's bytes. A branch that changed no design file costs the one start. A remote delete of a design branch that changed a mockup costs 11 git starts: the push verdict 3, the design check 8. A dry run starts none of this. An unread design folder asks after at most 3 starts per name (two tip lookups, then a tag read when no tip resolves).
 
 A call that deletes nothing runs none of this.
 
-A remote delete of one design branch, with the remote named in the command, measured 10 git starts. The push verdict takes 3 (the reviewer's count). The design check takes 7, measured here: tip lookup 1, default-branch read 2, ancestor read 2, design-file read 1, archive-ref read 1. The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 3 starts: tip lookup 2, tag read 1. That holds because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
+A remote delete of one design branch that changed a mockup, with the remote named in the command, costs 11 git starts. The push verdict takes 3 (the reviewer's count). The design check takes 8, from a probe: tip lookup 1, default-branch read 2, ancestor read 2, design-file read 2 (two diffs), archive-ref read 1. The design check takes 6 when the branch changed no design file, since the archive read is skipped. The ancestor read is 1 start when it answers "yes": the shallow-clone probe runs only on "no", and a "yes" ends the check. A name with no tip costs 3 starts: tip lookup 2, tag read 1. That holds because the default branch is read at the first tip that resolves. A local delete adds nothing unless its subject read is unreadable.
 
 ## Known limits
 
