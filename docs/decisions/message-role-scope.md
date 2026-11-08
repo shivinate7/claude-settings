@@ -58,7 +58,7 @@ One more guard process start per SendMessage, as the matcher in `settings.json` 
 
 ## Measure
 
-`MUTATE_ONLY=message-role: hooks/test_guard.py`: the `message-role` cases, 17 refusals and 35 passes. `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
+`MUTATE_ONLY=message-role: hooks/test_guard.py`: the `message-role` cases, 20 refusals and 38 passes. `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
 
 Kind: process
 Home: hooks/guard.py
