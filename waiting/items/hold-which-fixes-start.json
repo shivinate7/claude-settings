@@ -24,7 +24,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "Items 384 and 387; owner 13:20 CST Nov 7; coordinator record lane-inflow-hold (PR #1768); step pr-backlog-clear",
+  "reply": "You picked a (06:11 CST Nov 8): during the hold on new lanes, a lane may start for your own asks and for any fix for a found gap; other new work waits. Routed to the coordinator; home: record lane-inflow-hold (PR #1768) and step pr-backlog-clear. Closed 06:14 CST Nov 8.",
   "short": "Hold: which gap fixes start a lane",
-  "status": "open",
+  "status": "closed",
   "title": "During the hold on new lanes, may every fix for a found gap start a lane, or only a fix that unblocks a merge?"
 }

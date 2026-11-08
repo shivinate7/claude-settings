@@ -24,7 +24,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "CLAUDE.md rule roles-resume-by-name; step resume-finished-reviewer-no-tree",
+  "reply": "You picked a (06:11 CST Nov 8): rule roles-resume-by-name reads \"Resume a dead agent by name, never fresh. When a finished agent's worktree is gone, send a fresh agent of the same role the prior report instead.\" Step resume-finished-reviewer-no-tree widens its refusal to match. Routed to the coordinator and lane session_013NEJL3qSsV2LJ6R1a1HMCB. Closed 06:14 CST Nov 8.",
   "short": "Resume rule: cover builders and test-authors",
-  "status": "open",
+  "status": "closed",
   "title": "When any finished agent's worktree is gone, should the rule say to send a fresh agent the prior report, not only for reviewers?"
 }

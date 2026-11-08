@@ -31,7 +31,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "steps resume-guard-subagent-sends, resume-guard-workflow-agents, resume-finished-reviewer-no-tree; item 409; #1917",
+  "reply": "You picked a (06:11 CST Nov 8): lane resume-finished-reviewer-no-tree (session_013NEJL3qSsV2LJ6R1a1HMCB) runs the one-shot probe in its throwaway cloud container, then removes the hook. The settings write still needs words you type in that lane's chat; this pick alone does not get past the auto-mode check. Routed to the coordinator and that lane; home: steps resume-guard-subagent-sends and resume-guard-workflow-agents. Closed 06:14 CST Nov 8.",
   "short": "One-shot probe of a subagent's hook payload",
-  "status": "open",
+  "status": "closed",
   "title": "May a lane's throwaway cloud container add a temporary hook to log one subagent's tool-call payload, then remove it?"
 }

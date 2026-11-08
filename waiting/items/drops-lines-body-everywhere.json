@@ -25,7 +25,8 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "b",
   "ref": "docs/decisions/silent-undo-check-design.md (lines 24-25 on main); step silent-undo-cli-ignores-pr-body; step silent-undo-ci-body (#1712); #1785",
+  "reply": "You picked a (06:11 CST Nov 8): the silent-undo CLI reads a `Drops-lines:` line in the PR body through merge/merge.py's reader (env PR_BODY in CI, --pr-body locally), and decision silent-undo-check-design is rewritten in place to say every reader takes the body. This is the widening option, against your ruling that a repo changes to fit a shared tool; your pick overrides it for this case. Routed to the coordinator and lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8); the hold on step silent-undo-cli-ignores-pr-body lifts. Closed 06:14 CST Nov 8.",
   "short": "Drops-lines in the PR body: read it everywhere",
-  "status": "open",
+  "status": "closed",
   "title": "Should the silent-undo check read a `Drops-lines:` excuse in the PR body in CI and the lane lint too, not only in the merge tool?"
 }
