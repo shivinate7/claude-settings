@@ -12873,10 +12873,11 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
-    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
-    with Guard or check yes and a Net value of zero or positive. Net value negative is held. The third round with Guard or check yes and no
-    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change with Guard or check no is done by the review cap rule (roles-review-cap-three): the
+    last round is PASS and the last design-reviewer line is PASS or absent, or the third round is done, whatever its verdict. A change with
+    Guard or check yes is done only at the third round with a Net value of zero or positive, or, for Kind delete-only, when round 1 is all
+    PASS. Net value negative is held. Otherwise a Guard or check yes change is open below the third round, and at the third round with no
+    Net value. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
@@ -12888,7 +12889,7 @@ class ReviewRecordRules(unittest.TestCase):
                 self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
 
     def test_round_three_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # The third round is FAIL here. A PASS would also meet the last-round-PASS rule, which says done for any net value.
+        # The third round is FAIL here, so the net value alone decides. A guard or check change owes the third round, and then its net value.
         for net in ("zero", "positive"):
             with self.subTest(net=net):
                 self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net=net)), "done")
@@ -13001,15 +13002,52 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_delete_only_change_with_guard_yes_and_a_round_one_pass_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, kind="delete-only", guard="yes")), "done")
 
+    def test_a_delete_only_guard_yes_with_a_round_one_design_fail_is_open(self):
+        # control: round 1 is not all PASS while the design reviewer fails it, so the design hold keeps the change open
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, kind="delete-only", guard="yes")), "open")
+
+    def test_a_delete_only_guard_yes_with_a_round_one_fail_then_a_round_two_pass_is_open(self):
+        # A failed round 1 owes round 3 on a guard or check change, so a passing round 2 leaves the change open
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
+        for net in ("not owed", "positive"):
+            with self.subTest(net=net):
+                self.assertEqual(record_state(self, record_text(rounds=rounds, kind="delete-only", guard="yes", net=net)), "open")
+
+    def test_a_delete_only_guard_yes_after_a_failed_round_one_is_done_at_round_three_with_net_zero(self):
+        # control: round 3 with a zero net value closes a delete-only change that failed round 1, whatever round 3's verdict is
+        for verdict in ("PASS", "FAIL", "PARTIAL"):
+            with self.subTest(verdict=verdict):
+                rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", f"Round 3: reviewer, opus, {verdict}")
+                self.assertEqual(record_state(self, record_text(rounds=rounds, kind="delete-only", guard="yes", net="zero")), "done")
+
     def test_a_pass_in_round_three_with_guard_yes_owes_the_net_value_test(self):
         rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
         for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
             with self.subTest(net=net):
                 self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), want)
 
-    def test_a_pass_in_round_two_with_guard_yes_owes_no_net_value(self):
+    def test_a_pass_in_round_two_with_guard_yes_is_open_until_round_three(self):
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
-        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="not owed")), "done")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="not owed")), "open")
+
+    def test_a_guard_yes_change_before_round_three_is_open_whatever_the_net_value(self):
+        # A net value written before round 3 does not close a guard or check change, and neither does a PASS in round 1 or round 2.
+        cases = (REVIEW_PASS, ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"))
+        for rounds in cases:
+            for net in ("not owed", "zero", "positive"):
+                with self.subTest(rounds=rounds, net=net):
+                    self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), "open")
+
+    def test_a_full_size_guard_yes_record_with_passing_rounds_one_and_two_is_open(self):
+        # Full size: both rounds have a reviewer and a design reviewer, all PASS, and a positive net value. Round 3 is still owed.
+        rounds = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS",
+                  "Round 2: reviewer, sonnet, PASS", "Round 2: design-reviewer, opus, PASS")
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net="positive")), "open")
+
+    def test_a_guard_yes_record_with_no_round_is_open(self):
+        # control: the empty state. No round is recorded, so the net value settles nothing.
+        self.assertEqual(record_state(self, record_text(rounds=(), guard="yes", net="positive")), "open")
 
     def test_a_docs_only_change_with_no_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=(), kind="docs-only")), "done")
@@ -13019,8 +13057,9 @@ class ReviewRecordRules(unittest.TestCase):
 
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
-    the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
-    whatever that round's verdict, and owes no net value yet. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
+    the rounds say. A PASS counts as the round it follows passing. For Guard or check no, when that round is the first or the second allowed one, the
+    record is done whatever that round's verdict, and owes no net value yet. For Guard or check yes it is open until the third round, except a
+    delete-only change whose round 1 is all PASS. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
     why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
     value that is still owed. With no round recorded the record is open. The rule cases build their record with fix_state(); the last case
     reads the fix line from the text."""
@@ -13042,30 +13081,51 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check failed", why)
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
-        # A fix PASS after the first round counts as that round passing, for a normal change with guard no or yes
+        # A fix PASS after the first round counts as that round passing, for a normal change with guard no
         for verdict in ("PASS", "FAIL"):
-            for guard in ("no", "yes"):
-                with self.subTest(verdict=verdict, guard=guard):
+            with self.subTest(verdict=verdict):
+                rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="no", net="not owed")
+                self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard no, must read done: {why!r}")
+
+    def test_a_fix_pass_after_round_one_with_guard_yes_is_open_whatever_round_one_said(self):
+        # A guard or check change owes round 3, so a fix PASS after round 1 leaves it open, whatever round 1 said or the net value
+        for verdict in ("PASS", "FAIL"):
+            for net in ("not owed", "positive"):
+                with self.subTest(verdict=verdict, net=net):
                     rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
-                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
-                    self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard {guard}, must read done: {why!r}")
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="yes", net=net)
+                    self.assertEqual(state, "open", f"a fix check PASS after round 1 {verdict}, guard yes, net {net}, must read open: {why!r}")
 
     def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
-        # A fix PASS after the second round counts as that round passing, and owes no net value before the last allowed round
+        # For guard no, a fix PASS after the second round counts as that round passing, and owes no net value
         for verdict in ("PASS", "FAIL"):
-            for guard in ("no", "yes"):
-                with self.subTest(verdict=verdict, guard=guard):
-                    rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
-                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
-                    self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard {guard}, must read done: {why!r}")
+            with self.subTest(verdict=verdict):
+                rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="no", net="not owed")
+                self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard no, must read done: {why!r}")
 
-    def test_a_fix_pass_after_a_delete_only_round_one_with_guard_yes_is_done(self):
-        # A delete-only change with guard yes owes the later rounds after a failed first round. A fix PASS counts as that first round passing, so they are not owed
-        for verdict in ("FAIL", "PASS"):
+    def test_a_fix_pass_after_round_two_with_guard_yes_is_open_whatever_round_two_said(self):
+        # A guard or check change owes round 3, so a fix PASS after round 2 leaves it open, whatever round 2 said or the net value
+        for verdict in ("PASS", "FAIL"):
+            for net in ("not owed", "positive"):
+                with self.subTest(verdict=verdict, net=net):
+                    rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
+                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="yes", net=net)
+                    self.assertEqual(state, "open", f"a fix check PASS after round 2 {verdict}, guard yes, net {net}, must read open: {why!r}")
+
+    def test_a_fix_pass_after_a_passing_delete_only_round_one_with_guard_yes_is_done(self):
+        # A delete-only change with guard yes whose round 1 is all PASS is done, and a fix PASS after it is done too
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASS, kind="delete-only", guard="yes")
+        self.assertEqual(state, "done", f"a fix check PASS after a passing delete-only round 1 with guard yes must read done: {why!r}")
+
+    def test_a_fix_pass_after_a_failed_delete_only_round_one_with_guard_yes_is_open(self):
+        # A failed round 1 on a guard or check change owes round 3, and a fix PASS does not close it
+        for verdict in ("FAIL", "PARTIAL"):
             with self.subTest(verdict=verdict):
                 rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
                 state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, kind="delete-only", guard="yes")
-                self.assertEqual(state, "done", f"a fix check PASS after a delete-only round 1 {verdict} with guard yes must read done: {why!r}")
+                self.assertEqual(state, "open", f"a fix check PASS after a failed delete-only round 1 {verdict} with guard yes must read open: {why!r}")
 
     def test_a_fix_pass_before_round_three_with_a_design_hold_is_open_and_names_the_design_reviewer(self):
         # owner item 271 b: the design-reviewer hold stays. The last design-reviewer line is FAIL or PARTIAL, so the fix PASS leaves the state open
@@ -13117,7 +13177,9 @@ class ReviewFixRules(unittest.TestCase):
                  (REVIEW_FAILED_THREE, "yes", "zero", "PASS", "done"),
                  (REVIEW_FAILED_THREE, "yes", "negative", "PASS", "held"),
                  (REVIEW_PASS, "no", "not owed", "PASS", "done"),  # a fix PASS after a passing first round is done
-                 (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
+                 (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"),
+                 (REVIEW_PASS, "yes", "positive", "PASS", "open"),  # a guard change before round 3 stays open, whatever its net value
+                 (("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"), "yes", "positive", "PASS", "open"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
                 text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
