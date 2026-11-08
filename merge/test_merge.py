@@ -945,7 +945,8 @@ class CloudProxy(Env):
 
 class LockRetake(Env):
     """GitLock.acquire when its lease push fails (decision merge-lock). The ref is read again: a moved ref is another run's take and stays Held;
-    an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held."""
+    an unchanged ref is a refused push, which stops and prints the push output. Held is a Stop too, so each refusal case asserts it is not a Held.
+    Release reads the same ref: when its commit fetch fails, it still removes this run's lock and leaves a rival's."""
     EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     def released_lock(self):
@@ -1099,6 +1100,36 @@ class LockRetake(Env):
                 self.assertNotIsInstance(e, merge.NetStop, f"a fetch that failed without the network stopped the lock read as a network stop: {e}")
             else:
                 self.fail(f"a fetch that failed without the network read the lock as {got}, not as a stop")
+
+    def fail_every_fetch(self):
+        """-> the patch under which every fetch fails with a text no network produced. ls-remote and the other git calls run for real."""
+        self.assertFalse(merge.is_net(128, self.NON_NET_FETCH), "scope: the faked fetch output is a network error line")
+        return self.git_hook(lambda args, run: (128, self.NON_NET_FETCH) if args[:1] == ("fetch",) else run())
+
+    def assert_read_stops_on_the_fetch_fault(self):
+        """scope: under fail_every_fetch, the lock read stops with a plain Stop, so release's read is the one that fails."""
+        with self.assertRaises(merge.Stop) as cm:
+            self.lock.read("main")
+        self.assertNotIsInstance(cm.exception, merge.NetStop, f"scope: the fetch fault reads as a network stop: {cm.exception}")
+
+    def test_release_removes_its_lock_when_the_commit_fetch_fails(self):
+        tok = self.lock.acquire("main", 600)
+        self.assertEqual(self.head("merge-lock/main"), tok)  # scope: this run's lock is on origin
+        self.assertIn(tok, self.lock.mine)  # scope: this run took the lock, so release may remove it
+        with self.fail_every_fetch():
+            self.assert_read_stops_on_the_fetch_fault()
+            release_out(self, self.lock, tok)
+        self.assertFalse(self.lock_ref(), "release left this run's lock on origin when the commit fetch failed")
+
+    def test_release_leaves_a_rival_lock_when_the_commit_fetch_fails(self):
+        tok = self.lock.acquire("main", 600)
+        rival = self.rival_lock(f"--force-with-lease={merge.lock_ref('main')}:{tok}")  # a rival takes the ref over this run's lock
+        self.assertEqual(self.head("merge-lock/main"), rival)  # scope: the rival's lock is on origin
+        self.assertNotIn(rival, self.lock.mine)  # scope: the rival's commit is not this run's
+        with self.fail_every_fetch():
+            self.assert_read_stops_on_the_fetch_fault()
+            release_out(self, self.lock, tok)
+        self.assertEqual(self.head("merge-lock/main"), rival, "release removed a rival's lock when the commit fetch failed")
 
     def test_a_listed_sha_gone_after_the_fetch_is_not_never_expires(self):
         listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
