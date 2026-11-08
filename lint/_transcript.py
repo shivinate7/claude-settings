@@ -268,14 +268,15 @@ PEER_FRAME_SENDER = re.compile(
     r'\A\s*(?:Another Claude session sent a message[^\n]*:\s*)?<cross-session-message\b[^>]*?\sfrom-session="([^"]+)"')
 
 
-def peer_sender(rec):
-    """The id of the session that sent a peer message record: origin.fromSession, or, when the record has no origin
-    key (the shape a real transcript holds), the `from-session` attribute of the frame its string content opens with.
-    Else None."""
+def peer_sender(rec, frames=False):
+    """The id of the session that sent a peer message record: origin.fromSession, else None. With `frames`, a record
+    with no origin key (the shape a real transcript holds) also names the `from-session` attribute of the frame its
+    string content opens with. Only the pick guard (hooks/guard_merge.py) reads frames: the report guard's turn and
+    ack reads stay on origin alone."""
     origin = rec.get("origin")
     if _is_peer(origin):
         found = origin.get("fromSession")
-    elif origin is None and rec.get("type") == "user":
+    elif frames and origin is None and rec.get("type") == "user":
         content = (rec.get("message") or {}).get("content")
         match = PEER_FRAME_SENDER.match(content) if isinstance(content, str) else None
         found = match.group(1) if match else None

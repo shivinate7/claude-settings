@@ -1186,7 +1186,7 @@ def _inbound_pick(records, sender: str, names) -> bool:
     module = _transcript_module()
     newest = None  # [the newest frame is a pick, no send to the sender since]
     for rec in records:
-        if module.peer_sender(rec) == sender:
+        if module.peer_sender(rec, frames=True) == sender:
             newest = [_has_departs(_peer_body(rec)), True]
         elif newest and not rec.get("isSidechain"):
             if any(names & module.send_targets(use) for use in module.tool_uses(rec)):
