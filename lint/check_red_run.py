@@ -45,9 +45,8 @@ NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 FIELD = "\x1f"
 START = "\x01"  # opens each commit in the log output, so a commit's header and its file rows split apart
 MAX_PATHS = 5
-# The ancestors whose trees a gap commit is compared with. This repo holds about 2,300 commits, and a read of all
-# of them took 40 to 55 ms (2026-11-08), so 5,000 covers it twice over. The read is at most 205 KB of tree ids and,
-# at that rate, about 0.1 s, once per gap commit.
+# The most ancestors whose trees a gap commit is compared with. It is large enough to reach back past the whole
+# history of a repo this size, and small enough to bound the read to a few hundred KB of tree ids per gap commit.
 MAX_ANCESTORS = 5000
 # The printed remedy, one line each. The guard's push refusal quotes the first two. It leaves the third out,
 # because it names a branch switch, which a refusal never names (rule git-remedy-never-names-target).

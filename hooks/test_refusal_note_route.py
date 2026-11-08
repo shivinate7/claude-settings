@@ -30,12 +30,14 @@ import os
 import shutil
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_refusal_note as base  # noqa: E402  the hook harness and the route-row fixture (one home)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import test_report_guard as trg  # noqa: E402  run_guard and NO_PROCESS_CODE (one home)
+import route_match  # noqa: E402  the rows matcher and its size limits (hooks/route_match.py)
 
 ARCHIVE = base.ARCHIVE
 BASE_KEYS = {"ts", "tool_name", "reason", "tool_use_id"}
@@ -180,6 +182,37 @@ class RouteNoteTests(base.HookCase):
         self.assertEqual(self.files_written(), [os.path.join("state", base.REFUSALS_DIR, base.SESSION + ".jsonl")],
                          "the hook wrote a file besides the refusals file")
         self.assertEqual(read_bytes(self.rows_path()), before, "the hook wrote the rows file")
+
+
+class RouteMatchLimitTests(unittest.TestCase):
+    """hooks/route_match.py's two size limits, MAX_PATTERN_CHARS (500) and MAX_TARGET_CHARS (4000). Each limit is
+    driven at its value and one past it. The limits are pinned as literal lengths, so a change to either one moves the
+    boundary these cases check. No case here is red on the base code: they pin behaviour the code already has."""
+
+    def row(self, pattern):
+        return {"id": "r1", "act": "a", "route": "b", "surface": "local", "outcome": "works", "pattern": pattern}
+
+    def matches(self, pattern, command):
+        with mock.patch.object(route_match, "surface", return_value="local"):
+            rows = route_match.matching_rows([self.row(pattern)], "works", [("Bash", {"command": command})])
+        return bool(rows)
+
+    def test_pattern_of_500_chars_is_matched(self):
+        self.assertTrue(self.matches("b" * 500, "b" * 500), "a pattern at MAX_PATTERN_CHARS (500) was skipped")
+
+    def test_pattern_of_501_chars_is_skipped(self):
+        self.assertFalse(self.matches("b" * 501, "b" * 501), "a pattern one past MAX_PATTERN_CHARS (500) was matched")
+
+    def test_match_that_ends_at_4000_chars_is_found(self):
+        self.assertTrue(self.matches("ACT", "x" * 3997 + "ACT"), "a match that ends at MAX_TARGET_CHARS (4000) was missed")
+
+    def test_match_that_starts_at_4000_chars_is_not_searched(self):
+        self.assertFalse(self.matches("ACT", "x" * 4000 + "ACT"),
+                         "a match that starts past MAX_TARGET_CHARS (4000) was searched")
+
+    def test_match_whose_last_char_is_one_past_4000_chars_is_not_found(self):
+        self.assertFalse(self.matches("ACT", "x" * 3998 + "ACT"),
+                         "a match whose last char is one past MAX_TARGET_CHARS (4000) was found")
 
 
 if __name__ == "__main__":
