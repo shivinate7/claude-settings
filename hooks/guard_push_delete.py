@@ -867,6 +867,10 @@ _PR_URL = re.compile(r"/pull/(\d+)")
 # constants once it loads, so none is named here.
 _DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
 _VERDICT_LINE = re.compile(r"[\s>*#_-]*([A-Z]+), (round \d+ of \d+|fix check), [\w.-]+[\s*_]*")
+# A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix check
+# marker and an all-capitals word, as in `Done: round 1 reviewer haiku FAIL`.
+_LABEL_ROUND = re.compile(r"\bround (\d+)\b|\b(fix check)\b")
+_LABEL_WORD = re.compile(r"\b[A-Z]{4,}\b")
 _NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?)</result>", re.S)
 _HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
 _AGENT_ID = re.compile(r"agentId:\s*(\S+)")
@@ -882,8 +886,9 @@ def _blocks_text(content) -> str:
 
 def _done_verdict(text: str):
     """(word, kind, round number or None) of the verdict on the Done line of `text`, kind `round` or `fix`, else None. The Done line is
-    the first line after a `Done` label, or the label's own line. A finding line never counts, and nor does
-    any line inside a ``` fence."""
+    the first line after a `Done` label, or the label's own line, where the verdict may sit in any word order.
+    A label line with other text and no verdict leaves the line under it as the Done line. A finding line
+    never counts, and nor does any line inside a ``` fence."""
     after, fenced = False, False
     for line in text.splitlines():
         if line.lstrip().startswith("```"):
@@ -897,6 +902,12 @@ def _done_verdict(text: str):
             if not line.strip():
                 after = True
                 continue
+            if not _VERDICT_LINE.fullmatch(line):
+                loose, marker = _LABEL_WORD.search(line), _LABEL_ROUND.search(line)
+                if loose and marker:
+                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None
+                after = True
+                continue
         elif not after:
             continue
         found = _VERDICT_LINE.fullmatch(line)
@@ -906,6 +917,36 @@ def _done_verdict(text: str):
         if after and line.strip():
             return None
     return None
+
+
+def _named_sha(body: str):
+    """The first commit sha (7-40 hex) a report names, else None. A word of 7-39 hex characters counts only with
+    a digit and a letter in it, so `defaced` and a seven-digit count do not; a full 40-character sha always counts."""
+    for word in re.findall(r"\b[0-9a-f]{7,40}\b", body):
+        if len(word) == 40 or (re.search(r"\d", word) and re.search(r"[a-f]", word)):
+            return word
+    return None
+
+
+def _held_counts(held, head, where):
+    """The held reports (tuples ending in the sha they name) that count for a PR whose head branch is `head`, read
+    in the checkout `where`, as (role, word, kind, number): the report's sha is the head or an ancestor of it. A
+    failed read of the head or of the ancestry counts the report (fail toward refusing). The reads are one
+    `git rev-parse` and one `git merge-base --is-ancestor` per held report, and none when nothing is held."""
+    if not held:
+        return []
+    tip = None
+    for ref in (head, "refs/remotes/origin/" + head) if head and where else ():
+        answer = guard_core._git(where, "rev-parse", "--verify", "-q", ref + "^{commit}")
+        if answer is not None and answer.returncode == 0 and answer.stdout.strip():
+            tip = answer.stdout.strip()
+            break
+    counted = []
+    for report in held:
+        answer = guard_core._git(where, "merge-base", "--is-ancestor", report[-1], tip) if tip else None
+        if answer is None or answer.returncode != 1:   # 0 is an ancestor; a failed read is not 1
+            counted.append(report[:-1])
+    return counted
 
 
 def _notice_reports(record, roles, agents):
@@ -932,8 +973,8 @@ def _notice_reports(record, roles, agents):
 def _transcript_events(path: str):
     """The ordered events of a transcript that the rule reads: ("pr", number, head) for a create_pull_request or
     a Bash `gh pr create` that returned no error, ("post", body, from_shell) for a comment call that returned
-    none (a shell call's body is its command text), and ("report", role, word, kind, round) for an Agent report
-    whose Done line has the verdict shape. Raises OSError when the file cannot be read."""
+    none (a shell call's body is its command text), and ("report", role, word, kind, round, sha) for an Agent report
+    whose Done line has the verdict shape, with the sha the report names or None. Raises OSError when the file cannot be read."""
     events, calls, roles, agents, posts, pr_heads = [], {}, {}, {}, {}, {}
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
@@ -980,7 +1021,7 @@ def _transcript_events(path: str):
             for role, body in reports + _notice_reports(record, roles, agents):
                 verdict = _done_verdict(body)
                 if verdict:
-                    events.append(("report", role) + verdict)
+                    events.append(("report", role) + verdict + (_named_sha(body),))
     return events
 
 
@@ -1000,13 +1041,15 @@ def _record_of(merge, text: str, from_shell: bool):
     return merge.parse_review(text[start:end + len(merge.REVIEW_CI_LINE)]) if end >= 0 else None
 
 
-def review_record_hit(transcript: str, destinations=lambda: []):
+def review_record_hit(transcript: str, destinations=lambda: [], where: str = ""):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
-    branch names the push writes; it runs only when a posted record holds a Fix check line.
+    branch names the push writes; it runs only when a posted record holds a Fix check line. `where` is the
+    push's checkout, where a held report's sha is read against the PR's head.
     1. A PR known to the session and a reviewer report with no later posted record holding a line with that
        report's role, verdict and round (a fix check: the Fix check line's role and verdict). A report before the
-       PR is known is not read. A design-reviewer fix check is not read: a record holds a Fix check line for the
-       reviewer only.
+       PR is known is held by the sha it names, and counts when that PR becomes known and the sha is the PR's
+       head or an ancestor of it (`_held_counts`); a report naming no sha is dropped. A design-reviewer fix
+       check is not read: a record holds a Fix check line for the reviewer only.
     2. A posted record, accepted by parse_review, with a Fix check line for PR n, and a push to n's head branch
        (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes.
     An unreadable transcript, or an unloadable merge module, passes."""
@@ -1021,22 +1064,30 @@ def review_record_hit(transcript: str, destinations=lambda: []):
         if merge is None:
             return "", ""
         known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose record holds a Fix check
+        early = []   # reports read before any PR was known, each ending in the sha it names
         for event in events:
             if event[0] == "pr":
                 known = True
                 if event[1] is not None and event[2]:
                     heads[event[1]] = event[2]
+                pending += _held_counts(early, event[2], where)
+                early = []
             elif event[0] == "report":
-                _, role, word, kind, number = event
+                _, role, word, kind, number, sha = event
                 verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
-                if (known and role in merge.REVIEW_ROLES and word in verdicts
+                if (role in merge.REVIEW_ROLES and word in verdicts
                         and (kind == "round" or role == merge.REVIEW_ROLES[0])):
-                    pending.append((role, word, kind, number))
+                    if known:
+                        pending.append((role, word, kind, number))
+                    elif sha:
+                        early.append((role, word, kind, number, sha))
             else:
                 record = _record_of(merge, event[1], event[2])
                 if record is None:
                     continue
                 known = True
+                pending += _held_counts(early, None, where)   # no head branch is known: each counts
+                early = []
                 held = {(role, word, "round", number) for number, role, _, word in record["rounds"]}
                 if record["fix"]:
                     held.add((record["fix"][1], record["fix"][3], "fix", None))
