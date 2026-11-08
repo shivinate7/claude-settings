@@ -19,6 +19,18 @@ on=" "
 if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name-only --no-renames "$range" 2>/dev/null) && [ -n "$files" ]; then
   W=checks_windows M=checks_windows_merge R=checks_windows_rest Z=checks_windows_sweep X=checks_macos S=shell_macos P=pointer_windows
   while IFS= read -r f; do
+    # The merge flag (checks_windows_merge) beside the flags the arms below give each path: every file merge/merge.py loads, to closure
+    # (module- and function-level imports, by-path loads, transitive loads), guard family included. A list, not a read of merge.py: this
+    # script also runs in fixture repos and a Windows checkout, where merge.py or python3 may be absent. lint/test_ci_scope.py reads the
+    # closure and pins this set: a new load in merge.py, or in a file it loads, fails that test until its file is added here.
+    case "$f" in
+      hooks/guard_test_*) ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/shared_names.py|hooks/own_session.py|hooks/question_form.py|hooks/precompact_handoff.py) on="$on $M " ;;
+      hooks/_nowindow.py|hooks/git_reads.py|hooks/required_check.py|hooks/git_bash.py|hooks/call_judge.py|hooks/decision_watch.py|hooks/feedback_guard.py) on="$on $M " ;;
+      hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py) on="$on $M " ;;
+      lint/hook_catalog.py|lint/check_debt_retire.py|lint/check_record_slugs.py|lint/check_skill_model_rows.py|lint/report_guard.py|lint/rule_audit.py|lint/stale_cites.py|lint/workflow_steps.py) on="$on $M " ;;
+      janitor/sweep.py|janitor/temp_sweep.py|actions/ci-alarm/clear_rule.py) on="$on $M " ;;
+    esac
     case "$f" in
       # Fail safe: this script, the workflow, and git settings that change every checkout.
       .github/scripts/ci-scope.sh|.github/workflows/checks.yml|.gitattributes) on="$on $ALL " ;;
@@ -53,7 +65,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
       # beside the script, so an edit to bin/sim-lease turns the same job on.
-      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
+      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      # merge.py's load closure reaches bin/sim-lease too (hooks/guard.py loads it by path), so it also turns on the merge job.
+      bin/sim-lease) on="$on $S $M code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also

@@ -5,7 +5,9 @@ reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
-that patches one of these names patches it here, on the one object every reader calls. Standard
+that patches one of these names patches it here, on the module object that import returns.
+merge/merge.py loads its own private copy by path for `lists_refs` and `listing_text` only; its
+`ancestor` still imports this module from sys.modules, so a patch to the other names reaches merge. Standard
 library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
@@ -29,6 +31,29 @@ def _git(where: str, *args):
         )
     except Exception:
         return None
+
+
+def lists_refs(args):
+    """True for `git -C <dir> ls-remote ...`, the only call read stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
+    Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
+    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` reads it through its own private copy of this module."""
+    return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
+
+
+def listing_text(returncode, stdout, stderr):
+    """-> (returncode, text) for a finished `ls-remote`: stdout alone on success, both streams on a failure (the network-error read needs the stderr line)."""
+    if returncode == 0:
+        return returncode, stdout.strip()
+    return returncode, (stdout + stderr).strip()
+
+
+def ls_remote(where: str, *args, env=None, timeout=10):
+    """-> (returncode, text) of `git -C where ls-remote *args`, or None when git did not run or timed out. The janitor's reader. merge's `sh` loads its own private copy of this module for `lists_refs` and `listing_text`."""
+    try:
+        r = _nowindow.run(["git", "-C", where, "ls-remote", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
+    except Exception:
+        return None
+    return listing_text(r.returncode, r.stdout, r.stderr)
 
 
 def is_worktree(where: str):
