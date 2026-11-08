@@ -2402,8 +2402,8 @@ class RetireCite(unittest.TestCase):
 class NotesUnionRevival(unittest.TestCase):
     """The debt notes file merges by union (decision notes-merge-union, .gitattributes merge=union). A local merge keeps
     a row that one side deleted when the other side adds next to it, with no conflict marker, so union revives the row.
-    One read covers every merge of upstream..head: a line of a merge=union file (union read from the merge's first
-    parent) that is in the merge base of the two parents, absent from one parent, and present in the merge result is a
+    One read covers every merge of upstream..head: a line of a merge=union file (a file is union when either parent says
+    merge=union) that is in the merge base of the two parents, absent from one parent, and present in the merge result is a
     finding naming path and line. Duplicate rows count by copies. A Drops-lines trailer still excuses its path."""
 
     PATH = "docs/debts/notes.md"
@@ -2434,14 +2434,17 @@ class NotesUnionRevival(unittest.TestCase):
         r.push()
         return r
 
-    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False):
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None):
         """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
         commit each, in `order`. ff_first fast-forwards integ to lane A instead. A conflict in a file without merge=union
-        is resolved by hand to `keep`. -> (repo, integ head)."""
+        is resolved by hand to `keep`. extra_b maps more paths lane B adds, path -> text. -> (repo, integ head)."""
         r = self.base(path, union, rows)
         for lane, rows_ in (("A", a_rows), ("B", b_rows)):
             r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
             r.put(path, self.text(rows_))
+            if lane == "B":
+                for name, body in (extra_b or {}).items():
+                    r.put(name, body)
             r.commit("lane " + lane)
         r.sh("checkout", "-q", "-b", "integ", "origin/main")
         for lane in order:
@@ -2632,26 +2635,115 @@ class NotesUnionRevival(unittest.TestCase):
                 self.assertIn(self.GAMMA_NEW, rows, "premise: the rewrite is in the final head")
                 self.assert_fails_naming(r, head, self.GAMMA)
 
-    def test_a_git_without_check_attr_source_is_unknown_not_a_pass_or_a_crash(self):
-        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
-        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+    @contextlib.contextmanager
+    def git_below_240(self):
+        """A git below 2.40 refuses check-attr --source. Every other git call is real. Yields the refused calls."""
         real, hits = C.git, []
 
-        def old_git(cwd, *a, **k):  # a git below 2.40 refuses check-attr --source; every other call is real
+        def old_git(cwd, *a, **k):
             if a and a[0] == "check-attr":
                 hits.append(a)
                 raise C.Unknown("git check-attr failed: unknown option: --source")
             return real(cwd, *a, **k)
 
         with unittest.mock.patch.object(C, "git", old_git):
-            with self.assertRaises(C.Unknown) as caught:
-                C.check(r.dir, "origin/main", head)
-            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+            yield hits
+
+    def test_a_git_without_check_attr_source_is_unknown_not_a_pass_or_a_crash(self):
+        """A git below 2.40 refuses check-attr --source, so the union read is UNKNOWN. The UNKNOWN is printed beside the
+        other findings, never in place of them: a lost line in the same run still FAILs. Exit is 1 under --strict. With no
+        other finding, the UNKNOWN alone exits 1. No run passes the unread union."""
+        lost_r, lost_head = drop_merge(["lost line: keep the probe"])
+        self.assertIn("lost line", lost_r.sh("show", "origin/main:app.txt"), "premise: main holds the line")
+        self.assertNotIn("lost line", lost_r.sh("show", "%s:app.txt" % lost_head), "premise: the merge drops the line")
+        with self.git_below_240() as hits:
+            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", lost_head, "--repo", lost_r.dir, "--strict"], "utf-8")
         self.assertTrue(hits, "premise: the union read reached check-attr")
-        self.assertIn("git 2.40", str(caught.exception), "the Unknown does not name the git floor")
-        self.assertEqual(rc, 1, "an unreadable union read does not exit 1 under --strict")
+        self.assertIn("FAIL", text, "a git below 2.40 hides the lost line the merge drops")
+        self.assertIn("lost line", text, "the printed FAIL does not name the lost line")
         self.assertIn("UNKNOWN", text, "the printed verdict is not UNKNOWN")
         self.assertIn("git 2.40", text, "the printed UNKNOWN does not name the git floor")
+        self.assertEqual(rc, 1, "a lost line with an unreadable union read does not exit 1 under --strict")
+
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        with self.git_below_240() as hits:
+            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertTrue(hits, "premise: the union read reached check-attr")
+        self.assertNotIn("FAIL", text, "a union read that is UNKNOWN is printed as a FAIL")
+        self.assertIn("UNKNOWN", text, "the printed verdict is not UNKNOWN")
+        self.assertIn("git 2.40", text, "the printed UNKNOWN does not name the git floor")
+        self.assertEqual(rc, 1, "an unreadable union read does not exit 1 under --strict")
+
+    def cut_before_rule(self, keep=None):
+        """A lane cut before the union rule landed deletes the last row. Main then gains the rule and appends a row after
+        that one. The lane merges main: the merge's first parent has no rule, its second has merge=union. A conflict is
+        resolved to `keep`, both sides by default. -> (repo, lane merge sha, whether the merge conflicted)."""
+        r = self.base(self.PATH, union=False)
+        r.sh("checkout", "-q", "-b", "laneL", "origin/main")
+        r.put(self.PATH, self.text(self.ROWS[:2]))
+        r.commit("lane L deletes the last row")
+        r.sh("checkout", "-q", "main")
+        r.put(".gitattributes", "%s merge=union\n" % self.PATH)
+        r.put(self.PATH, self.text(self.ROWS + [self.NEW]))
+        r.commit("main gains the union rule and appends a row")
+        r.push()
+        r.sh("checkout", "-q", "laneL")
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Merge main into lane L", "origin/main", ok=False)
+        conflicted = bool(r.sh("diff", "--name-only", "--diff-filter=U"))
+        if conflicted:
+            r.put(self.PATH, self.text(self.ROWS + [self.NEW]) if keep is None else keep)
+            r.sh("add", "-A")
+            r.sh("commit", "-q", "-m", "Merge main into lane L")
+        return r, r.sh("rev-parse", "HEAD"), conflicted
+
+    def test_a_lane_cut_before_the_union_rule_is_read_through_the_merged_main(self):
+        r, head, conflicted = self.cut_before_rule()
+        lane, main = [r.sh("rev-parse", "%s^%d" % (head, i)) for i in (1, 2)]
+        self.assertNotIn("merge=union", r.sh("show", "%s:.gitattributes" % lane, ok=False), "premise: the lane, the first parent, has no union rule")
+        self.assertIn("merge=union", r.sh("show", "%s:.gitattributes" % main, ok=False), "premise: main, the second parent, has the union rule")
+        self.assertTrue(conflicted, "premise: git conflicts on the notes file, so the hand merge decides the row")
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: keeping both sides brings the deleted row back")
+        self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_lane_cut_before_the_union_rule_that_keeps_its_deletion_is_not_a_finding(self):
+        r, head, _ = self.cut_before_rule(keep=self.text(self.ROWS[:2] + [self.NEW]))
+        self.assertNotIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the merge keeps the deletion")
+        problems, _ = C.check(r.dir, "origin/main", head)
+        self.assertEqual(problems, [], "a row that stays deleted is read as revived: %s" % problems)
+
+    WIN_CMDLINE = 32767  # Windows' CreateProcess caps a command line here. Linux has no such cap, so the test simulates it.
+
+    @contextlib.contextmanager
+    def windows_command_line(self):
+        """A git call whose command line is over WIN_CMDLINE characters fails as Windows' CreateProcess does."""
+        real = C.git
+
+        def capped(cwd, *a, **k):
+            line = " ".join(["git", "-C", cwd, *a])
+            if len(line) > self.WIN_CMDLINE:
+                raise OSError("git %s: command line of %d characters is over %d" % (a[0], len(line), self.WIN_CMDLINE))
+            return real(cwd, *a, **k)
+
+        with unittest.mock.patch.object(C, "git", capped):
+            yield
+
+    def test_six_hundred_long_paths_in_one_merge_are_read_without_an_os_error(self):
+        names = ["bulk/%03d_%s.txt" % (i, "w" * 47) for i in range(600)]
+        self.assertTrue(all(len(n) == 60 for n in names), "premise: every name is 60 characters")
+        self.assertGreater(sum(len(n) + 1 for n in names), self.WIN_CMDLINE, "premise: the names alone are over the limit")
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), extra_b={n: "bulk\n" for n in names})
+        self.assertGreaterEqual(len(r.sh("diff", "--name-only", "%s^1" % head, head).splitlines()), 600, "premise: the merge changes 600 files")
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        with self.windows_command_line():
+            try:
+                problems, _ = C.check(r.dir, "origin/main", head)
+            except OSError as e:
+                self.fail("a git call's command line was over the limit: %s" % e)
+            self.assertTrue(any(self.PATH in p and self.GAMMA in p for p in problems), "no finding names the path and the row: %s" % problems)
+            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertEqual(rc, 1, "the revival does not exit 1 when the merge changes many long paths")
+        self.assertIn(self.GAMMA, text, "the printed FAIL does not name the row")
 
 
 if __name__ == "__main__":
