@@ -1163,6 +1163,24 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(self.stop(bad, True)["decision"], "block")
         self.assertIsNone(self.stop(bad, True))
 
+    def test_rw_three_stops_block_once_and_leave_no_marker(self):
+        # Pin (green on 3cfa1b1f9) of the three-Stop probe in review note 75: Stop 1 blocks for the missing report and
+        # writes the marker, Stop 2 gives a correction block and consumes it, Stop 3 stays quiet. The shared step
+        # missing_report_block() is the first stop. test_rw_second_rewrite_stays_quiet checks the outputs only, so this
+        # case reads the marker file too: a correction that re-arms it would loop.
+        import local_time  # hooks/ is on sys.path; the same path helper the guard writes through
+        marker = local_time.report_marker_path(self.sid)
+        self.assertIsNotNone(marker, "no marker path for the test session")
+        self.missing_report_block()
+        self.assertTrue(os.path.exists(marker), "Stop 1 blocked for the missing report but wrote no marker")
+        bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
+        out = self.stop(bad, True)
+        self.assertIsNotNone(out, "Stop 2, a flawed rewrite, gave no correction block")
+        self.assertEqual(out["decision"], "block")
+        self.assertFalse(os.path.exists(marker), "the correction block left the marker")
+        self.assertIsNone(self.stop(bad, True), "Stop 3 re-checked a flawed rewrite after the correction")
+        self.assertFalse(os.path.exists(marker), "Stop 3 left a marker")
+
     def test_rw_correct_rewrite_passes(self):
         self.missing_report_block()
         self.assertIsNone(self.stop(self.GOOD, True))
