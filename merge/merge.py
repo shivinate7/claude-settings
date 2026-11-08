@@ -2899,7 +2899,7 @@ def build_batch(root, h, base, push="", findings_ok=""):
     Output, printed at the end: the cap line, `skipped lint:` lines, a `joins: #n branch sha` line per joined PR in merge order, a `left out: #n
     branch: why` line per PR left out in PR order, and `batch: N PRs`.
     A done record whose Findings read could not run (`findings unknown` in pr_acts) is left out, and its line names the reason flag
-    --findings-unknown-ok "<reason>", which lets it join with the reason logged; a record whose Findings are not met is no candidate at all.
+    --findings-unknown-ok "<reason>", which lets it join with the reason printed; a record whose Findings are not met is no candidate at all.
     Cost: the open-pull list and the repo's comments (one read each), the Findings reads of pr_acts for each done record that has a Findings line other than
     `none` (its files, or one `pulls/<x>` per named follow-up), one `pulls/<n>` read per merge-after target outside the open list, one fetch
     of the base and one per candidate branch, two worktrees (the batch tree and a probe tree at the base) and one more per running lint, one or two
@@ -3745,9 +3745,15 @@ def findings_read(root, h, n, findings):
     debt notes file (FILING_KINDS, read by `filing_homes` from the layout of `root`). `N, follow-up #X, ...` is done when each named pull request exists,
     is not `n`, and is open or merged; the first one that is not ends the read (one that could not be read does not). A 404 is open and names the number. Any other failed read, a network stop or a reply that does not parse, is unknown, never open or done.
     Cost: one list read of `pulls/<n>/files` per page, or one `pulls/<x>` read per named pull request until one is not done; none for `none`, and
-    no call to Host.pr, which sets the host's base."""
+    no call to Host.pr, which sets the host's base. A `this PR` read also reads a few local files for `filing_homes` (lint/layout.json, the repo's
+    extras file and its git config); it starts no process and writes nothing.
+    A layout that cannot be read (layout.LayoutError: an extras file that does not parse or conflicts with the layout, or a legacy-repos entry that
+    names no layout kind) is unknown too, as `the layout could not be read` (owner item 276 a: a read that fails is unknown)."""
     if findings.endswith("this PR"):
-        folders, notes = filing_homes(root)
+        try:
+            folders, notes = filing_homes(root)
+        except layout.LayoutError:
+            return "unknown", "the layout could not be read"
         try:
             rows = h.pages(f"pulls/{n}/files")
             filed = any(r["status"] == "added" and r["filename"].startswith(folders) or r["filename"] in notes and r["additions"] > 0 for r in rows)
@@ -4013,7 +4019,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--findings", type=findings_arg, metavar="VALUE", help="with --review-record: the Findings line, required: none, N, this PR, or N, follow-up #PR[, #PR...]")
-    p.add_argument("--findings-unknown-ok", default="", metavar="REASON", help="with --build-batch: let a pull request whose Findings read could not run join the batch; logged")
+    p.add_argument("--findings-unknown-ok", default="", metavar="REASON", help="with --build-batch: let a pull request whose Findings read could not run join the batch; the reason is printed")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
