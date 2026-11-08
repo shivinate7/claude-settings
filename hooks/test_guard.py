@@ -9993,6 +9993,63 @@ def env_substitution_places_case():
 FIXTURELESS_CHECKS.update((env_cap_include_suffix_case, env_substitution_places_case))
 
 
+# ---- env walk: the shapes the walk leaves open or over-refuses. Each deny row searches a folder that holds an env
+# file, and its control is the same form over a folder with no env file, which stays allowed. A form that reaches
+# an env file by a shape the walk misses is a safety hole, and a clean form the walk refuses is a false alarm.
+
+# A cd inside an if-branch may not run, and the search runs in the start folder when it does not. Both folders
+# are judged, so the start folder's env file refuses the search.
+_IF_BRANCH_CD = "if [ -f x ]; then cd src; fi; rg --hidden K"
+sh("env: walk safety hole, cd inside an if-branch, the start folder holds an env file, refused: " + _IF_BRANCH_CD,
+   _IF_BRANCH_CD, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, cd inside an if-branch, folder has no env file, allowed: " + _IF_BRANCH_CD,
+   _IF_BRANCH_CD, "allow", cwd=ENVWALK_CLEAN)
+
+# Each form runs a search in a folder the walk does not enter: a shell string under zsh, a privilege wrapper, a
+# search whose paths come from stdin, and nohup or exec in front of a shell string. Each is refused over the held
+# folder, and allowed over a folder with no env file and over an empty one.
+_ROUND3_WRAPPERS = ("zsh -c 'grep -r K .'", "sudo rg --hidden K", "xargs rg --hidden K < list",
+                    "nohup bash -c 'grep -r K .'", "exec bash -c 'grep -r K .'")
+for _cmd in _ROUND3_WRAPPERS:
+    sh("env: walk safety hole, wrapper outside the walk's list, folder holds an env file, refused: " + _cmd, _cmd,
+       "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: walk control, wrapper outside the walk's list, folder has no env file, allowed: " + _cmd, _cmd,
+       "allow", cwd=ENVWALK_CLEAN)
+    sh("env: walk control, wrapper outside the walk's list, folder is empty, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_EMPTY)
+
+# In an all-&& chain, a search runs only when the test passes and the cd before it ran, even with a pipe in the chain.
+# The search runs in src, which holds no env file, so the start folder's env file cannot reach it and the walk
+# should allow it. The control is the same chain into the held folder, which the search does reach, so it is refused.
+_PIPE_AFTER_CD = "test -d src && cd src && echo | grep -r K"
+sh("env: walk false alarm, all-&& cd into a sub folder with no env file, then a piped grep, allowed: " + _PIPE_AFTER_CD,
+   _PIPE_AFTER_CD, "allow", cwd=ENVWALK_HELD)
+_PIPE_AFTER_CD_INTO_HELD = ("test -d " + slash(ENVWALK_HELD) + " && cd " + slash(ENVWALK_HELD)
+                            + " && echo | grep -r K")
+sh("env: walk control, all-&& cd into the env folder, then a piped grep, refused: " + _PIPE_AFTER_CD_INTO_HELD,
+   _PIPE_AFTER_CD_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+
+# Three conditional cds. The search runs in src, in CLEAN, in SUB_CLEAN, or in the start folder, and only the
+# combination where all three tests fail leaves it in the start folder, which holds the env file. The walk must
+# judge that combination, so the search is refused. The control is the same form over a folder with no env file.
+_THREE_CONDITIONAL_CDS = ("test -f a && cd src; test -f b && cd " + slash(ENVWALK_CLEAN)
+                          + "; test -f c && cd " + slash(ENVWALK_SUB_CLEAN) + "; rg --hidden K")
+sh("env: walk safety hole, three conditional cds, only the all-skipped combination reaches the held start folder, "
+   "refused: " + _THREE_CONDITIONAL_CDS, _THREE_CONDITIONAL_CDS, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: walk control, three conditional cds, folder has no env file, allowed: " + _THREE_CONDITIONAL_CDS,
+   _THREE_CONDITIONAL_CDS, "allow", cwd=ENVWALK_CLEAN)
+# The walk tries the all-run, the all-skipped and each one-skipped combination, and no other. With three cds, the
+# first cd running and the other two skipped leaves the search in the held folder, and no tried combination reaches
+# it. The control is the same shape over folders with no env file.
+_TWO_SKIPPED = ("test -f a && cd " + slash(ENVWALK_HELD) + "; test -f b && cd src; test -f c && cd src; rg --hidden K")
+sh("env: walk safety hole, three conditional cds, first runs and two skipped reach the held folder, refused: "
+   + _TWO_SKIPPED, _TWO_SKIPPED, "deny", "env-file", cwd=ENVWALK_CLEAN)
+_TWO_SKIPPED_CLEAN = ("test -f a && cd " + slash(ENVWALK_SUB_CLEAN)
+                      + "; test -f b && cd sub; test -f c && cd sub; rg --hidden K")
+sh("env: walk control, three conditional cds, first runs and two skipped, no env file, allowed: "
+   + _TWO_SKIPPED_CLEAN, _TWO_SKIPPED_CLEAN, "allow", cwd=ENVWALK_CLEAN)
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
