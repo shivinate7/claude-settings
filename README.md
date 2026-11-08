@@ -144,10 +144,12 @@ merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MO
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
                         --findings V: none, "<n>, this PR" or "<n>, follow-up #<pr>[, ...]". Required.
-merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, batch, batch run, lane round n, waits on <id>,
+merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, batch, batch run, lane round n, lane: <cause>, waits on <id>,
                         blocked on #N, or NO NEXT ACT) and its age in hours, read from GitHub alone. `lane lint red` comes before `batch`: a
                         `Lint: red <live head> <steps>` comment, posted by `merge --build-batch`, names the live head. A draft with no record reads `lane round 1`; a PR
                         with the `batch` label reads `batch run`. When main's latest run is red, each batch line adds `held by main red <age>`.
+                        A done record whose Findings are not filed reads `lane: <cause>`, where the cause is `findings not filed: this PR`,
+                        `follow-up #N does not exist`, `follow-up #N closed unmerged` or `follow-up #N is this PR`. It keeps the lane round age limit.
                         RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
                         with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
 merge --build-batch [--base BRANCH] [--push BRANCH]   build an integration branch from PR state alone: the PRs whose act is `batch`
