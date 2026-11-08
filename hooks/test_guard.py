@@ -8036,6 +8036,36 @@ sh("env: an ASCII # inside a string does not end the command, denies (the twin o
    'Write-Host "a #b"; Get-Content C:\\MyDir\\' + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 sh("env: Bash reads a smart pair as literal text, so the .env between them denies",
    "cat " + SMART_DQ + "a " + ENV + " b" + SMART_DQ_END, "deny", "env-file", cwd=NOGIT)
+# PowerShell ends a smart-opened string at a straight mark of the same kind, so the .env after that
+# close is a read. The same-kind close is the control: it denies with or without the mixed close.
+sh("env: a smart-double-quoted string closed by a straight quote, then .env, denies",
+   "Write-Host " + SMART_DQ + 'a"; Get-Content ' + ENV + "; Write-Host " + SMART_DQ + "ok" + SMART_DQ_END,
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-single-quoted string closed by a straight quote, then .env, denies",
+   "Write-Host " + SMART_SQ + "a'; Get-Content " + ENV + "; Write-Host " + SMART_SQ + "ok" + SMART_SQ_END,
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-double-quoted string with a space, closed by a straight quote, then .env, denies",
+   "Write-Host " + SMART_DQ + 'x y"; Get-Content ' + ENV + "; Write-Host " + SMART_DQ + "z" + SMART_DQ_END,
+   "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-double-quoted string closed by its own mark, then .env, denies (the control)",
+   "Write-Host " + SMART_DQ + "a" + SMART_DQ_END + "; Get-Content " + ENV + "; Write-Host " + SMART_DQ + "ok"
+   + SMART_DQ_END, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# A backslash and a dot after a space, in a regex or in prose, are text. No path is read here.
+sh("env: a Select-String regex with a digit and a space before .env, allowed",
+   'Select-String -Pattern "\\d+ \\' + ENV + '" -Path README.md', "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: a git grep regex with a digit and a space before .env, allowed",
+   'git grep -e "\\d \\' + ENV + '" -- src', "allow", cwd=NOGIT)
+sh("env: a Write-Host string naming a spaced folder and .env, allowed",
+   'Write-Host "see C:\\My Dir\\' + ENV + ' for setup"', "allow", tool="PowerShell", cwd=NOGIT)
+# main allows this unspaced form, so the spaced form above pins to the same verdict.
+sh("env: a Write-Host string naming an unspaced folder and .env, allowed",
+   'Write-Host "see C:\\MyDir\\' + ENV + '"', "allow", tool="PowerShell", cwd=NOGIT)
+# A smart quote opens a PowerShell string at the start of a word, and a straight mark can close it.
+sh("env: a smart-double-quoted bare .env closed by a straight quote, denies",
+   "Get-Content " + SMART_DQ + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: a smart-double-quoted folder with a space inside a backslash path, denies",
+   "Get-Content C:\\" + SMART_DQ + "My Dir" + SMART_DQ_END + "\\" + ENV, "deny", "env-file",
+   tool="PowerShell", cwd=NOGIT)
 
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
