@@ -575,6 +575,26 @@ class ReportGuardTests(unittest.TestCase):
         out = json.loads(run.stdout)
         self.assertEqual(out.get("decision"), "block")
 
+    def test_rg_red_a_turn_after_a_peer_message_is_not_judged_by_an_earlier_commit(self):
+        # Catches: a reply that lands nothing, after a peer's fix-check message, is asked for a report because a
+        # commit earlier in the same human message landed. The landing check starts at the last human message, which
+        # a peer never is, so the earlier commit stays in its window; the pick check starts at the peer message.
+        # Scope first: the same commit followed by a reply with no report blocks.
+        with tempfile.TemporaryDirectory() as tmp:
+            witness = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                       tool_result_msg(), assistant_text("Landed it.")]
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(witness, tmp)))
+            self.assertEqual(json.loads(run.stdout).get("decision"), "block", "scope: the witness did not block")
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                       tool_result_msg(), assistant_text(GOOD_REPORT),
+                       peer_msg("fix check: 0 findings on abc1234"),
+                       assistant_text("Fix check passed; nothing to land.")]
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stdout.strip(), "",
+                             "a turn that lands nothing was asked for a report: " + run.stdout[:200])
+
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
         # Pinned by hand, not read from report_guard.LANDING_TOOLS: an emptied set must fail here.
         # Catches: a GitHub landing tool with no report is not blocked.
@@ -1410,15 +1430,15 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
 
     def test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes(self):
-        # Catches: a Recovered item sourced as "commit <hex>" (with or without backticks or a colon), "PR <n>",
-        # "PR#<n>", "GitHub PR <n>" or a github.com URL is refused as sourceless. Each names where the fact came from.
+        # Catches: a Recovered item sourced as "commit <hex>" (with or without backticks or a colon), "PR #<n>",
+        # "PR#<n>" or a github.com URL is refused as sourceless. Each names where the fact came from. A PR with no
+        # "#" is no source (test_cc_red_pr_source_without_a_hash_is_no_source).
         items = [
             "ruling X from commit abc1234",
             "ruling X from commit `abc1234`",
             "ruling X from commit: abc1234",
             "ruling X from PR #978",
             "ruling X from PR#978",
-            "ruling X from GitHub PR 978",
             "ruling X from https://github.com/shivinate7/claude-settings/pull/978",
         ]
         for item in items:
@@ -1427,11 +1447,12 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
     def test_cc_green_pull_commits_sha_and_issue_forms_pass(self):
-        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" and "PR <n>" (no #)
-        # are refused as sourceless. "issue #5" is the pinned edge that already passes. An issue with no # is no source
-        # (test_cc_red_issue_without_a_hash_is_no_source).
+        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" are refused as
+        # sourceless. "issue #5" is the pinned edge that already passes. An issue with no # is no source
+        # (test_cc_red_issue_without_a_hash_is_no_source). A PR with no # is no source
+        # (test_cc_red_pr_source_without_a_hash_is_no_source).
         items = ["ruling X from pull request #978", "ruling X from pull #978", "ruling X from commits abc1234",
-                 "ruling X from sha abc1234", "ruling X from issue #5", "ruling X from PR 978"]
+                 "ruling X from sha abc1234", "ruling X from issue #5"]
         for item in items:
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
@@ -1455,6 +1476,18 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
                 self.assertIsNotNone(out, "a bare issue <n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
+
+    def test_cc_red_pr_source_without_a_hash_is_no_source(self):
+        # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   3" (spaces), "PR 978", "GitHub PR 978",
+        # "pr 2 of the plan" and "the PR 3 times". The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs
+        # "#<n>". The green control is "PR #3" (test_cc_green_spaced_pr_hash_is_a_source).
+        items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
+                 "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a PR with no # passes as a source: " + item)
                 self.assertEqual(out["decision"], "block", item)
 
     def test_cc_green_issue_with_a_hash_is_a_source(self):
