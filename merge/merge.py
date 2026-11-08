@@ -2450,14 +2450,15 @@ def review_record_step(h, root, n, info):
     passing lint before it prints a done record, so a FAIL there would deadlock."""
     found = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
     live = info["head"][:9]
+    again = f"Then post a new record with `merge {n} --review-record ...`: a comment is never fixed by a push."
     if not found:
         return None, f"Review record: note, no record on this pull request yet. Post one for the live head {live}, from `merge {n} --review-record`."
     created, cid, body = found[-1]
     rec, bad = review_parse(body, created, review_stamp_since(root, info["base"]))
     if bad:
         if not review_marked(body):
-            return f"FAIL Review record: the newest comment has record fields but no marker line, so no record names the live head {live}: {review_bad_text(bad, cid)}.", None
-        return "FAIL Review record: the newest record does not parse: " + " ".join(x for x in (review_bad_text(bad, cid) + ".", review_remedy(body, bad)) if x), None
+            return f"FAIL Review record: the newest comment has record fields but no marker line, so no record names the live head {live}: {review_bad_text(bad, cid)}. {again}", None
+        return "FAIL Review record: the newest record does not parse: " + " ".join(x for x in (review_bad_text(bad, cid) + ".", review_remedy(body, bad), again) if x), None
     if rec["n"] != n or rec["head"] != info["head"]:
         return None, f"Review record: note, the newest record is for head {rec['head'][:9]}, not the live head {live}. Post one for the live head."
     return None, None
@@ -3083,6 +3084,7 @@ REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_PR_PAT, REVIEW_HEAD_PAT = r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})"  # the first two fields of the form: review_parse and review_unmarked read them
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_STAMP_SALT = "claude-settings review record stamp v1"  # a stamp says the merge tool printed the record; it catches a typed or copied one, not a forger (decision guard-guards-mistakes-only)
 
@@ -3105,9 +3107,10 @@ def review_marked(text):
     return [line.rstrip() for line in text.splitlines()[:1]] == [REVIEW_MARKER]
 
 def review_unmarked(text):
-    """True when `text` has no marker line but opens with the record's own first two fields, `PR: #N` then `Head: `: a record whose marker line was cut off."""
+    """True when `text` has no marker line but opens with the record's own first two fields, `PR: #N` then `Head: <40-hex sha>`: a record whose marker line was cut off."""
     first = [line.rstrip() for line in text.splitlines()[:2]]
-    return len(first) == 2 and not review_marked(text) and re.fullmatch(r"PR: #\d+", first[0], re.ASCII) is not None and first[1].startswith("Head: ")
+    return (len(first) == 2 and not review_marked(text)
+            and re.fullmatch(REVIEW_PR_PAT, first[0], re.ASCII) is not None and re.fullmatch(REVIEW_HEAD_PAT, first[1], re.ASCII) is not None)
 
 
 _stamp_since = {}
@@ -3147,7 +3150,7 @@ def review_parse(text, created=None, cutover=None):
 
     if line(0) != REVIEW_MARKER:
         return bad(0)
-    pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
+    pats = (REVIEW_PR_PAT, REVIEW_HEAD_PAT, r"Kind: (\S+)", r"Guard or check: (\S+)")
     found = []
     for i, pat in enumerate(pats, 1):  # each value is checked on its own line, so the earliest bad line is named
         m = re.fullmatch(pat, line(i) or "", re.ASCII)
