@@ -16551,7 +16551,7 @@ mrf_case("origin/main: PR #8 names no other repo, so PR 8 is judged and refused"
 mrf_case("hooks/guard.py:100 PR #8 names no repo, so PR 8 is judged and refused", "deny",
          "hooks/guard.py:100 PR #8 has the fix.", carries=("#8",))
 
-# Marks and forms, in running text. The first group's labels are not repo marks, so PR 8 and sha 8c1f0e2a7 are judged.
+# Marks and forms, in running text. The first group's labels are not repo marks, so the made-up PR and sha on each line are judged.
 mrf_case("CI/CD: PR #8 is green is refused", "deny", "CI/CD: PR #8 is green.", carries=("#8",))
 mrf_case("Done/Next: PR #8 open is refused", "deny", "Done/Next: PR #8 open.", carries=("#8",))
 mrf_case("Batch 2/3: PR #8 merged is refused", "deny", "Batch 2/3: PR #8 merged.", carries=("#8",))
