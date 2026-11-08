@@ -789,8 +789,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if from_reads:
             raw = read_words[number]
         powershell = is_powershell(segments[number])
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         # A `( )` group outside the command's path slots is judged as a command of its own, below.
-        groups = _ps_inner_groups(raw) if powershell else []
+        groups = _ps_inner_groups(raw, at) if powershell else []
         grouped = {index: span[0] for span, _inner in groups for index in span}
         if kinds[number] in ("printer", "message"):
             last = number
@@ -823,7 +824,6 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = (read_scripts if from_reads else scripts)[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         scripts_run = _powershell_scripts_of(segments[number])
         for nested in scripts_run:
@@ -1046,13 +1046,13 @@ _PS_COMMAND_LEAD = re.compile(r"(?:\[[^\]]*\]|[$@]?\()*")
 _PS_GROUP_OPEN = re.compile(r"[$@]?\(")
 
 
-def _ps_inner_groups(raw):
+def _ps_inner_groups(raw, at):
     """The `( )` groups among a PowerShell segment's arguments that fill no path slot of its command, as
     (indexes into `raw`, the text inside the group). A path in such a group is read or written by the group's
     own commands, not by the outer one: `Set-Content docs/a.md (Get-Content hooks/test_x.py)` writes only
     docs/a.md. A group in a path slot (`Set-Content (Get-Item P) x`) names the target, so it is none of these.
-    A shape this does not read (an unclosed group, a command name it does not know) gives none, so every word
-    stays judged as part of the outer command."""
+    A shape this does not read (an unclosed group, a command name it does not know, a comma list) gives none,
+    so every word stays judged as part of the outer command. `at` is the folder the segment runs in."""
     plain = [_outside_quotes(word) for word in raw]
     start = 1 if plain and (plain[0].lower() == "return" or re.fullmatch(r"(?:\[[^\]]*\])+", plain[0])) else 0
     if start >= len(raw):
@@ -1073,6 +1073,9 @@ def _ps_inner_groups(raw):
         if depth != base and (opens or depth > base):
             return []   # an unclosed group, or a word that opens one mid-word
         if opens:
+            # A comma joins the group to the argument beside it, so it may be a path of that argument.
+            if (first > start + 1 and plain[first - 1].endswith(",")) or plain[index].endswith(","):
+                return []
             spans.append(range(first, index + 1))
             rest.append("\0" + str(len(spans) - 1))
         else:
@@ -1080,7 +1083,14 @@ def _ps_inner_groups(raw):
         if depth < base:
             break   # the paren that closes the command's own group ends its arguments
         index += 1
-    targets = {word for role, word in _ps_argument_slots(name.lower(), rest) if role != "source"}
+    slots = _ps_argument_slots(name.lower(), rest)
+    targets = {word for role, word in slots if role != "source"}
+    # A copy into a folder (or, with no destination, into `at`) writes FOLDER/<source name>, so its source
+    # names a target too. A destination that is a group may be a folder.
+    destinations = [word for role, word in slots if role == "destination"]
+    if name.lower() in _PS_COPY and (not destinations or any(
+            word.startswith("\0") or _is_folder(word, at) for word in destinations)):
+        targets |= {word for role, word in slots}
     groups = []
     for number, span in enumerate(spans):
         if "\0" + str(number) in targets:
