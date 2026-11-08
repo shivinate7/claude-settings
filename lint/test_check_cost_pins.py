@@ -8,7 +8,7 @@ docs/decisions/*.md under --root and prints one line per unpinned file token:
 `<record path>:<line>: <file token> named in a Cost sentence with no pin`.
 A count claim in a Cost sentence prints `<record path>:<line>: count in a Cost sentence with no reader`.
 A count claim in a debt note (each list item of docs/debts/notes.md is one note) prints
-`<notes path>:<line>: count in a debt note with no reader`.
+`<notes path>:<line>: count in a note with no reader`.
 The file cases compare file rows only; a count case passes counts=True to compare count rows too, and so
 does a note case.
 
@@ -38,7 +38,7 @@ COUNT = "count in a Cost sentence with no reader"
 # A count claim in a debt note: its row, and the notes file the note cases build. That file is the layout's
 # debt-notes path. An unrolled tree also tries the legacy path first, which these cases leave absent.
 NOTES = "docs/debts/notes.md"
-NOTE_COUNT = "count in a debt note with no reader"
+NOTE_COUNT = "count in a note with no reader"
 # A plain count beside a cost noun, which the rule flags. Each count case prints it, so a case whose other
 # sentences pass still shows that the rule ran on its record.
 CONTROL = "- **Cost:** two `simctl list` reads per call.\n"
