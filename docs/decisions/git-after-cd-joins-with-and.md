@@ -29,7 +29,7 @@ Allowed forms:
 - A read: `status`, `log`, `branch -l`, `stash list`, `tag -l`, `config --get`.
 - A cd inside `( ... )`: its scope ends at the `)`. The folder it names is read without the `)`. The shell outside is still stranded after the `)`, so `cd X; (cd /tmp) && git push` is refused, and `cd X; (cd /tmp && git push)` passes, because the chain inside runs in `/tmp`.
 - A cd that lands, or a cd whose word holds a variable: the folder is known or unknown, never stranded.
-- `[ -d M ] && cd M`, with `[[ -d M ]]` or `test -d M` for the test: a folder missing when the guard looks makes the test fail, so the cd never runs. It neither strands nor clears, so `cd E && [ -d M ] && cd M; git push` and `cd E; [ -d M ] && cd M; git push` pass, with or without `set -e` in front (the `&&` list is not the last command, so errexit ignores it). The test and the cd must name the same word after quote removal, and the test must head its `&&` list: after a `||` or a pipe it may be skipped. Any other `X && cd M` with a missing `M` stays as before.
+- `[ -d M ] && cd M`, with `[[ -d M ]]` or `test -d M` for the test: a folder missing when the guard looks makes the test fail, so the cd never runs. It neither strands nor clears, so `cd E && [ -d M ] && cd M; git push` and `cd E; [ -d M ] && cd M; git push` pass, with or without `set -e` in front (the failing test is not the last command of its `&&` list, so errexit ignores it). The test and the cd must name the same word after quote removal, and the test must head its `&&` list: after a `||` or a pipe it may be skipped. Any other `X && cd M` with a missing `M` stays as before.
 - A cd, a git word or a comment opener inside quotes or after `#`.
 
 Risk kind: incident 2026-11-07 ~16:15 CST. A session ran `cd <gone worktree> && <vcs> status; <vcs> fetch; <vcs> checkout -B ...; <vcs> merge ...`. The cd failed, so the `;`-joined writes ran in the primary checkout.
@@ -53,6 +53,7 @@ Limits:
 - `f() { cd M; push; }; f`, `function f { cd M; push; }; f` and `case x in x) cd M; push;; esac` are not read: a one-line form, where the cd is not at a segment head. A multi-line body is read: each line is its own segment, so a cd that heads a line is walked.
   Fix: none — a cd and a push inside one function body or case arm is not a form Claude writes by mistake (guard-guards-mistakes-only). Until: 2026-11-21
 - An `if` is read only when the cd is the whole test and the next segment opens the `then`. `if cd X && Y; then`, `while cd X; do` and `elif` are not read, so the write in their body is refused.
+- `if [ -d M ]; then cd M; fi; git push` and `[ -d M ] && { cd M; git push; }` are refused although bash never runs the cd; main refuses them too. Fix: none — fails closed, rare form. Until: 2026-11-21
 - A `tag` is a read when it holds a listing flag (`-l`, `--contains`, `--points-at`, `--merged`, `--sort`) or no word. A `config` is a write when it names a key and a value, or holds a write flag. A `worktree` verb other than `add` is not a write here: `worktree remove` and `prune` are judged by their own rules.
 - A quoted `>` in an `echo` is text, not a redirect (rule conflict-markers, `_chain_safe`). A backtick or `$(` inside it still counts as a step that may change the tree.
 - PowerShell is out of scope. The lane brief named Bash, and `cd_walk` reads Bash joins.
