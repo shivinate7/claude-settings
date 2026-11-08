@@ -51,6 +51,7 @@
 - dw-slot-timers-unmeasured: decision-watch slot timers sum to about 168 s, computed not measured; a timer frees the slot but does not kill the child (mods/decision-watch)
 - env-flat-crash-allows: a runtime crash in _env_flat allows the call (hooks/guard_env.py)
 - env-grep-long-abbrev-unpinned: grep long-option abbreviations of --regexp, --expression and --source, such as --regex=, are a safety hole with no pinning case (hooks/guard_env.py)
+- env-interpreter-body-line-false-alarm: a quoted interpreter heredoc body line starting with echo, printf, ls, test, [, git check-ignore, grep, rg or a runner with --env-file denies if it names the env file. Main allowed it. A -c script holding `if [ -f .env ]` also denies, where main allowed (hooks/guard_env.py _plain_escaped_quotes, _handed_on_scripts)
 - env-node-env-file-prints: node --env-file=.env -e 'console.log(process.env)' prints the env file through the runner allow-list (hooks/guard_env.py)
 - env-split-string-wsl-only: the WSL and env-file rules read the env -S script; draft-pr, detached-launch, rm-var and impeccable-review rules do not (hooks/guard_core.py nested_script)
 - estimate-rule-may-be-checkable: the measured time table (debt `measured-time-table`) may let a check compare a stated time with a measured range (row style-no-unmeasured-estimate)
