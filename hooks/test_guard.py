@@ -9071,6 +9071,33 @@ sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline i
 sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A PowerShell here-string is shell text when a shell runs it: piped to or passed to `iex` or Invoke-Expression,
+# piped to `pwsh -Command -`, or built into a scriptblock. A bare gh pr create line in such a body runs, so it is
+# refused. A here-string held in a variable is data: a bare line in it runs nothing, so it is allowed, and so is
+# a `$( )` in a single-quoted body (literal). A `$( )` in a double-quoted body runs while the string is built.
+PS_PR_LINE = "gh pr create -t x"
+PS_RUN_CASES = (
+    ("piped to Invoke-Expression", '@"\n' + PS_PR_LINE + '\n"@ | Invoke-Expression'),
+    ("piped to iex", '@"\n' + PS_PR_LINE + '\n"@ | iex'),
+    ("passed to Invoke-Expression", 'Invoke-Expression @"\n' + PS_PR_LINE + '\n"@'),
+    ("passed to iex, single-quoted, with an apostrophe line ahead", "iex @'\n# note: don't open it yet\n"
+     + PS_PR_LINE + "\n'@"),
+    ("single-quoted, piped to pwsh -Command -", "@'\n" + PS_PR_LINE + "\n'@ | pwsh -Command -"),
+    ("double-quoted, inside a scriptblock Create call", '& ([scriptblock]::Create(@"\n' + PS_PR_LINE + '\n"@))'),
+)
+for _name, _command in PS_RUN_CASES:
+    sh("draft-pr: a PowerShell here-string body run " + _name + " holds gh pr create, is refused",
+       _command, "deny", "draft-pr", tool="PowerShell", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a PowerShell double-quoted here-string whose $( ) runs gh pr create, held in a variable, is refused",
+   '$b = @"\n$(' + PS_PR_LINE + ')\n"@', "deny", "draft-pr", tool="PowerShell", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a PowerShell double-quoted here-string held in a variable, with a bare gh pr create line, is allowed",
+   '$body = @"\nRun gh pr create to open it.\n' + PS_PR_LINE + '\n"@\ngh pr create --draft --body $body',
+   "allow", tool="PowerShell", cwd=NOGIT)
+sh("draft-pr: a PowerShell single-quoted here-string held in a variable, with $( ) gh pr create, is allowed",
+   "$body = @'\n$(" + PS_PR_LINE + ")\n'@", "allow", tool="PowerShell", cwd=NOGIT)
+sh("draft-pr: a PowerShell Set-Content of a single-quoted here-string, with an apostrophe line and a bare gh pr create line, is allowed",
+   "Set-Content f.md -Value @'\n# note: don't open it yet\n" + PS_PR_LINE + "\n'@", "allow", tool="PowerShell", cwd=NOGIT)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
