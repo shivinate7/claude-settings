@@ -5668,6 +5668,13 @@ add("waiter: a Monitor call sent as Bash with timeout_ms and an until-loop is al
     cwd=NOGIT, command="until test -e d; do sleep 2; done; echo repro-done", description="x", timeout_ms=60000)
 add("waiter: the same loop as a Bash call with timeout stays refused", "deny", "waiter", tool="Bash",
     cwd=NOGIT, command="until test -e d; do sleep 2; done; echo repro-done", description="x", timeout=60000)
+# Under timeout_ms the watcher is refused and the pause passes. Each case below is judged by its Monitor
+# reading only: as a plain Bash call, `sleep 600` and `gh pr checks --watch` are both refused in the
+# foreground.
+add("waiter: a Monitor call sent as Bash with gh pr checks --watch is refused", "deny", "waiter",
+    tool="Bash", cwd=NOGIT, command="gh pr checks 12 --watch", description="x", timeout_ms=60000)
+add("waiter: a Monitor call sent as Bash with sleep 600 then echo is allowed", "allow", tool="Bash",
+    cwd=NOGIT, command="sleep 600; echo done", description="x", timeout_ms=60000)
 sh("waiter: two sleeps, each followed by a check, are refused",
    "sleep 5; gh run view 1; sleep 5; gh run view 1", "deny", "waiter", cwd=NOGIT)
 sh("waiter: Start-Sleep -Seconds 10 is allowed", "Start-Sleep -Seconds 10", "allow",
@@ -5721,6 +5728,16 @@ sh("waiter: a comment opener in quotes does not hide a loop, refused",
 # apostrophe in a Python single-quoted string must not end the quote, or the loop after it reads as a call.
 sh("waiter: a python heredoc string with an escaped apostrophe holds a loop as text, allowed",
    "python3 - <<'EOF'\ns = 'it\\'s: until test -e d; do sleep 2; done'\nEOF", "allow", cwd=NOGIT)
+# The backslash-quote keeps the Python string going to its closing quote. Here `print('it\'s')` closes
+# before `until`, so the loop is bare text in the body and the scanner reads it as a command: refused.
+sh("waiter: a loop after an escaped apostrophe in a python heredoc is refused",
+   "python3 - <<'EOF'\nprint('it\\'s'); until test -e d; do sleep 2; done\nEOF", "deny", "waiter", cwd=NOGIT)
+# A loop inside an os.system string is text to the scanner, and the shell that os.system starts runs it.
+# This is the os.system limit, named in the notes as guard-heredoc-os-system. It is pinned as allowed, so
+# the limit shows in the suite and does not pass unseen.
+sh("waiter: a loop in an os.system string with escaped quotes is allowed, the os.system limit",
+   "python3 - <<'EOF'\nimport os\nos.system('echo \\'hi\\'; until test -e d; do sleep 2; done')\nEOF",
+   "allow", cwd=NOGIT)
 # The scanner pins for the same body: a comment opener, a multi-line string, a lone apostrophe in a
 # comment, and an apostrophe inside a double-quoted string. Each holds the loop as text and is allowed.
 for _name, _body in (
