@@ -10191,7 +10191,7 @@ def write_rr_transcripts():
 lazy_fixture([rr_path(name) for name in RR_TRANSCRIPTS] + [rr_path("unreadable")], write_rr_transcripts)
 
 
-def rr_deny(name, tool, tool_input, transcript, agent_id=None):
+def rr_refuse(name, tool, tool_input, transcript, agent_id=None):
     """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision."""
     add("review-record-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
         carries=RR_CARRIES, agent_id=agent_id, env=ROLE_ENV, **tool_input)
@@ -10204,26 +10204,26 @@ def rr_allow(name, tool, tool_input, transcript, agent_id=None):
 
 
 # Refused: a builder, test-author or handoff after a reviewer spawn that has no record after it.
-rr_deny("a builder spawn after a reviewer spawn with no review record is refused",
-        "Agent", RR_BUILDER, rr_path("reviewer"))
-rr_deny("a test-author spawn after a reviewer spawn with no review record is refused",
-        "Agent", RR_TEST_AUTHOR, rr_path("reviewer"))
-rr_deny("a send_message handoff after a reviewer spawn with no review record is refused",
-        SEND_MESSAGE, RR_SEND, rr_path("reviewer"))
-rr_deny("a design-reviewer spawn counts like a reviewer: a builder spawn after it with no record is refused",
-        "Agent", RR_BUILDER, rr_path("design-reviewer"))
-rr_deny("a reviewer spawned by Task, then a builder spawned by Task with no record, is refused",
-        "Task", RR_BUILDER, rr_path("task-reviewer"))
-rr_deny("a comment without the record marker after a reviewer spawn is no record: a builder spawn is refused",
-        "Agent", RR_BUILDER, rr_path("unmarked"))
-rr_deny("a record posted before the last reviewer spawn is stale: a builder spawn after it is refused",
-        "Agent", RR_BUILDER, rr_path("stale-record"))
-rr_deny("round two: the round-one record does not cover a second reviewer spawn, so a builder spawn is refused",
-        "Agent", RR_BUILDER, rr_path("round-two"))
-rr_deny("a reviewer spawn far up a long transcript still counts: a builder spawn with no record after it is refused",
-        "Agent", RR_BUILDER, rr_path("long"))
-rr_deny("a reviewer spawn in an earlier turn still counts: an owner message after it does not reset the check",
-        "Agent", RR_BUILDER, rr_path("owner-turn"))
+rr_refuse("a builder spawn after a reviewer spawn with no review record is refused",
+          "Agent", RR_BUILDER, rr_path("reviewer"))
+rr_refuse("a test-author spawn after a reviewer spawn with no review record is refused",
+          "Agent", RR_TEST_AUTHOR, rr_path("reviewer"))
+rr_refuse("a send_message handoff after a reviewer spawn with no review record is refused",
+          SEND_MESSAGE, RR_SEND, rr_path("reviewer"))
+rr_refuse("a design-reviewer spawn counts like a reviewer: a builder spawn after it with no record is refused",
+          "Agent", RR_BUILDER, rr_path("design-reviewer"))
+rr_refuse("a reviewer spawned by Task, then a builder spawned by Task with no record, is refused",
+          "Task", RR_BUILDER, rr_path("task-reviewer"))
+rr_refuse("a comment without the record marker after a reviewer spawn is no record: a builder spawn is refused",
+          "Agent", RR_BUILDER, rr_path("unmarked"))
+rr_refuse("a record posted before the last reviewer spawn is stale: a builder spawn after it is refused",
+          "Agent", RR_BUILDER, rr_path("stale-record"))
+rr_refuse("round two: the round-one record does not cover a second reviewer spawn, so a builder spawn is refused",
+          "Agent", RR_BUILDER, rr_path("round-two"))
+rr_refuse("a reviewer spawn far up a long transcript still counts: a builder spawn with no record after it is refused",
+          "Agent", RR_BUILDER, rr_path("long"))
+rr_refuse("a reviewer spawn in an earlier turn still counts: an owner message after it does not reset the check",
+          "Agent", RR_BUILDER, rr_path("owner-turn"))
 # Allowed: no reviewer spawn, a record after the last one, an agent's own call, a spawn the rule does not judge,
 # and a transcript that is missing or unreadable.
 rr_allow("a builder spawn before any reviewer spawn is allowed",
@@ -10232,7 +10232,7 @@ rr_allow("a builder spawn after a reviewer spawn and a comment with the record m
          "Agent", RR_BUILDER, rr_path("record"))
 rr_allow("a Bash call holding the record marker after a reviewer spawn lets a builder spawn through",
          "Agent", RR_BUILDER, rr_path("bash-record"))
-rr_allow("a subagent's builder spawn (payload with agent_id) is not judged by this rule",
+rr_allow("an agent's builder spawn (payload with agent_id) is not judged by this rule",
          "Agent", RR_BUILDER, rr_path("reviewer"), agent_id=RR_AGENT)
 rr_allow("a send_message with no reviewer spawn in the transcript is allowed: the merge tool catches it downstream",
          SEND_MESSAGE, RR_SEND, rr_path("builder-only"))
