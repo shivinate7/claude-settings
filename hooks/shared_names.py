@@ -4,6 +4,7 @@ The config watch's fast exit reads this before the guard loads, so nothing here 
 guard or any sibling hook.
 """
 
+import datetime
 import os
 import re
 from typing import Optional
@@ -55,6 +56,25 @@ BRIEF_MARKERS = (
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
 )
+
+# A reviewer's granted fourth round (decision agent-model-cap, owner item 396 a). It is not a BRIEF_MARKERS row: that
+# table's rows all read `of 3`, and widening them would free more than the one round the owner granted. The brief opens
+# with GRANTED_ROUND_MARKER and carries one `Grant: <REVIEW_GRANT>` line, the form the review record takes.
+GRANTED_ROUND_MARKER = r"(?i)[ \t]*round[ \t]+4[ \t]+of[ \t]+4\b"
+GRANT_LINE = r"Grant: (.*)"
+REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past the review cap of three
+
+
+def grant_valid(text):
+    """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
+    if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
+        return False
+    try:
+        datetime.datetime.strptime(text[-len("YYYY-MM-DD HH:MM CST"):-4], "%Y-%m-%d %H:%M")
+    except ValueError:
+        return False
+    return True
+
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).

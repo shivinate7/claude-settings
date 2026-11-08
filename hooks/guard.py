@@ -2520,7 +2520,7 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
 # note try-marker-sunset.
 BUILDER_MARKERS = ("round", "try")
 # The one marker scanner reads shared_names.BRIEF_MARKERS; each row is compiled once, at import.
-from shared_names import BRIEF_MARKERS  # noqa: E402  the one home of the marker rows
+from shared_names import BRIEF_MARKERS, GRANT_LINE, GRANTED_ROUND_MARKER, grant_valid  # noqa: E402  the one home of the marker rows and the Grant form
 _MARKER_ROWS = tuple((kind, re.compile(text), position) for kind, text, position in BRIEF_MARKERS)
 
 
@@ -2561,6 +2561,14 @@ def brief_markers(brief) -> list:
     """The [(kind, n)] round and try markers of a brief in line order, with the first-line one last: marker_scan
     without the audit marker, which has no n. Line order picks which refusal text a reviewer brief gets."""
     return [(kind, n) for kind, n in marker_scan(brief) if n is not None]
+
+
+def granted_round_4(brief) -> bool:
+    """True when a brief opens with the granted fourth-round marker and holds a `Grant:` line whose cite is a whole,
+    real-dated grant. Only this one reading frees a fourth round; every other marker is read by marker_scan."""
+    if not isinstance(brief, str) or not re.match(GRANTED_ROUND_MARKER, brief_first_line(brief)):
+        return False
+    return any(hit and grant_valid(hit.group(1)) for hit in (re.fullmatch(GRANT_LINE, line, re.ASCII) for line in brief.splitlines()))
 
 
 def builder_third_round(brief) -> bool:
@@ -2865,6 +2873,8 @@ def role_model_one(tool_input):
             return "", "", False
         if role == "reviewer" and named < top and any(kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
+            return "", "", False
+        if role == "reviewer" and named < top and granted_round_4(tool_input.get("prompt")):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""

@@ -67,6 +67,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from shared_names import REVIEW_GRANT, grant_valid  # noqa: E402  the one home of the Grant form, shared with the model guard (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -3179,19 +3180,8 @@ REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL"
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
-REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
-
-def grant_valid(text):
-    """True when `text` is a whole Grant text whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
-    if not re.fullmatch(REVIEW_GRANT, text, re.ASCII):
-        return False
-    try:
-        datetime.datetime.strptime(text[-len("YYYY-MM-DD HH:MM CST"):-4], "%Y-%m-%d %H:%M")
-    except ValueError:
-        return False
-    return True
 
 def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
