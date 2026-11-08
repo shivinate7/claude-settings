@@ -42,9 +42,10 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
   itself.
 
 Cost: no new process or file. The reads run per push, in the guard's own run. A literal
-destination, and an MCP file write's `branch`, reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
+destination reads nothing new. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
 A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_push_cost_case` in
-`hooks/test_guard.py` proves the counts.
+`hooks/test_guard.py` proves the counts. It has no MCP file-write case. An MCP file write reads
+nothing new: its `branch` is a literal.
 
 ## The mistakes
 
