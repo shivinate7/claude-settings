@@ -857,9 +857,7 @@ def own_tier_tagged(transcript: str, own_id: str, tier: str) -> bool:
     try:
         if not transcript or not own_id:
             return False
-        own_tags = set()
-        own_session.own_session_read(transcript, own_id, own_tags=own_tags)
-        return ROLE_TAG_PREFIX + tier in own_tags
+        return ROLE_TAG_PREFIX + tier in own_session.own_session_tags(transcript, own_id)
     except Exception:
         return False
 
