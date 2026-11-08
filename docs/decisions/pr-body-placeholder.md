@@ -20,7 +20,14 @@ Limits:
 - `gh api -X PATCH .../pulls/N -f body=` is not judged.
 - A `gh pr edit` body with a `$` or a backtick is judged when the shell sends it as it stands: a message file, a quoted heredoc (`<<'EOF'`, also inside `$(cat <<'EOF' ...)`) or a single-quoted value. A real expansion (`"$(cat f)"`, an unquoted heredoc holding `$`, text mixed with a variable) is not the text the call sends, so it passes unjudged. A piped body passes unjudged too, even a quoted heredoc piped through `cat` into `--body-file -`, because that heredoc belongs to `cat`.
 - A body that is one bare variable (`"$BODY"`, `$BODY`, `"${BODY}"`) is read from the guard's environment. An unset variable reads as empty, because shell state does not carry over between Bash calls. An empty value is denied. The guard does not run the command, so `BODY=$(cat missing.md)` and `BODY=x | gh pr edit ...` still pass. A set value is judged for the placeholder test only, with no live read, so it never asks for a shrink. A variable the same command may assign earlier (`BODY=...;`, `BODY=$(...) &&`, `export BODY=...`, `read BODY`) is unknown and passes unjudged; the test leans to unknown, so `echo BODY=x` before the call also passes. A prefix `BODY=x gh pr edit ... "$BODY"` is no assignment, because bash expands the word before the prefix applies.
-- A PowerShell variable (`$body`) is a session variable, not an environment one, and a fresh PowerShell call holds no session variable (lane ruling 2026-11-08 12:00 CST, process-only). With no `$name =` (case-blind) earlier in the command, the body reads as empty and is denied; the guard never looks the name up in its environment. `$env:BODY` is out of scope and passes unjudged.
+- A PowerShell variable (`$body`) is a session variable, not an environment one, and a fresh PowerShell call holds no session variable (lane ruling 2026-11-08 12:00 CST, process-only). The guard never looks the name up in its environment. The name is case-blind. An earlier assignment in the command makes the body unknown, and it passes unjudged:
+  - `$body =`, with a scope (`$script:body =`, also `global:`, `local:`, `private:`) or in braces (`${body} =`);
+  - `Set-Variable` or `New-Variable` that names it;
+  - `foreach ($body`, `[ref]$body`, `-Variable body` or `-OutVariable body`.
+
+  With none of these, the body reads as empty and is denied. `$env:BODY` is out of scope and passes unjudged.
+- A variable the shell or a script block sets is unknown, never empty, and passes unjudged: `$_`, `$0`-`$9`, `$@`, `$*` and `$#` in each shell, and PowerShell's automatic variables, such as `$PSItem`, `$args`, `$input`, `$this` and `$Matches`. `$null` stays judged as empty.
+- A PowerShell body word that opens with `(`, `$(` or `@(` is an expression, such as `--body (Get-Content body.md -Raw)`. It passes unjudged. A quoted `"(WIP)"` is text and stays judged.
 - A `gh pr edit` inside `sh -c` or a command substitution is not read, as cite-by-id does not read it.
 - Unmeasured: how often a lane rewrites a body far shorter on purpose.
 

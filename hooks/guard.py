@@ -1533,13 +1533,13 @@ def _word_expands(word: str) -> bool:
     return False
 
 
-def _inline_body_literal(segment: str, body: str) -> bool:
-    """True when every word of the segment that carries this inline body keeps its `$` and backticks
-    literal (single quotes, or escaped). No such word found is not literal: the text is unknown."""
+def _body_carriers(segment: str, body: str) -> list:
+    """Return the words of the segment that carry this inline body, read with their quotes kept. A
+    segment that does not split returns none."""
     try:
         words = shlex.split(segment, posix=False)
     except ValueError:
-        return False
+        return []
     carriers = []
     for word in words:
         try:
@@ -1547,6 +1547,13 @@ def _inline_body_literal(segment: str, body: str) -> bool:
                 carriers.append(word)
         except ValueError:
             continue
+    return carriers
+
+
+def _inline_body_literal(segment: str, body: str) -> bool:
+    """True when every word of the segment that carries this inline body keeps its `$` and backticks
+    literal (single quotes, or escaped). No such word found is not literal: the text is unknown."""
+    carriers = _body_carriers(segment, body)
     return bool(carriers) and not any(_word_expands(word) for word in carriers)
 
 
@@ -1558,22 +1565,30 @@ def _bare_variable(segment: str, body: str) -> str:
     """Return the variable name when every word of the segment that carries this inline body is one
     bare variable (`"$BODY"`, `$BODY`, `"${BODY}"`, also after `--body=` or `-b`), else ''. A
     single-quoted `'$BODY'` is literal text and is no variable."""
-    try:
-        words = shlex.split(segment, posix=False)
-    except ValueError:
-        return ""
     names = set()
-    for word in words:
-        try:
-            if not any(body in part for part in shlex.split(word)):
-                continue
-        except ValueError:
-            continue
+    for word in _body_carriers(segment, body):
         found = BARE_VARIABLE_WORD.match(word)
         if not found:
             return ""
         names.add(next(group for group in found.groups() if group))
     return names.pop() if len(names) == 1 else ""
+
+
+# A PowerShell body word that opens an expression: its value is what the expression returns, not this text.
+POWERSHELL_EXPRESSION_WORD = re.compile(r"^(?:--body=|-b)?[$@]?\(")
+# Variables the shell or a script block sets: their value is unknown, never empty.
+POSITIONAL_VARIABLE = re.compile(r"^(?:_|\d+)$")
+POWERSHELL_AUTOMATIC_VARIABLES = frozenset((
+    "psitem", "args", "input", "this", "matches", "myinvocation", "psboundparameters", "pscmdlet",
+    "foreach", "switch", "error", "lastexitcode", "event", "eventargs", "eventsubscriber", "sender",
+    "stacktrace", "psscriptroot", "pscommandpath", "home", "pwd", "host", "pid", "profile"))
+POWERSHELL_SCOPE = r"(?:(?:script|global|local|private):)?"
+
+
+def _unknown_variable(name: str, powershell: bool) -> bool:
+    """True when the shell or a script block sets this variable, so a fresh call does not hold it empty:
+    `$_` and `$0`-`$9` in each shell, and PowerShell's automatic variables (`$PSItem`, `$args`, ...)."""
+    return bool(POSITIONAL_VARIABLE.match(name)) or (powershell and name.lower() in POWERSHELL_AUTOMATIC_VARIABLES)
 
 
 COMMAND_START = r"(?:^|[(){;&|]|\b(?:then|do|else|elif|if|while|until)\b)\s*"
@@ -1583,12 +1598,15 @@ def _may_assign(earlier: str, name: str, powershell: bool = False) -> bool:
     """True when the segments ahead of the call might set this variable, so its value is unknown. Quoted
     text is no assignment (`echo 'BODY=x'`). The test leans to unknown: `name=` at a word start, a
     declaration or read of the name, `${name:=`, and `eval`, `source` or a dot-source at command position
-    all count. In PowerShell the name ignores case and an assignment reads `$name =`."""
+    all count. In PowerShell the name ignores case. An assignment reads `$name =`, with an optional scope
+    (`$script:name =`) or in braces (`${name} =`), and `Set-Variable`, `New-Variable`, `foreach ($name`,
+    `[ref]$name`, `-Variable` and `-OutVariable` count too."""
     dot_source = re.compile(COMMAND_START + r"(?:eval|source|\.)\s", re.MULTILINE | re.IGNORECASE * powershell)
     if powershell:
         quoted = re.escape(name)
         return bool(
-            re.search(r"(?<!['\"])\$" + quoted + r"\b\s*[-+*/%?]?=", earlier, re.IGNORECASE)
+            re.search(r"(?<!['\"])\$(?:\{" + POWERSHELL_SCOPE + quoted + r"\}|" + POWERSHELL_SCOPE + quoted + r"\b)"
+                      r"\s*[-+*/%?]?=", earlier, re.IGNORECASE)
             or re.search(r"\b(?:Set|New)-Variable\b[^\n;]*\b" + quoted + r"\b", earlier, re.IGNORECASE)
             or re.search(r"\bforeach\s*\(\s*\$" + quoted + r"\b", earlier, re.IGNORECASE)
             or re.search(r"\[ref\]\s*\$" + quoted + r"\b|-(?:Out)?Variable\s+" + quoted + r"\b",
@@ -1612,7 +1630,9 @@ def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), n
     single-quoted value. A real expansion (`"$(cat f)"`, an unquoted heredoc, text mixed with a variable)
     is not the text the call will send. A body that is one bare variable is read from this process's
     environment, or as empty when unset, because shell state does not carry over between Bash calls. A
-    PowerShell variable is a session variable, never an environment one, so it reads as empty. Only
+    PowerShell variable is a session variable, never an environment one, so it reads as empty. `$_`,
+    `$0`-`$9` and PowerShell's automatic variables are unknown, and a PowerShell body word that opens with
+    `(`, `$(` or `@(` is an expression: each is unread. Only
     a placeholder value is a hit; a real value passes with no live read. A value the command may set in
     the segments ahead of this one (`segments[:number]`, joined only for a bare variable) stays unknown. A prefix
     `BODY=x gh pr edit ... "$BODY"` sets nothing the word sees, since bash expands the word first. An
@@ -1623,9 +1643,13 @@ def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), n
     if read is None or read[2] or not read[1]:
         return None
     body = read[1][-1]
+    powershell = tool == "PowerShell"
+    if powershell and any(POWERSHELL_EXPRESSION_WORD.match(word) for word in _body_carriers(segment, body)):
+        return None
     if "$" in body or "`" in body:
         name = _bare_variable(segment, body) if not read[1][:-1] and "<<" not in segment else ""
-        powershell = tool == "PowerShell"
+        if name and _unknown_variable(name, powershell):
+            return None
         if name and not _may_assign("\n".join(segments[:number]), name, powershell):
             # A PowerShell variable lives in its session, and a fresh call holds none: it reads as empty.
             value = "" if powershell else os.environ.get(name, "")
