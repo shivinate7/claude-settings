@@ -1155,12 +1155,17 @@ def case_powershell_comment_quote_ends_at_its_line():
 
 def case_powershell_bash_prefix_braced_expansion():
     # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
-    # so each is refused. The hashtable controls pass: their `}` closes the hashtable, not an expansion.
+    # so each is refused. A `$` inside the expansion and one nested expansion are refused too. The hashtable controls
+    # pass: their `}` closes the hashtable, not an expansion.
     refused = ("command-in-item", "bash operator")
     page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
          entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
     page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
          entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    page("a PowerShell command, PORT=${PORT:-$DEFAULT} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-$DEFAULT} node server.js")), refused)
+    page("a PowerShell command, PORT=${A:-${B}} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${A:-${B}} node server.js")), refused)
     for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
                      ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
                      ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
