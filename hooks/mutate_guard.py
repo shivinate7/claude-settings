@@ -1785,7 +1785,16 @@ MUTATIONS = [
     ("test-author: the merge carve-out is not limited to a merge",
      '        if merging is None or merging.returncode != 0:\n            return False',
      '        if merging is None:\n            return False', "guard",
-     "test-author: Edit of a conflicted product file in a cherry-pick is refused"),
+     "test-author: Edit of a conflicted product file after a squash merge with no MERGE_HEAD is refused"),
+    ("test-author: the merge carve-out drops the replay-mark refusal beside a stale MERGE_HEAD",
+     '        if any(os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in OTHER_REPLAY_MARKS):\n'
+     '            return False',
+     '        if False:\n            return False', "guard",
+     "test-author: Edit of a conflicted product file in a cherry-pick with a stale MERGE_HEAD is refused"),
+    ("test-author: the merge carve-out compares a root file's backslash name as a separator",
+     '        want = os.path.normcase(rel.replace(os.sep, "/"))',
+     '        want = os.path.normcase(norm(rel))', "guard",
+     "test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged"),
     # The symlink case exists only where os.symlink works, so this mutant runs on POSIX only.
     ("test-author: the merge carve-out reads the spelled path, not the resolved one",
      'os.path.relpath(os.path.realpath(full), os.path.realpath(root))',
