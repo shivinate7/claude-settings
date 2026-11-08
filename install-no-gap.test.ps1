@@ -992,6 +992,66 @@ public static class FileIdentity
     Write-Host "  install log (retry1): $($T1Text.Trim())"
     Check "retry1: the install log has no 'failed' for a file the retry recovered" ($T1Text -notmatch '(?i)failed')
     Check "retry1: the install marker is written on the first install" (Test-Path -LiteralPath $T1Marker)
+
+    # ---- skillrecover1: a skill folder whose first refresh fails, then frees up, lands on retry ----
+    # Run 1 lands the skill folder (copy mode forced), so run 2 refreshes it in place. The source
+    # changes, and a handle holds notes.md open with FileShare.Read, so run 2's first refresh fails on
+    # that file. Run 2 starts as a child without -Wait. The case waits for its retry line, then releases
+    # the handle. Resolve-Failures retries the folder 2 s after the line, when the lock is gone. The
+    # retry must land the new text and log no 'could not replace ... after retries' for the folder.
+    # On main there is no skill retry: no retry line prints, so the case FAILs. The wait is bounded at
+    # 120 s, as in retry1, and the finally block disposes the handle and bounds the wait for the child.
+    $Sr      = New-Scratch 'skill-recover' @('skills')
+    Write-FixtureFile (Join-Path $Sr.Clone 'skills\recoverskill\SKILL.md') '# recoverskill v1'
+    Write-FixtureFile (Join-Path $Sr.Clone 'skills\recoverskill\notes.md') '# notes v1'
+    $SrSkill = Join-Path $Sr.Cfg 'skills\recoverskill'
+    $SrNotes = Join-Path $SrSkill 'notes.md'
+    $SrOut   = Join-Path $Tmp 'skillrecover1-run2.log'
+    $SrHeld  = $null
+    $pSr     = $null
+    $rcSr2   = $null
+    $env:CLAUDE_CONFIG_DIR = $Sr.Cfg
+    $env:CLAUDE_SETTINGS_FORCE_COPY = '1'
+    try {
+        $rcSr1 = Invoke-Install $Sr.Clone 'skillrecover1-run1.log'
+        Check "skillrecover1: run 1 (forced copy) exits 0 (exit $rcSr1)" ($rcSr1 -eq 0)
+        Check "skillrecover1: run 1 lands notes.md as a real file" ((Test-Path -LiteralPath $SrNotes) -and -not (Test-ReparsePoint $SrNotes))
+        Check "skillrecover1: run 1 writes the copy marker, so run 2 is not a first run" (Test-Path -LiteralPath (Join-Path $Sr.Cfg '.claude-settings-installed'))
+        Write-FixtureFile (Join-Path $Sr.Clone 'skills\recoverskill\SKILL.md') '# recoverskill v2'
+        Write-FixtureFile (Join-Path $Sr.Clone 'skills\recoverskill\notes.md') '# notes v2'
+        if (Test-Path -LiteralPath $SrNotes) { $SrHeld = [IO.FileStream]::new($SrNotes, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read) }
+        # Fixture: the open handle must refuse a write, or run 2 proves nothing.
+        $SrBlocked = $false
+        if ($null -ne $SrHeld) { try { [IO.File]::Open($SrNotes, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite).Dispose() } catch { $SrBlocked = $true } }
+        Check "skillrecover1 fixture: a write to the held notes.md is refused while the handle is open" $SrBlocked
+        $pSr = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $Sr.Clone 'install.ps1') + '"') -PassThru -NoNewWindow -RedirectStandardOutput $SrOut -RedirectStandardError ($SrOut + '.err')
+        # Reading Handle now keeps the exit code reachable after the process ends.
+        $null = $pSr.Handle
+        # Holds the handle until the run prints its retry line, the run exits, or the bound passes.
+        # The bound only limits the wait; no check reads the clock.
+        $SrDeadline = (Get-Date).AddSeconds(120)
+        $SrRetry = $false
+        while (-not $pSr.HasExited -and -not $SrRetry -and (Get-Date) -lt $SrDeadline) {
+            try { $SrRetry = (Test-Path -LiteralPath $SrOut) -and ((Get-RunText $SrOut) -match 'retrying in') } catch { $SrRetry = $false }
+            if (-not $SrRetry) { Start-Sleep -Milliseconds 100 }
+        }
+    } finally {
+        if ($null -ne $SrHeld) { $SrHeld.Dispose() }
+        if ($null -ne $pSr) {
+            if (-not $pSr.WaitForExit(120000)) { try { $pSr.Kill() } catch { } ; $pSr.WaitForExit() }
+            $pSr.Refresh()
+            $rcSr2 = $pSr.ExitCode
+        }
+        Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
+    }
+    $SrPrinted   = if (Test-Path -LiteralPath $SrOut) { Get-RunText $SrOut } else { '' }
+    $SrSkillMd   = try { [IO.File]::ReadAllText((Join-Path $SrSkill 'SKILL.md')) } catch { '' }
+    $SrNotesText = try { [IO.File]::ReadAllText($SrNotes) } catch { '' }
+    Check "skillrecover1: run 2 printed a retry (non-vacuous: the first refresh of the folder failed)" ($SrPrinted -match 'skill folder\(s\) not replaced; retrying in')
+    Check "skillrecover1: run 2 exits 0 (exit $rcSr2)" ($rcSr2 -eq 0)
+    Check "skillrecover1: SKILL.md holds the new text after the retry" ($SrSkillMd -eq '# recoverskill v2')
+    Check "skillrecover1: notes.md holds the new text after the retry" ($SrNotesText -eq '# notes v2')
+    Check "skillrecover1: the run log has no 'could not replace ... after retries' for the skill folder" ($SrPrinted -notmatch 'could not replace [^\r\n]*recoverskill[^\r\n]*after retries')
 } finally {
     Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY, Env:\CLAUDE_SETTINGS_USER_ENV_KEY -ErrorAction SilentlyContinue
     try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($EnvSub, $false) } catch { }
