@@ -121,8 +121,8 @@ Built:
 
 - The route rows file, `hooks/route_rows.json`, and its one path reader, `rows_path()` (read hooks/route_match.py:40-42).
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1416-1434).
-- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2280-2310; read lint/report_guard.py:2899-2909).
-- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1581-1606; read lint/report_guard.py:2842).
+- Part (vi), `cannot_problem`, run at Stop (read lint/report_guard.py:2283-2313; read lint/report_guard.py:2902-2912).
+- Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1581-1606; read lint/report_guard.py:2845).
 - Part (v) on the waiting page: guard rule `task-why-cited` refuses a task's Why yours line that gives a capability reason with no route-row or dated measured cite (`why_cited_hit` in hooks/question_form.py; the verdict is `why_yours_verdict` in lint/report_guard.py).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
 - STALE005, report-only (read lint/stale_cites.py:759-764).
