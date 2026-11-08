@@ -31,7 +31,8 @@
   "owner": "lane stall-watch-quiet-lint (session_013NEJL2LYXQpmabnoQqYgNv)",
   "pick": "a",
   "ref": "decision stall-watch (the job removes its log and beat file when it ends, also after a STALL report; lane commit 78c608d45, Nov 4); test A1 in hooks/test_stall_watch.py; #1803's lane incident",
+  "reply": "You picked a (06:09 CST Nov 8): a stalled job's log stays for 7 days. On a stall the watcher writes a marker; the job keeps its log when the marker is there; the next stall-watch hook call removes such logs older than 7 days. Routed to lane stall-watch-quiet-lint (session_013NEJL2LYXQpmabnoQqYgNv); home: step stall-watch-quiet-lint and decision stall-watch. Closed 06:13 CST Nov 8.",
   "short": "Keep a stalled job's log",
-  "status": "open",
+  "status": "closed",
   "title": "Should a stalled job's log stay readable after the job ends?"
 }
