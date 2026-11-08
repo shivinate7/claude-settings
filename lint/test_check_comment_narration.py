@@ -63,8 +63,12 @@ RUN_STATE = [
 ]
 
 # Date text that stays flagged: a date with no ruling word, with or without a time, and an owner word with a date but
-# no time. The `date` pattern flags each hit. The list also joins FLAGGED, so every flagged test runs it.
-DATE_CONTROLS = ["Fixed on 2026-11-01.", "Changed 2026-11-01 16:30 CST.", "Owner, 2026-11-01"]
+# no time. A ruling cite is an owner word that opens it, then a date, a 24-hour time and a zone. A word before owner,
+# or a word after the time that is not a zone, stays flagged. The `date` pattern flags each hit. The list also joins
+# FLAGGED, so every flagged test runs it.
+DATE_CONTROLS = ["Fixed on 2026-11-01.", "Changed 2026-11-01 16:30 CST.", "Owner, 2026-11-01",
+                 "Changed by the owner, 2026-11-01 16:30 CST.", "Fixed after owner, 2026-11-01 16:30 CST.",
+                 "Owner, 2026-11-01 16:30 OLD: returns None"]
 
 # Text the check must flag, in a comment or in a docstring line.
 FLAGGED = [
@@ -462,6 +466,12 @@ class Quiet(Case):
         rc, out = self.scan({"cite.py": src})
         self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
         self.assertNoHit(out, "cite.py", at(src, "16:20 CDT"))
+
+    def test_ruling_cite_with_a_one_digit_hour_passes(self):
+        src = "x = 1\n# Owner, 2026-11-01 9:05 CST\n# fixed in round 2\ny = 2\n"
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "9:05 CST"))
 
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
