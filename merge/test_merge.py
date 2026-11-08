@@ -14142,6 +14142,35 @@ class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
+    def test_a_tip_record_posted_on_another_pr_says_it_is_on_the_wrong_pull_request_and_not_round_three(self):
+        # the record sits on pull request 7's comments and names pull request 8, the lane's own pull request. Its Guard or check value is unknown, so the
+        # refusal stays. The remedy names the pull request the record belongs to. A record posted on another pull request does not owe the third round
+        tips = lane_batch(self, "agent/lane1")
+        tip = tips["agent/lane1"]
+        misfiled = review_comment(1, 7, record_text(n=8, head=tip, guard="yes", rounds=REVIEW_PASS))
+        host = self.batch_host(tips, [misfiled])
+        self.scope(tips, host)
+        self.assertEqual(parse_text(self, misfiled["body"])["n"], 8, "the record does not name pull request 8, so the case does not reach the wrong-pull-request state")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        remedy = self.remedy_line(out)
+        self.assertIn("wrong pull request", remedy, "the remedy does not say the record is on the wrong pull request:\n" + out)
+        self.assertRegex(remedy, r"post\w* .*#8", "the remedy does not name posting the record on #8, the pull request it names:\n" + out)
+        self.assertNotIn("Get round 3 done", out, "the remedy asks for the third round, which a record posted on another pull request does not owe:\n" + out)
+        self.assertNotIn("round 3 is owed", out, "the refusal says the third round is owed on a record posted on another pull request:\n" + out)
+        self.assertEqual([l for l in out.splitlines() if re.fullmatch(r"Round \d+: .*PASS", l)], [], "the refusal prints a passing record line:\n" + out)
+
+    def test_a_tip_record_posted_on_its_own_pr_still_names_round_three_as_owed(self):
+        # the control beside the case above: the same record, posted on the pull request it names, owes the third round and is not called misfiled
+        tips = lane_batch(self, "agent/lane1")
+        tip = tips["agent/lane1"]
+        host = self.batch_host(tips, [round_check_comment(1, 8, tip, guard="yes", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("Get round 3 done", out, "the refusal does not ask for the third round on a record posted on its own pull request:\n" + out)
+        self.assertNotIn("wrong pull request", out, "the refusal says the record is on the wrong pull request, though it is posted on #8:\n" + out)
+
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
 
