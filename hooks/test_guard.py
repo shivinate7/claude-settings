@@ -8958,8 +8958,8 @@ sh("git env set: PowerShell, a braced GIT_DIR set in a foreach block, denies",
    r'foreach($i in 1){${env:GIT_DIR}="x"}', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a spaced GIT_DIR set after an if block, denies",
    r'if ($x) { 1 } $env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
-# A space before `=` in a braced name is the same set as none, so each spaced form denies. Its unspaced
-# twin is the green control beside it: the two differ only in that space.
+# These pin the unspaced braced set inside a block, which main refuses. The spaced form is note
+# `git-env-braced-spaced-set`.
 sh("git env set: PowerShell, a braced GIT_DIR set with no space before =, in a block, denies",
    r"{${env:GIT_DIR}='x'}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a braced GIT_DIR set with no space before =, after a leading %, denies",
