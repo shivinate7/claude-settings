@@ -29,6 +29,7 @@ Claude writes both in normal work: it states what code does from memory, and it 
 - The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id. A dotted name reads its first part.
 - STALE009 reports, never fails: a sentence on a line a range adds in a decision record that states what code does, with no code cite (lint/stale_cites.py `CodeClaimReader`).
 - STALE010 fails the PR: a line a range adds in governed Markdown cites a Python name, and the file is absent at head or the name is not bound there (lint/stale_cites.py `dead_name_cites`).
+- STALE011 fails the PR: a line a range adds in governed Markdown cites a line anchor `file.py:N` or `file.py:N-M`, its sentence names a symbol, and neither a def or class span of that name nor a line holding it falls within three lines of the cited range (lint/stale_cites.py `anchor_name_cites`). `--tree` judges every line.
 - Whether the claim is true stays with the reviewer: `agents/reviewer.md` reads each cited name against its claim.
 - The module docstring of `lint/stale_cites.py` and `skills/fresh-prose/SKILL.md` state the cost. Both run inside the existing ste-lint step.
 
