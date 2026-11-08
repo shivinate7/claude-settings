@@ -1153,12 +1153,13 @@ def _scan_transcript(records, collections):
 
 
 def _cleared(exports, results, newest, page_id):
-    """True when an export run after `newest` ended with the verdict `same`: as its last line, or, for the
-    `--all` form, as the line `<page id>: same`."""
+    """True when an export run after `newest` printed the verdict `same`: as a line of its own, or, for the `--all`
+    form, as the line `<page id>: same`. An exit 4 (a held item) prints the verdict first and its held lines after,
+    and the held lines hold the republish through the waiting-page skill's `--check` step, so an error result that holds the verdict line clears too.
+    An error result with no verdict line (a refusal, a crash) clears nothing."""
     for when, uid in exports:
-        failed, lines = results.get(uid, (True, []))
-        if when > newest and not failed and lines and (
-                lines[-1] == EXPORT_SAME or "%s: %s" % (page_id, EXPORT_SAME) in lines):
+        _, lines = results.get(uid, (True, []))
+        if when > newest and (EXPORT_SAME in lines or "%s: %s" % (page_id, EXPORT_SAME) in lines):
             return True
     return False
 
