@@ -905,13 +905,19 @@ def case_command_in_item_spans():
 # ------------------------------------------------------------------ a slash command is no file command
 
 def case_command_in_item_slash_command():
-    # `/doctor` is a slash command typed in Claude Code, not a shell command in a file. A step that runs one after
-    # a file step names no file for a command, so it passes. A step that sends the owner to a file for a command,
-    # or runs the command a file shows, is still refused with no `command` field on the item. A slash command a file
-    # shows is a file command too, and a plain `command` after a file step stays refused. A slash command whose file
-    # comes on the next line or in the next sentence of the same step is a file command as well.
-    page("a step that runs the /doctor slash command after a file step passes", "set",
-         entry_of(task_item(["Read plans/x.md for the lane's notes.", "Run the /doctor command in Claude Code."])), None)
+    # A slash command after a file step is refused as a shell command is: the owner goes from the file on to a
+    # command. A step that sends the owner to a file for a command, or runs the command a file shows, is refused with
+    # no `command` field on the item. A slash command whose file comes on the next line, in the next sentence of the
+    # same step, or in another step of the item is a file command as well.
+    page("a step that runs the /doctor slash command after a file step is refused", "set",
+         entry_of(task_item(["Read plans/x.md for the lane's notes.", "Run the /doctor command in Claude Code."])),
+         ("command-in-item", "file for a command"))
+    page("a file step, then a step that runs a slash command the file lists, is refused", "set",
+         entry_of(task_item(["Read plans/x.md for the lane's notes.", "Run the /sync command it lists."])),
+         ("command-in-item", "file for a command"))
+    page("a slash command step, then a file step, is refused", "set",
+         entry_of(task_item(["Run the /sync command.", "Read plans/x.md for the lane's notes."])),
+         ("command-in-item", "file for a command"))
     for name, steps in (("paste the command in plans/x.md", ["Paste the command in plans/x.md."]),
                         ("run the command shown in plans/x.md",
                          ["Read plans/x.md first.", "Run the command shown in plans/x.md."]),

@@ -326,6 +326,14 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + line)), [])
 
+    def test_id_word_before_a_colour_hash_is_refused(self):
+        # An id word spares only an all-digit hash. A colour hash after "box", "items", "PR" or "item" is refused.
+        for line in ("background of the box #fff.", "Selected items #3d5af1.", "PR #3d5af1 is the header.",
+                     "Background item #fff."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
+
     def test_pixel_value_written_in_words_is_refused(self):
         # "12 pixels" is a px value in words. The spacing pattern reads px, rem and dp, so it misses this.
         self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\nCards have 12 pixels of padding."))))
@@ -335,9 +343,10 @@ class BriefFaults(unittest.TestCase):
         found = pairs(self.m.brief_faults(brief(job=JOB + "\nA screen is 1920 pixels wide.")))
         self.assertIn(("token-spacing", "Job"), found)
 
-    def test_ios_app_named_in_a_device_section_passes(self):
-        # The lane draws an iOS app. "the iOS app" names the product being drawn, not today's product.
-        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThe lane draws the iOS app for this phone.")), [])
+    def test_ios_app_named_in_a_device_section_is_refused(self):
+        # Main refuses "the iOS app" as `current` in every section, Device included.
+        found = pairs(self.m.brief_faults(brief(device=DEVICE + "\nThe lane draws the iOS app for this phone.")))
+        self.assertIn(("current", "Device"), found)
 
     def test_ios_app_as_todays_product_in_a_device_section_is_refused(self):
         # A Device section exempts only the sentence that draws the iOS app. "Match" it, or say what it "now"
@@ -347,8 +356,19 @@ class BriefFaults(unittest.TestCase):
                 found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
                 self.assertIn(("current", "Device"), found)
 
-    def test_this_lane_draws_the_ios_app_in_a_device_section_passes(self):
-        self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThis lane draws the iOS app.")), [])
+    def test_this_lane_draws_the_ios_app_in_a_device_section_is_refused(self):
+        found = pairs(self.m.brief_faults(brief(device=DEVICE + "\nThis lane draws the iOS app.")))
+        self.assertIn(("current", "Device"), found)
+
+    def test_ios_app_mirror_or_copy_in_a_device_section_is_refused(self):
+        # Only the first "the iOS app" of a sentence is read, so a second mention after a draw verb, and a mirror
+        # or copy verb, stay refused as `current` in Device. Main refuses each of these.
+        for line in ("Draw the iOS app and mirror the iOS app's tabs.",
+                     "Draw the iOS app, then copy the iOS app home screen.",
+                     "Draw the iOS app and mirror it.", "Copy the iOS app's home screen."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
 
     def test_draw_verb_before_the_ios_app_in_a_device_section_is_still_refused(self):
         # A draw verb earlier in a sentence exempts "the iOS app" from `current`. Each of these sentences uses that
