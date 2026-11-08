@@ -494,6 +494,11 @@ def _wrapper_name(word: str) -> str:
     return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
 
 
+# Stands in for a newline inside a quoted string while `_quoted_words` splits on whitespace. No other
+# mark in the guard modules reads this byte (NUL is the space stand-in, \x02 and \x03 belong to guard_frozen).
+_NEWLINE_MARK = "\1"
+
+
 def _quoted_words(segment: str, keep_newlines=False):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
     A newline inside a quote reads as a space, or stays a newline with `keep_newlines`, for a caller that
@@ -519,14 +524,15 @@ def _quoted_words(segment: str, keep_newlines=False):
                 j += 2 if char == '"' and segment[j] == "\\" else 1
             if j < n:
                 flush()
-                chunks.append(re.sub(r"\s", lambda m: "\1" if keep_newlines and m.group() == "\n" else "\0",
-                                     segment[i:j + 1]))
+                chunks.append(re.sub(
+                    r"\s", lambda m: _NEWLINE_MARK if keep_newlines and m.group() == "\n" else "\0",
+                    segment[i:j + 1]))
                 i = j + 1
                 continue
         plain.append(char)
         i += 1
     flush()
-    return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
+    return [w.replace("\0", " ").replace(_NEWLINE_MARK, "\n") for w in "".join(chunks).split()]
 
 
 def _env_words(segment: str):

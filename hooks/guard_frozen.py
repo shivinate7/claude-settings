@@ -666,7 +666,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 # root fed through a variable that a loop or an xargs itself assigns are not read.
 _MARK = "\0"
 _MARK_AT = re.compile("`\0`|\0")
-_WORD_MARK = "\x02"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL (\x01 is its newline stand-in)
+_WORD_MARK = "\x04"   # the mark as `_copy_outer` splits words: `_quoted_words` keeps it, not NUL; no other mark shares its byte
 _FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
 _FIND_END = (";", "\\;", "+")
 _FIND_TEST_STARTS = ("(", "\\(", "!", "\\!")
