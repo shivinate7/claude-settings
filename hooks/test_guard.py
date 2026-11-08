@@ -5731,6 +5731,11 @@ sh("verdict-pipe-exit: a build script run by its path piped to tail, then && ech
 sh("verdict-pipe-exit: cat of the lint script piped to tail, then && echo, is allowed",
    "cat ./lint/ste_lint.py | tail -3 && echo ok", "allow", cwd=NOGIT)
 
+sh("verdict-pipe-exit: a lint script run by its bare name after cd lint, piped to tail, then && push, is refused",
+   "cd lint && ./ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
+sh("verdict-pipe-exit: python3 -Im pytest piped to tail, then && echo, is allowed",
+   "python3 -Im pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
+
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
