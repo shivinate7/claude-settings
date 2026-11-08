@@ -1364,6 +1364,14 @@ class Stale(unittest.TestCase):
     def unknown_lines(self, out, prefix):
         return [line for line in out.splitlines() if line.startswith(prefix + ": unknown")]
 
+    def unreadable_asks_inputs(self):
+        """(label, --asks arg) for each asks input that cannot be read whole: malformed JSON, a JSON object, and a folder with no .complete marker."""
+        malformed = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="asks-"), "asks.json"), "[{")
+        an_object = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="asks-"), "asks.json"), "{}")
+        cut_short = self.docs_folder({ASK_OPEN["id"]: ASK_OPEN}, "asks")
+        os.remove(os.path.join(cut_short, ".complete"))
+        return (("malformed JSON", malformed), ("a JSON object, not a list", an_object), ("a folder with no complete marker", cut_short))
+
     def assert_fail_last(self, r):
         """Exactly one line starts FAIL:, and it is the last line of stdout."""
         lines = r.stdout.splitlines()
@@ -1571,6 +1579,52 @@ class Stale(unittest.TestCase):
                 self.assertEqual([line for line in r.stdout.splitlines() if line.startswith("open-item")], [],
                                  "a run with no --items printed an open-item line:\n" + r.stdout + r.stderr)
 
+    def test_open_ask_non_object_entry_prints_one_unknown_line_and_still_lists_the_valid_asks(self):
+        # A null or string entry is not an ask, but skipping it would read a list that may hold an unseen ask as clear.
+        current, _ = self.current_and_behind()
+        for label, bad in (("a null entry", None), ("a string entry", "Which option?")):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    if as_folder:
+                        path = self.docs_folder({"ask-bad": bad, ASK_OPEN["id"]: ASK_OPEN}, "asks")
+                    else:
+                        path = self.list_file([bad, ASK_OPEN], "asks")
+                    r = self.asks_run(current, path)
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-open"],
+                                     "%s: the valid ask is not listed on its own line:\n%s" % (label, r.stdout + r.stderr))
+                    self.assert_one_unknown(r, "open-ask")
+                    self.assert_page_word(r, "current", 2)
+
+    def test_open_ask_behind_page_with_an_unreadable_or_cut_short_list_keeps_exit_1_and_ends_with_fail(self):
+        # A behind page exits 1 for its own verdict. An unreadable asks list adds unknown and FAIL, and does not raise the exit to 2.
+        _, behind = self.current_and_behind()
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(behind, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "behind", 1)
+
+    def test_open_ask_unknown_page_with_an_unreadable_or_cut_short_list_keeps_exit_2_and_ends_with_fail(self):
+        empty = write_text(os.path.join(self.fetched, "empty.html"), "")
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(empty, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "unknown", 2)
+
+    def test_open_item_run_with_answers_and_no_items_prints_an_open_item_unknown_line_and_exits_2(self):
+        # --answers without --items cannot name an open item, so the run must say it read none, and must never read as clear.
+        current, _ = self.current_and_behind()
+        for label, asks, listed in (("only a replied ask", [ASK_REPLIED], []), ("an open ask", [ASK_OPEN], ["ask-open"])):
+            for as_folder in (False, True):
+                with self.subTest(case=label, folder=as_folder):
+                    answers = self.docs_folder({OPEN_ID: OPEN_ANSWER}, "answers") if as_folder else self.list_file([OPEN_ANSWER], "answers")
+                    r = self.page_run(current, "--main", TEMPLATE, "--asks", self.asks_shaped(asks, as_folder), "--answers", answers)
+                    self.assertEqual(self.listed_ask_ids(r.stdout), listed, "%s: the open asks differ:\n%s" % (label, r.stdout + r.stderr))
+                    self.assert_one_unknown(r, "open-item")
+                    self.assertEqual(self.open_item_names(r.stdout), [], "an open item is named without --items:\n" + r.stdout + r.stderr)
+                    self.assert_page_word(r, "current", 2)
+
     # --items with --answers and --asks: the open-item lines.
 
     def test_open_item_with_a_kept_answer_is_listed_in_both_shapes(self):
@@ -1755,6 +1809,77 @@ class Stale(unittest.TestCase):
                 self.assert_page_word(r, "current", 0)
 
 
+    # --items, --answers and --asks: an open item with a lane or a reply is listed again when the owner answered after the
+    # writer routed or replied. Each boundary case runs beside a listed sibling, so each test is red on a build that never
+    # lists such an item, and the negatives are checked in the same run.
+
+    def test_open_item_on_a_lane_is_listed_only_when_its_kept_answer_is_later_than_its_last_answer(self):
+        # Later than lastAnswer.at: the owner answered again after the routing. At the same time or earlier: the routed answer.
+        routed = {"choice": "a", "note": "", "at": HANDLED_AT}
+        items = [decision_item(441, "lane-answer-later", status="open", lane=LANE, lastAnswer=routed),
+                 decision_item(442, "lane-answer-same", status="open", lane=LANE, lastAnswer=routed),
+                 decision_item(443, "lane-answer-earlier", status="open", lane=LANE, lastAnswer=routed)]
+        answers = [("lane-answer-later", answer_for("lane-answer-later", 441, at=LATER_AT)),
+                   ("lane-answer-same", answer_for("lane-answer-same", 442, at=HANDLED_AT)),
+                   ("lane-answer-earlier", answer_for("lane-answer-earlier", 443, at=EARLIER_AT))]
+        self.assert_open_items_named(items, answers, ["lane-answer-later"],
+                                         "an open lane item with a later, a same-time and an earlier kept answer")
+
+    def test_open_item_with_a_reply_is_listed_only_when_its_kept_answer_is_later_than_replied(self):
+        # Later than replied: the owner answered again after the reply. At the same time or earlier, the replied time is the later one.
+        items = [decision_item(444, "reply-answer-later", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(445, "reply-answer-same", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(446, "reply-replied-later", status="open", reply="Ship it.", replied=HANDLED_AT)]
+        answers = [("reply-answer-later", answer_for("reply-answer-later", 444, at=LATER_AT)),
+                   ("reply-answer-same", answer_for("reply-answer-same", 445, at=HANDLED_AT)),
+                   ("reply-replied-later", answer_for("reply-replied-later", 446, at=EARLIER_AT))]
+        self.assert_open_items_named(items, answers, ["reply-answer-later"],
+                                         "an open item with a reply, a kept answer later than replied, one at the same time and one earlier")
+
+    def test_open_item_on_a_lane_with_no_usable_last_answer_time_is_not_listed(self):
+        # The lane rule compares with lastAnswer.at. With no usable time the item stays out, however late the kept answer is.
+        items = [decision_item(447, "lane-valid", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": HANDLED_AT}),
+                 decision_item(448, "lane-no-last-answer", status="open", lane=LANE),
+                 decision_item(449, "lane-no-at", status="open", lane=LANE, lastAnswer={"choice": "a", "note": ""}),
+                 decision_item(450, "lane-at-null", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": None})]
+        answers = [(item["id"], answer_for(item["id"], item["n"], at=LATER_AT)) for item in items]
+        self.assert_open_items_named(items, answers, ["lane-valid"],
+                                         "an open lane item with no lastAnswer, no lastAnswer.at, and a null lastAnswer.at, each with a later kept answer")
+
+    def test_open_item_with_a_reply_and_no_usable_replied_time_is_not_listed(self):
+        # The reply rule compares with replied. With no usable time the item stays out, however late the kept answer is.
+        items = [decision_item(451, "reply-valid", status="open", reply="Ship it.", replied=HANDLED_AT),
+                 decision_item(452, "reply-no-replied", status="open", reply="Ship it."),
+                 decision_item(453, "reply-null-replied", status="open", reply="Ship it.", replied=None),
+                 decision_item(454, "reply-blank-replied", status="open", reply="Ship it.", replied="")]
+        answers = [(item["id"], answer_for(item["id"], item["n"], at=LATER_AT)) for item in items]
+        self.assert_open_items_named(items, answers, ["reply-valid"],
+                                         "an open item with a reply and no replied, a null replied and a blank replied, each with a later kept answer")
+
+    def test_open_item_with_an_unparseable_time_is_not_listed_and_never_a_traceback(self):
+        # A time that is not an ISO string is unusable: the item stays out, the run prints no traceback, and the valid lane sibling is listed.
+        current, _ = self.current_and_behind()
+        valid = decision_item(455, "lane-valid-time", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "", "at": HANDLED_AT})
+        valid_answer = answer_for("lane-valid-time", 455, at=LATER_AT)
+        cases = (("a lastAnswer.at that is not a time", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": "soon"}}, LATER_AT),
+                 ("a lastAnswer.at that is a number", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": 1762509600}}, LATER_AT),
+                 ("a kept answer whose at is not a time", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": HANDLED_AT}}, "not a time"),
+                 ("a replied that is not a time", {"reply": "Ship it.", "replied": "yesterday"}, LATER_AT),
+                 ("a replied that is an impossible date", {"reply": "Ship it.", "replied": "2026-13-45T99:00:00Z"}, LATER_AT))
+        for as_folder in (False, True):
+            for n, (label, extra, answer_at) in enumerate(cases, start=456):
+                with self.subTest(case=label, folder=as_folder):
+                    item_id = "unparseable-%d" % n
+                    item = decision_item(n, item_id, status="open", **extra)
+                    r = self.open_item_run(current, [OPEN_ITEM, valid, item],
+                                           [(OPEN_ID, OPEN_ANSWER), (valid["id"], valid_answer), (item_id, answer_for(item_id, n, at=answer_at))],
+                                           as_folder)
+                    self.assertNotIn("Traceback", r.stdout + r.stderr, "%s: the run printed a traceback:\n%s" % (label, r.stdout + r.stderr))
+                    named = sorted(named_id for _, named_id in self.open_item_names(r.stdout))
+                    self.assertEqual(named, sorted([OPEN_ID, valid["id"]]),
+                                     "%s: the named open items differ from the expected ones:\n%s" % (label, r.stdout + r.stderr))
+
+
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
 RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
@@ -1876,6 +2001,8 @@ OPEN_N, OPEN_ID = 401, "open-kept"
 OPEN_ITEM = decision_item(OPEN_N, OPEN_ID, status="open")
 OPEN_ANSWER = answer_for(OPEN_ID, OPEN_N)
 OPEN_ITEM_RE = re.compile(r"^open-item: item (\d+) \(([^)]*)\)")
+# The times the changed-answer cases compare: the writer routed or replied at HANDLED_AT, and a kept answer is later or earlier.
+HANDLED_AT, EARLIER_AT, LATER_AT = "2026-11-07T10:00:00Z", "2026-11-07T09:30:00Z", "2026-11-07T10:30:00Z"
 
 
 def load_stale_pages():
