@@ -584,6 +584,49 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+_SED_GAP = re.compile(r"[\s;]*(?:(?:\d+(?:~\d+)?|\$|/(?:\\.|[^/\\\n])*/[IM]*)"
+                      r"(?:\s*,\s*(?:[+~]?\d+|\$|/(?:\\.|[^/\\\n])*/[IM]*))?)?\s*!*\s*")
+
+
+def _sed_acts_on_files(script: str) -> bool:
+    """True when a sed script holds a command that writes or runs a file (`w`, `W`, `e`, an `s` flag `w`
+    or `e`), or cannot be read. Commands are found by the grammar (address, `s` delimiter, text commands),
+    never by a letter search, so `s/testing/x/` is no `e` command. An unread script fails closed."""
+    pos = 0
+    while True:
+        pos = _SED_GAP.match(script, pos).end()
+        if pos >= len(script):
+            return False
+        command, pos = script[pos], pos + 1
+        if command in "wWe":
+            return True
+        if command in "sy":
+            delimiter = script[pos:pos + 1]
+            if not delimiter or delimiter in "\\\n":
+                return True
+            pos += 1
+            for _ in range(2):      # pattern and replacement, a backslash escapes the next character
+                while pos < len(script) and script[pos] != delimiter:
+                    pos += 2 if script[pos] == "\\" else 1
+                if pos >= len(script):
+                    return True
+                pos += 1
+            if command == "s":
+                pos = re.compile(r"[gpiImM0-9]*").match(script, pos).end()
+                if script[pos:pos + 1] in ("w", "e"):
+                    return True
+        elif command in "aicrR":
+            pos = re.compile(r"(?:\\.|[^\\\n])*", re.S).match(script, pos).end()
+        elif command in "btT:":
+            pos = re.compile(r"[^;\n]*").match(script, pos).end()
+        elif command == "#":
+            pos = re.compile(r"[^\n]*").match(script, pos).end()
+        elif command in "lLqQ":
+            pos = re.compile(r"\s*\d*").match(script, pos).end()
+        elif command not in "{}=pPdDgGhHnNxzF":
+            return True
+
+
 def _sed_script_words(raw) -> set:
     """Indexes in `raw` of a sed segment's script words: each `-e` / `--expression` value (joined or not),
     else the first operand when no `-e` or `-f` is given. A script is no file; every other operand is."""
@@ -618,7 +661,9 @@ def _sed_script_words(raw) -> set:
                     break
     if not has_script and operands:
         scripts.add(operands[0])
-    return scripts
+    # A script that writes or runs something stays judged as before, which refuses a test-ish word in it.
+    return {at for at in scripts
+            if at < len(raw) and not _sed_acts_on_files(re.sub(r"^--expression=|^-[A-Za-z]*e", "", _unquoted(raw[at])))}
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
@@ -654,6 +699,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], set()
         script_at = _sed_script_words(raw) if command_position else set()
+        is_sed = command_position and _segment_command(raw)[0] == "sed"
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -667,7 +713,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 if index in script_at:
                     script.update(range(len(words), len(words) + len(pieces)))
                 words.extend(pieces)
-                shown.extend(pieces)
+                # A quoted `;` in a sed script would cut `writes_to`'s `sed -i ... <path>` reading short.
+                shown.extend(re.sub(r"[;&|]", " ", p) for p in pieces) if is_sed else shown.extend(pieces)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
