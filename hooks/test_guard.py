@@ -10355,8 +10355,10 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 # whose refusal is kept with no worktree. A finished spawn with no worktree that is not a reviewer is allowed.
 # A Workflow agent has no spawn in the parent's transcript. Its run's journal, beside the transcript under
 # subagents/workflows/<runId>/, holds its started line and, once it finishes, its result line. Its meta file holds the
-# agentType, which is the role judged. A Workflow agent has no worktree, so only a reviewer is refused. `to` names it by
-# its agentId or by its started line's label. A finished one with no meta file has no role, so the send asks.
+# agentType, which is the role judged, and spawnedWithWorktree, true when it was spawned with isolation worktree.
+# A Workflow agent has no Agent input, so its worktree is that flag or its role file's pin. A finished one with a
+# worktree is refused for any role. Otherwise only a reviewer is refused. `to` names it by its agentId or by its
+# started line's label. A finished one with no meta file has no role, so the send asks.
 # `to` resolves to a spawn by its launch result's toolUseResult.agentId, or by the spawn call's `name` input, and the
 # latest spawn with that name wins. A background
 # spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.

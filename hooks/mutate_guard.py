@@ -2438,7 +2438,8 @@ MUTATIONS = [
      '        lambda role: role_isolation_pin(pointer_checkout(), role))',
      "guard", "a finished background reviewer, named by its agent id, is refused"),
     # The Workflow arms: the lookup of a name no spawn holds (guard_merge._workflow_resume_hit), the role of a finished agent
-    # with no meta file, and workflow_agent's match by label and its running state (lint/_transcript.py).
+    # with no meta file, its spawnedWithWorktree flag, and workflow_agent's match by label and its running state
+    # (lint/_transcript.py).
     ("resume-finished-reviewer: a Workflow agent is not looked up when no spawn holds its name",
      '        if not named:\n            return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)',
      '        if not named:\n            return "", "", "", ""',
@@ -2447,6 +2448,10 @@ MUTATIONS = [
      '    role = agent_type or "agent"\n    return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""',
      '    role = agent_type or "agent"\n    return "", "", "", ""',
      "guard", "a finished Workflow agent with no meta file asks: its role is unknown"),
+    ("resume-finished-reviewer: a Workflow agent's spawnedWithWorktree flag is ignored, so only its role's pin counts",
+     '    worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
+     '    worktree = False or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
+     "guard", "a main-session send to a finished Workflow agent spawned with a worktree is refused"),
     ("resume-finished-reviewer: a Workflow agent is found by its agent id only, so its label names none",
      'and target in (agent_id, rec.get("label"))):',
      'and target == agent_id):',
