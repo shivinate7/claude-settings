@@ -1,11 +1,11 @@
 {
   "title": "The guard's matcher names every tool the guard handles, MCP GitHub tools included",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 258.5,
   "owner": "coordinator",
   "lane": "session_013NEJL1BcjeYCubrQhUmWKz",
   "why": "Lane review-record-from-render found that no mcp__github__* tool is in the guard's PreToolUse matcher, so the guard code for MCP merges and draft PRs never ran (coordinator, 17:15 CST Nov 7). A merge through the MCP tool skips the merge guard.",
-  "note": "Done check: a check that fails when a guard handles a tool name the matcher misses, red on main. Sighting (#2284 review, coordinator 14:51 CST Nov 8): mcp__github__merge_pull_request is also missing from the guard matcher, so no merge check runs for the MCP merge tool. This step owns it; the lane confirms its stack (#1601-#1694) adds that tool name, or adds it.",
-  "updatedAt": "2026-11-08T14:53:00-06:00"
+  "note": "Done check: a check that fails when a guard handles a tool name the matcher misses, red on main. Sighting (#2284 review, coordinator 14:51 CST Nov 8): mcp__github__merge_pull_request is also missing from the guard matcher, so no merge check runs for the MCP merge tool. This step owns it; the lane confirms its stack (#1601-#1694) adds that tool name, or adds it. Lane 14:53 CST Nov 8, from git: #1665 (head fd2316577) adds mcp__github__merge_pull_request, enable_pr_auto_merge and create_pull_request to the guard matcher in settings.json; main gets it when runner 8 merges #1601 then #1665. No new work.",
+  "updatedAt": "2026-11-08T14:54:00-06:00"
 }
