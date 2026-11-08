@@ -2116,9 +2116,8 @@ def case_send_tool_names_come_from_shared_names():
 # the owner has not answered, is no ruling, so the judge may not cite it. Each stub answer below cites a candidate only
 # when the list it was shown holds the case's marker (CJ_CITE_SHOWN). So a candidate that is not offered, and one that is
 # offered but not cited as a refusal, both allow the question.
-NOTE_INCIDENT_MARK = "hand-merged the release fix"
-NOTE_INCIDENT = ("Incident, 2026-11-05: a lane hand-merged the release fix onto #1488 before the owner's review, so the "
-                 "milestone check never ran.")
+NOTE_INCIDENT_MARK = "hand-merged 1a444eb96"
+NOTE_INCIDENT = "Incident (shiv, 2026-11-05 10:12): a lane hand-merged 1a444eb96 onto #1932"
 NOTE_RECOMMEND_MARK = "recommends raising the milestone job cap"
 NOTE_RECOMMEND = ("Page item 150 (open) recommends raising the milestone job cap; the owner has not answered, so the cap "
                   "stays as it is until he does.")
@@ -2143,8 +2142,8 @@ def owner_only_box():
 
 
 def case_past_ruling_incident_note_is_not_cited():
-    # The step note holds only an incident. It names no owner as its source, so it is no ruling, and a judge that cites it
-    # must not refuse the question. Red on main: the note is offered as a ruling, and the cited note refuses the box.
+    # The step note holds only an incident, in the form the lane notes use. An incident is no ruling, so a judge that
+    # cites it must not refuse the question.
     import question_form  # the one form check (hooks/question_form.py)
     box = owner_only_box()
     check("owner-only incident: the box passes chat_hit, so the model judges it",
@@ -2181,6 +2180,29 @@ def case_past_ruling_owner_decision_stays_refused():
     r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, cite_shown="generous on purpose")
     check("owner-only control: a decision whose ruling line names the owner still refuses a question it settles",
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
+
+
+def case_item8_prompt_names_record_kinds_and_owner_markers():
+    # The item-8 text the judge is sent: the lines from its `8. ` marker up to the candidate list. It must say that a
+    # decision or debt record is a ruling by its kind, and that a step or page line needs an owner marker. Each anchor
+    # is one sentence, so a word that appears elsewhere in the text does not pass.
+    r = run_hook(question_input(box=owner_only_box()), answer=ALLOW)
+    calls = form_calls(r)
+    check("item 8 prompt: the question box makes one judged call", len(calls) == 1, detail(r))
+    if len(calls) != 1:
+        return
+    prompt = calls[0]["prompt"]
+    scoped = prompt.split("\n8. ", 1)
+    check("item 8 prompt: the judged call holds an item-8 line before the candidate list",
+          len(scoped) == 2 and "Past rulings (item 8)" in scoped[1], prompt[-300:])
+    if len(scoped) != 2:
+        return
+    item8 = scoped[1].split("Past rulings (item 8)", 1)[0]
+    sentences = re.split(r"(?<=[.!?;])\s+", item8)
+    check("item 8 prompt: a sentence says a decision or debt record is a ruling by its kind",
+          any("decision" in s and "debt" in s and "record" in s for s in sentences), item8[:300])
+    check("item 8 prompt: a sentence says a step or page line needs an owner marker",
+          any("owner marker" in s and ("step" in s or "page" in s) for s in sentences), item8[:300])
 
 
 def main():
@@ -2226,7 +2248,8 @@ def main():
                  case_send_tool_names_come_from_shared_names,
                  case_past_ruling_incident_note_is_not_cited, case_past_ruling_recommended_pick_is_not_cited,
                  case_past_ruling_owner_answered_page_item_stays_refused,
-                 case_past_ruling_owner_decision_stays_refused):
+                 case_past_ruling_owner_decision_stays_refused,
+                 case_item8_prompt_names_record_kinds_and_owner_markers):
         try:
             case()
         except Exception as exc:

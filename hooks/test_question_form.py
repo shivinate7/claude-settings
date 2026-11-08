@@ -1480,6 +1480,45 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+# ------------------------------------------------------------------ owner ruling forms (decision question-form)
+# OWNER_RULING_RE marks a sentence that names the owner as its source. A ruling sentence matches; an incident, a
+# gripe, a deferral, or a passing mention of the owner does not.
+OWNER_RULING_MUST_MATCH = (
+    "Your ruling Oct 21: no measuring step",
+    "Your ruling, Oct 21: no freeze",
+    "Owner go, Nov 1 17:26 CST",
+    "Owner pressed Done on item 312",
+    "Owner 17:02 CST: keep it",
+    "the owner's 12:27 CST ruling that a lane may start it",
+    "shiv approved 2026-11-02",
+    "Ruling (owner, 2026-11-07 13:20)",
+    "Owner, 2026-11-01 16:30 CST",
+)
+OWNER_RULING_MUST_NOT = (
+    "Incident (shiv, Nov 9 10:12): a lane hand-merged X",
+    "Gripe (shiv, Nov 6): too slow",
+    "Deferred (shiv, Nov 5): later",
+    "(shiv's caution, item 2)",
+    "(owner note on item 398)",
+    "this is not an owner ruling (P44)",
+)
+
+
+def case_owner_ruling_forms_and_non_rulings():
+    # One row per sentence. The rows that pass on main are controls and stay green.
+    import question_form  # the one form check (hooks/question_form.py)
+    pattern = getattr(question_form, "OWNER_RULING_RE", None)
+    check("owner ruling form: question_form.OWNER_RULING_RE exists", hasattr(pattern, "search"), "missing regex")
+    if not hasattr(pattern, "search"):
+        return
+    for sentence in OWNER_RULING_MUST_MATCH:
+        check("owner ruling form, must match: %r" % sentence, pattern.search(sentence) is not None, "no match")
+    for sentence in OWNER_RULING_MUST_NOT:
+        hit = pattern.search(sentence)
+        check("owner ruling form, must not match: %r" % sentence, hit is None,
+              "matched %r" % (hit.group(0) if hit else ""))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -1675,7 +1714,7 @@ def main():
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes):
+                 case_task_str_replace_prose_label_passes, case_owner_ruling_forms_and_non_rulings):
         try:
             case()
         except Exception as exc:
