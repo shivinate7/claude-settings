@@ -91,11 +91,10 @@ not exist is skipped. When the newest claim in a note is STALE_DAYS or more days
 The last upkeep row, "done without check", names each done step that closed without showing its Done check green on
 main (step done-needs-check). Only a done step whose updatedAt is on or after DONE_CHECK_SINCE (an ISO UTC time) is read.
 Its note, why and ask are searched for the whole phrase `Done check` (any case; `Done checks` does not count). With no
-such phrase the entry is `<step id>`. With the phrase, one sentence of the three texts (a sentence ends at ". " or at
-the end of a text) must hold the whole phrase `green on main` or `met on main` (any case), with no negator (not, never,
-no, yet, or a word ending in n't) before it in its clause (a clause breaks at ANSWERED_CLAUSE_BREAK_RE in
-lint/report_guard.py: `.` `;` `:` `!` `?` `,` a dash), and a source, which may sit anywhere in the sentence: a ref that DONE_REF_RE in
-lint/report_guard.py accepts (the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash). With none the entry is `<step id> (not shown green on main)`. A missing or
+such phrase the entry is `<step id>`. With the phrase, one of the three texts must hold exactly `Done check green on
+main:` (any case, single spaces), then optional spaces, then a ref that DONE_REF_RE in lint/report_guard.py accepts
+(the one home: `#<digits>`, `PR <n>`, a /pull/ or /commit/ URL, a hex commit hash) with no word between. Nothing else shows it green: not `met on main`, not a bare `green on main`.
+With none the entry is `<step id> (not shown green on main)`. A missing or
 unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
 file. It adds no process, file, timer or log: it reads the notes already loaded.
 
@@ -166,14 +165,13 @@ FUTURE_MINUTES = 5
 TODO_STATUS = ("todo", "ready")
 KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
 TOP = 5
-DONE_CHECK_SINCE = "2026-11-07T00:00:00Z"  # ISO UTC: a done step updated before this time is not read for a Done check
+# ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
+# row ships: the 42 done steps updated Nov 7-8 carry no `Done check green on main:` line, so an earlier cutoff
+# would list all 42 at launch.
+DONE_CHECK_SINCE = "2026-11-10T06:00:00Z"
 DONE_CHECK = re.compile(r"(?<![\w-])done check(?![\w-])", re.I)
-GREEN_ON_MAIN = re.compile(r"(?<![\w-])(?:green|met) on main(?![\w-])", re.I)
-# A negator before the phrase in its sentence: the check is said not to be green. `\w+n't` covers isn't, wasn't, hasn't.
-NEGATOR = re.compile(r"(?<![\w'-])(?:not|never|no|yet|\w+n['’]t)(?![\w'-])", re.I)
-# A future marker in the same sentence: the green-on-main claim is about a check that is not green yet. `after`
-# counts only when `merge`, `merges` or `lands` follows it (`merged` is past, so it does not).
-FUTURE_MARKER = re.compile(r"\b(?:will|expected|once|pending)\b|\bafter\b.*\b(?:merge|merges|lands)\b", re.I)
+# The whole phrase a close writes to show its Done check green; DONE_REF_RE then reads the ref after it.
+GREEN_PHRASE = re.compile(r"(?<![\w-])done check green on main: *", re.I)
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
 SCANNED = ("roadmap", "briefs", "plans", "handoffs")
@@ -209,7 +207,7 @@ from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.R
 )
 sys.path.insert(0, str(LINT))
 try:
-    from report_guard import ANSWERED_CLAUSE_BREAK_RE, DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line and of a clause break (lint/report_guard.py)
+    from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
 finally:
     sys.path.remove(str(LINT))
 
@@ -1312,12 +1310,15 @@ def unfiled(steps, work):
     return out
 
 
-def shown_green(sentence):
-    """True when the sentence holds `green on main` or `met on main` with no negator before it in its clause, a
-    source, and no future marker (FUTURE_MARKER) anywhere in the sentence: a forward claim is not shown green."""
-    plain = any(not NEGATOR.search(ANSWERED_CLAUSE_BREAK_RE.split(sentence[:m.start()])[-1])
-                for m in GREEN_ON_MAIN.finditer(sentence))
-    return plain and bool(DONE_REF_RE.search(sentence)) and not FUTURE_MARKER.search(sentence)
+def shown_green(text):
+    """True when the text holds `Done check green on main:` (GREEN_PHRASE) and then, with no word between, a ref
+    that DONE_REF_RE accepts. A URL holds its ref inside the word, and `PR 12` holds a space, so a ref counts when only
+    non-space text lies between the phrase and its start."""
+    for m in GREEN_PHRASE.finditer(text):
+        ref = DONE_REF_RE.search(text, m.end())
+        if ref and not re.search(r"\s", text[m.end():ref.start()]):
+            return True
+    return False
 
 
 def done_without_check(steps):
@@ -1340,9 +1341,7 @@ def done_without_check(steps):
         if not any(DONE_CHECK.search(t) for t in texts):
             out.append(k)
             continue
-        # Each text splits on its own, so a sentence never runs from one field into the next.
-        sentences = [part for t in texts for part in re.split(r"\.\s", t)]
-        if not any(shown_green(x) for x in sentences):
+        if not any(shown_green(t) for t in texts):
             out.append("%s (not shown green on main)" % k)
     return out
 
