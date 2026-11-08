@@ -550,10 +550,12 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # A push after a commit in the same call is read before that commit lands, so its range never holds it. Such
 # a commit is refused as a red-run chain (RED_RUN_CHAIN_REASON) when it is an `--amend`, or stages added lines
 # on a test path: the index, or the working tree for `-a`, a pathspec and an earlier `git add`, read the way the
-# marker read above reads them. Cost, only for a commit with a push after it in the call: one `git diff
-# --cached --numstat`, or the working-tree form for `-a`, a pathspec or a whole-tree add. An add with
-# pathspecs also reads the index first (one more numstat), and an untracked file costs one `git ls-files
-# --others` and a size stat. An `--amend` costs none. A failed read is no hit.
+# marker read above reads them. Cost, only for a commit with a `git push` after it in the call: one `git diff
+# --numstat`, of the index, or of the working tree for `-a`, a pathspec or a whole-tree add. A whole-tree add
+# costs one `git ls-files --others`. Each earlier add with pathspecs costs one `git ls-files --others` in every
+# form, and one more numstat when the commit reads the index. An untracked test file costs a size stat. The
+# reads stop at the first test addition. An `--amend` costs none, and a commit with no push after it costs no
+# read. A failed read is no hit.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
@@ -820,12 +822,15 @@ def _commit_stages_tests(call, where, top, all_flag, specs, wholes, adds, is_tes
         return True
     if specs:
         return _numstat_adds_test(where, ["HEAD", "--", *specs], is_test_rel)
-    if all_flag or top in wholes:
-        return (_numstat_adds_test(top, ["HEAD"], is_test_rel)
-                or (top in wholes and _untracked_adds_test(top, top, None, is_test_rel)))
-    if _numstat_adds_test(top, ["--cached"], is_test_rel):
+    whole = all_flag or top in wholes
+    if _numstat_adds_test(top, ["HEAD"] if whole else ["--cached"], is_test_rel):
         return True
-    return any(add_top == top and (_numstat_adds_test(add_where, ["HEAD", "--", *add_paths], is_test_rel)
+    if top in wholes and _untracked_adds_test(top, top, None, is_test_rel):
+        return True
+    # `git diff HEAD` covers an earlier add's tracked paths, but no diff form shows an untracked file, and `-a`
+    # stages none: each add's untracked paths are read in every form, as the marker read reads them.
+    return any(add_top == top and ((not whole and _numstat_adds_test(add_where, ["HEAD", "--", *add_paths],
+                                                                     is_test_rel))
                                    or _untracked_adds_test(add_where, top, add_paths, is_test_rel))
                for add_where, add_top, add_paths in adds)
 
@@ -883,10 +888,14 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
     red_chain = False                   # an earlier commit amends HEAD or stages added test lines
     ends = []
     segments = split_segments(stripped, ends)
+    calls = [git_call_of(segment) if segment.strip() else None for segment in segments]
+    # A commit with no push after it lands before any push reads a range, so it needs no red-run read.
+    last_push = max((number for number, call in enumerate(calls) if call is not None and call[0] == "push"),
+                    default=-1)
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
-        call = git_call_of(segment)
+        call = calls[number]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
@@ -926,8 +935,9 @@ def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
         head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
         if head is None or head.returncode != 0:
             continue
-        red_chain = red_chain or (is_test_rel is not None and _red_run_present() and _commit_stages_tests(
-            call, where, top, all_flag, specs, wholes, adds, is_test_rel))
+        red_chain = red_chain or (number < last_push and is_test_rel is not None and _red_run_present()
+                                  and _commit_stages_tests(call, where, top, all_flag, specs, wholes, adds,
+                                                           is_test_rel))
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:

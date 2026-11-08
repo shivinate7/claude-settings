@@ -3863,8 +3863,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
     # A push of a test commit with no Red-run line is refused here too (rule red-run): it shares the
     # push's range, and adds one `git log` per push. A push after a commit in the same call that amends
-    # HEAD or stages added test lines is refused as a chain (the range cannot hold that commit yet): at most
-    # one `git diff --numstat` per such commit (an add with pathspecs reads the index too), none for an amend.
+    # HEAD or stages added test lines is refused as a chain (the range cannot hold that commit yet): one
+    # `git diff --numstat` per commit with a push after it, plus a `git ls-files --others` per earlier add
+    # (see RED_RUN_CHAIN_REASON's comment), none for an amend or a commit with no push after it.
     kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel)
     if kind == "red-run":
         flagged, remedy = red_run_parts(matched)
