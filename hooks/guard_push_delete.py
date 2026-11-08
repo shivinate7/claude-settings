@@ -21,6 +21,11 @@ PUSH_VALUE_OPTS = {"--receive-pack", "--exec", "--push-option"}
 DEFAULT_BRANCH_FALLBACK = ("main", "master")
 
 
+def names_default_branch(ref: str) -> bool:
+    """True when a pushed ref, with or without its `refs/heads/` prefix, is main or master. The one home of that test."""
+    return ref.strip().removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK
+
+
 def _push_config(cwd: str, key: str, overrides=None):
     """The config value, '' when the key is unset, None when git cannot answer.
 
@@ -333,9 +338,9 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
-                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
+                if names_default_branch(target):
                     return "main"
-            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
+            elif names_default_branch(source):
                 return "main"
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
