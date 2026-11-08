@@ -3,12 +3,15 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import json, os, re, sys, unittest
+import json, os, re, shutil, subprocess, sys, unittest
+import _test_temp  # test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
 CALL_JUDGE = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "call_judge.py")
+
+GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "guard.py")
 
 
 def call_judge_judges():
@@ -79,6 +82,34 @@ class Matcher(unittest.TestCase):
         tool = "mcp__claude-code-remote__send_message"
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
+
+    def test_guard_matcher_covers_draft_pr_create(self):
+        # Rule draft-pr refuses the MCP create call without draft true, so the guard must see that call.
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        tool = "mcp__github__create_pull_request"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
+    def test_guard_refuses_draft_less_create_under_a_matched_tool(self):
+        # End to end: guard.py refuses a draft-less create call under draft-pr, and the matcher covers that same
+        # tool name. Its config folder is this run's temp folder, so guard.log stays out of ~/.claude.
+        tool = "mcp__github__create_pull_request"
+        run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, run, ignore_errors=True)
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": run, "session_id": "matcher-test",
+                   "tool_input": {"owner": "y", "repo": "x", "title": "x", "head": "h", "base": "main"}}
+        out = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+                             env=dict(os.environ, CLAUDE_CONFIG_DIR=run), timeout=60)
+        decision = json.loads(out.stdout or "{}").get("hookSpecificOutput", {})
+        self.assertEqual(decision.get("permissionDecision"), "deny",
+                         "guard.py did not deny %s: stdout %r" % (tool, out.stdout))
+        self.assertTrue(decision.get("permissionDecisionReason", "").startswith("draft-pr: "),
+                        "guard.py denied %s, but not under draft-pr: %r" % (tool, decision))
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "guard.py refuses %s under draft-pr, but no guard matcher covers it: %r" % (tool, matchers))
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
