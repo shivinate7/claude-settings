@@ -1525,11 +1525,11 @@ def hand_off_problem(hook, text):
 # Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
-# The phrases are _clause.CANNOT_FORMS; the permission forms vary in their words, so they stay a pattern of their own.
-_PERMISSION_FORM = r"do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
+# The phrases, the permission forms too, are _clause.CANNOT_FORMS.
+# A hyphen just before or after a phrase makes it part of a name, so the match refuses it.
 CANNOT_RE = re.compile(
-    _NOT_NAME + "(?:%s|%s)(?![\\w-])" % ("|".join(_clause.form_pattern(form) for form in _clause.CANNOT_FORMS),
-                                         _PERMISSION_FORM), re.I)
+    _NOT_NAME + "(?:%s)(?![\\w-])" % "|".join(_clause.form_pattern(form) for form in _clause.CANNOT_FORMS),
+    re.I)
 # The words just before the phrase must hold the writer's own subject (_clause.own_subject), or the phrase opens its clause.
 # Any other subject (it, the guard, the lane, the session, a draft PR) is another party, so the sentence is no claim about
 # this session. A conditional or a negator just before the phrase (_clause.conditional, _clause.negated_near) is no claim.

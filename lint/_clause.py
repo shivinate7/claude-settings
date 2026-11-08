@@ -33,12 +33,17 @@ PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against
 VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot", "isn't", "aren't",
          "wasn't", "doesn't", "didn't", "won't", "not", "no", "needs", "requires")
 # The phrases that say a session cannot do an act. A form reads the same with n't or not and with a curly apostrophe.
+# The generated tail holds the permission forms: "do not have the permission to", with or without "the", does for do, and
+# the nouns of _PERMISSION_NOUNS.
+_PERMISSION_NOUNS = ("permission", "authorization", "authorisation", "authority", "ability")
 CANNOT_FORMS = ("can't", "cannot", "can not", "unable to", "could not", "couldn't", "no way to", "no way I can",
                 "no way we can", "not able to", "wasn't able to", "won't be able to", "will not be able to",
                 "haven't been able to", "hasn't been able to", "have not been able to", "has not been able to",
                 "not allowed to", "not permitted to", "not going to be able to", "not authorized to", "not authorised to",
                 "don't have access to", "do not have access to", "doesn't have access to", "does not have access to",
-                "lack permission to", "lacks permission to", "blocked from", "forbidden from")
+                "lack permission to", "lacks permission to", "blocked from", "forbidden from") + tuple(
+    "%s have %s%s to" % (verb, the, noun)
+    for verb in ("don't", "do not", "doesn't", "does not") for the in ("", "the ") for noun in _PERMISSION_NOUNS)
 # The nouns that make a checks noun an outage, not a CI check ("the network checks are failing"), and the verbs that make
 # "failing to <verb>" an outage, not a red check. They live here, a shared lexicon, so each caller reads an outage alike.
 OUTAGE_NOUNS = ("connection", "network", "connectivity", "api", "auth", "authentication", "proxy", "health")
