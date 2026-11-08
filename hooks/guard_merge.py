@@ -550,6 +550,18 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+CONFLICT_MARKERS_UNREAD_REASON = (
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): the guard could not read the "
+    "repository (a git read timed out or did not start), so it cannot check this commit or push for conflict "
+    "markers. Remedy: retry the command once git answers."
+)
+CONFLICT_MARKERS_UNREAD_KIND = "unread"   # the kind conflict_markers_hit answers; guard.py asks on it
+
+
+class _GitUnread(Exception):
+    """A git read that could not run (None from `_git`): unknown, never clear."""
+
+
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -566,7 +578,9 @@ def _diff_check(where, diff_args):
 def _marker_findings(where, top, diff_args, source):
     """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports."""
     done = _diff_check(where, diff_args)
-    return {} if done is None else _kinds_of(done, top, source)
+    if done is None:
+        raise _GitUnread(where)
+    return _kinds_of(done, top, source)
 
 
 def _kinds_of(done, top, source):
@@ -582,7 +596,9 @@ def _kinds_of(done, top, source):
     for name, numbers in wanted.items():
         if source is not None:
             read = _git(top, "cat-file", "-p", source + ":" + name)
-            text = read.stdout if read is not None and read.returncode == 0 else ""
+            if read is None:
+                raise _GitUnread(top)
+            text = read.stdout if read.returncode == 0 else ""
         else:
             try:
                 with open(os.path.join(top, name), encoding="utf-8", errors="replace", newline="") as handle:
@@ -726,6 +742,16 @@ def _unresolved(specs):
 
 
 def conflict_markers_hit(stripped: str, cwd: str):
+    """`_conflict_markers_hit`, with a git read that could not run answered `(CONFLICT_MARKERS_UNREAD_KIND,
+    folder)`: a read that timed out or did not start is unknown, so the caller asks. A read that ran and
+    exited non-zero (no repository, no HEAD) is still skipped."""
+    try:
+        return _conflict_markers_hit(stripped, cwd)
+    except _GitUnread as unread:
+        return CONFLICT_MARKERS_UNREAD_KIND, str(unread) or "git"
+
+
+def _conflict_markers_hit(stripped: str, cwd: str):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). Each segment is judged from its own command
@@ -760,6 +786,8 @@ def conflict_markers_hit(stripped: str, cwd: str):
         if tree and where:
             where = _absolute(tree.group(2), where)
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
+        if done is None and where and os.path.isdir(where):
+            raise _GitUnread(where)
         if done is None or done.returncode != 0 or not done.stdout.strip():
             continue
         top = os.path.normpath(done.stdout.strip())
@@ -774,7 +802,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
         whole_tops, add_specs = set(), []
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
         head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
-        if head is None or head.returncode != 0:
+        if head is None:
+            raise _GitUnread(top)
+        if head.returncode != 0:
             continue
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)

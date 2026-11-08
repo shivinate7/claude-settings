@@ -4,8 +4,10 @@ and whether a live session stands in it. The roadmap build also imports it for `
 reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
-so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
-that patches one of these names patches it here, on the one object every reader calls. Standard
+so its start-up never loads the guard. guard_core.py imports these names, and guard_merge.py takes
+`_git` from guard_core, so each binds its own copy of the name. A patch on a name here reaches the
+janitor and the callers in this file only. A test of a guard reader patches the name in the reader's
+own module too. Standard
 library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
