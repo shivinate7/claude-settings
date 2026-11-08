@@ -73,7 +73,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened.
 - A Findings line reads only on a record the rules above call done: one paged read of the PR's files for `<n>, this PR` (one call per page), and one read per follow-up PR named. `none` costs what a legacy record costs.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads. `ReviewedList.test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once`, `ReviewedList.test_findings_follow_up_reads_each_named_pr_once` and `ReviewedList.test_findings_none_reads_no_more_than_a_legacy_record` pin the Findings reads. `ReviewFixFiling` pins the filing diff.
+- The test `ReviewedList.test_one_ready_pr_with_a_record_costs_three_gh_calls` in `merge/test_merge.py` pins the three calls. `ReviewedLedger.test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr` pins the list reads. `ReviewedList.test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once`, `ReviewedList.test_findings_follow_up_reads_each_named_pr_once` and `ReviewedList.test_findings_none_reads_no_more_than_a_legacy_record` pin the Findings reads. `ReviewFixFiling` pins that a filing push (and a filing-plus-fix push) is accepted with no diff read.
 
 ## The limits
 
