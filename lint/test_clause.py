@@ -532,6 +532,19 @@ TEXT = "it's a plain string, not a pattern: this session"
         self.assertTrue(home_hits, "control: the scan finds no writer word in _clause.py, the one home")
         self.assertEqual(hits, [], "report_guard holds a writer lead-in or subject words of its own: %r" % (hits,))
 
+    def test_lead_in_tuples_feed_both_lead_in_regexes(self):
+        # Catches: _WRITER_START keeping its own lead-in list, short of SUBORDINATORS, so a subordinator that _LEAD_RE skips
+        # ("since", "as") is no lead-in for the writer's subject. A sentinel swapped into one lead-in tuple shows in both.
+        # JOINERS and REASON_LINKS already reach both regexes, so those subtests are the controls beside SUBORDINATORS.
+        self.assertNotIn("zqxvlead", clause._LEAD_RE.pattern, "control: the shared _clause reads the sentinel in _LEAD_RE")
+        self.assertNotIn("zqxvlead", clause._WRITER_START.pattern, "control: the shared _clause reads the sentinel")
+        for name in ("JOINERS", "REASON_LINKS", "SUBORDINATORS"):
+            with self.subTest(name=name):
+                probe = clause_with(name, ("zqxvlead",))
+                self.assertEqual(getattr(probe, name), ("zqxvlead",), "scope: the probe does not read the sentinel %s" % name)
+                self.assertIn("zqxvlead", probe._LEAD_RE.pattern, "_LEAD_RE does not read %s" % name)
+                self.assertIn("zqxvlead", probe._WRITER_START.pattern, "_WRITER_START does not read %s" % name)
+
 
 if __name__ == "__main__":
     unittest.main()

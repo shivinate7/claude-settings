@@ -2134,8 +2134,8 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_green_a_masked_if_needed_before_a_semicolon_still_blocks(self):
         # Control: the base already blocks this line, so it is green here. It pins the verdict the fix must keep. The MCP
-        # form of the same span, "MCP status: `if needed`; I cannot open a PR.", passed on 2aed48244 (red there, a
-        # must-block), so the conditional read of masked text had a red case; this line is the control beside it.
+        # form of the same span, "MCP status: `if needed`; I cannot open a PR.", must block too: a conditional inside a
+        # code span must not condition the claim, even after a semicolon. This line is the control beside that form.
         line = "The note said `if needed`; I cannot push."
         out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
@@ -2364,7 +2364,7 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_red_q3_a_speech_word_about_a_person_names_no_check(self):
         # Catches: "said" after the claim read as a check whatever its subject. The owner is a person, not a tool, hook,
-        # check or command, so the owner's word names no check after a failed push.
+        # check or command, so the owner's grant names no check after a failed push.
         line = "I cannot push, as the owner said."
         out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
         self.assert_blocked_for(out, NO_CHECK, line)
@@ -2402,6 +2402,79 @@ class CannotClaimTests(unittest.TestCase):
         line = "I did not say I am not authorized to push."
         out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
         self.assert_passes(out, "the control: a negator across a speech verb and a new subject negates the claim")
+
+    # ---- lead-in words before this session or the cloud (f5r1), and subordinator lead-ins after a failed push (f5r2).
+    # The f5r1 lines carry no try. The f5r2 lines follow a failed push.
+
+    def test_cc_red_f5r1_unfortunately_this_session_cannot_blocks(self):
+        # Catches: a lead-in word before "this session" ("Unfortunately") stopped the writer's subject from opening the clause,
+        # so the claim read as a third party's and passed with no try.
+        line = "Unfortunately this session cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r1_also_this_session_cannot_blocks(self):
+        # Catches: the same lead-in gap for "Also", an adverb that is not a joiner or a subordinator.
+        line = "Also this session cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r1_sadly_this_session_cannot_blocks(self):
+        # Catches: the same lead-in gap for "Sadly", a word before the subject that is not in any lead-in list.
+        line = "Sadly this session cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r1_right_now_this_session_cannot_blocks(self):
+        # Catches: the same lead-in gap for a two-word lead-in, "Right now", before "this session".
+        line = "Right now this session cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r1_i_think_this_session_cannot_blocks(self):
+        # Catches: a hedge before "this session" ("I think") that pushed the subject past the clause start, so the claim
+        # read as a third party's and passed with no try.
+        line = "I think this session cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r1_unfortunately_the_cloud_cannot_blocks(self):
+        # Catches: the same lead-in gap for "the cloud", the other first-person subject of the writer.
+        line = "Unfortunately the cloud cannot merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_f5r1_builder_in_this_session_passes(self):
+        # Control: "this session" after a preposition ("in") is the builder's subject, so the line is no claim about the writer.
+        line = "The builder in this session is unable to push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_passes(out, "a third party's subject with this session after a preposition: %r" % line)
+
+    def test_cc_green_f5r1_this_session_not_able_to_still_blocks(self):
+        # Control: "This session" opening the clause is the writer's own subject, so "not able to" is a claim and blocks.
+        line = "This session is not able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_f5r2_since_i_tried_it_names_no_check(self):
+        # Catches: a failed push followed by "Since I tried it, I cannot push." passed, though the line names no check. "Since"
+        # is a subordinator: _LEAD_RE skips it before the writer's subject, and _WRITER_START does not.
+        line = "Since I tried it, I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_f5r2_as_i_was_not_allowed_to_names_no_check(self):
+        # Catches: the same gap for "As", the other subordinator that _WRITER_START does not skip: the line passed after a failed
+        # push though it names no check.
+        line = "As I was not allowed to, I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_f5r2_because_i_tried_it_names_no_check(self):
+        # Control: "Because" is a reason link the writer's subject already skips, so the same line blocks after a failed push.
+        line = "Because I tried it, I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
 
 
 if __name__ == "__main__":
