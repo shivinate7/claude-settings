@@ -514,8 +514,9 @@ def _loop_items(listed):
 
 
 def _loop_rewrites(words, first, last, name, items):
-    """{segment index: new text} for the body segments of one loop that use `$NAME` as a whole word, else None when the
-    loop keeps its literal reading: the body assigns NAME, uses it in part, as the command word or as a redirect target."""
+    """{segment index: new text} for the body segments of one loop that use `$NAME` as a whole word, each read as one
+    command per list item, else None when the loop keeps its literal reading: the body assigns NAME, uses it in part,
+    as the command word or as a redirect target."""
     assigned = re.compile(r"%s\+?=" % name)
     out = {}
     for index in range(first + 1, last + 1):
@@ -527,12 +528,16 @@ def _loop_rewrites(words, first, last, name, items):
             if _loop_whole_use(word, name):
                 if index == last or place == start or (place and _is_redirect(body[place - 1])):
                     return None
-                made.extend(items)
+                made.append(None)
                 changed = True
             else:
                 made.append(word)
         if changed:
-            out[index] = " ".join(made)
+            # One command per list item, so a writer that judges only its last operand reads each item there: a
+            # `cp SRC "$f"` over two items is a cp to each, never a cp with the first item as a source.
+            out[index] = " ; ".join(
+                " ".join(word if word is not None else item for word in (made if number == 0 else made[start:]))
+                for number, item in enumerate(items))
     return out
 
 

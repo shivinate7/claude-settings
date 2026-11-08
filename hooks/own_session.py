@@ -47,7 +47,10 @@ def _record_json(body):
 
 
 def _tag_names(value):
-    """The strings of a tag list, else an empty list: a call whose list cannot be read adds or removes nothing."""
+    """The strings of a tag list, else an empty list: a call whose list cannot be read adds or removes nothing. A bare
+    string is a one-tag list, as the tool reads it."""
+    if isinstance(value, str):
+        return [value]
     return [str(tag) for tag in value] if isinstance(value, list) else []
 
 
@@ -65,6 +68,17 @@ def own_session_read(transcript, own_id, created=False, applied=False):
     uses, newest, parent, tagged_after = set(), None, None, False
     added = []  # tags the own set_session_tags calls added since the newest record, in order
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
+    pending = {}  # tool_use id of a record call with no result yet -> the own tag calls made since, in order
+
+    def note_tag_call(given):
+        """Count one own set_session_tags call: it is after the record, and with `applied` its add and remove show."""
+        nonlocal tagged_after, added
+        tagged_after = True
+        if applied:
+            added.extend(tag for tag in _tag_names(given.get("add")) if tag not in added)
+            dropped = set(_tag_names(given.get("remove")))
+            added = [tag for tag in added if tag not in dropped]
+
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -78,29 +92,34 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
+                    pending[block.get("id")] = []
                 elif created and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("create_session"):
                     given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
                     if isinstance(given, list):
                         named = block["input"].get("parent_session_id")
                         creates[block.get("id")] = ([str(t) for t in given], named if isinstance(named, str) and named else None)
+                        pending[block.get("id")] = []
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("set_session_tags"):
                     # Only a call that names the own session changes the own tags. A call with no readable
                     # list of ids counts too: the safe reading is that it may have named this session.
                     ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
                     if not isinstance(ids, list) or own_id in ids:
-                        tagged_after = True
-                        if applied:
-                            given = block.get("input") if isinstance(block.get("input"), dict) else {}
-                            added.extend(tag for tag in _tag_names(given.get("add")) if tag not in added)
-                            dropped = set(_tag_names(given.get("remove")))
-                            added = [tag for tag in added if tag not in dropped]
+                        given = block.get("input") if isinstance(block.get("input"), dict) else {}
+                        note_tag_call(given)
+                        # A record call in the same assistant message may have read the tags before or after this
+                        # call ran, so the result must not drop it.
+                        for calls in pending.values():
+                            calls.append(given)
                 elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
                     body = block.get("content")
+                    held = pending.pop(block.get("tool_use_id"), [])
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after, added = creates[block.get("tool_use_id")], False, []
+                            for given in held:
+                                note_tag_call(given)
                         continue
                     if not isinstance(body, str):
                         continue
@@ -108,6 +127,8 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
                             newest, tagged_after, added = ccr["tags"], False, []
+                            for given in held:
+                                note_tag_call(given)
                             found = ccr.get("parent_session_id")
                             parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
