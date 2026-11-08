@@ -1525,6 +1525,12 @@ CHAIN_PIN_FORMS = {  # the pins, and the green controls beside the gaps: the sam
                               "    with open(os.path.join(HERE, n), encoding='utf-8') as handle:\n        handle.read()\n",
     "basename_literal": CHAIN_HEAD + "with open(os.path.join(HERE, os.path.basename(\"leaf.py\")), encoding='utf-8') as handle:\n"
                                     "    handle.read()\n",
+    "own_def_run": CHAIN_HEAD + "\n\ndef run(paths):\n    return len(paths)\n\n\n"  # a helper the file defines
+                                "run([\"hooks/leaf.py\"])\n",
+    "items_pair": CHAIN_HEAD + "ROOT = os.path.dirname(HERE)\nfor k, v in {\"hooks/leaf.py\": \"x\"}.items():\n"
+                               "    with open(os.path.join(ROOT, v), encoding='utf-8') as handle:\n        handle.read()\n",
+    "zip_pair": CHAIN_HEAD + "for a, n in zip((\"hooks/leaf.py\",), (\"x.py\",)):\n"  # the first name of each pair is leaf.py
+                             "    with open(os.path.join(HERE, n), encoding='utf-8') as handle:\n        handle.read()\n",
 }
 CHAIN_POOLED_NAME = (CHAIN_HEAD + "\n\ndef load():\n    for n in (\"leaf.py\",):\n"  # the loop that loads leaf.py
                      "        with open(os.path.join(HERE, n), encoding='utf-8') as handle:\n            handle.read()\n\n\n"
@@ -1560,7 +1566,8 @@ class LintSuitesChainTests(unittest.TestCase):
     ends (the controls). A loop name passed to a helper that builds no path is not followed, one passed whole to str() or
     format() is, and a name is read only in the function that binds it. A loop name split into path parts, read from a
     dict's items() or values(), zipped, or passed through basename() or replace() is followed; each of these forms has a
-    control with a literal in place of the loop name."""
+    control with a literal in place of the loop name. A module-level def named like a file call (`run`) is a helper, so a
+    call of it with a path is no load, and a dict's key or a zip's first name is not the name a suite opens (the pins)."""
 
     def picked(self, repo):
         code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
@@ -1802,6 +1809,27 @@ class LintSuitesChainTests(unittest.TestCase):
         self.assertIn(CHAIN_SUITE, self.picked(repo),
                       "--lint-suites must pick %s for a diff of only hooks/leaf.py: the suite opens os.path.basename(\"leaf.py\")"
                       % CHAIN_SUITE)
+
+    def test_a_diff_of_only_leaf_py_does_not_pick_the_suite_that_calls_a_run_helper_the_file_defines_with_leaf_py(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_PIN_FORMS["own_def_run"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only hooks/leaf.py")
+        self.assertNotIn(CHAIN_SUITE, self.picked(repo),
+                         "--lint-suites must not pick %s for a diff of only hooks/leaf.py: run() is defined at module level, so "
+                         "its call with the path is a call of that helper, and the helper never opens the path" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_leaf_py_does_not_pick_the_suite_that_opens_the_value_of_a_dict_items_pair_keyed_by_leaf_py(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_PIN_FORMS["items_pair"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only hooks/leaf.py")
+        self.assertNotIn(CHAIN_SUITE, self.picked(repo),
+                         "--lint-suites must not pick %s for a diff of only hooks/leaf.py: the loop's pair is (key, value) of "
+                         "a dict literal, the suite opens the value x, and only the key is leaf.py" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_leaf_py_does_not_pick_the_suite_that_opens_the_second_name_of_a_zip_pair_led_by_leaf_py(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_PIN_FORMS["zip_pair"])
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only hooks/leaf.py")
+        self.assertNotIn(CHAIN_SUITE, self.picked(repo),
+                         "--lint-suites must not pick %s for a diff of only hooks/leaf.py: the loop zips two tuples and opens n, "
+                         "the second of each pair, which is x.py; leaf.py is only the first" % CHAIN_SUITE)
 
 
 if __name__ == "__main__":
