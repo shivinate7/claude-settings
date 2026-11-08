@@ -1004,7 +1004,7 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
-    # ---- an and or or after create or raise does not stop the object window; a failed word before to, with, a colon or a paren is an outage; a CI state names no blocker (coordinator ruling 04:31 CST)
+    # ---- an and or or after create or raise does not stop the object window; a failed word before to is an outage; a CI state names no blocker (coordinator ruling 04:31 CST)
 
     def test_cc_red_a_create_or_raise_claim_with_and_or_or_still_blocks(self):
         # Catches: the and or or stop of the object window applied to open only, so "create the branch and PR" read its PR as
@@ -1015,9 +1015,10 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("open the PR"), notice("github: failed to connect"), trg.assistant_text(line)])
                 self.assert_blocks(out, line)
 
-    def test_cc_red_a_failed_word_before_to_with_a_colon_or_a_paren_is_no_blocker(self):
-        # Catches: "failed" or "failing" followed by to, with, a colon or a paren read as a CI blocker, so a merge claim beside
-        # an outage passed as backed. A health-check that failed is an outage too, with a hyphen as with a space.
+    def test_cc_red_a_failed_word_before_to_is_an_outage(self):
+        # Catches: "failed" or "failing" before to read as a CI blocker, so a merge claim beside an outage passed as backed.
+        # The lines with with, a colon or a paren also block and stay here. A health-check that failed is an outage too,
+        # with a hyphen as with a space.
         for line in ("The health-check failed and I can't merge PR 12.",
                      "I can't merge PR 12 because CI failed: connection refused.",
                      "I can't merge PR 12 because CI failed (connection refused).",
@@ -1559,6 +1560,104 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open the PR for other"), *failed_bash("./open-pr.sh other", "tu_1"),
                          *ok_bash("./open-pr.sh feature", "tu_2"), landed_reply(line)])
         self.assert_blocks(out, line)
+
+    def test_cc_red_a_status_after_a_colon_or_after_got_names_the_check(self):
+        # Catches: a bare status after a colon, or a number after got, read as naming no check, so a refused merge whose
+        # status was named blocked. A diff size is no status (the case above).
+        for line in ("I cannot merge PR 12: 403 Forbidden.", "I cannot merge PR 12, got a 403."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+                self.assert_passes(out, "a refused merge whose status is named")
+
+    def test_cc_red_a_peer_ack_after_a_send_does_not_end_the_turn(self):
+        # Catches: a peer ack after a send read as the start of a new turn, so the failed push before it stopped counting and
+        # the push claim blocked with no try. An ack starts no turn.
+        line = "I cannot push; `git push` exited 1."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"),
+                         use("mcp__claude-code-remote__send_message", {"session_id": "session_peer", "message": "status?"},
+                             "tu_s"),
+                         done("tu_s", "sent"), trg.peer_msg("got it", from_session="session_peer"), landed_reply(line)])
+        self.assert_passes(out, "a push claim whose failed try sits before a peer ack in the same turn")
+
+    def test_cc_red_emphasis_around_the_phrase_or_the_subject_still_claims(self):
+        # Catches: emphasis marks around the phrase or the subject read past the subject test, so the claim passed as no claim.
+        for line in ("I **cannot** merge PR 12.", "I *cannot* merge PR 12.", "**I cannot** merge PR 12.",
+                     "I *can't* merge PR 12."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_currently_unable_past_push_recovered_by_a_later_push_is_no_claim(self):
+        # Catches: an adverb between was and unable read as a present claim, so a past failure of a push that a later push
+        # recovered blocked. An adverb after was keeps the phrase past.
+        line = "I was currently unable to push at first; I rebased and pushed."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p1"),
+                         *ok_bash("git push origin HEAD", "tu_p2"), landed_reply(line)])
+        self.assert_passes(out, "a past failure of a push that a later push recovered, with an adverb after was")
+
+    def test_cc_red_a_permission_or_allowed_claim_has_no_try(self):
+        # Catches: "not allowed", "do not have permission" and "not going to be able" read as no act claim, so a claim that a
+        # merge or a push cannot be done passed with no try.
+        for prompt, line in (("merge PR 12", "I am not allowed to merge PR 12."),
+                             ("merge PR 12", "I do not have permission to merge PR 12."),
+                             ("push the branch", "I'm not going to be able to push.")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(prompt), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_bare_cannot_merge_the_branch_still_blocks(self):
+        # Control: "I cannot merge the branch." is a bare claim with no try, so it blocks.
+        line = "I cannot merge the branch."
+        out = self.stop([trg.human("merge the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_reason_adjective_after_a_refused_merge_names_no_check(self):
+        # Catches: "protected" read as a reason verb, so the adjective after the claim named a check and the refused merge
+        # passed as named.
+        line = "I cannot merge PR 12, a protected branch."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_check_of_another_act_in_an_earlier_sentence_names_no_check(self):
+        # Catches: a check named for another act, a create that returned 403, read as naming the check of this merge claim.
+        line = "I cannot merge PR 12, a protected branch."
+        reply = "`gh pr create` returned 403. " + line
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_m"), landed_reply(reply)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_create_cancelled_by_another_head_does_not_cancel_the_first(self):
+        # Catches: two creates with empty targets cancelling each other, so the failed create of b1 backed no claim. A create is
+        # cancelled only by a success for its own --head.
+        line = "I could not open the PR for b1 at first."
+        out = self.stop([trg.human("open the PR for b1"), *failed_bash("gh pr create --draft --head b1", "tu_1"),
+                         *ok_bash("gh pr create --head b2", "tu_2"), landed_reply(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_red_network_checks_failing_is_an_outage_for_a_merge_claim(self):
+        # Catches: "the network checks are failing" read as a CI check blocker, so the merge claim beside it passed. A network
+        # check is an outage, so the claim has no try and blocks.
+        line = "I cannot merge PR 12; the network checks are failing."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_failing_to_pass_go_green_or_complete_names_the_blocker(self):
+        # Catches: "failing to" read as an outage for any verb, so a CI state that failed to pass, go green or complete blocked
+        # as having no try. Only failing to start, connect, run, load or reach is an outage.
+        for line in ("I can't merge PR 12 because the checks are failing to pass.",
+                     "I can't merge PR 12 because CI is failing to go green.",
+                     "I can't merge PR 12 because CI is still failing to complete."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_passes(out, "a merge claim whose blocker is CI failing to pass, go green or complete")
+
+    def test_cc_green_a_failing_to_run_load_or_reach_is_an_outage(self):
+        # Control: failing to run, load or reach is an outage, so the merge claim beside it has no try and blocks.
+        for line in ("I can't merge PR 12 because CI is failing to run.",
+                     "I can't merge PR 12 because CI is failing to load.",
+                     "I can't merge PR 12 because CI is failing to reach the server."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
 
 
 if __name__ == "__main__":
