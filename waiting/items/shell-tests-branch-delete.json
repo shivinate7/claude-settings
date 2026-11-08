@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T09:08:00Z",
+  "context": "Goal: no stray branches on origin, and no lost work.\nProblem (cannot undo): a test-author of lane comment-check-scans-shell pushed agent branches shell-tests (cc60ef375) and shell-tests-2 (71262843d) to origin unasked. They are unmerged, so deleting them needs your word. Both are copied to archive/shell-tests and archive/shell-tests-2 on origin; triage read origin at 03:08 CST and each copy points at the same commit. The cloud refused the delete (\"unexpected disconnect while reading sideband packet\").\nBased on (ruling): .claude/CLAUDE.md Standing grants (owner, 2026-10-30 16:20 CDT): a session on your computer may delete merged branches only. Asked again because these two are unmerged.\nBased on (read): rule shared-trees-archive-then-delete: once the archive push succeeds, nothing is lost.\nDeparts from: main \u2014 the 2 branches stay on origin \u2192 a session on your computer deletes shell-tests and shell-tests-2, and the archive copies stay.\nMeanwhile: nothing waits on this. Step push-agent-branch-asks (#1833) makes such a push ask first.",
+  "home": "comment-check-scans-shell",
+  "id": "shell-tests-branch-delete",
+  "kind": "decision",
+  "n": 407,
+  "options": [
+    {
+      "gain": "No stray branches on origin.",
+      "how": "A session on your computer deletes shell-tests and shell-tests-2 on origin. archive/shell-tests and archive/shell-tests-2 stay.",
+      "key": "a",
+      "label": "Yes, delete the two branches",
+      "lose": "Nothing: the archive copies hold both commits."
+    },
+    {
+      "gain": "No act on origin.",
+      "how": "Both branches stay on origin next to their archive copies.",
+      "key": "b",
+      "label": "No, keep them",
+      "lose": "Two stray branches stay on origin."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": ".claude/CLAUDE.md Standing grants (2026-10-30 16:20 CDT); rule shared-trees-archive-then-delete; step push-agent-branch-asks (#1833)",
+  "short": "Delete 2 stray branches",
+  "status": "open",
+  "title": "May a session on your computer delete the two stray agent branches shell-tests and shell-tests-2?"
+}
