@@ -64,6 +64,18 @@ def whole_second_ahead(seconds):
     return epoch, iso_utc(epoch)
 
 
+def helper_timeout(path, argv):
+    """The timeout the helper at `path` takes from `argv`. It imports the helper's own PROG and USAGE and calls
+    its split_args, so the seam is the helper's real argument path and no wait happens."""
+    import importlib.machinery
+    import importlib.util
+    name = "helper_" + os.path.basename(path).replace("-", "_")
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(module)  # __name__ is not "__main__", so the helper's main does not run
+    return module.wait_common.split_args(module.PROG, module.USAGE, argv)[1]
+
+
 class T(unittest.TestCase):
     # The file itself.
     def test_helper_is_an_executable_python_script(self):
@@ -126,6 +138,18 @@ class T(unittest.TestCase):
         self.assertEqual(r.rc, EXIT_REACHED, r.out)
         beats = [line for line in r.out.splitlines() if line.startswith(HEARTBEAT_LINE)]
         self.assertGreaterEqual(len(beats), 1, r.out)
+
+    # With no --timeout, the target time bounds a wait-until, so its default is no cap (0). wait-pid keeps its
+    # 540 s cap, since the pid it waits on may never exit.
+    def test_wait_until_with_no_timeout_has_no_cap(self):
+        self.assertEqual(helper_timeout(HELPER, []), 0,
+                         "wait-until with no --timeout must have no cap, so the target time alone ends the wait")
+
+    def test_wait_pid_with_no_timeout_keeps_its_540_second_cap(self):
+        self.assertEqual(helper_timeout(os.path.join(HERE, "..", "bin", "wait-pid"), []), 540)
+
+    def test_timeout_flag_sets_the_cap_it_is_given(self):
+        self.assertEqual(helper_timeout(HELPER, ["--timeout", "7"]), 7)
 
 
 def tearDownModule():

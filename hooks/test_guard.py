@@ -5702,12 +5702,13 @@ for _label, _command in (
 
 # ------------------------------------------------------------------ wait-until: a wait for a clock time
 #
-# A session waits until a clock time, then runs one command. Two forms of that wait are allowed under
-# run_in_background: a pause of 600 s, and a loop whose test reads the clock. A loop whose test compares
-# `date` output with a literal time ends at that time, so it is a deadline, not a wait with no end.
-# Every loop with no clock bound, every foreground loop and every foreground pause stays refused. The
-# one helper for a wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases:
-# lint/test_wait_until.py).
+# A session waits until a clock time, then runs one command. Under run_in_background a loop may wait on the
+# clock only when its one test orders `date` output against a literal time, in the direction that turns
+# false at that time: `until` with `>`, `-ge` or `-gt`, or `while` with `<`, `-lt` or `-le`. Such a loop
+# ends at that time, so it is a deadline and not a wait with no end. Equality, a second test, a second
+# loop, a poll of a file and the other direction never reach the time, so each stays refused. A pause of
+# 25 s or more is allowed under run_in_background only when a command follows it. The one helper for a
+# wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
 WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
 WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
                          r'do sleep 15; done; node tool.mjs')
@@ -5742,10 +5743,9 @@ for _bg in (False, True):
     add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
         "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
 
-# DENY under run_in_background, each aimed at a branch of clock_loop or waiter_verdict. Each is refused on
-# the builder's head. Four of them go green under one revert of their own branch. The two-loop case goes
-# green only when its single-loop check and the two-pause rule are both reverted. The reverts are named in
-# the commit message.
+# DENY under run_in_background. Each shape looks like a clock wait and is not one: its test never reaches the
+# time (the other direction, equality, a poll of a file, an extra test), a second loop follows, or a long pause
+# has no command after it. Each case aims at one branch of clock_loop or waiter_verdict.
 add("wait-until: a loop on a literal time with no date stays refused under run_in_background", "deny",
     "waiter", cwd=NOGIT, command="until [ -s 2026-11-06T22:48:00 ]; do sleep 15; done; cmd", run_in_background=True)
 add("wait-until: a loop on date with no literal time stays refused under run_in_background", "deny",
@@ -5761,8 +5761,32 @@ add("wait-until: two clock loops in one command stay refused under run_in_backgr
     run_in_background=True)
 add("wait-until: a bare sleep of 600 s with nothing after it stays refused under run_in_background", "deny",
     "waiter", cwd=NOGIT, command="sleep 600", run_in_background=True)
+add("wait-until: a while loop that waits while the clock is later than a literal stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='while [ "$(date +%s)" -gt 1700000000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop that tests the date for equality stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%F)" = "2026-11-06" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop that polls a file for a dated name stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until grep -q "$(date +%F)" 2026-11-07.log; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop with an extra file test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt 1700000000 -a -f done.flag ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop then a second loop with no pause stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+            r'until [ -f x ]; do :; done; cmd',
+    run_in_background=True)
+# ALLOW, kept: a numeric epoch and a while loop that waits while the clock is earlier than a literal.
+add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
+    cwd=NOGIT, command='until [ "$(date +%s)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while loop that waits while the clock is earlier than a literal is allowed under "
+    "run_in_background", "allow", cwd=NOGIT,
+    command=r'while [ "$(date -u +%FT%T)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
 
-# The remedy of a pause names the time form in backticks, so the remedy check below reads it.
+# The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
 sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
    carries=("`wait-until",))
 
