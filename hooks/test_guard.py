@@ -20280,6 +20280,12 @@ repo_case("a reason across a newline ending in ) before -C naming this checkout 
           f'{MERGE_SHIM} 5 --confirm --base-red-ok "line one\nflaky (x)" -C {REPO_A}', REPO_A, TX_A)
 repo_case("an unclosed quote in a reason before -C naming another checkout is denied", "deny",
           f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x) -C {REPO_B}', REPO_A, TX_A)
+# An open quote is judged only when the segment names --confirm: the merge tool cannot confirm without that flag. An apostrophe in
+# echo text opens no merge, so the text that names merge and --confirm is not judged either.
+repo_case("an open quote with no --confirm naming another checkout is not judged", "allow",
+          f'{MERGE_SHIM} 5 --base-red-ok "flaky (x) -C {REPO_B}', REPO_A, TX_A)
+repo_case("an apostrophe in echo text that names merge --confirm is not judged", "allow",
+          "echo it's merge 5 --confirm", REPO_A, TX_A)
 repo_case("a reason ending in ) in closed quotes before -C naming this checkout is allowed", "allow",
           f'{MERGE_SHIM} 5 --confirm --base-red-ok "flaky (x)" -C {REPO_A}', REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
