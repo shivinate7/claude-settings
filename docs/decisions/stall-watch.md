@@ -124,7 +124,7 @@ Limits: a session that is idle with no Stop sees nothing until its next Stop. A 
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
 stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
 an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
-age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+age cap (unmeasured). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
