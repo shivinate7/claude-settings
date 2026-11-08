@@ -9694,6 +9694,137 @@ def env_posix_class_stderr_case():
 FIXTURELESS_CHECKS.add(env_posix_class_stderr_case)  # it runs the guard in a child and builds no fixture
 
 
+# ------------------------------------------------------------------ env walk: the cap, the glob, shell strings, cd
+# ENV_WALK_LIMIT is 50000 entries, so the cap checks lower it with mock.patch and build folders just past
+# the lowered cap, not 50000 files. A subprocess guard cannot be patched, so each cap check calls
+# guard_env.env_refusal with the folder as cwd, the call guard.py makes. Each check tests the folder's size
+# against the cap first, then the verdict.
+ENVCAP_LOW = 5
+ENVCAP_PY = "rg -g '*.py' K"
+# A glob that starts with a dot is refused by the per-word check before the walk runs, so it cannot test the cap.
+ENVCAP_GLOBS = (
+    "rg -g '*env*' K",                  # a glob that names the env name at any depth
+    "rg -g '*" + ENV + "' K",           # a star before the env name: the word check passes it, the walk picks it
+    "rg -g '*' K",                      # every name, the env name among them
+    "rg -g '*.py' -g '*env*' K",        # the second of two -g globs names the env name
+    "rg -g '{*.py," + ENV + "*}' K",    # a brace list whose second word names the env name
+    "rg --iglob '*ENV*' K",             # a case-folded glob names the env name
+)
+
+
+def envcap_folder(name, count, extra=None):
+    """A folder under ROOT with `count` plain files, and each `extra` file (relative name -> text)."""
+    folder = os.path.join(ROOT, name)
+    os.makedirs(folder, exist_ok=True)
+    for number in range(count):
+        write(os.path.join(folder, "f%06d" % number), "x\n")
+    for relative, text in (extra or {}).items():
+        write(os.path.join(folder, relative), text)
+    return folder
+
+
+def envcap_reason(command, folder):
+    """The reason env_refusal prints for `command` run in `folder`, with the walk cap set to ENVCAP_LOW."""
+    import guard_env
+    with mock.patch.object(guard_env, "ENV_WALK_LIMIT", ENVCAP_LOW):
+        return guard_env.env_refusal(command, cwd=folder)[0]
+
+
+def env_cap_glob_allowed_case():
+    """A positive glob that names no env file is allowed over a folder past the cap. The cap refuses a
+    search only when a glob could pick an env file, so a folder's size is no reason to refuse it."""
+    big = envcap_folder("envcap-big-py", ENVCAP_LOW + 1)
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the fixture is not past the lowered cap"
+    got = envcap_reason(ENVCAP_PY, big)
+    if got:
+        return False, "%s over a folder past the cap was refused: %s" % (ENVCAP_PY, got[:90])
+    if envcap_reason(ENVCAP_PY, envcap_folder("envcap-empty", 0)):
+        return False, "%s over an empty folder was refused" % ENVCAP_PY
+    small = envcap_folder("envcap-small-env", 0, {ENV: "FIXTURE=1\n", "README.md": "x\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    got = envcap_reason(ENVCAP_PY, small)
+    if got:
+        return False, "%s over a folder under the cap, with an env file the glob does not pick, was refused: %s" % (
+            ENVCAP_PY, got[:90])
+    return True, "past the cap the glob is allowed; the empty and the small control folders too"
+
+
+def env_cap_gitignored_bulk_case():
+    """The same glob, over a folder past the cap whose bulk sits in a gitignored node_modules, is allowed.
+    The ignore rules skip that folder, so its bulk is not walked."""
+    repo = os.path.join(ROOT, "envcap-bulk")
+    make_repo(repo, {".gitignore": "node_modules/\n", "README.md": "bulk\n"})
+    modules = os.path.join(repo, "node_modules")
+    os.makedirs(modules, exist_ok=True)
+    for number in range(ENVCAP_LOW + 1):
+        write(os.path.join(modules, "f%06d" % number), "x\n")
+    if len(os.listdir(modules)) <= ENVCAP_LOW:
+        return False, "the node_modules fixture is not past the lowered cap"
+    got = envcap_reason(ENVCAP_PY, repo)
+    if got:
+        return False, "%s past the cap, in a gitignored node_modules, was refused: %s" % (ENVCAP_PY, got[:90])
+    return True, "the gitignored bulk is skipped, and the search is allowed"
+
+
+def env_cap_positive_glob_case():
+    """A positive glob that can name an env file is refused over a folder past the cap, as too large to
+    check: the walk cannot see past the cap, so the folder cannot be shown clean. A folder under the cap
+    with no env file is allowed."""
+    big = envcap_folder("envcap-big-glob", ENVCAP_LOW + 1)
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the fixture is not past the lowered cap"
+    for command in ENVCAP_GLOBS:
+        got = envcap_reason(command, big)
+        if "too large to check" not in got:
+            return False, "%s over a folder past the cap was not refused as too large to check: %s" % (
+                command, got[:90] or "it was allowed")
+    small = envcap_folder("envcap-small-glob", 0, {"README.md": "x\n", "notes.txt": "x\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    got = envcap_reason("rg -g '*env*' K", small)
+    if got:
+        return False, "a positive glob over a folder under the cap, with no env file, was refused: %s" % got[:90]
+    return True, "each positive glob is refused as too large to check; the folder under the cap is allowed"
+
+
+FIXTURELESS_CHECKS.update((env_cap_glob_allowed_case, env_cap_gitignored_bulk_case, env_cap_positive_glob_case))
+
+# A search that a shell runs from a string (`bash -c`, `sh -c`, `eval`) is a command of its own, and it walks
+# the folder it names. The guard does not read it yet, so each form is allowed over a folder that holds an env
+# file. Each form is refused over the folder that holds one, and allowed over a folder with none and an empty one.
+_SHELL_STRINGS = ("bash -c 'grep -r K .'", "sh -c 'grep -r K .'", "eval 'grep -r K .'")
+for _cmd in _SHELL_STRINGS:
+    sh("env: walk safety hole, a shell string runs a recursive grep of a folder that holds an env file, refused: "
+       + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: walk control, a shell string, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
+    sh("env: walk control, a shell string, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
+
+# The string reader is a scanner, so it gets the three shapes a scanner gets wrong: a comment opener inside the
+# string, a newline inside the string, and a lone apostrophe in text before the search.
+_SHELL_SCANNER = (
+    ('bash -c \'echo "#"; grep -r K .\'', "a comment opener inside the string"),
+    ("bash -c 'echo one\ngrep -r K .'", "a newline inside the string"),
+    ("echo \"don't\" && bash -c 'grep -r K .'", "a lone apostrophe in text before the search"),
+)
+for _cmd, _shape in _SHELL_SCANNER:
+    _shown = _cmd.replace("\n", " NEWLINE ")
+    sh("env: walk safety hole, %s, refused: %s" % (_shape, _shown), _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
+    sh("env: walk control, %s, folder has no env file, allowed: %s" % (_shape, _shown), _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
+
+# `cd` moves the folder a later search walks. The guard does not follow it: the search reads the folder the shell
+# started in. So a search after `cd` into a folder that holds an env file is refused, and a search of a subfolder
+# with no env file after that `cd` is allowed.
+_CD_INTO_HELD = "cd " + slash(ENVWALK_HELD) + " && grep -r K ."
+sh("env: walk safety hole, cd into a folder that holds an env file, then a recursive grep, refused: " + _CD_INTO_HELD,
+   _CD_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+_CD_INTO_HELD_SRC = "cd " + slash(ENVWALK_HELD) + " && grep -r K src"
+sh("env: walk control, cd into the env folder, then a search of its src folder with no env file, allowed: "
+   + _CD_INTO_HELD_SRC, _CD_INTO_HELD_SRC, "allow", cwd=ENVWALK_CLEAN)
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
@@ -23263,6 +23394,11 @@ LOG_CHECKS = (
      incident_write_strip_case),
     ("env: a POSIX class in an ag file regex prints no FutureWarning on stderr",
      env_posix_class_stderr_case),
+    ("env: walk cap, a glob that names no env file is allowed past the cap", env_cap_glob_allowed_case),
+    ("env: walk cap, the same glob past the cap in a gitignored node_modules is allowed",
+     env_cap_gitignored_bulk_case),
+    ("env: walk cap, a positive glob that names an env file is refused too large to check",
+     env_cap_positive_glob_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -30377,6 +30513,9 @@ LOG_RULE_FAMILY = (
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
     ("env: a POSIX class in an ag file regex", "env"),
+    ("env: walk cap, a glob that names no env file is allowed past the cap", "env"),
+    ("env: walk cap, the same glob past the cap in a gitignored node_modules", "env"),
+    ("env: walk cap, a positive glob that names an env file is refused too large", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
