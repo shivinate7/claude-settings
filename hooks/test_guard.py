@@ -15366,6 +15366,72 @@ ors_allow("push-owes-review-record: C13 an entry at H, then the remote branch re
           ors_c13)
 
 
+def ors_g1(label):
+    """G1, the reviewer stops at a head that origin's default branch already holds: the lane's first commit, merged
+    into main. The stop writes no entry, and a later push to the lane's descendant is allowed."""
+    ctx = ors_new(label)
+    _must(ctx["main"], "merge", "-q", "--ff-only", ORS_LANE)
+    _must(ctx["main"], "push", "-q", "origin", "HEAD:refs/heads/main")
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "fix the finding", "x = 3\n")
+    ctx["command"] = ORS_PUSH
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["after"] = lambda c: ("" if not ors_entries(c["config"]) else
+                              "an entry was written for a head on main: %r" % ors_entries(c["config"]))
+    ctx["note"] = "the reviewed head is on main, and no entry is written"
+    return ctx
+
+
+def ors_g2(label, recorded=True):
+    """G2, an entry at H0 never got a record. The reviewer stops again at H1 on the same branch, and a record at H1 is
+    posted (unless `recorded` is false). The newest entry governs."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "second fix", "x = 3\n")
+    _must(ctx["lane"], "push", "-q", "origin", "HEAD:refs/heads/" + ORS_LANE)
+    ctx["head"] = ors_head(ctx["lane"])
+    ors_stop_into(ctx)
+    ors_commit(ctx["lane"], "third fix", "x = 4\n")
+    ctx["scope"] = lambda c: ("" if len(ors_entries(c["config"])) == 2 else
+                              "scope: %d entries, want 2" % len(ors_entries(c["config"])))
+    comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "PASS")])]} if recorded else None
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["command"] = ORS_PUSH
+    ctx["note"] = "an entry at H0 with no record, then H1 recorded" if recorded else "H1 unrecorded"
+    return ctx
+
+
+def ors_g2c(label):
+    """G2c, the newest entry at H1 has no record, and the older entry at H0 has none either: the push asks."""
+    return ors_g2(label, recorded=False)
+
+
+def ors_asks_rule(label, build):
+    """A control: `build` makes the scenario, then the push must ask and name the rule. The head the ask names is not
+    checked, since the entries are judged in name order, and that order changes from run to run."""
+    def case():
+        ctx = build(ors_slug(label))
+        problem = ors_scope_problem(ctx, red=True)
+        if problem:
+            return False, problem
+        decision, reason = ors_push(ctx)
+        if decision != "ask" or ORS_RULE not in reason:
+            return False, "the push was %s (%s), want ask naming the rule" % (decision, reason[:80])
+        problem = ors_reason_problem(reason)
+        if problem:
+            return False, problem
+        return True, "asks, and names the rule: " + ctx["note"]
+    FIXTURELESS_CHECKS.add(case)
+    LOG_CHECKS_EXTRA.append((label, case))
+
+
+ors_allow("push-owes-review-record: G1 the reviewer stopped at a head on main, then a push to the lane's descendant with "
+          "its own open pull request and no record: allowed silently, no entry written", ors_g1)
+ors_allow("push-owes-review-record: G2 an entry at H0 never got a record, then H1 is recorded: a push is allowed silently",
+          ors_g2)
+ors_asks_rule("push-owes-review-record: G2c the newest entry at H1 has no record: asks", ors_g2c)
+
+
 def ors_entries_scope(c):
     """'' when an entry exists in the case's config folder."""
     return "" if ors_entries(c["config"]) else "scope: no entry exists"
