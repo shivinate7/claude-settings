@@ -109,6 +109,12 @@ def unreadable_error(path):
     raise AssertionError("control: %s opened as a file, so it is not an unreadable log" % path)
 
 
+def unreadable_payload_head(err):
+    """The head of the line for an agent-end payload log that cannot be read. Both the full and the short
+    form keep its state: a short head that drops "unknown" would read as clear (verification-report-unknown-reads)."""
+    return "agent-end payload log cannot be read (%s): its state is unknown." % err
+
+
 def session_start_commands():
     """Commands under SessionStart matchers that cover startup and that name daily_note.py."""
     with open(SETTINGS, encoding="utf-8") as handle:
@@ -140,10 +146,14 @@ class NoteCase(unittest.TestCase):
         os.makedirs(path)
         return path
 
-    def long_path(self, length, prefix):
-        """A scratch folder whose absolute path is `length` characters long, padded from this case's root."""
+    def long_path(self, length, prefix, at_least=False):
+        """A scratch folder whose absolute path is `length` characters long, padded from this case's root.
+        at_least: a root already past `length` is kept, for a case whose claim holds at any longer path."""
         pad = length - len(os.path.join(self.root, prefix))
-        self.assertGreater(pad, 0, "control: the root is too long for a %d-character path" % length)
+        if at_least:
+            pad = max(pad, 1)
+        else:
+            self.assertGreater(pad, 0, "control: the root is too long for a %d-character path" % length)
         return self.scratch(prefix + "x" * pad)
 
     def require_file(self, path):
@@ -535,19 +545,24 @@ class AgentEndTests(NoteCase):
         self.assert_silent(self.run_note(MORNING))
 
     def test_a_payload_log_that_cannot_be_read_is_reported_as_unknown(self):
+        self.config = self.long_path(LONG_CONFIG, "claude-config-", at_least=True)  # a long temp root: the cut runs
         os.makedirs(self.payload_path())  # a directory cannot be read as a log
+        err = unreadable_error(self.payload_path())
+        tail = "Read: " + self.payload_path()
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        self.assertIn("unknown", lines[0].lower())
-        self.assertTrue(lines[0].endswith("Read: " + self.payload_path()), lines[0])
+        self.assertIn("unknown", lines[0], "the line dropped unknown: %r" % lines[0])
+        # Past the cap the line is the short head plus the whole Read: tail, and the head still says unknown.
+        self.assert_short_head_kept(lines[0], unreadable_payload_head(err), tail, keep="unknown")
 
     def test_a_long_config_dir_keeps_the_agent_end_line_within_the_cap_with_its_whole_reader_tail(self):
-        self.config = self.long_path(LONG_CONFIG, "claude-config-")
+        self.config = self.long_path(LONG_CONFIG, "claude-config-", at_least=True)
         tail = "Read: " + self.payload_path()
-        self.assertLessEqual(len(tail), MAX_LINE, "control: the reader tail alone must fit the cap")
         self.write_payload([started_row(run_id(141, YESTERDAY_NOON))])
         line = self.assert_one_run_line(self.run_note(MORNING), 1)
-        self.assertLessEqual(len(line), MAX_LINE)
+        # Within the cap when the short head and the whole tail fit; past it, the short head and the whole tail.
+        self.assert_short_head_kept(line, "1 agent-end reap run(s) killed or crashed:", tail,
+                                    keep="1 agent-end reap run(s)")
 
     def test_a_config_dir_so_long_that_the_reader_tail_alone_is_past_the_cap_still_prints_the_whole_tail(self):
         self.config = self.long_path(TAIL_CONFIG, "claude-config-")
@@ -567,14 +582,14 @@ class AgentEndTests(NoteCase):
                                     keep="3 agent-end reap run(s)")
 
     def test_a_long_config_dir_keeps_the_unknown_lead_and_the_whole_tail_when_the_payload_log_is_unreadable(self):
-        self.config = self.long_path(175, "claude-config-")  # the tail is 212 characters: past the cap with any error
+        self.config = self.long_path(175, "claude-config-", at_least=True)  # a config of 175 or more: the line is past the cap
         os.makedirs(self.payload_path())  # a directory cannot be read as a log
         err = unreadable_error(self.payload_path())
         tail = "Read: " + self.payload_path()
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        self.assert_short_head_kept(lines[0], "agent-end payload log cannot be read (%s):" % err, tail,
-                                    keep="cannot be read (%s)" % err)
+        self.assertIn("unknown", lines[0], "the line dropped unknown: %r" % lines[0])
+        self.assert_short_head_kept(lines[0], unreadable_payload_head(err), tail, keep="unknown")
 
 
 class SweepErrorLogTests(NoteCase):

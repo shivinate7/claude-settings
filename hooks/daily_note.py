@@ -119,8 +119,8 @@ def agent_end_failures(path, window):
     except FileNotFoundError:
         return []
     except OSError as err:
-        return [fit("agent-end payload log cannot be read (%s): its state is unknown." % type(err).__name__,
-                    "agent-end payload log cannot be read (%s):" % type(err).__name__, "Read: " + path)]
+        head = "agent-end payload log cannot be read (%s): its state is unknown." % type(err).__name__
+        return [fit(head, head, "Read: " + path)]  # the short head keeps "unknown": a cut line must not read as clear
     days = set(window)
     runs = {}
     for text in rows:
