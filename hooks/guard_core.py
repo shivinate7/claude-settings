@@ -840,6 +840,34 @@ def _runs_written_file(text: str, headers, runner=_RUNNER) -> bool:
     return False
 
 
+# A call that hands a string to a shell from inside an interpreter body. Backticks count too, but only
+# where perl or ruby is named (`_BACKTICK_RUNNER`): in a python body they are prose.
+_SHELL_OUT = re.compile(
+    r"os\s*\.\s*(?:system|popen|exec\w*|spawn\w*)|shell\s*=\s*True|\bcommands\s*\.|pty\s*\.\s*spawn"
+    r"|create_subprocess_shell|[\"'](?:" + _SHELLS + r")[\"']\s*,\s*[\"']-[\w-]*c\b"   # an argv list `["sh", "-c", ...]`
+    r"|child_process|Open3|IO\s*\.\s*popen|%x[\[({<]"
+    r"|\b(?:system|exec|execSync|execFile|spawn|spawnSync|popen)\s*\("
+    r"|\b(?:system|exec)[ \t]+[\"']").search
+_BACKTICK_RUNNER = re.compile(r"(?<![\w.-])(?:perl|ruby)(?:\.exe|\.cmd)?(?![\w.-])").search
+
+
+def _shell_reads_bodies(text: str, bodies):
+    """One flag per body: may a shell read it? The one test strip_heredoc_bodies(shells_only) and
+    without_data_bodies share. A body is read when a shell heredoc or pipe reaches it, a shell or runner runs
+    the file its header writes, or an interpreter reads it and it holds a shell-out call (`os.system`,
+    `subprocess` with `shell=True`, `exec(`): the shell then runs its `$( )`. Other interpreter text is data.
+    `text` is the command with its bodies gone."""
+    if SHELL_HEREDOC(text):
+        return [True] * len(bodies)   # a pipe or an eval may span lines to a shell: every body may run
+    flags = []
+    for _, body, header in bodies:
+        read = _runs_written_file(text, [header], _SHELL_RUNNER)
+        if not read and (_SHELL_OUT(body) or "`" in body and _BACKTICK_RUNNER(text)):
+            read = INTERPRETER_HEREDOC(text) or _runs_written_file(text, [header], _RUNNER)
+        flags.append(read)
+    return flags
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines."""
@@ -862,8 +890,11 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
     # is text, and no body line may make another body look run.
     text = _without_message_values(dropped)
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
+    if shells_only:
+        read = SHELL_HEREDOC(text) or any(_shell_reads_bodies(text, bodies))
+    else:
+        read = INTERPRETER_HEREDOC(text) or _runs_written_file(text, [header for _, _, header in bodies])
+    if read:
         return cmd  # the body may be executed, so keep it under inspection
     return "\n".join([dropped] + runs)
 
@@ -871,7 +902,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
 def without_data_bodies(cmd: str) -> str:
     """`cmd` less each quoted-delimiter heredoc body that no shell reads: bash expands nothing in it, so a
     `$( )` or backtick there is text (an interpreter body, a file only an interpreter runs, a `cat` print).
-    A body a shell reads stays: `bash <<'EOF'`, `| sh`, `eval`, or a written file a shell, a runner or `./f` runs."""
+    A body a shell may read stays (`_shell_reads_bodies`)."""
     if "<<" not in cmd:
         return cmd
     spans = []
@@ -879,11 +910,9 @@ def without_data_bodies(cmd: str) -> str:
     if unclosed:
         return cmd
     text = _without_message_values(_drop_heredoc_bodies(cmd))
-    if SHELL_HEREDOC(text):
-        return cmd   # a pipe or an eval may span lines to a shell: every body may run
     gone = set()
-    for (quote, _, header), (start, end) in zip(bodies, spans):
-        if quote and not _runs_written_file(text, [_without_message_values(header)], _SHELL_RUNNER):
+    for (quote, _, _), read, (start, end) in zip(bodies, _shell_reads_bodies(text, bodies), spans):
+        if quote and not read:
             gone.update(range(start, end))
     if not gone:
         return cmd
