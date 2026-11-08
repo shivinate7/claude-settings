@@ -776,7 +776,7 @@ def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
 # Options known to take no value. An unlisted option is read as a possible value owner, and these
 # are the common ones that are not, so `docker run --rm myimage serve env` has one start, not two.
 ENV_CHILD_BOOL_FLAG = re.compile(
-    r"^(-[ditqvy]+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
+    r"^(-[ditqy]+|-v+|-P|--(rm|detach|interactive|tty|privileged|init|read-only|frozen|locked|isolated"
     r"|offline|all-extras|quiet|verbose|yes|no-[a-z-]+))$")
 
 
@@ -851,14 +851,20 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
         flags = ENV_CHILD_VALUE_FLAGS["npm"]
         exec_at = -1
         i = position + 1
+
+        def pnpm_child_prints() -> bool:
+            return name.startswith("pnpm") and exec_at >= 0 and any(
+                _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
+
         while i < len(words):
             word = words[i]
             if word == "--" and exec_at >= 0:  # the rest is the child's
                 break
-            if word in ("-c", "--call"):
-                return i + 1 < len(words) and _shell_string_prints(words[i + 1])
+            if word in ("-c", "--call"):  # past `pnpm exec`, `-c` may be the child's own flag
+                return pnpm_child_prints() or (
+                    i + 1 < len(words) and _shell_string_prints(words[i + 1]))
             if word.startswith("--call="):
-                return _shell_string_prints(word[7:])
+                return pnpm_child_prints() or _shell_string_prints(word[7:])
             if word in flags:
                 i += 2
             elif word.startswith("-"):
@@ -870,8 +876,7 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
                 i += 1
             else:
                 break
-        return name.startswith("pnpm") and exec_at >= 0 and any(
-            _child_prints(words, c, fed) for c in _child_starts(words, exec_at + 1, flags))
+        return pnpm_child_prints()
     if name.startswith("uv"):
         flags = ENV_CHILD_VALUE_FLAGS["uv"]
         return any(
