@@ -1214,7 +1214,8 @@ def pick_ack_hit(tool: str, tool_input, transcript: str):
         return matched + " with a failed past-ruling search", PICK_REASON % (
             "The search of the decision records failed, so the guard cannot tell which ids are real. ", "")
     known = set(question_form.candidate_ids(candidates))
-    if any(word in known or "decisions/" + word in known or "debts/" + word in known for word in named):
+    stems = {record_id.split("/", 1)[-1] for record_id in known}  # the bare slug of each `<folder>/<slug>` id
+    if any(word in known or word in stems for word in named):
         return None
     ranked = question_form.pick_candidates(candidates, message)
     detail = ("Records that may bear on it: " + ", ".join(ranked) + ". ") if ranked else ""
