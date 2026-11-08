@@ -15,12 +15,16 @@ the one home of this grammar (FIX_BODY, NONE_REASONS, parse_fix); lint/report_gu
     Fix: none -- <reason>   or "none —"; the reason is one of NONE_REASONS
     Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead) that is a
                             commit and an ancestor of origin/main (`git merge-base --is-ancestor`)
-Three more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13:59 CST):
+Four more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13:59 CST):
   Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those at
     the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
     reads no base.
   Until: a `Fix: none` line the branch adds or edits carries `Until: YYYY-MM-DD`, today or later and no more than
     UNTIL_CAP_DAYS (14) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
+  Cite: a `Fix: none` line the branch adds or edits, whose text after the reason names a commit (a 7 to 40 digit hex
+    word with a digit and a letter a-f) or a cost (a number with a time, size or count unit, or linear, quadratic, O(...)),
+    carries check output after it: a backticked command, then a verdict word (pass, fail, ok, red, green). Read with
+    the Until check; each refused note prints one FAIL line with its slug.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
@@ -30,7 +34,7 @@ did not run, and exits 1 (CI or not). Every diff it parses passes --src-prefix=a
 Cost, every git read of a run with no file argument, per notes file path (the layout gives one, or two):
   - one name-status diff (changes) for the whole branch;
   - one show of origin/main per moved debt file (the feel-fix check);
-  - the added lines (added_note_lines, run twice: once for the Fix check, once for the Until check): an ls-tree of
+  - the added lines (added_note_lines, run twice: once for the Fix check, once for the Until and Cite checks): an ls-tree of
     HEAD and a diff each, and, for the Fix check only when the branch adds a bullet, a merge-base, an ls-tree of the
     merge base and a show of it;
   - one show of HEAD per added debt file;
@@ -322,12 +326,37 @@ def until_problem(line, now):
     return ""
 
 
+# A `Fix: none` reason is a bare listed phrase. A commit or a cost after it is a claim about a fix or a cost that nobody
+# re-reads, so it needs check output beside it.
+COMMIT = re.compile(r"\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b")
+COST_UNITS = ("ms", "s", "sec", "secs", "second", "seconds", "min", "mins", "minute", "minutes", "hour", "hours",
+              "line", "lines", "char", "chars", "character", "characters", "byte", "bytes", "KB", "MB", "GB")
+COST = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?[ \t-]?(?:" + "|".join(COST_UNITS) + r")(?!\w)"
+                  + r"|(?<!\w)(?:quadratic|linear)(?!\w)|(?<!\w)O\(")
+CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*[:,;-]?[ \t]*(?:pass|passed|fail|failed|ok|red|green)(?!\w)", re.I)
+
+
+def cite_problem(line):
+    """Why the note `line` fails the cite rule, else ''. A `Fix: none` note whose text after the reason names a commit or
+    a cost needs check output (a backticked command, then a verdict word). The gap text before the Fix is not read."""
+    marks = list(FIX_MARK.finditer(line))
+    fix = parse_fix(line)
+    if not fix or fix[0] != "none":
+        return ""
+    rest = line[FIX_BODY.match(line, marks[-1].end()).end():]
+    named = "a commit" if COMMIT.search(rest) else "a cost" if COST.search(rest) else ""
+    if not named or CHECK_OUTPUT.search(rest):
+        return ""
+    return "has Fix: none naming %s with no check output" % named
+
+
 def until_failures(root, now):
-    """[(path, label, why)] for each line the branch adds or edits in the notes file that fails the Until rule."""
+    """[(path, label, why)] for each line the branch adds or edits in the notes file that fails the Until rule or the
+    cite rule. A line that fails both lists the Until reason."""
     bad = []
     for path in layout.candidates(root, "debt-notes"):
         for line in added_note_lines(root, path, edits=True):
-            why = until_problem(line, now)
+            why = until_problem(line, now) or cite_problem(line)
             if why:
                 bad.append((path, _note_entry(path, line)[1], why))
     return bad
