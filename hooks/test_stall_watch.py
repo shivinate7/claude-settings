@@ -659,13 +659,14 @@ def job_problems(shell, template, pidfiles=()):
     before = alive(below)
     for pid in listed:  # one at a time, in line order: the parent dies first and starts nothing more
         kill_all([pid])
+    time.sleep(0.5)  # an absence window: a shell that outlives its child may still write the never-file below
 
     def leftovers():
         left = {pid: args for pid, _ppid, args in process_table() if mark in args}
         for pid in alive(before):
             left.setdefault(pid, args_of.get(pid, ""))
         return left
-    wait_until(lambda: not leftovers(), 3.0)
+    wait_until(lambda: not leftovers(), 2.5)
     left = leftovers()
     if left:
         pid, args = next(iter(left.items()))
