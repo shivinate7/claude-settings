@@ -1,0 +1,11 @@
+{
+  "title": "hooks/mutate_guard.py has mutants for the ste-push rule",
+  "why": "Gap from #1755's round-1 review: no mutant in hooks/mutate_guard.py covers hooks/guard_ste.py or the ste-push block of hooks/guard_merge.py, so a broken ste-push check could pass CI (lane lint-before-record-push, 06:36 CST Nov 8).",
+  "note": "Fix: add mutants for hooks/guard_ste.py and the ste-push block of hooks/guard_merge.py; each goes red on today's tests or gains the test that kills it. Debt record docs/debts/ste-push-mutants.md lands on #1898; #1755's body carries `Fix: step:ste-push-mutants`. Queue fix (owner 13:20 CST Nov 7). Filed 06:38 CST Nov 8; the coordinator assigns a lane.",
+  "phase": "now",
+  "status": "todo",
+  "order": 631,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T06:24:00-06:00"
+}
