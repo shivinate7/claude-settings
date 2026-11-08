@@ -73,8 +73,9 @@ NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 # A Red-run line is a near-miss key followed by a colon (`Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`, any case, spaces
 # before the colon), or a key with no colon that also carries the failed form's tail. Only `Red-run:` exactly can be valid.
 # A bare line-start "Red run" with no colon is not a key: eleven main messages carry valid trailers and begin a line so.
-RED_KEY = re.compile(r"^red[\s_-]*runs?\s*:", re.IGNORECASE)
-RED_KEY_NO_COLON = re.compile(r"^red[\s_-]*runs?\b.* -> \d+ failed on [0-9a-f]{7,64}\s*$", re.IGNORECASE)
+RED_KEY_WORD = re.compile(r"^red[\s_-]*runs?", re.IGNORECASE)
+RED_KEY = re.compile(RED_KEY_WORD.pattern + r"\s*:", re.IGNORECASE)
+RED_KEY_NO_COLON = re.compile(RED_KEY_WORD.pattern + r"\b.* -> \d+ failed on [0-9a-f]{7,64}\s*$", re.IGNORECASE)
 # First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
 # keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
 REFUSED_NONE_WORDS = frozenset(("none", "non"))
@@ -108,8 +109,12 @@ def git(root, *args):
 
 def lead_word(line):
     """The first word of a failed-form line's command as written, with leading wrappers dropped. The one home of what
-    the word rule reads. Pure."""
-    words = line[len("Red-run:"):].lstrip(LEAD_WRAPPERS).split()
+    the word rule reads. The key is cut by its own match, so a near-miss key of any width (`Red-run :`, `Red-runs:`,
+    `Red run`) does not shift the word. A line with no Red-run key has no word. Pure."""
+    key = RED_KEY.match(line) or RED_KEY_WORD.match(line)
+    if not key:
+        return ""
+    words = line[key.end():].lstrip(LEAD_WRAPPERS).split()
     if not words:
         return ""
     word = words[0]
