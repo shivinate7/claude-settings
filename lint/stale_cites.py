@@ -66,11 +66,13 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
             not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
-            left, and not in --tree mode. A cite path led by `/`, `..` or `~` (`cite_path`) is no path cite. It
+            left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
             leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
             STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .js, .cjs, .ts or .sh file keeps
             the unknown line. A cited .py that does not parse at head is one unknown line, no finding.
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
+A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
+no path cite for STALE010, and one unknown line for a STALE005 backing or a STALE008 value cite.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008, STALE010). Fenced blocks count as prose.
@@ -174,9 +176,11 @@ FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
 FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
-# A path cite: a folder part and an extension, inside the repo. A `/`, `..` or `~` lead names a path outside it, which
-# no blob at a rev holds (a `..` lead even ends `git cat-file`), so it is no path cite.
-FILE_CITE = re.compile(r"^(?!\.\./|~)[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")
+# The lead of a cite path (after `cite_path`) outside the repo: `..`, `~` or `/`. No blob at a rev holds one, and a `..`
+# lead ends `git cat-file`, so no reader asks for one (`outside_repo`).
+OUTSIDE_LEAD = r"(?:\.\.(?:/|\Z)|~|/)"
+# A path cite: a folder part and an extension, inside the repo.
+FILE_CITE = re.compile(r"^(?!%s)[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$" % OUTSIDE_LEAD)
 ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
 
 
@@ -527,6 +531,11 @@ def cite_path(text):
     return posixpath.normpath(text)
 
 
+def outside_repo(text):
+    """True when a cited path names a path outside the repo (`OUTSIDE_LEAD`): its reader gives one unknown line."""
+    return re.match(OUTSIDE_LEAD, cite_path(text)) is not None
+
+
 def path_cites(line, gone, exotic):
     """Each removed path the line names, at a path boundary."""
     hits = []
@@ -775,6 +784,9 @@ class ValueReader:
                 continue
             if path in state.rng.removed or path in state.rng.renamed:
                 continue  # STALE001 judges a cite of a path the range removed
+            if outside_repo(path):
+                cannot_read("%s is outside the repo, so the cite is not checked" % path, False)
+                continue
             tree = self.tree(state, "head", path)
             lit = parse_literal(literal)
             if tree is ABSENT:
@@ -1158,7 +1170,12 @@ class RouteClaimReader:
             path = backing_path(kind, rest)
             if kind in BACKING_KINDS or kind == "test":
                 sourced = bool(TEST_CITE.match(rest)) if kind == "test" else has_source(rest)
-                if sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
+                if sourced and path is not None and outside_repo(path):
+                    note = "%s:%d: %s is outside the repo, so the backing was not checked" % (where + (path,))
+                    if note not in rng.unknowns:
+                        rng.unknowns.append(note)
+                    backed = True  # an unknown, never a finding
+                elif sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
                     dead_files.append(path)  # a read or test backing is dead when its file is not at head
                 else:
                     backed = backed or sourced
