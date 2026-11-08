@@ -1897,25 +1897,29 @@ for (const kind of ["hold", "orphan"]) {
       // A file, not a pipe: without a watchdog the fixture would hold a pipe, and this test, forever.
       const outFile = join(dir, "out.txt");
       const fd = openSync(outFile, "w");
-      let r, found;
+      let r = { status: null }, found, callErr = null;
       try {
         // A hang guard only: the watchdog ends a hung run at its cap, well before this spawn timeout.
         r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 40_000 });
+      } catch (e) {
+        callErr = e; // a guard that fires is text in out, so the marker assert still runs and names its cause
       } finally {
         closeSync(fd);
         found = leftovers(pidFile);
       }
-      const out = readFileSync(outFile, "utf8");
+      const out = readFileSync(outFile, "utf8") + (callErr ? `\n${callErr.message}` : "");
       assert.equal(found.pids.length, 2, out);
-      // The watchdog arms the same way on every platform, so the marker is checked before the orphan return.
-      assert.ok(existsSync(marker), `the watchdog wrote no armed-delay marker at ${marker}\n${out}`);
-      assert.equal(readFileSync(marker, "utf8").trim(), String(Number(env.STAMP_SUITE_CAP_S) * 1000),
-        `the watchdog armed a delay other than the ${env.STAMP_SUITE_CAP_S} s cap\n${out}`);
+      // A Windows orphan's fixture ends at once. Its child can close before the watchdog's poll sees the
+      // pid file; then arm() never runs and writes no marker. So this path returns before the marker asserts.
       if (orphanEndsOnItsOwn(kind)) {
         assert.equal(r.status, 0, out);
         assert.match(out, /ok - hang fixture \(orphan\)/, out);
         return;
       }
+      // Elsewhere the run hangs until the watchdog stops it, so the watchdog has armed and the marker holds its delay.
+      assert.ok(existsSync(marker), `the watchdog wrote no armed-delay marker at ${marker}\n${out}`);
+      assert.equal(readFileSync(marker, "utf8").trim(), String(Number(env.STAMP_SUITE_CAP_S) * 1000),
+        `the watchdog armed a delay other than the ${env.STAMP_SUITE_CAP_S} s cap\n${out}`);
       assert.equal(r.status, 1, out);
       assert.match(out, new RegExp(`FAIL - hang fixture \\(${kind}\\)`), out);
       assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
