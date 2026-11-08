@@ -1,0 +1,11 @@
+{
+  "title": "A fix check may take the record's own top-round head as its fix base",
+  "why": "Lane record-rounds-name-own-head (session_013NEJL2WYHwGu4KngBLPUaF), coordinator pick b, 17:18 CST Nov 8; Merge after: #2277. On q_max #1149 and on #2323, fix checks passed after round 3, but the tool could not record them: no record on the PR had the round-3 head as its Head, because the PR opened later or a fix check was already on the record. Both PRs paid for a fresh rounds 1-3 chain. Rule: when the new record names per-round heads (#2277), `--fix-check` may take the record's own top-round sha as its fix base. The write step already proves that sha is one of the PR's commits. Related: step fix-check-chain (a second fix check starts from the previous fix check's head).",
+  "note": "The lane builds it after #2277 passes round 3.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL2WYHwGu4KngBLPUaF",
+  "status": "todo",
+  "order": 844,
+  "updatedAt": "2026-11-08T17:18:00-06:00"
+}
