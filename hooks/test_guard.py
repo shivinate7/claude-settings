@@ -28242,6 +28242,26 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer, the same plain 
 add("reviewer-brief-blind: allowed: a Workflow agent() builder whose prompt is a variable holding a report",
     "allow", tool="Workflow", script=RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: 'builder', model: 'sonnet'"))
 
+# A verdict line stands alone on its line in the brief: a round label with an em dash or a hyphen, a `Prior round result:`
+# label, or the bold `**Verdict:**` label, plain or in a bullet, then a FAIL word. The allow rows are the same words in
+# prose, which must pass.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 — FAIL line, em dash",
+           "Check the floor fix.\nRound 1 — FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 - FAIL line, hyphen",
+           "Check the floor fix.\nRound 1 - FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round result: FAIL line",
+           "Check the floor fix.\nPrior round result: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Verdict:** FAIL line",
+           "Check the floor fix.\n**Verdict:** FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bullet - **Prior verdict:** FAIL line",
+           "Check the floor fix.\n- **Prior verdict:** FAIL\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Round 1 — read the diff first. line",
+          "Check the floor fix.\nRound 1 — read the diff first.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line saying the prior round result is in the PR thread",
+          "Check the floor fix.\nThe prior round result is in the PR thread.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a bold **Verdict:** line that asks for one word, PASS or FAIL",
+          "Check the floor fix.\n**Verdict:** one word, PASS or FAIL.\nFiles: hooks/guard.py.")
+
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
              "model": "haiku"}
