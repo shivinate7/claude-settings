@@ -14044,6 +14044,89 @@ sh("pwsh-r3-limits scanner: PowerShell tool, a # and a brace inside a double-quo
 sh("pwsh-r3-limits scanner control: PowerShell tool, the same line with Remove-Item of a docs file, is allowed "
    "[pwsh-r3-limits green]",
    'Write-Host "# {"; if ($x) { Remove-Item docs/x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+# PWSH-R3-LIMITS listed-target forms. A listed `$_` that is the target of a write is REFUSED, whether `ni` takes it
+# as a name, an -ErrorAction flag comes before it, a `return` sits in front of the command, or it is a braced `${_}`.
+# Each docs twin of the same form has no `$_` target and is ALLOWED. A `$_` that is only the value written into a
+# docs file is no target, so each of those ALLOWS (the -Path docs file is the target).
+sh("pwsh-r3-limits ni: PowerShell tool, ni of docs with each listed hooks file's Name, which creates a docs test "
+   "file, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { ni docs $_.Name }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits ni control: PowerShell tool, ni of docs/x.md over a hooks listing, with no $_ target, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { ni docs x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of docs/x with each listed FullName as a second path, is "
+   "refused [pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item docs/x $_.FullName }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of two docs paths over a hooks listing, with no $_ "
+   "target, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item docs/x docs/y.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove: PowerShell tool, Remove-Item of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue $_.FullName }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits remove control: PowerShell tool, Remove-Item of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Remove-Item -ErrorAction SilentlyContinue docs/x.md }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy: PowerShell tool, Copy-Item of each listed FullName after a -ErrorAction flag into a docs "
+   "folder, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Copy-Item $_.FullName -ErrorAction SilentlyContinue docs/ }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits copy control: PowerShell tool, Copy-Item of a docs file after a -ErrorAction flag into a docs "
+   "folder, over a hooks listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Copy-Item docs/a.md -ErrorAction SilentlyContinue docs/ }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set: PowerShell tool, Set-Content of each listed FullName after a -ErrorAction flag, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue $_.FullName x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits set control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -ErrorAction SilentlyContinue docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing: PowerShell tool, Set-Content of $_ after a -ErrorAction flag on the listing, is "
+   "refused [pwsh-r3-limits red]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content $_ x }", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits listing control: PowerShell tool, Set-Content of a docs file after a -ErrorAction flag on the "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci -ErrorAction SilentlyContinue hooks | % { Set-Content docs/x.md x }", "allow", tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast: PowerShell tool, Set-Content of a parenthesized $_.FullName.ToString() over a hooks "
+   "listing, is refused [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ($_.FullName.ToString()) x }", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits cast control: PowerShell tool, Set-Content of a parenthesized docs path over a hooks listing, is "
+   "allowed [pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content ("docs/x.md") x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace: PowerShell tool, Set-Content of a braced ${_} over a hooks listing, is refused "
+   "[pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content ${_} x }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits brace control: PowerShell tool, Set-Content of a quoted docs path over a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   'gci hooks | % { Set-Content "docs/x.md" x }', "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return pin: PowerShell tool, return ni of a test path inside a hooks listing, is refused "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni hooks/test_x.py }", "deny", rule=BT, carries=("test-author",), tool="PowerShell",
+   **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits return control: PowerShell tool, return ni of a docs file inside a hooks listing, is allowed "
+   "[pwsh-r3-limits green]",
+   "gci hooks | % { return ni docs/x.md }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Add-Content of each listed Name as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Add-Content -Path docs/list.txt $_.Name }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Add-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Add-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value: PowerShell tool, Set-Content of each listed file as the value of a docs list file, is "
+   "allowed [pwsh-r3-limits red]",
+   "gci hooks | % { Set-Content -Path docs/list.txt $_ }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
+sh("pwsh-r3-limits value control: PowerShell tool, Set-Content of a fixed value to a docs list file over a hooks "
+   "listing, is allowed [pwsh-r3-limits green]",
+   "gci hooks | % { Set-Content -Path docs/list.txt x }", "allow", tool="PowerShell", **dict(BR, cwd=TESTHOLD))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
