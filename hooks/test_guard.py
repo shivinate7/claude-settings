@@ -13208,6 +13208,38 @@ sh(SHELL_CD + "a test write after a cd in a pipe is refused",
 sh(SHELL_CD + "a test write after a cd into a folder the same call creates is refused (known residual, debt)",
    "mkdir -p %s && cd %s && : > tests/x_test.mjs" % (slash(CD_CREATED), slash(CD_CREATED)),
    "deny", rule=BT, **B)
+# A cd the shell skips, a link to the worktree's hooks folder, and a target that starts with a variable the
+# scanner cannot read. Each write lands in the builder's own worktree, so each one is refused.
+sh(SHELL_CD + "a test write after a cd that `||` skips is refused",
+   "true || cd %s && : > hooks/test_guard.py" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd that `&&` skips is refused",
+   "false && cd %s ; : > hooks/test_guard.py" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write to $R/hooks/test_guard.py after a cd, with $R a command substitution, is refused",
+   'R=$(git rev-parse --show-toplevel) && cd %s && : > "$R/hooks/test_guard.py"' % slash(NOGIT),
+   "deny", rule=BT, **B)
+# The link sits in no repository and points at the worktree's hooks folder. A cd into it, logical or physical
+# (`-P`), puts the write in that folder, so the guard must read where the link leads.
+CD_LINK = os.path.join(NOGIT, "hooks-link")
+NO_LINK = "symlinks need a privilege this account does not hold, so the link cannot be made here"
+
+
+def _build_cd_link():
+    materialize(GITWT)   # the link's target is a folder of the worktree, built by its own builder
+    os.symlink(os.path.join(GITWT, "hooks"), CD_LINK, target_is_directory=True)
+    if os.path.realpath(CD_LINK) != os.path.realpath(os.path.join(GITWT, "hooks")):
+        sys.exit("fixture setup failed: CD_LINK does not resolve to the worktree's hooks folder. realpath is %r"
+                 % os.path.realpath(CD_LINK))
+
+
+if LINKS_MADE:
+    lazy_fixture([CD_LINK], _build_cd_link)
+    sh(SHELL_CD + "a test write after a cd into a link to the worktree's hooks folder is refused",
+       "cd %s && : > test_guard.py" % slash(CD_LINK), "deny", rule=BT, **B)
+    sh(SHELL_CD + "a test write after a cd -P into a link to the worktree's hooks folder is refused",
+       "cd -P %s && : > test_guard.py" % slash(CD_LINK), "deny", rule=BT, **B)
+else:
+    skip_case(SHELL_CD + "a test write after a cd into a link to the worktree's hooks folder is refused", NO_LINK)
+    skip_case(SHELL_CD + "a test write after a cd -P into a link to the worktree's hooks folder is refused", NO_LINK)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
