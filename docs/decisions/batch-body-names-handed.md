@@ -33,8 +33,8 @@ The harm: a reviewed lane was lost without a word.
 
 ## The body grammar
 
-- `Lanes: #n #m` lists the batch's lane PRs.
-- A left-out line starts with `Dropped`, `Held` or `Next batch`. Only the numbers after the first colon count. Each number needs a reason: a `(...)` right after it, or a `(...)` in the label before the colon.
+- `Lanes: #n #m` lists the batch's lane PRs. The line may carry a bullet or bold, in any case.
+- A left-out line starts the line with `Dropped`, `Held` or `Next batch`, in that case. Its label ends at its first colon outside parentheses. Only the numbers after that colon count. Each number needs a reason: a `(...)` right after it, or a `(...)` in the label before the colon.
   - `Dropped (macOS CI red): #n #m` passes.
   - `Dropped from #n: #m (macOS CI red)` passes.
   - `Dropped earlier: #n` fails. It has no reason.
@@ -48,7 +48,7 @@ Each refusal names every PR it finds, one line each. It stops the run.
 2. A handed PR is not in the batch and is on no left-out line.
 3. A PR is on a left-out line with no reason.
 4. A PR is on `Lanes:`, and the integration head does not hold its head.
-5. A failed read stops the run. Unknown is never a pass.
+5. A failed read stops the run. Unknown is never a pass. With no `Lanes:` line, `--undo-check-unknown-ok "<reason>"` lifts a failed lane read, as it does for the dropped-lane check.
 6. Every handed lane is named. One line prints: `merge: handed-lane check: N lanes in the batch, M named as left out.`
 
 ## The one departure
@@ -68,12 +68,12 @@ Departs from: the batch bodies so far, which took a left-out line with no reason
 
 - Per run with a `Lanes:` line: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record.
 - Each compare is one `gh api` call. Against the base: one per open PR on the base that reads done, other than the integration PR. Against the integration head: one per handed PR, and one per Lanes-named open PR not in the batch. A handed PR named on `Lanes:` but not in the head is compared twice.
-- A body with no `Lanes:` line: one `git` process, `git log`, in the worktree. No gh call.
+- A body with no `Lanes:` line: one `git log` in the worktree, then two `git` processes per lane tip not on the base. No gh call.
 - No long-lived process, no file and no timer.
 
 ## Status
 
-Built in this PR, on all three paths in `merge/merge.py`. The roadmap step `runner-drops-handed-lane` is the build. Its refusals cite this decision.
+Built on all three paths in `merge/merge.py`. The roadmap step `runner-drops-handed-lane` is the build. Its refusals cite this decision.
 
 Kind: process
 Home: merge/merge.py

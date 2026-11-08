@@ -21,8 +21,8 @@
                           --undo-check-unknown-ok "REASON" also lifts a failed lane read of the no-Lanes check (one line names it).
                           Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then
                           one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
-                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, one `git log` process in the worktree and
-                          no gh call. No long-lived process, file or timer.
+                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, read_lanes's git processes in the worktree
+                          (one `git log`, then two per lane tip not on the base) and no gh call. No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -3470,7 +3470,7 @@ def handed_local(wt, base_ref, n, info, unknown_ok=""):
     """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
     lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
     unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
-    and the reason is returned, for record_lift. A body with a Lanes line is handed_check's. Cost: one `git log` process, no gh call."""
+    and the reason is returned, for record_lift. A body with a Lanes line is handed_check's. Cost: read_lanes's git processes (one `git log`, two per lane tip not on the base), no gh call."""
     if body_lanes(info.get("body") or "")[0] is not None:
         return None
     try:
