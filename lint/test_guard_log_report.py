@@ -814,10 +814,11 @@ class OffsetStampReadTests(unittest.TestCase):
 
     @unittest.skipIf(not hasattr(time, "tzset"), "no time.tzset here, so the zone cannot be forced")
     def test_offset_line_reads_as_local_wall_time_in_a_forced_non_utc_zone(self):
-        # Asia/Kolkata is +05:30. The +05:00 line at 12:00 is 07:00 UTC, which is 12:30 there. A reader that
-        # returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
+        # IST-5:30 is +05:30, read from the POSIX zone string, so it needs no tzdata: a machine without the zone
+        # database falls back to UTC for a name such as Asia/Kolkata. The +05:00 line at 12:00 is 07:00 UTC,
+        # which is 12:30 there. A reader that returns UTC-naive gives 07:00 here, so this fails where a UTC clock would pass it.
         old = os.environ.get("TZ")
-        os.environ["TZ"] = "Asia/Kolkata"
+        os.environ["TZ"] = "IST-5:30"
         time.tzset()
         try:
             row = glr.parse_line(PLUS_FIVE_LINE)
