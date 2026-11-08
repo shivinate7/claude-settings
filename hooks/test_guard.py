@@ -11607,6 +11607,16 @@ records_refusal("skipped cd into no repository: a generator run, then false && c
 # no repository, and git cannot commit there. Allowed, as today.
 records_allow("control, cd runs into no repository: a generator run, then cd, then add -A and commit",
               GEN + " --records-only ; cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
+# `true` does not end a `false &&` chain: the chain runs on to the `;`, so the `cd` after the second `&&` never runs.
+records_refusal("skipped cd behind a true in a false chain: a generator run, then false && true && cd, then add -A and commit",
+                GEN + " --records-only ; false && true && cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
+# `true || false` succeeds, so the `false` after `||` is skipped and the `&&` after it runs the `cd`. The commit is judged
+# in NOGIT, where git cannot commit, so it is allowed. A `false` after `||` must not mark the chain as skipped.
+records_allow("cd after a true || false chain runs: a generator run, then true || false && cd, then add -A and commit",
+              GEN + " --records-only ; true || false && cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
+# A pipe inside a `false &&` chain keeps the chain skipped: `echo a | cat` is one link, and the `cd` after its `&&` never runs.
+records_refusal("skipped cd behind a pipe in a false chain: a generator run, then false && echo a | cat && cd, then add -A and commit",
+                GEN + " --records-only ; false && echo a | cat && cd " + NOGIT + " ; " + ADD_A + " && " + COMMIT_X, LANE)
 # A skipped `cd` into another repo with no generated base page. The chain starts in NOGIT, as the judged-folder
 # cases above do: from a cwd inside a checkout, other-checkout refuses a `cd` into REC_NOPAGE before records-page
 # reads the chain. The commit is judged in REC_NOPAGE, which has no base page, so the guard finds no hit, though
