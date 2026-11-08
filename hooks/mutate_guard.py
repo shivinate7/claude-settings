@@ -2308,6 +2308,11 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # ---- report-sha-missing (decision agent-report-shas-resolve): the hand-back refusal, the one deny line.
+    ("report-sha-missing: the hand-back refusal is never printed, so a made-up sha is delivered",
+     '            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))',
+     '            pass',
+     "guard", "report-sha-missing: an Explore hand-back naming a made-up sha is refused"),
 ]
 
 

@@ -48,7 +48,17 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        role-diff-unread. An unread diff of any role, builder included, is logged
                        and allowed.
                        (builders-cannot-edit-tests)
-  git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
+  report-sha-missing   deny. An agent's report (the `message` of SubagentHandback, judged in `judge`,
+                       and the last message at SubagentStop, judged in `judge_stop`) that names a
+                       sha-like token that is no commit in the repo at its cwd. One
+                       `git cat-file --batch-check` call. A payload with no valid `agent_id`, no
+                       repo, a git error, or an ambiguous short sha passes. An override lifts it.
+                       The first stop is blocked once, with each reason of that stop in one block.
+  report-sha-shallow, report-sha-unresolved
+                       noted. A missing sha in a shallow clone is allowed. A second stop
+                       (`stop_hook_active`) with a missing sha is allowed.
+                       (agent-report-shas-resolve)
+  git-env-set         deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
                        its subject. An empty subject passes. An unreadable subject is allowed and
@@ -2301,22 +2311,15 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
         record(tool, "noted", diff_rule(role), found or noted[0])
 
 
-def judge_stop(payload) -> None:
-    """A builder, test-author, record-writer or designer that stops has its own change judged. A
-    builder's test change is refused at the first stop (rule `builder-diff`, with the undo route). A second
-    stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
-    its tree never loops. A builder's logged change and the other roles' offences log under the role's
-    rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
-    and allow. A missing cwd logs nothing."""
-    role = agent_role(payload)
-    if not role:
-        return
-    where = str(payload.get("cwd") or "")
-    if not where:
-        return
+def stop_diff_block(payload, role: str, where: str):
+    """A role's own change at its stop. A builder's test change at the first stop is recorded as a deny and
+    returned as the reason text for the one block; a second stop (`stop_hook_active`) is allowed and logs
+    `role-diff-unresolved`. A builder's logged change and the other roles' offences log under the role's
+    rule and never block. A cwd that is the main checkout and a change that could not be read log too.
+    Returns '' when nothing blocks."""
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
-        return
+        return ""
     found, noted = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
@@ -2324,10 +2327,97 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
-        sys.exit(0)
+        return diff_rule(role) + ": " + builder_diff_reason()
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
+    return ""
+
+
+# Rule report-sha-missing. A report's sha-like token must resolve as a commit in the repo at the payload's cwd
+# (decision agent-report-shas-resolve). A token is 7 to 40 lowercase hex characters with a digit and a letter a-f.
+# It is not one when it touches - _ / # @ or a period that is followed by a non-space (a file name, a URL, an
+# agent id, a colour), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
+HANDBACK_TOOL = "SubagentHandback"
+REPORT_SHA = re.compile(r"(?<![0-9A-Za-z_\-/#.@])[0-9a-f]{7,40}(?![0-9A-Za-z_\-/#@]|\.(?!\s|$))")
+REPORT_QUOTED = re.compile(r'"[^"\n]*"')
+REPORT_QUOTE_LINE = re.compile(r"\s*>(\s|$)")
+REPORT_SHA_MAX = 100   # shas judged in one report: a bound on the one git call's input
+REPORT_SHA_REASON = (
+    "Your report names a commit this repo does not hold: %s. Check each sha with git before you write it, "
+    "and name only a commit that exists. If you made no commit, say so and give no sha. "
+    "Then hand back again. (decision agent-report-shas-resolve)"
+)
+
+
+def report_shas(text) -> list:
+    """The sha-like tokens of a report, each once, in order of first sight."""
+    if not isinstance(text, str):
+        return []
+    found = []
+    for line in text.split("\n"):
+        if REPORT_QUOTE_LINE.match(line):
+            continue
+        line = REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
+        for token in REPORT_SHA.findall(line):
+            if re.search(r"[0-9]", token) and re.search(r"[a-f]", token) and token not in found:
+                found.append(token)
+    return found[:REPORT_SHA_MAX]
+
+
+def report_sha_missing(tool: str, payload, text, where: str) -> list:
+    """The shas of `text` that are no commit in the repo at `where`, for an agent's report. [] when the
+    payload holds no valid agent_id, the report holds no sha, git fails, `where` is no repo, or the repo is
+    shallow (noted `report-sha-shallow`). One `git cat-file --batch-check` call, and one more on a miss."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not where or not os.path.isdir(where):
+        return []
+    shas = report_shas(text)
+    if not shas:
+        return []
+    try:
+        done = git_reads._nowindow.run(
+            ["git", "-C", where, "cat-file", "--batch-check"],
+            input="".join(sha + "^{commit}\n" for sha in shas),
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+    except Exception:
+        return []
+    answers = done.stdout.splitlines()
+    if done.returncode != 0 or len(answers) != len(shas):
+        return []
+    missing = [sha for sha, answer in zip(shas, answers) if answer.rstrip().endswith(" missing")]
+    if not missing:
+        return []
+    shallow = guard_core._git(where, "rev-parse", "--is-shallow-repository")
+    if shallow is None or shallow.returncode != 0:
+        return []
+    if shallow.stdout.strip() == "true":
+        record(tool, "noted", "report-sha-shallow", " ".join(missing))
+        return []
+    return missing
+
+
+def judge_stop(payload) -> None:
+    """A builder, test-author, record-writer or designer that stops has its own change judged (rule
+    `builder-diff` for a builder's test change, with the undo route). Any agent with a valid `agent_id` has
+    its last message judged for a sha that is no commit (rule `report-sha-missing`). The first stop that
+    breaks either rule is blocked once, and the one block gives each reason. A second stop
+    (`stop_hook_active`) is allowed and logs `role-diff-unresolved` and `report-sha-unresolved`, so an agent
+    that cannot fix its tree or its report never loops. A missing cwd logs nothing."""
+    role = agent_role(payload)
+    where = str(payload.get("cwd") or "")
+    diff_reason = sha_reason = ""
+    if role and where:
+        diff_reason = stop_diff_block(payload, role, where)
+    missing = report_sha_missing("SubagentStop", payload, payload.get("last_assistant_message"), where)
+    if missing:
+        if payload.get("stop_hook_active"):
+            record("SubagentStop", "noted", "report-sha-unresolved", " ".join(missing))
+        else:
+            record("SubagentStop", "deny", "report-sha-missing", " ".join(missing))
+            sha_reason = "report-sha-missing: " + REPORT_SHA_REASON % ", ".join(missing)
+    if diff_reason or sha_reason:
+        print(json.dumps({"decision": "block", "reason": diff_reason + " " + sha_reason}))
+        sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -4804,6 +4894,12 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+
+    # 0, report-sha-missing. An agent's hand-back names only commits its repo holds (decision agent-report-shas-resolve).
+    if tool == HANDBACK_TOOL:
+        missing = report_sha_missing(tool, payload, tool_input.get("message"), cwd)
+        if missing:
+            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
