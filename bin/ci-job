@@ -334,7 +334,7 @@ def plan(step, pr, values, top, pinned=None):
                 return "unknown", "no bin/ste-changed in the pinned tree: looked for %s" % looked, None, None, None
         return "run", '"%s" "%s"' % (slashed(ste), values["base"]), shell_argv(None), {}, None
     if step_key(step, "uses") is not None:
-        return "not run locally", "an action (uses: %s); CI runs it" % step_key(step, "uses").split(" #")[0], None, None, None
+        return "not run locally", "an action (uses: %s); CI runs it" % uses(step), None, None, None
     cond = condition(step_key(step, "if"), pr)
     if cond is None:
         return "unknown", "an if: this runner cannot read: %s" % step_key(step, "if"), None, None, None

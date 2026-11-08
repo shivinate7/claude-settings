@@ -120,10 +120,13 @@ def drop_comment(value):
 
 
 def yaml_scalar(text):
-    """A YAML scalar's value: the inline comment cut (drop_comment) and one pair of matching outer quotes removed, so a `#`
-    inside quotes stays text."""
+    """A YAML scalar's value: the inline comment cut (drop_comment), one pair of matching outer quotes removed and their escapes
+    undone (`''` in single quotes, `\\"` and `\\\\` in double), so a `#` inside quotes stays text."""
     value = drop_comment((text or "").strip())
-    return value[1:-1] if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"" else value
+    if len(value) < 2 or value[0] != value[-1] or value[0] not in "'\"":
+        return value
+    inner = value[1:-1]
+    return inner.replace("''", "'") if value[0] == "'" else re.sub(r'\\(["\\])', r"\1", inner)  # `''` and `\"`, `\\` are escapes
 
 
 def step_map(step, key):
