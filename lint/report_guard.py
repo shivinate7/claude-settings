@@ -1524,7 +1524,6 @@ def hand_off_problem(hook, text):
 # name its check. A notice (a connect-failure attachment, say) is no try: only a tool call with a failed result is.
 # Why: a notice alone can make a reply hand the owner an act the session can do, such as a PR that the GitHub MCP
 # create-PR tool opens on its first call. Record: decision claims-carry-backing.
-_ADVERB = "(?:%s)" % "|".join(_clause.ADVERBS)  # the listed adverbs only; lint/test_clause.py pins them against ADVERBS
 _NOT_NAME = r"(?<![\w-])"  # a phrase inside a hyphenated name (a branch called cannot-claim-x) is no phrase
 # The phrases are _clause.CANNOT_FORMS; the permission forms vary in their words, so they stay a pattern of their own.
 _PERMISSION_FORM = r"do(?:es)?(?:n['’]t| not)\s+have\s+(?:the\s+)?(?:permission|authori[sz]ation|authority|ability) to"
