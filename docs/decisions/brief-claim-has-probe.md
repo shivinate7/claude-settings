@@ -31,7 +31,7 @@ Rule `brief-claim-has-probe` in `hooks/guard.py` refuses an Agent or Task brief 
   - A subject-first "lets ... today ... through", with "through" after the last "today", is not read, as on the head of PR #1664. That form appears in 74 of 200k random sentences and in no real brief.
 - Cost: pure text work inside the guard call already running. No process start, no file written, no log line beyond the refusal's own. The subject-first form is searched only up to the sentence's last "today", so 1500 repeats of "it refuses" on one line take 0.002 to 0.008 s, measured.
 
-Protected by the `brief-claim:` cases in `hooks/test_guard.py` (64 deny, 36 allow, 100 in all), red before the rule landed. The 75 mutants in `hooks/mutate_guard.py` labelled `brief-claim:` each go red on one named case. An edge no case pins has no mutant. Many edges are unpinned. Examples: the -ed verbs but refused, the adverbs but never, the locator words but in, and the probe commands but python3 and git.
+Protected by the `brief-claim:` cases in `hooks/test_guard.py`: 69 deny and 36 allow, 105 cases in all, plus one log check (106 runs). They were red before the rule landed. The 81 mutants in `hooks/mutate_guard.py` labelled `brief-claim:` each go red on one named case. An edge no case pins has no mutant. Many edges are unpinned. Examples: the -ed verbs but refused, the adverbs but never, the locator words but in, and the probe commands but python3 and git.
 
 Kind: process
 Home: hooks/guard.py
