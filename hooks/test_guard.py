@@ -10302,9 +10302,11 @@ step_allow("a Triage label in bold, the colon after the bold, is allowed",
 step_allow("role labels in lower case with no colons are allowed: a label is read in any case",
            role_path("step-topic-lane"),
            ROLE_TOP + " coordinator session_C1; triage session_T2; batch runner 8 session_B3.")
-step_allow("Coordinator subtriage session_C1 is allowed: subtriage is no Triage label, so the gap holds none",
-           role_path("step-topic-lane"),
-           ROLE_TOP + "\nCoordinator subtriage session_C1\nTriage: session_T1\nBatch runner 8: session_B1")
+# Refused under the filler-word list: subtriage is a word, not a filler word, so the gap holds a word and the
+# Coordinator id is not read.
+roles_refuse("Coordinator subtriage session_C1 is refused: subtriage is no filler word, so the gap holds a word",
+             role_path("step-topic-lane"),
+             ROLE_TOP + "\nCoordinator subtriage session_C1\nTriage: session_T1\nBatch runner 8: session_B1", ["Coordinator"])
 step_allow("a Coordinator gap of exactly 80 characters before its id is allowed",
            role_path("step-topic-lane"),
            ROLE_TOP + "\nCoordinator" + ROLE_GAP_80 + "session_C1\nTriage: session_T1\nBatch runner 8: session_B1")
@@ -10408,10 +10410,11 @@ step_allow("a backticked batch runner id, Batch runner: `session_abc123`, passes
 step_allow("a lowercase batch runner label, batch runner: session_x8, passes", role_path("step-topic-lane"),
            ROLE_TOP + COORD_LINE + TRIAGE_LINE + "\nbatch runner: session_x8")
 
-# Allowed, the N2 pin (rule lane-one-topic: the other-label lookahead ends at a word boundary). `Triagey` is no Triage
-# label, so the gap holds none and the Coordinator id after it is read. Dropping that boundary makes this case go red.
-step_allow("a Coordinator id after Triagey, Coordinator Triagey session_C1, is allowed: Triagey is no Triage label",
-           role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triagey session_C1" + TRIAGE_LINE + RUNNER_LINE)
+# Refused under the filler-word list: Triagey is a word, not a filler word, so the gap holds a word and the
+# Coordinator id is not read.
+roles_refuse("a Coordinator id after the word Triagey, Coordinator Triagey session_C1, is refused: Triagey is no filler word",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triagey session_C1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
 # Allowed, N1 (brief-role-title-holds-label): a quoted span and a parenthetical span in the gap are skipped, so another
 # role's label inside them is no label of the gap. Each case keeps the other two roles valid.
 step_allow("a Coordinator title holding a Triage label in quotes, session_A1, is allowed",
@@ -10428,6 +10431,14 @@ roles_refuse("a Triage word in prose, Triage the failing test in session_01Q., i
 roles_refuse("a Coordinator word in prose, Coordinator will merge session_C1, is refused: prose is no role id",
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator will merge session_C1" + TRIAGE_LINE + RUNNER_LINE,
              ["Coordinator"])
+# Refused under the filler-word list: an unclosed quote is no span, so its text is plain gap text. The words cs and
+# notes are no filler words, so the Coordinator id is not read.
+roles_refuse("a Coordinator with an unclosed quote, Coordinator \"cs notes, session_A1, is refused: no span is closed",
+             role_path("step-topic-lane"), ROLE_TOP + '\nCoordinator "cs notes, session_A1' + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+# Refused, a pin: the label is Coordinator, and Coordinators is a word that holds no Coordinator label.
+roles_refuse("a Coordinators word with no colon, Coordinators session_C1, is refused: the label is Coordinator",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinators session_C1" + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
 
 # Refused: a role id that is a placeholder, one with no digit. Each keeps the other two roles valid.
 roles_refuse("a triage id that is the placeholder session_TBD is refused",
