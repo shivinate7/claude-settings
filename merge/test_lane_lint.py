@@ -779,6 +779,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
         second = self.side_parent(SECOND_PARENT_BRANCH, "second parent")
+        self.push_ref("feat", self.commit_in_other(second, "lane.txt", "lane commit on the second parent"))
         body = body_at(second[:9]).replace("Merge after: #1785\n", "Merge after: #1785\nMerge after: #1700\n")
         self.assertEqual(body.count("Merge after: #"), 2, "the fixture does not name two parents")
         parents = {PARENT_PR: (h["P"], PARENT_BRANCH), SECOND_PARENT_PR: (second, SECOND_PARENT_BRANCH)}
@@ -814,11 +815,12 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assert_review_range_passes(body, "a body whose only wrong range sits in a fenced block", one_parent(h["P"]))
 
     def test_review_range_passes_every_number_on_a_merge_after_line(self):
-        """`Merge after: #1676, #1742` names two parents, so a range at the head of #1742 passes."""
+        """`Merge after: #1676, #1742` names two parents, so a range at the head of #1742 passes. The lane is built on that head."""
         self.use_ci_job(PASSING, 0)
         self.fork_history()
         first = self.side_parent(FIRST_PARENT_BRANCH, "first parent of two")
         last = self.side_parent(LAST_PARENT_BRANCH, "last parent of two")
+        self.push_ref("feat", self.commit_in_other(last, "lane.txt", "lane commit on the last parent"))
         body = body_at(last[:9]).replace("Merge after: #1785", "Merge after: #%d, #%d" % (FIRST_PARENT_PR, LAST_PARENT_PR))
         self.assertIn("Merge after: #1676, #1742", body, "the fixture did not take the two-number line")
         parents = {FIRST_PARENT_PR: (first, FIRST_PARENT_BRANCH), LAST_PARENT_PR: (last, LAST_PARENT_BRANCH)}
