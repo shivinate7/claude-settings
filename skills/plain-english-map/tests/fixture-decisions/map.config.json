@@ -1,5 +1,5 @@
 {
-  "formatVersion": 5,
+  "formatVersion": 6,
   "title": "Decisions fixture",
   "codeExtensions": ["ts", "tsx", "py", "sh"],
   "decisionsDir": "docs/records/",
