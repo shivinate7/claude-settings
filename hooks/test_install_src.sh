@@ -4140,15 +4140,42 @@ guardset3() {
 # guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
 # with the Python parser, so a new import needs no edit here. The try-block imports are guardset5's.
 # The check reads the list line only (the loop or the case line), never the comments above it.
-guard_set_modules() {  # $1 "try" prints each flat module a guard file imports in a try block; else outside one. One per line
+guard_set_modules() {  # $1 "try" prints each flat module a guard file imports in a try block; "closure" prints each flat module the guard reaches through any import, at any depth, transitively; else outside one. One per line
   python3 -I - "$REPO_ROOT" "${1:-outside}" <<'PY'
 import ast, glob, os, sys
 hooks = os.path.join(sys.argv[1], "hooks")
 mode = sys.argv[2]
-if mode not in ("outside", "try"):
-    sys.exit("guard_set_modules: mode %r, want outside or try" % mode)
+if mode not in ("outside", "try", "closure"):
+    sys.exit("guard_set_modules: mode %r, want outside, try or closure" % mode)
 flat = set(os.listdir(hooks))
 found = set()
+if mode == "closure":
+    # A flat module that a reached module imports lazily, in a def body, an except or an else, loads from the
+    # set's folder too, so it is walked as well. Only a flat hooks module counts: a lint/ module is no set member.
+    todo = ["guard.py"] + sorted(f for f in flat if f.startswith("guard_") and f.endswith(".py"))
+    seen = set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        with open(os.path.join(hooks, name), encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                dotted = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                dotted = [node.module]
+            else:
+                continue
+            for item in dotted:
+                mod = item.split(".")[0] + ".py"
+                if mod in flat:
+                    todo.append(mod)
+                    if mod != "guard.py" and not mod.startswith("guard_"):
+                        found.add(mod)
+    print("\n".join(sorted(found)))
+    sys.exit(0)
 def visit(stmts, out):
     for node in stmts:
         if isinstance(node, ast.Try):
@@ -4244,6 +4271,21 @@ guardset6() {
   else
     ok "$name"
   fi
+}
+
+# guardset7: the closure. guardset4 and guardset5 read the guard files' own imports, so a module that a listed
+# module imports (override.py loads local_time.py in its override lift, precompact_handoff.py loads feedback_guard.py
+# in its inbox note) is walked by neither. The walk runs from the guard files through every reached flat module,
+# at any depth, so a lazy import needs no edit here. A module outside the set loads from the flat copy, which
+# install.sh replaces file by file, so one guard run can judge with a mix of old and new modules.
+guardset7() {
+  name="guardset7: each flat module the guard reaches through its imports, transitively and at any depth, is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules closure); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard's import closure reads to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
 }
 
 guardset2() {
@@ -5395,6 +5437,7 @@ run guardset3
 run guardset4
 run guardset5
 run guardset6
+run guardset7
 run win_sh1
 run win_sh2
 run win_sh3

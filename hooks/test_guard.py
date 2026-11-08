@@ -5963,18 +5963,31 @@ STE_CHECKOUT = os.path.join(ROOT, "stecheckout")  # a checkout whose lint/ holds
 OWN_REPO = os.path.join(ROOT, "ownrepo")  # another repo: its own lint/own_check.py, and no lint/pytest.py
 
 
-def stream_copy_build():
+def guard_d_copy_build(folder, name, with_lint=False):
     """A copy install, laid out as install.sh's land_guard_set lays it: every module under
     hooks/guard.d/<id>/, guard.py and guard_*.py stamped with <id>, and the stamped guard.py beside that
-    folder, in hooks/. The stamped modules come from _reload_copy, the one home of a stamped set."""
-    source, _good = _reload_copy("streamcopy", STREAM_COPY_ID)
-    hooks = os.path.join(STREAM_COPY, "hooks")
-    shutil.rmtree(STREAM_COPY, ignore_errors=True)
+    folder, in hooks/. The stamped modules come from _reload_copy, the one home of a stamped set. With
+    with_lint, the install's lint/ and skills/waiting-page/page.html sit beside hooks/, as install.sh lands
+    them; without it, no lint/ is beside the copy at all."""
+    source, _good = _reload_copy(name, STREAM_COPY_ID)
+    hooks = os.path.join(folder, "hooks")
+    shutil.rmtree(folder, ignore_errors=True)
     set_dir = os.path.join(hooks, "guard.d", STREAM_COPY_ID)
     os.makedirs(set_dir)
     for entry in os.listdir(source):
         shutil.copy(os.path.join(source, entry), set_dir)
     shutil.copy(os.path.join(source, "guard.py"), hooks)
+    if with_lint:
+        shutil.copytree(os.path.join(REPO, "lint"), os.path.join(folder, "lint"),
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        page_dir = os.path.join(folder, "skills", "waiting-page")
+        os.makedirs(page_dir)
+        shutil.copy(os.path.join(REPO, "skills", "waiting-page", "page.html"), page_dir)
+
+
+def stream_copy_build():
+    """The copy install of the stream family: no lint/ beside it (see guard_d_copy_build)."""
+    guard_d_copy_build(STREAM_COPY, "streamcopy")
 
 
 def lint_checkouts_build():
@@ -16252,6 +16265,18 @@ add("port question: file_path data with today's item is denied", "deny", "port-q
     doc_id="suspense-cards", file_path=PQ_FILE_BAD)
 add("port question: file_path data that departs is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards", file_path=PQ_FILE_GOOD)
+# A copy install with the install's lint/ and skills/ beside its hooks/. question_form.py finds lint/layout.py
+# and skills/waiting-page/page.html from its own folder, which from guard.d/<id>/ holds neither. The waiting-page
+# rules then raise, and the guard allows the write it should refuse. The control is the flat deny above.
+QF_COPY = os.path.join(ROOT, "qfcopy")
+QF_COPY_GUARD = os.path.join(QF_COPY, "hooks", "guard.py")
+lazy_fixture([QF_COPY], lambda: guard_d_copy_build(QF_COPY, "qfcopy", with_lint=True))
+add("port question: a copy install with lint/ beside it denies a batch with today's item", "deny", "port-question",
+    tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch", guard=QF_COPY_GUARD,
+    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+            {"op": "set", "collection": "items", "doc_id": "suspense-cards", "data": pq_item()}])
+add("port question: a copy install with lint/ beside it allows a plain call (control)", "allow",
+    cwd=NOGIT, guard=QF_COPY_GUARD, command="ls")
 add("port question: an unreadable file_path fails open", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="suspense-cards",
     file_path=os.path.join(ROOT, "pq", "missing.json"))
