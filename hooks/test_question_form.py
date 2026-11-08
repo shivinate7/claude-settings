@@ -1173,7 +1173,7 @@ def case_gh_login_switch_on_the_page():
          "set", entry_of(gh_task("gh pr view 3 -R shivinate7/repo", "gh pr view 3 -R shivinate7/repo")),
          ("gh-login-switch", None))
     # A gh command inside a substitution glued to its word is a command the shell runs. _gh_calls reads only the
-    # words that open a segment, so each glued form passes on main. The plain `echo $(gh pr merge 5)` is refused.
+    # words that open a segment, so the check reads each substitution text as a script of its own.
     for command in ("x=$(gh pr merge 5)", 'echo "$(gh pr merge 5)"', "echo a$(gh pr merge 5)"):
         page("gh login switch: a glued substitution holding a gh command with no switch is refused: %s" % command,
              "set", entry_of(gh_task(command, command)), ("gh-login-switch", None))
