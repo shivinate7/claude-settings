@@ -131,6 +131,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  ste-push             deny. A `git push` whose net range (the conflict-markers range) changes a file the
+                       ste-lint step lints (`changed_paths` and `exclude` of actions/ste-lint/action.yml, and
+                       .ste-lint-exclude), when `bin/ste-changed <base>` run in the pushed checkout (or
+                       STE_CHANGED_BIN) prints `ste-lint: FAIL`. Not judged: a dry run, a delete, a tag or a
+                       tags-only push, a destination `archive/*` or the record branch, and a checkout whose
+                       CI runs no ste-lint (no pin in .github/workflows, and not claude-settings itself).
+                       A push of a ref other than HEAD, an exit other than 0, 1 or 3, no verdict line, a
+                       lint past 40 s and a base that is not origin's read as unknown: allowed, with one
+                       guard.log line and a stderr line that say unknown. Exit 3 (pin drift) never
+                       refuses. An override lifts it.
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -380,7 +390,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit, ste_push_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3574,6 +3584,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
+
+    # 6c3. A push whose changed prose fails the ste-lint step CI runs (rule ste-push). Cost: none for a call with
+    # no push or a repo whose CI runs no ste-lint; else a few short `git` reads, and one lint run when the push
+    # changes a file in scope (see guard_merge.py, ste-push).
+    def ste_note(why):
+        record(tool, "noted", "ste-push", "unknown: " + why)
+        print("ste-push: unknown, %s. The push is allowed, not linted." % why, file=sys.stderr)
+
+    hit = ste_push_hit(stripped, cwd, record_branch_of, read_verb, ste_note)
+    if hit:
+        refuse(tool, "deny", "ste-push", hit[1], hit[0])
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)

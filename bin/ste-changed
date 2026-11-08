@@ -13,30 +13,30 @@
 # `git fetch --unshallow`; unlike the line above, it still exits 3, because the files differ, and that is a fact.
 # Checkout: the clone this file lives in; a copy install (~/.claude/bin) has no actions/, so it uses the clone the
 # global CLAUDE.md names on its `@<dir>/CLAUDE.md` line (hooks/guard_pointer.pointer_checkout).
+# Exit codes: the step's own (0 pass, 1 FAIL), 3 pin drift, and 2 for a fault of this command (no checkout, no bash, a crash).
+# The guard rule ste-push reads the `ste-lint: PASS|FAIL,` line of stdout, so a fault never reads as FAIL (hooks/guard_ste.py).
 # Windows: bin\ste-changed.cmd. Needs bash (Git for Windows has it) and python3 on PATH.
 import os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
+import guard_ste  # noqa: E402  the one home of the action defaults, the pin pattern and the checkout lookup (hooks/guard_ste.py)
 
-LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
+LINT_ACTION = guard_ste.LINT_ACTION
+FAULT_EXIT = 2   # this command's own faults. Exit 1 is the step's FAIL, so a crash never reads as one (rule ste-push)
+
+
+def fault(message):
+    print(message, file=sys.stderr)
+    sys.exit(FAULT_EXIT)
 
 
 def find_root():
     """The checkout that holds the lint step: this file's own clone, else the one the global CLAUDE.md points at."""
-    own = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    if os.path.isfile(os.path.join(own, LINT_ACTION)):
-        return own
-    try:
-        import guard_pointer  # noqa: E402  the one reader of the pointer line (hooks/guard_pointer.py)
-        pointed = guard_pointer.pointer_checkout()
-    except ImportError:
-        pointed = ""
-    if pointed and os.path.isfile(os.path.join(pointed, LINT_ACTION)):
-        return pointed
-    sys.exit("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer line "
-             "in the CLAUDE.md of the config dir.")
+    root = guard_ste.find_checkout(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    return root or fault("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer "
+                         "line in the CLAUDE.md of the config dir.")
 
 
 ROOT = find_root()
@@ -50,7 +50,7 @@ LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/st
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
 PINNED = {"ste-lint": (LINT_FILES, "lint", ", with no question (rule git-integration-branch-merge)"),
           "zizmor": (("actions/zizmor/action.yml", "actions/zizmor/run.sh"), "zizmor run", "")}
-PIN = re.compile(r"[\w.-]+/claude-settings/actions/(%s)@([0-9a-f]{40})" % "|".join(map(re.escape, PINNED)))
+PIN = guard_ste.pin_pattern(PINNED)
 
 
 def out(*a):
@@ -64,15 +64,7 @@ def here(*a):
 
 def pins():
     """{(action, sha): first "file:line" that pins it}, from the linted repo's .github/workflows."""
-    top, found = out("rev-parse", "--show-toplevel"), {}
-    wf = os.path.join(top, ".github", "workflows")
-    for name in sorted(os.listdir(wf)) if os.path.isdir(wf) else ():
-        if name.endswith((".yml", ".yaml")):
-            with open(os.path.join(wf, name), encoding="utf-8", errors="replace") as f:
-                for n, line in enumerate(f, 1):
-                    for key in PIN.findall(line.split("#", 1)[0]):
-                        found.setdefault(key, ".github/workflows/%s:%d" % (name, n))
-    return found
+    return guard_ste.workflow_pins(out("rev-parse", "--show-toplevel"), PIN)
 
 
 def pin_report():
@@ -111,26 +103,25 @@ def pin_report():
     return drift
 
 
-def default(text, name):
-    return re.search(r"^  %s:.*?\n    default: \"([^\"]*)\"" % re.escape(name), text, re.M | re.S).group(1)
-
-
 def find_bash():
     if os.path.exists("/bin/bash"):
         return "/bin/bash"
-    return find_git_bash() or sys.exit("ste-changed: bash not found")  # never the WSL launcher
+    return find_git_bash() or fault("ste-changed: bash not found")  # never the WSL launcher
 
 
 def main(argv):
     if len(argv) != 1:
-        sys.exit("usage: ste-changed <base>")
+        fault("usage: ste-changed <base>")
     base = re.sub(r"^origin/", "", argv[0])
-    text = open(os.path.join(ACTION, "action.yml")).read()
+    with open(os.path.join(ACTION, "action.yml")) as handle:
+        defaults = guard_ste.lint_inputs(handle.read())
+    missing = [name for name, value in defaults.items() if value is None]
+    if missing:
+        fault("ste-changed: action.yml has no default for input %s" % ", ".join(missing))
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
-               PATHS_GLOB=default(text, "paths"), EXCLUDE=default(text, "exclude"),
-               CHANGED_PATHS_GLOB=default(text, "changed_paths"),
-               DECISIONS_DIR=default(text, "decisions-dir"))
+               PATHS_GLOB=defaults["paths"], EXCLUDE=defaults["exclude"],
+               CHANGED_PATHS_GLOB=defaults["changed_paths"], DECISIONS_DIR=defaults["decisions-dir"])
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; with no window that output goes to a hidden console
     rc = subprocess.run([find_bash(), run], env=env).returncode
@@ -138,4 +129,11 @@ def main(argv):
     sys.exit(rc or (3 if drift else 0))
 
 
-main(sys.argv[1:])
+try:
+    main(sys.argv[1:])
+except SystemExit:
+    raise
+except BaseException:   # an uncaught error exits 1, which is the step's FAIL
+    import traceback
+    traceback.print_exc()
+    sys.exit(FAULT_EXIT)

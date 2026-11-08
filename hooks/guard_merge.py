@@ -12,6 +12,7 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+import guard_ste  # the ste-lint reads and run that bin/ste-changed shares (hooks/guard_ste.py)
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
@@ -624,13 +625,24 @@ def _ref_sha(top, ref):
     return done.stdout.strip() if done is not None and done.returncode == 0 else ""
 
 
+_RANGES = {}   # (where, source, tracking) -> _checked_range's answer, for the life of one hook process
+
+
 def _checked_range(where, source, tracking, memo):
-    """(finished `git diff --check <base>...<source>`, source) for the first base that git accepts, else
-    (None, source). The three dots make git find the merge base itself, so no ref is read first. The
+    """(finished `git diff --check <base>...<source>`, source, base) for the first base that git accepts, else
+    (None, source, ''). The three dots make git find the merge base itself, so no ref is read first. The
     bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
     once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
     read once: one that does not resolve is read as HEAD, and the same base is tried again.
-    `--check` exits 2 on a finding."""
+    `--check` exits 2 on a finding. One hook call is one process and reads each range once, so the
+    conflict-markers check and the ste-push check share it."""
+    key = (where, source, tracking)
+    if key not in _RANGES:
+        _RANGES[key] = _read_range(where, source, tracking, memo)
+    return _RANGES[key]
+
+
+def _read_range(where, source, tracking, memo):
     verified = source == "HEAD"
     step = 0
     while step < 3:
@@ -640,16 +652,16 @@ def _checked_range(where, source, tracking, memo):
         if base:
             done = _diff_check(where, [base + "..." + source, "--"])
             if done is None:
-                return None, source
+                return None, source, ""
             if done.returncode in (0, 2):
-                return done, source
+                return done, source, base
             if not verified:
                 verified = True
                 if not _ref_sha(where, source):
                     source = "HEAD"
                     continue
         step += 1
-    return None, source
+    return None, source, ""
 
 
 def _push_hit(segment, stripped, cwd, args):
@@ -672,7 +684,7 @@ def _push_hit(segment, stripped, cwd, args):
             continue
         source = _plain_source(source)
         tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
-        done, source = _checked_range(where, source, tracking, memo)
+        done, source, _base = _checked_range(where, source, tracking, memo)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
@@ -794,6 +806,158 @@ def conflict_markers_hit(stripped: str, cwd: str):
             blind_commit = True
             blind_triplet = blind_triplet or bool(name)
     return "", ""
+
+
+# ---- ste-push: a `git push` whose net range changes a file the ste-lint step lints, and the lint fails
+#
+# CI runs the ste-lint step (actions/ste-lint) on a pull request; this runs the same step before the push,
+# so a failing sentence is fixed before CI spends a run. The step is bin/ste-changed (or STE_CHANGED_BIN):
+# `<program> <base>`, run in the pushed checkout, which lints HEAD against `origin/<base>`. Only the
+# `ste-lint: PASS|FAIL,` line of its stdout decides. A FAIL is a deny. Exit 3 (the pin drifted) never
+# refuses. Any other exit than 0, 1 and 3, no verdict line, a lint past guard_ste.LINT_SECONDS, a program
+# that will not start and a range this reader cannot lint read as unknown: the push is allowed, one
+# guard.log line holds `ste-push` and `unknown`, and stderr says so. An exit 1 with a PASS line is a failure
+# of the stale-cites step, not of the sentences, and allows.
+# A push is not linted when it is a dry run, a delete, tags only, a tag, a push to `archive/*` or the record
+# branch, a push of a ref other than HEAD (unknown, noted), or a push from a checkout whose CI runs no
+# ste-lint (no pin in .github/workflows, and not claude-settings itself). It is linted only when
+# `git diff --name-only --diff-filter=AMR <base>...<source> -- <scope>` names a file, with the scope
+# (guard_ste.scope_pathspecs) read from action.yml and .ste-lint-exclude, so a push with nothing in scope
+# starts no lint. The range base is the one conflict-markers read (_checked_range, cached).
+# Limits: a commit made earlier in the same call is not in HEAD yet, so it is not linted; a `sh -c` script
+# is not read; a base that is not origin's reads unknown.
+# Cost: per push segment, no git spawn until a pin is found (the top-folder read is the record-branch
+# check's own, cached), then one `git rev-parse --symbolic-full-name` and one `git symbolic-ref` for a
+# source other than HEAD, one `git diff --name-only`, and for a base from the upstream one `git rev-parse
+# --abbrev-ref`; a push in scope adds one lint run (about 1.2 s for a small push), the lint's own reads.
+STE_PUSH_REASON = (
+    "Rule (STE, ste-push): this push sends prose that fails the ste-lint check CI runs on it: {detail}. "
+    "Remedy: fix the sentence at the file and line named, commit the fix, then retry. "
+    "`python3 lint/ste_lint.py --fix <file>` (in claude-settings; elsewhere the same file under $HOME/.claude/lint) "
+    "covers bloat only, the long-sentence finding; every other finding needs a hand edit."
+)
+_ARCHIVE_PREFIX = "archive/"
+
+
+def _ste_source(where, source):
+    """'' when `source` is HEAD, 'tag' when it names a tag, else a note's text: the lint reads HEAD only."""
+    if source == "HEAD":
+        return ""
+    named = _git(where, "rev-parse", "--symbolic-full-name", source)
+    full = named.stdout.strip() if named is not None and named.returncode == 0 else ""
+    if full.startswith("refs/tags/"):
+        return "tag"
+    head = _git(where, "symbolic-ref", "-q", "HEAD")
+    if full and head is not None and head.returncode == 0 and full == head.stdout.strip():
+        return ""
+    return "the push sends %s, and ste-changed lints HEAD only" % (source or "a ref other than HEAD")
+
+
+def _ste_base(where, base):
+    """The branch name for `ste-changed <base>`, or ('', why) when the range base is not one of origin's."""
+    if base.endswith("@{upstream}"):
+        named = _git(where, "rev-parse", "--abbrev-ref", base)
+        base = named.stdout.strip() if named is not None and named.returncode == 0 else ""
+    elif base.startswith("refs/remotes/"):
+        base = base.removeprefix("refs/remotes/")
+    if base.startswith("origin/") and len(base) > len("origin/"):
+        return base, ""
+    return "", "the range base %r is not a branch of origin, the only remote ste-changed reads" % base
+
+
+def ste_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
+    """Return (matched, reason) for the first push whose lint fails, else None. `note(why)` is called once per
+    push the guard could not lint; the push is allowed. `record_branch_of(root)` reads the record branch
+    (lint/layout.py) and `read_verb("push", args)` is guard.py's own test for a dry run."""
+    try:
+        return _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note)
+    except Exception as err:   # a bug here is never a reason to block a push
+        note("the guard's ste-push read failed (%s: %s)" % (type(err).__name__, cap_safe(str(err), 100)))
+        return None
+
+
+def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
+    linted = set()
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is None or call[0] != "push" or read_verb("push", call[1]):
+            continue
+        named = push_refspecs(call[1])
+        where, overrides = push_target(segment, stripped, cwd)
+        if named is None or not where or not os.path.isdir(where):
+            continue
+        done = _toplevel(where)
+        top = os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
+        if not top or not guard_ste.ci_runs_lint(top):
+            continue
+        try:
+            record = record_branch_of(top)
+        except Exception:
+            record = DEFAULT_RECORD_BRANCH
+        memo = {}
+        for spec, dest in zip(named[1] or [""], push_destinations(call[1], where, overrides)):
+            source, colon, _target = spec.lstrip("+").partition(":")
+            if (colon and not source) or (dest and (dest in (record, DEFAULT_RECORD_BRANCH)
+                                                   or dest.startswith(_ARCHIVE_PREFIX))):
+                continue
+            source = _plain_source(source)
+            why = _ste_source(where, source)
+            if why == "tag":
+                continue
+            if why:
+                note(why)
+                continue
+            tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+            _done, source, base = _checked_range(where, source, tracking, memo)
+            if not base:
+                note("no range of the push could be read")
+                continue
+            scope = guard_ste.scope_pathspecs(top)
+            if scope is None:
+                note("the ste-lint scope in actions/ste-lint/action.yml could not be read")
+                continue
+            names = _git(top, "-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AMR",
+                         base + "..." + source, "--", *scope)
+            if names is None or names.returncode != 0:
+                note("the files the push changes could not be read")
+                continue
+            if not names.stdout.strip():
+                continue
+            lint_base, why = _ste_base(where, base)
+            program = guard_ste.program_path(top)
+            if not lint_base:
+                note(why)
+            elif not program:
+                note("bin/ste-changed was not found (set STE_CHANGED_BIN or install the config folder)")
+            elif (top, lint_base) not in linted:
+                linted.add((top, lint_base))
+                hit = _ste_lint(program, lint_base, top, note)
+                if hit:
+                    return hit
+    return None
+
+
+def _ste_lint(program, base, top, note):
+    """(matched, reason) when the lint's verdict is FAIL, else None, after one `note` for a lint that read unknown."""
+    result, why = guard_ste.run_lint(program, base, top)
+    if result is None:
+        note(why)
+        return None
+    code, out, err = result
+    if code not in (0, 1, 3):
+        note("the lint exited %d: %s" % (code, cap_safe((err.strip().splitlines() or ["no message"])[-1], 100)))
+        return None
+    verdict = guard_ste.verdict_of(out)
+    if not verdict:
+        note("the lint printed no ste-lint verdict line (exit %d)" % code)
+        return None
+    if verdict == "PASS":
+        return None
+    rows = guard_ste.error_findings(out)
+    detail = "; ".join("%s%s %s" % (path, ":" + line if line else "", text) for path, line, text in rows)
+    detail = detail or "the ste-lint step reported FAIL"
+    return (rows[0][0] + (":" + rows[0][1] if rows[0][1] else "") if rows else "ste-lint FAIL",
+            STE_PUSH_REASON.format(detail=detail))
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
@@ -928,6 +1092,17 @@ def _push_calls(segment: str, script: str, cwd: str):
                 yield from _push_calls(part, text, inner_cwd)
 
 
+_TOPLEVELS = {}   # where -> the finished `git rev-parse --show-toplevel`, for the life of one hook process
+
+
+def _toplevel(where):
+    """The finished `git rev-parse --show-toplevel` in `where`, read once per hook call: the record-branch
+    check and the ste-push check share it."""
+    if where not in _TOPLEVELS:
+        _TOPLEVELS[where] = _git(where, "rev-parse", "--show-toplevel")
+    return _TOPLEVELS[where]
+
+
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
     name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
@@ -938,7 +1113,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
                 continue
-            top = _git(where, "rev-parse", "--show-toplevel") if where else None
+            top = _toplevel(where) if where else None
             root = top.stdout.strip() if top is not None and top.returncode == 0 and top.stdout.strip() else where
             try:
                 record = record_branch_of(root)
