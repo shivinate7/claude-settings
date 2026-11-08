@@ -9700,6 +9700,16 @@ record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS +
              LANE_TRANSCRIPT)
 record_allow("a lane's bare push from the feat checkout is allowed", VCS + " push", LANE_TRANSCRIPT)
 record_allow("a lane's HEAD push from the feat checkout is allowed", VCS + " push origin HEAD", LANE_TRANSCRIPT)
+# A redirect's target is no push argument. A quoted target with a space is blanked before the push reader runs.
+# An unquoted target is cut by the redirect reader, so an escaped space leaves its second word behind as an argument.
+record_allow("a lane's push of HEAD to x with a redirect to a quoted name with a space is allowed",
+             VCS + ' push origin HEAD:x > "my out.txt"', LANE_TRANSCRIPT)
+record_allow("a lane's push of HEAD to x with a redirect to a name with an escaped space is allowed",
+             VCS + " push origin HEAD:x > my\\ roadmap", LANE_TRANSCRIPT)
+record_allow("a lane's push of HEAD to x with a redirect to a plain name is allowed",
+             VCS + " push origin HEAD:x > out.txt", LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap with a redirect to a quoted name with a space is still refused",
+              VCS + ' push origin roadmap > "my out.txt"', LANE_TRANSCRIPT)
 # Text that names the push is text, in quotes, a heredoc body, a comment and a commit message.
 record_allow("a push to roadmap named in single quotes is text", "echo '" + VCS + " push origin roadmap'",
              LANE_TRANSCRIPT)
@@ -10770,6 +10780,9 @@ records_refusal("stage then commit: add . and commit with an edited page",
 records_refusal("stage then commit: add of the page and commit with an edited page",
              VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
 
+records_refusal("stage then commit: add . with a redirect glued to its path, and commit with an edited page",
+             VCS + " add .>out.txt && " + VCS + " commit -m x", "unstaged")
+
 # 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
 records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
               REC_LANES["product"])
@@ -10906,6 +10919,13 @@ records_allow("a chain that logs the generator's history, then add -A and commit
               VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+# --print writes the page to stdout, so a redirect into the page is a write of it.
+records_refusal("a chain that runs the generator with --print into the page, then add -A and commit",
+             GEN + " --print > docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --print glued to a redirect into the page, then add -A and commit",
+             GEN + " --print>docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a chain that runs the generator with --print into another file, then add -A and commit",
+              GEN + " --print > out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 
 # argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
 # --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
@@ -10956,15 +10976,24 @@ records_refusal("a chain that runs the generator with --root=/x/<this repo's nam
 # still runs the generator, which writes this repo's page. Redirections and a trailing & are such tokens; so
 # are a subshell that moves the run into lint, and an `env -C` that runs the generator in this repo from
 # another folder.
+# A noclobber override (`>|`) and a named descriptor (`{fd}>`) are redirects too, spaced or glued: the run still writes.
 for _name, _run in (
     ("2>&1", GEN + " 2>&1"),
     ("> /dev/null", GEN + " > /dev/null"),
     (">/dev/null 2>&1", GEN + " >/dev/null 2>&1"),
     ("&> /dev/null", GEN + " &> /dev/null"),
     ("--root . > /dev/null", GEN + " --root . > /dev/null"),
+    (">| out.txt", GEN + " >| out.txt"),
+    (">|out.txt", GEN + " >|out.txt"),
+    ("{fd}>out.txt", GEN + " {fd}>out.txt"),
+    ("a glued target >out.txt", GEN + " >out.txt"),
 ):
     records_refusal("a chain that runs the generator with %s, then add -A and commit" % _name,
                  _run + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a noclobber redirect of echo, with no generator run, then add -A and commit",
+              "echo x >| out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a named-descriptor redirect of echo, with no generator run, then add -A and commit",
+              "echo x {fd}>out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 # A trailing & detaches the run, which detached-launch refuses before records-page reads it: a control, not a red.
 sh("a chain that runs the generator with a trailing &, then add -A and commit is refused",
    GEN + " & " + ADD_A + " && " + COMMIT_X, "deny", cwd=LANE)
