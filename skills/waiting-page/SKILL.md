@@ -263,7 +263,7 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
-   (never an open item, an arbiter ruling or a park answer). The exit code stays the page's.
+   (never an open item, an item with `waits`, an arbiter ruling or a park answer). The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
