@@ -31,6 +31,12 @@ TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
 UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook's line when the caution level is unread
 KEEP = object()  # run_hook's tmpdir default: the runner's own TMPDIR is kept
 TMP_SEAM = "CLAUDE_SETTINGS_TMP_CANDIDATE"  # the hook's /tmp candidate, read only so these tests can name it
+WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
+# Git's sh.exe builds PATH with /usr/bin, which holds the real uname, ahead of the Windows PATH, so a fake uname
+# set in the environment is shadowed there. The shell prepends the fake folder itself. Derived from the PATH_FIRST
+# of hooks/test_wrappers.py, which replaces PATH whole; a whole replace would drop the /usr/bin tools the hook needs.
+PREPEND_FAKE = ('if command -v cygpath >/dev/null 2>&1; then FAKE_BIN=$(cygpath -u "$FAKE_BIN"); fi; '
+                'PATH="$FAKE_BIN:$PATH"; export PATH; ')
 
 
 def hook_tier_line():
@@ -103,7 +109,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, env_file=None, tmpdir=KEEP, tmp_candidate=None, path_dir=None):
+                 remote_session_id=None, env_file=None, tmpdir=KEEP, tmp_candidate=None, path_dir=None,
+                 uname=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -115,6 +122,8 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         tmpdir: the TMPDIR value, "" for an empty one, None to unset it, or KEEP (the default) for the runner's own.
         tmp_candidate: the TMP_SEAM value (the hook's /tmp candidate), or None to unset it.
         path_dir: a folder put first on PATH (a fake python3 lives there), or None to leave PATH alone.
+        uname: the answer a fake uname prints for the hook's uname calls, put first on PATH inside the shell, or None
+        for the real uname.
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -142,11 +151,30 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             env.pop("TMPDIR", None)
         elif tmpdir is not KEEP:
             env["TMPDIR"] = tmpdir
-        answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
+        if uname is None:
+            argv = [sh_exe(), HOOK]
+        else:
+            env["FAKE_BIN"] = self.fake_uname(uname)
+            env["HOOK_SH"] = sh_exe().replace("\\", "/")
+            env["HOOK"] = HOOK.replace("\\", "/")
+            argv = [sh_exe(), "-c", PREPEND_FAKE + 'exec "$HOOK_SH" "$HOOK"']
+        answer = subprocess.run(argv, input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
         self.assertEqual(answer.returncode, 0, "the hook exited %d" % answer.returncode)
         return answer.stdout.splitlines()
+
+    def fake_uname(self, answer):
+        """A uname that prints `answer` for any argument. Returns its folder, to put first on PATH."""
+        bin_dir = os.path.join(self.root, "fake-uname-bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        script = os.path.join(bin_dir, "uname")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write('#!/bin/sh\ncat "$0.answer"\n')
+        os.chmod(script, 0o755)
+        with open(script + ".answer", "w", encoding="utf-8") as handle:
+            handle.write(answer + "\n")
+        return bin_dir
 
     def test_no_notice_at_fifty_and_one_notice_at_fifty_one(self):
         baseline = self.run_hook()
@@ -897,6 +925,41 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
                 self.assertTrue(os.path.exists(log), "the hook never reached the python fallback, so the case tests nothing")
                 text = self.read(path)
                 self.assertNotRegex(text, TMPDIR_LINE, "a python answer naming no dir got an export TMPDIR= line: %r" % text)
+
+    def uname_probe(self, uname):
+        """The answer `uname -s` gets in the hook's shell with the fake set: the fake's answer, once PREPEND_FAKE works."""
+        env = dict(os.environ, FAKE_BIN=self.fake_uname(uname), HOOK_SH=sh_exe().replace("\\", "/"))
+        answer = subprocess.run([sh_exe(), "-c", PREPEND_FAKE + "uname -s"], capture_output=True, text=True,
+                                env=env, timeout=60)
+        self.assertEqual(answer.returncode, 0, "the uname probe exited %d: %r" % (answer.returncode, answer.stderr))
+        return answer.stdout.strip()
+
+    def assert_no_tmpdir_line(self, text):
+        self.assertNotRegex(text, TMPDIR_LINE,
+                            "the env file got an export TMPDIR= line on a Windows host, though Git Bash has /tmp: %r" % text)
+
+    def test_a_windows_uname_gets_no_tmpdir_line(self):
+        """Git Bash always has /tmp, so the hook writes no export TMPDIR= line on a Windows host (ruling 2026-11-08 00:38 CST)."""
+        for uname in WINDOWS_UNAMES:
+            with self.subTest(uname=uname):
+                # Scope first: if the shell did not run the fake, these cases would read the real host.
+                self.assertEqual(self.uname_probe(uname), uname, "the shell did not run the fake uname")
+                for tmpdir in (None, ""):
+                    for fixture in FIXTURES:
+                        with self.subTest(tmpdir=tmpdir, fixture=fixture):
+                            name = "%s-%s-%s.sh" % (uname.split("_")[0], "unset" if tmpdir is None else "empty", fixture)
+                            self.assert_no_tmpdir_line(self.read(self.env_run(name, fixture, tmpdir, uname=uname)))
+
+    def test_a_linux_uname_still_gets_the_tmpdir_line(self):
+        """Control for the Windows case: the same fake answering Linux still gets the export line."""
+        self.assertEqual(self.uname_probe("Linux"), "Linux", "the shell did not run the fake uname")
+        for tmpdir in (None, ""):
+            for fixture in FIXTURES:
+                with self.subTest(tmpdir=tmpdir, fixture=fixture):
+                    name = "linux-%s-%s.sh" % ("unset" if tmpdir is None else "empty", fixture)
+                    text = self.read(self.env_run(name, fixture, tmpdir, uname="Linux"))
+                    self.assertRegex(text, TMPDIR_LINE,
+                                     "a Linux uname got no export TMPDIR= line, so the Windows case proves nothing: %r" % text)
 
     def test_a_single_quoted_candidate_is_never_exported(self):
         quoted = os.path.join(self.root, "it's-tmp")
