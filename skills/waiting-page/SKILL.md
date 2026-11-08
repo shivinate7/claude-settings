@@ -323,8 +323,9 @@ The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set 
 passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
 (`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
-A password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and
-the ssh remote of a public git host pass.
+A password word with a placeholder, a mask or a plain word as its value, and only blanks or plain prose (a function
+word, then letter words) after it on its line, passes. So do `PWD=<path>`, a no-reply address, the ssh remote of a public
+git host, and a `key` in nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey, hockey, lackey).
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
