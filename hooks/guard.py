@@ -56,13 +56,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
-  silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
-                       git's `-q`. The measured carve-outs are the comments above
-                       SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   checkout-b-held-branch
                        deny. A `checkout -B` or `switch -C` of a branch a worktree other than the
                        one the command runs in holds. Its own branch passes, and so does the
                        pointer checkout, for pointer-head to judge. (checkout-b-held-branch)
+  silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
+                       git's `-q`. The measured carve-outs are the comments above
+                       SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
   hand-made-worktree   deny. A real worktree add whose new tree lands outside
                        `<primary>/.claude/worktrees/`. A repo under the temp folder passes.
                        (lanes-start-in-tool-worktrees)
@@ -83,12 +83,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
-  rm-after-cd          deny. A recursive delete of a relative target after a cd.
-                       (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
+  rm-after-cd          deny. A recursive delete of a relative target after a cd.
+                       (rm-after-cd-names-absolute-path)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
