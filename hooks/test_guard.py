@@ -9135,12 +9135,15 @@ STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: i
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
 STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
 STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
+STAMPORIGIN = os.path.join(ROOT, "stamp_origin")     # STAMPREPO's stamp, in a checkout whose origin is the GitHub repo y/x
 
 
 def _build_stamp_repos():
     stamp = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}}
     make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    make_repo(STAMPORIGIN, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    run_vcs(STAMPORIGIN, "remote", "add", "origin", "https://github.com/y/x.git")
     ignoring = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True,
         "ignoreChecks": [{"name": "sync", "reason": "the sync job is advisory"}]}}
@@ -9155,7 +9158,7 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPORIGIN],
              _build_stamp_repos)
 add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
@@ -9218,6 +9221,23 @@ sh("bare-merge: a heredoc body that names a merge is data",
    "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
    silent=True, cwd=STAMPREPO)
+# The host's merge (the GitHub MCP merge tool) and its auto-merge arming tool are judged against the repo they NAME. A call from
+# the checkout of that repo, whose stamp has a merge block, asks as a bare `gh pr merge` does. A call that names another repo,
+# or runs from a checkout with no origin, allows.
+MCP_MERGE_NAMED = {"tool": "mcp__github__merge_pull_request", "owner": "y", "repo": "x", "pullNumber": 12}
+MCP_ENABLE_NAMED = dict(MCP_MERGE_NAMED, tool="mcp__github__enable_pr_auto_merge")
+add("bare-merge: an MCP merge of y/x from its own checkout asks", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPORIGIN,
+    lacks=("stamp_origin",), env_path=GREEN_ON, config=MERGECFG, **MCP_MERGE_NAMED)
+add("bare-merge: an MCP enable of auto-merge for y/x from its own checkout asks", "ask", BARE_MERGE, carries=BARE_SAYS,
+    cwd=STAMPORIGIN, lacks=("stamp_origin",), env_path=GREEN_ON, config=MERGECFG, **MCP_ENABLE_NAMED)
+add("bare-merge: an MCP merge of another repo from a checkout of y/x allows", "allow", silent=True, cwd=STAMPORIGIN,
+    env_path=GREEN_ON, config=MERGECFG, **dict(MCP_MERGE_NAMED, owner="z", repo="w"))
+add("bare-merge: an MCP enable of auto-merge for another repo from a checkout of y/x allows", "allow", silent=True,
+    cwd=STAMPORIGIN, env_path=GREEN_ON, config=MERGECFG, **dict(MCP_ENABLE_NAMED, owner="z", repo="w"))
+add("bare-merge: an MCP merge of y/x from a merge-tool checkout with no origin allows", "allow", silent=True, cwd=STAMPREPO,
+    env_path=GREEN_ON, config=MERGECFG, **MCP_MERGE_NAMED)
+add("bare-merge: an MCP merge of y/x with a pending head from its own checkout still denies", "deny", "merge-checks",
+    carries="pending", cwd=STAMPORIGIN, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG, **MCP_MERGE_NAMED)
 
 
 # =========================================================================== 5e. the merge role record
@@ -25341,14 +25361,24 @@ cs_write("record_checkout_other_path_denied", "deny", os.path.join(CS_RECORD, "s
 CS_LEGACY_REPOS = cs_layout().get("legacy-repos", {})
 
 
-def _cs_legacy_checkout(name):
-    """A checkout whose origin is the GitHub repo `name`, built when a case first names it."""
-    where = os.path.join(DIFFROOT, "cs-legacy-" + name.replace("/", "-"))
+_CS_CHECKOUTS = {}
+
+
+def _cs_legacy_checkout(name, rolled_out=False):
+    """A checkout whose origin is the GitHub repo `name`, built when a case first names it. `rolled_out` adds the extras
+    file that marks the checkout as rolled out to the layout (lint/layout.py, rolled_out). One path per (name, mark): a
+    second call returns the first call's path without registering its fixture again."""
+    if (name, rolled_out) in _CS_CHECKOUTS:
+        return _CS_CHECKOUTS[(name, rolled_out)]
+    where = os.path.join(DIFFROOT, ("cs-rolled-" if rolled_out else "cs-legacy-") + name.replace("/", "-"))
+    files = dict(BASE_FILES, **{cs_layout()["extras"]: json.dumps({"kinds": {}, "rolled-out": True}) + "\n"}) if rolled_out \
+        else BASE_FILES
 
     def build_legacy_checkout():
-        make_repo(where, BASE_FILES)
+        make_repo(where, files)
         run_vcs(where, "remote", "add", "origin", "https://github.com/%s.git" % name)
     lazy_fixture([where], build_legacy_checkout)
+    _CS_CHECKOUTS[(name, rolled_out)] = where
     return where
 
 
@@ -25543,14 +25573,21 @@ CS_MCP_CLIMB = os.path.dirname(CS_MCP_RECORD) + "/../../src/app.py"     # climbs
 CS_MCP_REPO = {"owner": "acme", "repo": "widgets", "branch": "work", "message": "x"}
 
 
-def cs_mcp(name, expected, tool, path=None, files=None, role="coordinator", lacks=()):
+def cs_mcp(name, expected, tool, path=None, files=None, role="coordinator", lacks=(), cwd=None,
+           named={"owner": "acme", "repo": "widgets"}):
     """`cs` for one GitHub MCP write: `path`, or `files` (push_files' entries, given as their paths). A refusal must not name
-    the file it refuses, so a deny row passes that file's name in `lacks`."""
+    the file it refuses, so a deny row passes that file's name in `lacks`. `cwd` is the folder the call runs in (GITMAIN when
+    None). `named` is the repo the call names, as its owner and repo keys; {} names none, so the call carries neither."""
     call = dict(CS_MCP_REPO, tool=tool)
+    call.pop("owner")
+    call.pop("repo")
+    call.update(named)
     if files is None:
         call["path"] = path
     else:
         call["files"] = [{"path": entry, "content": "x"} for entry in files]
+    if cwd is not None:
+        call["cwd"] = cwd
     cs(name, expected, role=role, lacks=lacks, **call)
 
 
@@ -25574,6 +25611,67 @@ cs_mcp("coordinator_push_files_no_entry_allowed", "allow", "mcp__github__push_fi
 cs_mcp("coordinator_push_files_full_size_records_allowed", "allow", "mcp__github__push_files", files=[CS_MCP_RECORD] * 25)
 cs_mcp("coordinator_push_files_full_size_product_last_denied", "deny", "mcp__github__push_files",
        files=[CS_MCP_RECORD] * 24 + [CS_MCP_PRODUCT], lacks=("app.py",))
+
+# ---- the repo an MCP write names (rule coordinator-scope, decision session-tiers). The record homes of a write are those of the
+# repo the call names (owner and repo): that repo's legacy-repos paths, the layout's legacy spellings and its layout path
+# (lint/layout.py, named_candidates). The checkout the call runs in decides only when its origin is that repo, so a write that
+# names another repo reads that checkout's extras file for nothing. Repo and path names come from the layout, never copied here.
+def cs_guard_names(constant):
+    """The tuple `constant` of the guard under test, read from its module the way lint/test_settings_matcher.py reads them."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_under_names", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(getattr(module, constant))
+
+
+def cs_kept_file(path):
+    """The repo-relative file a legacy-repos path names: the path itself when it has an extension, else a file in that folder."""
+    return path.strip("/") if os.path.splitext(path)[1] else path.strip("/") + "/x.md"
+
+
+def cs_named_call(name, expected, tool, rel, cwd=None, named={"owner": "acme", "repo": "widgets"}, role="coordinator"):
+    """`cs_mcp` for one repo path of `tool`: the path itself, or the one entry of push_files. A deny row must not name the file."""
+    kw = {"files": [rel]} if tool == "mcp__github__push_files" else {"path": rel}
+    lacks = (os.path.basename(rel),) if expected != "allow" else ()
+    cs_mcp(name, expected, tool, lacks=lacks, cwd=cwd, named=named, role=role, **kw)
+
+
+CS_NAMED_OTHER = {"owner": "acme", "repo": "widgets"}   # a repo that no legacy-repos entry names
+CS_ROLLED = _cs_legacy_checkout("acme/gizmo", rolled_out=True)   # rolled out to the layout, its origin another repo
+CS_LEGACY_KEPT = [(repo, kind, cs_kept_file(path)) for repo, kept in sorted(CS_LEGACY_REPOS.items())
+                  for kind, path in sorted(kept.items()) if kind in CS_KINDS]
+CS_LEGACY_TODO_FILE = next(rel for _, kind, rel in CS_LEGACY_KEPT if kind == "todo" and os.path.splitext(rel)[1])  # a kept file
+CS_LEGACY_DECISIONS = cs_layout()["legacy"][cs_layout()["kinds"]["decisions"]["path"]]   # the legacy spelling of decisions
+CS_NAMED_WRITE = cs_guard_names("COORDINATOR_MCP_WRITE_TOOLS")
+for _tool in CS_NAMED_WRITE:
+    _short = _tool.replace("mcp__github__", "")
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: a rolled-out checkout writes that repo's kept path, naming the repo
+        _owner, _name = _repo.split("/")
+        cs_named_call("named_repo_rolled_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel, cwd=CS_ROLLED,
+                      named={"owner": _owner, "repo": _name})
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: that repo's own checkout writes the same path for another repo: denied
+        cs_named_call("named_repo_legacy_checkout_%s_%s_%s_other_repo_denied" % (_short, _repo.split("/")[1], _kind), "deny", _tool,
+                      _rel, cwd=_cs_legacy_checkout(_repo))
+    # RED: a rolled-out checkout writes the legacy spelling of decisions for another repo: allowed, as the layout's legacy
+    # spelling is a record home of every repo.
+    cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_other_repo_allowed" % _short, "allow", _tool,
+                  CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED)
+    # Green: the rolled-out checkout names its own repo, and writes a path only another repo keeps: denied, as before.
+    cs_named_call("named_repo_rolled_checkout_%s_own_repo_other_kept_path_denied" % _short, "deny", _tool, CS_LEGACY_TODO_FILE,
+                  cwd=CS_ROLLED, named={"owner": "acme", "repo": "gizmo"})
+    # Green: a mixed-case name finds the repo's kept paths, from a checkout whose origin is that repo and from no checkout.
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:
+        _owner, _name = _repo.split("/")
+        _mixed = {"owner": _owner.capitalize(), "repo": _name.upper()}
+        cs_named_call("named_repo_mixed_case_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel,
+                      cwd=_cs_legacy_checkout("%s/%s" % (_mixed["owner"], _mixed["repo"])), named=_mixed)
+        cs_named_call("named_repo_mixed_case_no_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel,
+                      named=_mixed)
+    # Green: a call that names no repo is judged on the default union, the layout's paths and its legacy spellings.
+    cs_named_call("named_repo_no_owner_layout_record_%s_allowed" % _short, "allow", _tool, cs_kind_path("decisions"),
+                  cwd=CS_ROLLED, named={})
+    cs_named_call("named_repo_no_owner_kept_path_%s_denied" % _short, "deny", _tool, CS_LEGACY_TODO_FILE, cwd=CS_ROLLED, named={})
 
 # ---- the tier when the role file is missing (rule coordinator-scope). The tier falls back to the session's own cs-build tag,
 # read from the newest get_session record that names the session's id, as merge-role-proof reads it. A role file that is there
@@ -26079,38 +26177,42 @@ def cs_spawn_log_check():
     return cs_log_refusal_check("Agent", dict(CS_SPAWN_INPUT), "cs-log-spawn", None)
 
 
-def cs_spawn_cost_check(want, tool_input, tool="Agent"):
-    """A coordinator's spawn opens the role file once, opens no layout and no config CLAUDE.md, and starts no child process.
-    The same call with CLAUDE_CODE_REMOTE "false" is the control, as in cs_rule_opens. A refusal writes its own guard.log
-    line and reads its own override file: those are the refusal's reads, not the rule's, so they are set aside."""
+def cs_call_cost_check(want, tool_input, tool="Agent", role="coordinator", cwd=NOGIT, env=None, role_opens=(1,)):
+    """A call's cost, for a call the rule judges. The role file is opened a count of `role_opens` times (once for a cloud
+    session, none for a local one), it opens no layout and no config CLAUDE.md, and it starts no child process. A coordinator's
+    spawn is the default. `env` is the call's environment: CS_REMOTE, unless a case gives another. The same call with
+    CLAUDE_CODE_REMOTE "false" is the control, as in cs_rule_opens. A refusal writes its own guard.log line and reads its own
+    override file: those are the refusal's reads, not the rule's, so they are set aside."""
     def check():
-        config = CS_CONFIG["coordinator"]
-        got, reason, report = cs_probe_report(config, tool, dict(tool_input), NOGIT, env=CS_REMOTE)
+        config = CS_CONFIG[role]
+        env_of_call = dict(CS_REMOTE if env is None else env)
+        got, reason, report = cs_probe_report(config, tool, dict(tool_input), cwd, env=env_of_call)
         if "opens" not in report:
             return False, "the probe wrote no opens: %s" % reason[:90]
-        _, _, off = cs_probe_report(config, tool, dict(tool_input), NOGIT, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE="false"))
+        _, _, off = cs_probe_report(config, tool, dict(tool_input), cwd, env=dict(env_of_call, CLAUDE_CODE_REMOTE="false"))
         opened = report["opens"]
         rule_opens = [path for path in dict.fromkeys(opened) if path not in off.get("opens", [])]
-        role = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
+        role_file = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
         log = os.path.abspath(os.path.join(config, "guard.log"))
         override = os.path.abspath(os.path.join(config, "state", "override")) + os.sep
         problems = []
         if got != want:
             problems.append("the call was %s, want %s: %s" % (got, want, reason[:90]))
-        if opened.count(role) != 1:
-            problems.append("it opened the role file %d times, want once" % opened.count(role))
+        if opened.count(role_file) not in role_opens:
+            problems.append("it opened the role file %d times, want %s"
+                            % (opened.count(role_file), " or ".join(map(str, role_opens))))
         if [path for path in opened if slash(path).endswith("lint/layout.json")]:
             problems.append("it opened lint/layout.json")
         # The config folder's CLAUDE.md is the pointer every spawn's role-model rule reads, so it is judged on the rule's own
         # opens only; the layout is read by no spawn, so it is judged on the whole call.
         if os.path.abspath(os.path.join(config, "CLAUDE.md")) in rule_opens:
             problems.append("the rule opened the config folder's CLAUDE.md")
-        named = [os.path.basename(path) for path in rule_opens if path not in (role, log) and not path.startswith(override)]
+        named = [os.path.basename(path) for path in rule_opens if path not in (role_file, log) and not path.startswith(override)]
         if named:
             problems.append("the rule opened %s besides the role file" % named)
         if report.get("children"):
             problems.append("it started %d child process(es): %s" % (len(report["children"]), report["children"][:3]))
-        return not problems, "; ".join(problems) or "one role-file open, no layout, no config CLAUDE.md, no child process"
+        return not problems, "; ".join(problems) or "the role file as often as allowed, no layout, no config CLAUDE.md, no child process"
     return check
 
 
@@ -26121,9 +26223,102 @@ CS_CHECKS.append(("coordinator-scope spawn_override_lifts_once: a one-act overri
 CS_CHECKS.append(("coordinator-scope spawn_refusal_logs_one_line: one refused coordinator spawn appends one guard.log line "
                   "that names the rule and holds no remedy text", cs_spawn_log_check))
 CS_CHECKS.append(("coordinator-scope spawn_log_cost: a refused coordinator spawn opens the role file once, no layout, "
-                  "no child process", cs_spawn_cost_check("deny", CS_SPAWN_INPUT)))
+                  "no child process", cs_call_cost_check("deny", CS_SPAWN_INPUT)))
 CS_CHECKS.append(("coordinator-scope spawn_log_cost: a coordinator's Plan spawn opens the role file once, no layout, "
-                  "no child process", cs_spawn_cost_check("allow", {"subagent_type": "Plan", "prompt": "Design the plan."})))
+                  "no child process", cs_call_cost_check("allow", {"subagent_type": "Plan", "prompt": "Design the plan."})))
+# ---- the cost of the five GitHub MCP names, and the repo a merge names (rule coordinator-scope, decision session-tiers). The
+# names are read from the guard: COORDINATOR_MCP_WRITE_TOOLS, COORDINATOR_MERGE_TOOLS (the merge tool and the arming tool) and
+# MERGE_TOOLS (the merge tool). A write or an arm call by a lane session, or by a local one, is allowed, starts no child process
+# and opens the role file at most once. The merge tool's reads are the merge tool's own: a counted fake `gh` answers them, and
+# its count is pinned. A coordinator's write that names another repo reads no extras file of the checkout it runs in.
+CS_MCP_MERGE_TOOLS = cs_guard_names("COORDINATOR_MERGE_TOOLS")   # the merge tool and the arming tool: numbered calls
+CS_MCP_MERGE = cs_guard_names("MERGE_TOOLS")                    # the merge tool: merge-checks reads its head
+CS_MCP_NAMES = CS_NAMED_WRITE + CS_MCP_MERGE_TOOLS
+CS_MCP_NUMBERED = {"owner": "acme", "repo": "widgets", "pullNumber": 4321}
+# The gh calls of one merge of a green numbered head with no other ready pull request, as merge/merge.py head_read makes them: the
+# pull request, the head's check runs and statuses, its run list, then the batch read (the open pull requests, the protection,
+# and the head's check runs, statuses and run list again).
+CS_MERGE_GH_CALLS = 9
+
+
+def cs_mcp_cost_input(tool):
+    """The input of a call of `tool` a lane session makes: a product path for a write, the numbered pull request for a merge."""
+    if tool in CS_MCP_MERGE_TOOLS:
+        return dict(CS_MCP_NUMBERED)
+    if tool == "mcp__github__push_files":
+        return dict(CS_MCP_REPO, files=[{"path": CS_MCP_PRODUCT, "content": "x"}])
+    return dict(CS_MCP_REPO, path=CS_MCP_PRODUCT)
+
+
+def merge_counted_gh():
+    """A counted fake `gh`, green on any head. Each call it answers is one line of its log, which gh_calls_taken reads."""
+    folder = os.path.join(ROOT, "mergecount")
+    make_fake_gh(folder, "main", count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def cs_merge_count_check(tool, role, env):
+    """A merge of a green numbered head, by `role`, is allowed and makes CS_MERGE_GH_CALLS gh calls: the merge tool's own reads."""
+    def check():
+        folder = merge_counted_gh()
+        gh_calls_taken(folder)
+        got, reason, report = cs_probe_report(CS_CONFIG[role], tool, dict(CS_MCP_NUMBERED), NOGIT, env=env,
+                                              env_path=folder + os.pathsep + PY_PATH)
+        calls = gh_calls_taken(folder)
+        problems = []
+        if got != "allow":
+            problems.append("the merge was %s, want allow: %s" % (got, reason[:90]))
+        if len(calls) != CS_MERGE_GH_CALLS:
+            problems.append("the merge made %d gh call(s), want %d: %s" % (len(calls), CS_MERGE_GH_CALLS, " | ".join(
+                " ".join(json.loads(line)[:3]) for line in calls)))
+        return not problems, "; ".join(problems) or "a green merge makes %d gh calls, all the merge tool's" % CS_MERGE_GH_CALLS
+    return check
+
+
+def cs_extras_open_check():
+    """A coordinator's write that names another repo opens no extras file of the checkout it runs in: the record homes of the named
+    repo decide, and the checkout's own extras file is read only when its origin is that repo. The control names the checkout's own
+    repo, which does open it, so a spy that sees no open proves nothing."""
+    extras = os.path.abspath(os.path.join(CS_ROLLED, *cs_layout()["extras"].split("/")))
+    tool_input = dict(CS_MCP_REPO, path=CS_MCP_RECORD)   # CS_MCP_REPO names acme/widgets, the other repo
+    got, reason, other = cs_probe_report(CS_CONFIG["coordinator"], CS_NAMED_WRITE[0], tool_input, CS_ROLLED, env=CS_REMOTE)
+    own_got, own_reason, own = cs_probe_report(CS_CONFIG["coordinator"], CS_NAMED_WRITE[0], dict(tool_input, repo="gizmo"),
+                                               CS_ROLLED, env=CS_REMOTE)
+    problems = []
+    if got != "allow":
+        problems.append("the write naming another repo was %s, want allow: %s" % (got, reason[:90]))
+    if "opens" not in other:
+        problems.append("the probe wrote no opens for the write naming another repo")
+    elif extras in other["opens"]:
+        problems.append("the write naming another repo opened the checkout's extras file")
+    if own_got != "allow":
+        problems.append("the control, a write naming the checkout's own repo, was %s, want allow: %s" % (own_got, own_reason[:90]))
+    elif extras not in own.get("opens", []):
+        problems.append("the control did not open the checkout's extras file, so the spy is blind")
+    return not problems, "; ".join(problems) or "no extras file opened for a write naming another repo; the own-repo control opens it"
+
+
+# Gap 2, the coordinator's refusal of the two host merge names when they name y/x from its checkout: refused before the merge-checks
+# read and before the bare-merge ask, so the coordinator's refusal wins.
+cs("named_repo_merge_by_coordinator_denied", "deny", tool="mcp__github__merge_pull_request", owner="y", repo="x", pullNumber=12,
+   cwd=STAMPORIGIN, env_path=GREEN_ON, lacks=("stamp_origin",))
+cs("named_repo_enable_by_coordinator_denied", "deny", tool="mcp__github__enable_pr_auto_merge", owner="y", repo="x", pullNumber=12,
+   cwd=STAMPORIGIN, env_path=GREEN_ON, lacks=("stamp_origin",))
+for _tool in CS_MCP_NAMES:
+    if _tool in CS_MCP_MERGE:   # counted below: the merge tool's own reads
+        continue
+    for _who, _role, _env in (("a lane session", "lane", CS_REMOTE),
+                              ("a local session", "coordinator", dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))):
+        CS_CHECKS.append(("coordinator-scope cost: %s by %s is allowed, starts no child process, and opens the role file at most once"
+                          % (_tool, _who),
+                          cs_call_cost_check("allow", cs_mcp_cost_input(_tool), _tool, role=_role, cwd=GITMAIN, env=_env,
+                                             role_opens=(0, 1))))
+for _who, _role, _env in (("a lane session", "lane", CS_REMOTE),
+                          ("a local session", "coordinator", dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))):
+    CS_CHECKS.append(("coordinator-scope cost: the merge tool by %s makes CS_MERGE_GH_CALLS gh calls, the merge tool's own reads"
+                      % _who, cs_merge_count_check(CS_MCP_MERGE[0], _role, _env)))
+CS_CHECKS.append(("coordinator-scope cost: a coordinator's write naming another repo opens no extras file of its checkout, and "
+                  "the own-repo control does", cs_extras_open_check))
 for _label, _check in CS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
