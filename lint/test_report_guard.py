@@ -1039,8 +1039,8 @@ class DoneNamesModelsTests(unittest.TestCase):
                            earlier=[REVIEWER_PINNED])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    # Ruling: coordinator lane brief, 2026-11-07 18:05 CST, failure class "a bypass where a report names sonnet
-    # for an Opus spawn". The haiku name is the earlier window's; the window's sonnet still needs its own name.
+    # Ruling: roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a
+    # role ran in the window must be named; re-pointed in a429cf4b0.
     def test_dm_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET]),
@@ -1210,6 +1210,20 @@ class DoneNamesModelsTests(unittest.TestCase):
         run = run_guard(REPORT_GUARD, hook, env=agent_env("opus"))
         self.assertEqual(run.returncode, 0)
         assert_no_model_block(self, json.loads(run.stdout) if run.stdout.strip() else None)
+
+    BUILDER_OPUS_R2 = {"subagent_type": "builder", "model": "opus", "prompt": "Round 2 of 3"}
+
+    def test_dm_false_alarm_double_backtick_model_word_names_its_run(self):
+        # A double-backticked model word still names its run: builder ``opus`` is named, so no model block.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet; builder ``opus``)\n"
+                           "> **Next** Unstarted: none", [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+        assert_no_model_block(self, out)
+
+    def test_dm_pin_span_with_role_word_leaves_its_model_unnamed(self):
+        # The span quotes opus beside a role word. Opus is not a builder's model, so builder opus stays unnamed.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet; quoted `opus, reviewer`)\n"
+                           "> **Next** Unstarted: none", [BUILDER_SONNET, self.BUILDER_OPUS_R2])
+        assert_blocks(self, out, "no model named for builder opus")
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1449,8 +1463,8 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                         earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    # Ruling: coordinator lane brief, 2026-11-07 18:05 CST, failure class "a bypass where a report names sonnet
-    # for an Opus spawn". The haiku name is the earlier window's; the window's sonnet still needs its own name.
+    # Ruling: roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a
+    # role ran in the window must be named; re-pointed in a429cf4b0.
     def test_rw_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         self.missing_report_block(later=[REVIEWER_SONNET])
