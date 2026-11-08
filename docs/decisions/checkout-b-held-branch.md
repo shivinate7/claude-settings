@@ -10,11 +10,16 @@ Coordinator brief, 2026-11-08 03:16 CST: `git checkout -B <b> [start]` and `git 
 - **The refusal** says in words: choose a new branch name, or reset inside the worktree that holds the branch. It names neither the held branch nor the forcing flag git has for this case (`git-remedy-never-names-target`).
 - **An owner override lifts it** (`owner-override`).
 
-Why: git 2.43 resets a held branch without refusing. The ref moves, and the holder's files and index keep the old commit, so its next status shows the reverse of the reset as staged work.
+Why: git 2.43 resets a held branch without refusing. The ref moves, and the holder's files and index keep the old commit, so its next status shows the reverse of the reset as staged work. This holds for the running worktree as for a sibling.
 
-The mistake: an agent resets a branch it, or a sibling worktree, already holds. The harm: a stale index in the holder, and work that is easy to lose by committing or discarding the false diff. Named limits, each a form Claude rarely writes: a glued short cluster (`-fB name`), a `bash -c` string the guard leaves unparsed, and a branch named by a full ref (`refs/heads/b`).
+The mistake: an agent resets a branch its own worktree holds, or one a sibling worktree holds. The harm: a stale index in the holder, and work that is easy to lose by committing or discarding the false diff. Named limits, each a form Claude rarely writes: a glued short cluster (`-fB name`), a `bash -c` string the guard leaves unparsed, and a branch named by a full ref (`refs/heads/b`).
 
-Risk kind: incident, the step `checkout-b-current-branch` note, and a lane's own reset of its held branch at 02:49 CST, 2026-11-08.
+Incidents:
+
+- **Own worktree, Nov 7 22:47 CST.** The roadmap push-refusal lane (`roadmap-push-refusal-says-fetch`, PR #1777) hit it twice. An agent's `git checkout -B` of its current branch left old files in its own worktree and index. The coordinator's done check (03:16 CST, Nov 8): red on `checkout -B <current branch>` in an agent worktree.
+- **Sibling worktree, Nov 8 02:49 CST.** Lane `idle-lane-steps-unknown`. A test-author worktree ran `git checkout -B idle-lane-holds-followup <sha>` while a builder worktree held that branch. `git worktree list` showed both on it. The builder's index kept a stale staged test file, which blocked its commit.
+
+Risk kind: incident. Source: the roadmap step note for `checkout-b-current-branch`, and the two incidents above.
 
 Kind: process
 Home: hooks/guard_branch_worktree.py
