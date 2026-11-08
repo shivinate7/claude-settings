@@ -1058,6 +1058,41 @@ def shell_abs(path: str, base):
 CdWalk = collections.namedtuple("CdWalk", "where stranded skipped")
 
 
+def _head_word(segment: str) -> str:
+    """The first word of a segment, past a leading `then` or `do`, with a closing `)` cut off (`fi)`),
+    or '' when it cannot be read."""
+    tokens = segment_tokens(segment) or []
+    while tokens[:1] in (["then"], ["do"]):
+        tokens = tokens[1:]
+    return tokens[0].rstrip(")") if tokens else ""
+
+
+def _exits_on_failure(segments, ends, at: int) -> bool:
+    """True when the `||` after `segments[at]` runs `exit` or `return` as its first command, bare or as
+    the first `;`-joined step of a `{ ... }` group: the shell stops there when the command before the
+    `||` fails, so nothing later runs in the folder it stayed in. An `exit` that follows an `&&`
+    or `||` inside the group runs only sometimes and is not read."""
+    grouped = False
+    for number in range(at + 1, len(segments)):
+        tokens = segment_tokens(segments[number]) or []
+        if number == at + 1:
+            grouped = tokens[:1] == ["{"]
+        index = resolve_command(tokens) if tokens else None
+        if index is not None and basename(tokens[index]) in ("exit", "return"):
+            return True
+        if not grouped or tokens[:1] == ["}"] or (number < len(ends) and ends[number] not in (";", "\n")):
+            return False
+    return False
+
+
+def _opens_if_body(segments, at: int) -> bool:
+    """True when `segments[at]` is `if <cd ...>` alone as the test, and the next segment opens its `then`."""
+    tokens = segment_tokens(segments[at]) or []
+    after = segment_tokens(segments[at + 1]) if at + 1 < len(segments) else None
+    return (len(tokens) > 1 and tokens[0] == "if" and basename(tokens[1]) in CD_WORDS
+            and bool(after) and after[0] == "then")
+
+
 def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """What one pass over the segments ahead of `segments[number]` says about the shell when it
     runs: a `CdWalk` of `where` (the directory the shell is in, or None when it cannot be told),
@@ -1083,14 +1118,28 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
     prev, stack = None, []
     stranded = False
     skip_depth = None   # a failed cd ended in `&&`: the group depth the skipped chain stands at
+    skip_if = None      # a failed cd was an `if` test: the `if`s nested in the skipped `then` body
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev, stranded)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
+        in_then = False
+        if skip_if is not None:
+            head = _head_word(segment)
+            if skip_if == 0 and head in ("else", "elif", "fi"):
+                skip_if = None   # the `then` body is over: this segment runs in the folder the shell stayed in
+            else:
+                skip_if += (head == "if") - (head == "fi")
+                in_then = True
         if at == number:
-            if skip_depth is not None:
+            if skip_depth is not None or in_then:
                 return CdWalk(None, False, True)
             return CdWalk(where, stranded and where is not None, False)
+        if in_then:
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev, stranded = stack.pop()
+            continue
         if skip_depth is not None:
             for _ in range(marks.count(")")):
                 if stack:
@@ -1113,14 +1162,22 @@ def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=Fals
             elif move == "-":
                 where, stranded = prev, False
             else:
+                for _ in range(marks.count(")")):   # the `)` that closes a subshell is not part of the folder
+                    if move.endswith(")"):
+                        move = move[:-1]
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
                     stranded = stranded and shell_abs(move or "~", None) is None
                     where = target
                 elif target and failed_cd_stays:
                     skip_depth = len(stack) if end == "&&" else None   # the shell stays, and an `&&` chain stops
-                    stranded = True
-                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                    if end in (";", "\n") and _opens_if_body(segments, at):
+                        skip_if = 0   # the `then` body runs only when the test passes
+                    if end == "||" and _exits_on_failure(segments, ends, at):
+                        where, stranded = None, False   # the shell exits on a failure: later segments follow a cd that landed
+                    else:
+                        stranded = True
+                        old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where, stranded = None, False
             prev = old

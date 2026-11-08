@@ -4673,6 +4673,41 @@ GIT_AFTER_CD_REASON = (
 GIT_BRANCH_WRITE_FLAGS = BRANCH_DELETE_FLAGS | {"-f", "--force", "-m", "-M", "--move"}
 
 
+# The writes rule git-after-cd reads beyond SESSION_HOME_GIT_VERBS. They stay out of that list because rule
+# session-home pins `worktree add` as allowed (the way a session makes its new home), and it does not
+# judge the other three. After a failed cd each of these four runs in the folder the shell stayed in.
+GIT_AFTER_CD_EXTRA_VERBS = ("add", "tag", "config", "worktree")
+# `tag` flags that list or verify tags, `config` flags that only read or only write, and the `config` flags
+# that take a value word of their own (the file, the type), which is not a key.
+GIT_TAG_READ_FLAGS = {"-l", "--list", "-v", "--verify", "--contains", "--no-contains", "--points-at",
+                      "--merged", "--no-merged", "--sort", "--format", "--column", "--no-column"}
+GIT_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
+                         "--get-colorbool", "-l", "--list"}
+GIT_CONFIG_WRITE_FLAGS = {"--add", "--replace-all", "--unset", "--unset-all", "-e", "--edit",
+                          "--rename-section", "--remove-section"}
+GIT_CONFIG_VALUE_FLAGS = {"-f", "--file", "--blob", "--type", "--default", "--comment"}
+
+
+def git_config_writes(args) -> bool:
+    """True when `git config` sets, adds, unsets or edits a value. A `--get`, `--list` or a key with no
+    value (`git config user.name`) reads. The `get` and `list` subcommands read; `set`, `unset` and
+    `edit` write."""
+    words, flags, skip = [], set(), False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg.startswith("-"):
+            flags.add(arg.split("=", 1)[0])
+            skip = arg in GIT_CONFIG_VALUE_FLAGS
+        else:
+            words.append(arg)
+    if flags & GIT_CONFIG_WRITE_FLAGS:
+        return True
+    if flags & GIT_CONFIG_READ_FLAGS or words[:1] in (["get"], ["list"]):
+        return False
+    return len(words) >= 2 or words[:1] in (["set"], ["unset"], ["edit"], ["rename-section"], ["remove-section"])
+
+
 def session_home_write(verb: str, args) -> bool:
     """True when a call of a verb of SESSION_HOME_GIT_VERBS changes the files or the branch: a
     `stash list`, a `stash show` and a `clean` that deletes nothing only read."""
@@ -4683,9 +4718,24 @@ def session_home_write(verb: str, args) -> bool:
     return True
 
 
+def git_after_cd_extra_write(verb: str, args) -> bool:
+    """True when a call of a verb of GIT_AFTER_CD_EXTRA_VERBS changes the index, a ref, the config or the
+    worktree list: an `add` that is no dry run, a `tag` that names or deletes a tag, a `config` that
+    writes a value (`git_config_writes`) and `worktree add`."""
+    if verb == "add":
+        return not {"-n", "--dry-run"} & set(args)
+    if verb == "tag":
+        flags = {arg.split("=", 1)[0] for arg in args if arg.startswith("-")}
+        listing = bool(flags & GIT_TAG_READ_FLAGS) or any(LISTING.fullmatch(flag) for flag in flags)
+        return bool(args) and not listing
+    if verb == "config":
+        return git_config_writes(args)
+    return args[:1] == ["add"]
+
+
 def git_write_verb(verb: str, args) -> bool:
-    """True when a git call changes a ref, the index or the files: the verbs of SESSION_HOME_GIT_VERBS,
-    `push`, `update-ref`, the file verbs of GIT_FILE_VERBS, a `fetch` that writes a branch
+    """True when a git call changes a ref, the index, the config or the files: the verbs of SESSION_HOME_GIT_VERBS
+    and of GIT_AFTER_CD_EXTRA_VERBS, `push`, `update-ref`, the file verbs of GIT_FILE_VERBS, a `fetch` that writes a branch
     (`fetch_moves_branch`), and `branch` with a force, move or delete flag. A call whose argv names a
     read (`read_verb`: a dry run, help), a `stash list`, a `stash show` and a `clean` that deletes
     nothing only read."""
@@ -4697,6 +4747,8 @@ def git_write_verb(verb: str, args) -> bool:
         return fetch_moves_branch(args)
     if verb in SESSION_HOME_GIT_VERBS:
         return session_home_write(verb, args)
+    if verb in GIT_AFTER_CD_EXTRA_VERBS:
+        return git_after_cd_extra_write(verb, args)
     return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS
 
 
