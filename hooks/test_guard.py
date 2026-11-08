@@ -406,6 +406,7 @@ NOGIT = os.path.join(ROOT, "nogit")        # a directory that is not a git tree
 CHECK = os.path.join(ROOT, "checkout")     # a checkout marked by its `.git` folder alone
 EXPORT = os.path.join(ROOT, "export")      # a copy of the clone: its install script, and no `.git`
 MIXED = os.path.join(ROOT, "mixed")        # a checkout (`.git`) that holds `sub`: an install script, and no `.git`
+NESTINST = os.path.join(ROOT, "nestinst")  # an install folder that holds `inner`, also an install folder, and no `.git`
 GITMAIN = os.path.join(ROOT, "repo")       # an ordinary checkout, shared with other sessions
 GITWT = os.path.join(ROOT, "lane")         # a linked worktree of that checkout
 # D2026-10-03 (owner ruling): a linked worktree under <repo>/.claude/worktrees/ is AGENT-OWNED,
@@ -1261,7 +1262,8 @@ def build_fixtures():
                    os.path.join(ROOT, "tmp"),   # the temp folder the silent-write cases read
                    os.path.join(CLONE, ".git"), os.path.join(CHECK, ".git"),
                    os.path.join(CHECK, "hooks"), os.path.join(EXPORT, "hooks"),
-                   os.path.join(MIXED, ".git"), os.path.join(MIXED, "sub", "hooks")):
+                   os.path.join(MIXED, ".git"), os.path.join(MIXED, "sub", "hooks"),
+                   os.path.join(NESTINST, "inner", "hooks")):
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -1284,6 +1286,10 @@ def build_fixtures():
     write(os.path.join(EXPORT, "settings.json"), "{}\n")
     write(os.path.join(EXPORT, "install.ps1"), "# install\n")
     write(os.path.join(MIXED, "sub", "install.ps1"), "# install\n")
+    write(os.path.join(NESTINST, "settings.json"), "{}\n")
+    write(os.path.join(NESTINST, "install.ps1"), "# install\n")
+    write(os.path.join(NESTINST, "inner", "settings.json"), "{}\n")
+    write(os.path.join(NESTINST, "inner", "install.ps1"), "# install\n")
     make_fake_gh(GHMAIN, "main")
     write(MSG_BAD, "title\n\ncites decisions/one-shared-record-stamp.md\n")
     write(MSG_OK, "title\n\ncites D12, short titles for records\n")
@@ -12565,6 +12571,24 @@ MIXED_HOOKS = slash(os.path.join(MIXED, "sub", "hooks"))
 add("cap: a Write of ../settings.json from a hooks folder under an install.ps1 folder inside a checkout asks", "ask",
     "agent-model-cap", tool="Write", cwd=MIXED_HOOKS, file_path="../settings.json",
     content=cap_settings(), carries=(OPUS,))
+# THE NEAREST INSTALL FOLDER IS NOT THE ONLY ONE. `nestinst` and `nestinst/inner` each hold an install script and no
+# `.git`. A local install from `nestinst` links ~/.claude/settings.json to ITS settings.json, so a cap write to
+# `../../settings.json` from `inner`'s hooks folder reaches that file and asks. A walk that stops at the nearest
+# install folder (`inner`) never reaches `nestinst` and allows it. The write to `inner`'s own file still asks, and a
+# write that sets no model variable stays allowed.
+NEST_HOOKS = slash(os.path.join(NESTINST, "inner", "hooks"))
+add("cap: an Edit of ../../settings.json, the outer install folder's file, from inner's hooks folder asks", "ask",
+    "agent-model-cap", tool="Edit", cwd=NEST_HOOKS, file_path="../../settings.json",
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
+    carries=(OPUS,))
+sh("cap: a sed -i of an opus model onto ../../settings.json, the outer install folder's file, from inner's hooks folder asks",
+   "sed -i 's/" + CAP_KEY + "=sonnet/" + CAP_KEY + "=" + OPUS + "/' ../../settings.json",
+   "ask", "agent-model-cap", cwd=NEST_HOOKS, carries=(CAP_KEY + " = " + OPUS,))
+add("cap: a Write of ../settings.json, inner's own install folder file, from inner's hooks folder still asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NEST_HOOKS, file_path="../settings.json",
+    content=cap_settings(), carries=(OPUS,))
+add("cap: a Write of ../../settings.json that sets no model variable, from inner's hooks folder, stays allowed", "allow",
+    tool="Write", cwd=NEST_HOOKS, file_path="../../settings.json", content=json.dumps({"theme": "dark"}))
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
