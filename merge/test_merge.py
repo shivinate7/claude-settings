@@ -12643,6 +12643,60 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)
 
+class ReviewLaneLint(ReviewEnv):
+    """`merge <pr> --review-record` prints a record whose newest round, or whose fix check, is PASS only when `merge --lane-lint` passes on that
+    head. The incident: a pull request was handed off with its lint red and no CI run. lane_lint is stubbed, so the lint verdict is the case's:
+    no network, no worktree. A record whose newest round fails still prints, whatever the lint says."""
+
+    @contextlib.contextmanager
+    def lint(self, verdict):
+        """lane_lint answers `verdict`, PASS or FAIL, for every call. The calls are logged in the list the context yields."""
+        calls = []
+
+        def stub(*args, **kwargs):
+            calls.append((args, kwargs))
+            if verdict == "FAIL":
+                raise merge.Stop("the lint of " + REVIEW_HEAD[:9] + " FAILs")
+            return 0
+
+        with unittest.mock.patch.object(merge, "lane_lint", stub):
+            yield calls
+
+    def assert_held(self, rc, out, err, calls):
+        self.assertNotEqual(rc, 0, "a PASS record printed although its lint fails:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a held PASS record still printed its body")
+        self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
+        self.assertTrue(calls, "the record did not ask lane_lint about its head")
+
+    def test_a_pass_record_whose_lint_fails_is_refused_and_names_the_lane_lint_step(self):
+        with self.lint("FAIL") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_held(rc, out, err, calls)
+
+    def test_a_fix_pass_record_whose_lint_fails_is_refused_and_names_the_lane_lint_step(self):
+        host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                                head=self.head())
+        flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        with self.lint("FAIL") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *flags, host=host)
+        self.assert_held(rc, out, err, calls)
+
+    def test_a_pass_record_whose_lint_passes_prints_its_body(self):
+        with self.lint("PASS") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["rounds"], [(1, "reviewer", "sonnet", "PASS")])
+        self.assertTrue(calls, "the record did not ask lane_lint about its head")
+
+    def test_a_record_whose_newest_round_fails_prints_its_body_whatever_the_lint_says(self):
+        # control: a failing round still records, so the lint does not hold it
+        flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head())
+        with self.lint("FAIL"):
+            rc, out, err = self.run_args("7", "--review-record", *flags)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["rounds"], [(1, "reviewer", "sonnet", "FAIL")])
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
