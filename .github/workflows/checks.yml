@@ -1192,13 +1192,12 @@ jobs:
 
   # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel. It runs in 3 shards, this job and
   # checks-mutate-guard-2 and -3 (MUTATE_SHARD=<i>/3 in hooks/mutate_guard.py; lint/test_windows_split.py proves the family).
-  # Why: each mutant starts a fresh suite run, so one job nears any cap as the guard gains mutants (ci-job-caps; debt
-  # mutate-guard-split). Each shard runs about a third of the mutants. Every shard checks every anchor, then runs only its own
+  # Why: each mutant starts a fresh suite run, so one job nears any cap as the guard gains mutants (ci-job-caps). Each shard runs about a third of the mutants. Every shard checks every anchor, then runs only its own
   # mutants and the clean-layout controls of its own targets; the guard, override and simlease targets run every
   # hooks/test_guard*.py.
   # Cap: 25 min per shard. Cost: the 3 shards pay 5 guard-suite controls (guard in each shard, override in one, simlease in
   # one). Each control is split in 4: test_guard.py as 4 parallel GUARD_SHARD sub-runs (CONTROL_SPLIT in hooks/mutate_guard.py).
-  # Per-shard time unmeasured in CI.
+  # Run 42431817106 (n=1): shard jobs took 17.0, 8.3 and 12.4 min, the slowest 68% of the cap.
   checks-mutate-guard:
     runs-on: ubuntu-latest
     needs: scope

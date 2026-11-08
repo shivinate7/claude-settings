@@ -297,7 +297,7 @@ GUARD_JOB = "checks-windows-guard"
 # is one more SHARD_VAR family, but a Linux family: its shards are needed jobs, not event-only ones (EVENT_ONLY_BASES).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
-MUTATE_CAP = 25  # minutes, per job of the mutation family: each shard's mutants must fit it (debt mutate-guard-split)
+MUTATE_CAP = 25  # minutes, per job of the mutation family: each shard's mutants must fit it (decision ci-job-caps)
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD", MUTATE_JOB: "MUTATE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py",
              MUTATE_JOB: MUTATE_CMD}
