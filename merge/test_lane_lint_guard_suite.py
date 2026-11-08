@@ -92,7 +92,8 @@ PROBE_RUN = "import runpy, sys\nsys.argv = [%r] + sys.argv[1:]\nrunpy.run_path(%
 
 FIXTURE_NPM = {  # what an npm install makes for the fixture: playwright and playwright-core, whose chromium is browser/chrome in the repo
     "playwright-core/package.json": '{"name": "playwright-core", "version": "1.55.0", "main": "index.js"}\n',
-    "playwright-core/index.js": "module.exports = {chromium: {executablePath: () => require('path').join(__dirname, '../../../../browser/chrome')}};\n",
+    "playwright-core/index.js": "module.exports = {chromium: {executablePath: () => require('path').join(__dirname, '../../../../browser/chrome'),\n"
+                               "  launch: () => Promise.resolve({close: () => Promise.resolve()})}};\n",  # the probe launches it: a launch that works
     "playwright-core/cli.js": "// fixture: no case runs the pinned CLI\n",
     "playwright/package.json": '{"name": "playwright", "version": "1.55.0", "main": "index.js"}\n',
     "playwright/index.js": "module.exports = require('playwright-core');\n",
@@ -230,6 +231,18 @@ class SuiteAfterInstall(Fixture):
         self.assertTrue(self.install_ran(), "the playwright-setup step did not run before the suite: " + out)
         self.assertEqual(state_of(verdict_line(lines, SUITE)), "PASS", "the suite does not read PASS with the browser: " + out)
         self.assertEqual((self.seen() or {}).get("chromium"), "1", "the suite does not read GUARD_CHROMIUM=1 with the browser present")
+
+    def test_a_browser_file_that_does_not_launch_unsets_the_marker_and_prints_one_noted_line(self):
+        self.install_fixture(browser=True)
+        self.set_npm("playwright-core/index.js", "module.exports = {chromium: {executablePath: () => require('path').join(__dirname, '../../../../browser/chrome'),\n"
+                                                 "  launch: () => Promise.reject(new Error('fixture: the browser does not launch'))}};\n")
+        rc, lines, out = self.run_suite(install_step(), suite_step())
+        self.assertTrue(self.install_ran(), "the playwright-setup step did not run before the suite: " + out)
+        self.assertEqual(state_of(verdict_line(lines, SUITE)), "PASS", "the suite does not read PASS when the browser does not launch: " + out)
+        self.assertIsNone((self.seen() or {}).get("chromium"),
+                          "the suite keeps GUARD_CHROMIUM when the browser file exists but does not launch: %r" % (self.seen(),))
+        noted = [ln for ln in lines if ln.startswith("noted")]
+        self.assertEqual(len(noted), 1, "want one noted line naming the skipped browser cases, got %d: %s" % (len(noted), out))
 
     def test_a_failed_install_reads_unknown_naming_the_install_and_the_suite_does_not_run(self):
         self.install_fixture(ok=False)
