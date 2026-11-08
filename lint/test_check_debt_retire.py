@@ -40,6 +40,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
 def sh(cwd, *cmd):
@@ -410,6 +411,39 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-fail -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the red check did not run in the head folder")
         self.assertEqual(pairs(found), [("d-fail", "red")], "a green cited run cleared a red check")
+
+    def retired_of(self, body, run_state):
+        """retired() for this case's PR. A missing function is a named red: no close can be excused without it."""
+        self.assertTrue(hasattr(D, "retired"), NO_RETIRED)
+        return D.retired(self.dir, self.base, head=self.head, pr_body=body, run_state=run_state)
+
+    def test_r10_retired_returns_the_debt_path_for_a_green_cite_on_a_prose_retire(self):
+        self.closed_prose()
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n" % RUN_URL
+        self.assertEqual(self.findings(pr_body=body, run_state=Runs(("success", self.head))), [], "scope: the debt-close check clears it")
+        runs = Runs(("success", self.head))
+        self.assertEqual(set(self.retired_of(body, runs)), {"docs/debts/d-prose.md"}, "retired() does not name the closed debt")
+        self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
+
+    def test_r11_retired_returns_nothing_for_a_red_runnable_retire_with_a_green_cite(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(rm=["docs/debts/d-fail.md"])
+        body = "Retire-run: d-fail -- %s\n" % RUN_URL
+        self.assertEqual(pairs(self.findings(pr_body=body, run_state=Runs(("success", self.head)))), [("d-fail", "red")], "scope")
+        self.assertEqual(self.retired_of(body, Runs(("success", self.head))), {})
+
+    def test_r12_retired_returns_nothing_for_an_uncited_close(self):
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        self.assertEqual(pairs(self.findings(run_state=runs)), [("d-prose", "prose")], "scope")
+        self.assertEqual(self.retired_of("Summary.\n", runs), {})
+        self.assertEqual(runs.urls, [], "a run was read with no cite")
+
+    def test_r13_retired_returns_nothing_without_a_run_reader(self):
+        self.closed_prose()
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
+        self.assertEqual(self.retired_of(body, None), {})
 
 
 if __name__ == "__main__":
