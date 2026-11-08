@@ -17,10 +17,10 @@ Home: hooks/guard_branch_worktree.py
 `git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It refuses the delete when all of these hold:
 
 - The tip is not an ancestor of origin's default branch.
-- The branch added or changed a file under the layout's `design` folder since its merge base with the default branch (`base...tip`), and the file's bytes at the tip differ from the default branch's. A mockup the branch modified counts as the only copy, as an added one does. A file the branch never touched does not count, even when the default branch edited, deleted or renamed it after the fork. A file whose bytes the default branch holds does not count. No merge base (a shallow clone, unrelated history) fails the read, so the delete asks.
+- The branch added or changed a file under the layout's `design` folder since its merge base with the default branch (`base...tip`). The file's bytes at the tip must differ from the default branch's. A mockup the branch modified counts as the only copy, as an added one does. A file the branch never touched does not count, even when the default branch edited, deleted or renamed it after the fork. A file whose bytes the default branch holds does not count. No merge base (a shallow clone, unrelated history) fails the read, so the delete asks.
 - No `archive/*` ref on origin holds the tip. Any archive name counts, not only `archive/<b>`, because the rule allows a new archive name when the first is taken.
 
-It asks, never allows, when a read cannot answer: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, the default branch is unreadable, or the layout's `design` folder is unread (no readable layout file). A dry run (`--dry-run`, `-n`) removes nothing and is not judged, as main's push asks skip it.
+It asks, never allows, when a read cannot answer. These reads count: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, the default branch is unreadable, or the layout's `design` folder is unread (no readable layout file). A dry run (`--dry-run`, `-n`) removes nothing and is not judged, as main's push asks skip it.
 
 ### A local delete
 
