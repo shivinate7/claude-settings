@@ -143,6 +143,23 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
+def peer_frame_first(body, from_session="local_fixture"):
+    """A peer record whose text opens with the `<cross-session-message` tag, the way a brief reads. Its origin
+    says peer, so it is a peer's words and starts no window."""
+    rec = peer_msg(body, from_session=from_session)
+    rec["message"]["content"] = ('<cross-session-message from="uds:fixture-pipe" from-session="%s">\n%s\n'
+                                 "</cross-session-message>" % (from_session, body))
+    return rec
+
+
+def fired_wake():
+    """A fired scheduled task's wake: a plain user record that opens with the fired-task block. Its isMeta flag
+    is unmeasured, so it has none, the shape main reads as a turn start."""
+    return {"type": "user", "isSidechain": False,
+            "message": {"role": "user", "content": "<system-reminder>This task fired at Wed 2026-11-04 04:35:32 UTC. "
+                        "Treat this as the current date.</system-reminder>\nCheck the batch."}}
+
+
 def tool_use_msg(name, input_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
@@ -1016,10 +1033,32 @@ class DoneNamesModelsTests(unittest.TestCase):
             [self.REVIEWER_R1, self.REVIEWER_R2], between=[stop_hook_feedback()]))
 
     def test_dm_false_alarm_lane_builder_then_reviewer_passes(self):
-        # A lane: its input is a peer brief, then a builder and a reviewer, each followed by an agent finish.
-        self.assertIsNone(self.verdict(
-            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku)\n> **Next** Unstarted: none",
-            [self.BUILDER, self.REVIEWER_R1], lead=[peer_brief()], between=task_notice(), tail=task_notice()))
+        # A lane: its input is a peer brief. A finish sequence comes before the round-1 and round-2 reviewers.
+        # Catches: on main the finish sequence's reminder, read as the owner's message, moves the window to the
+        # round-2 spawn alone, so the haiku named in Done matches no spawn and the report blocks.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
+            [self.BUILDER, self.REVIEWER_R1, self.REVIEWER_R2], lead=[peer_brief()], between=task_notice())
+        self.assertIsNone(out, "the report blocked: the finish sequence moved the window past the earlier reviewer spawns")
+
+    def test_dm_red_fired_wake_starts_the_window_blocks(self):
+        # Catches: a fired wake starts a turn, so the sonnet spawn before it is out of the window and the sonnet
+        # named in Done matches no reviewer spawn. The head reads the wake as no turn start and counts that spawn.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
+                           [self.REVIEWER_R2, self.REVIEWER_OPUS], between=[fired_wake()])
+        self.assertIsNotNone(out, "the report passed: the fired wake did not start the window, so the sonnet "
+                                  "spawn before it backed the name")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("matches no reviewer spawn", out["reason"])
+
+    def test_dm_red_origin_peer_frame_starts_no_window_blocks(self):
+        # Catches: a peer message that opens with the cross-session tag starts no window when its origin says peer,
+        # so the builder spawn before it still counts and the report with no builder name blocks.
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER],
+                           tail=[peer_frame_first("Check the batch.")])
+        self.assertIsNotNone(out, "the report passed: a peer-origin frame started the window past the builder spawn")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_red_lane_builder_opus_ran_sonnet_blocks(self):
         # Catches: the finish sequence's system-reminder, read as the owner's message, drops the lane's builder
@@ -1275,6 +1314,24 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                    assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** merge")]
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
+
+    def reviewer_turn(self, reply, active):
+        # One turn: a round-1 reviewer, the real finish sequence, a round-2 reviewer, the landing commit, the reply.
+        records = [human("do the task"), tool_use_msg("Agent", DoneNamesModelsTests.REVIEWER_R1), tool_result_msg()]
+        records += task_notice()
+        records += [tool_use_msg("Agent", DoneNamesModelsTests.REVIEWER_R2), tool_result_msg(),
+                    tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), assistant_text(reply)]
+        return self.run_hook(records, active)
+
+    def test_rw_green_rewrite_naming_both_reviewers_after_a_finish_passes(self):
+        # Catches: the finish sequence's reminder, read as the owner's message, moves the rewrite's window past the
+        # round-1 haiku spawn, so the haiku named in the rewrite matches no spawn and the rewrite is refused again.
+        first = self.reviewer_turn("All done.", False)
+        self.assertIn("Send the report now", first["reason"])
+        out = self.reviewer_turn("> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n"
+                                 "> **Next** Unstarted: none", True)
+        self.assertIsNone(out, "the rewrite was refused: the finish sequence moved the rewrite's window past the "
+                               "round-1 haiku spawn")
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
