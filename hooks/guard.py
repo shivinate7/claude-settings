@@ -835,13 +835,15 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     (`agent_worktree_home` status "home") or its own red-run folder (`_own_red_run`); a "no-record"
     agent has no home to match. A variable target is read from an assignment earlier in the same
     command; one left unresolved (or a substitution) is refused from a non-temp repo, since its
-    value is unknown. Other unreadable parts (a repo, a cwd) allow."""
-    tokens = segment_tokens(segments[number])
+    value is unknown; a `-C` variable is read the same way. Other unreadable parts (a repo, a
+    cwd) allow."""
+    read = _segment_with_vars(segments, number)
+    tokens = segment_tokens(read)
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return ""
     target = None
-    for subcommand, args in git_calls(_segment_with_vars(segments, number)):
+    for subcommand, args in git_calls(read):
         if subcommand == "worktree" and args and args[0] == "add":
             target = worktree_add_target(args[1:])
             break
@@ -885,8 +887,9 @@ WORKTREE_HAND_MADE_REASON = (
     "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
     "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
     "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
-    "`path`. A path the guard could not read from a variable or a substitution is refused too: "
-    "write any path in a command out literally. If the tool's isolation was refused, "
+    "`path`. A path the guard cannot read, such as one held in a variable or a substitution, is "
+    "refused too. The only tree made by hand that passes is an agent's own red-run checkout, "
+    "named literally. If the tool's isolation was refused, "
     "make no tree by hand: stop and report to the owner which layer refused and its exact "
     "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
     "harness's."
