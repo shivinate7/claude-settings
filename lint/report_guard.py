@@ -1310,8 +1310,8 @@ def pending_refusals(hook, text):
     tool_use_id is in an orchestrator record stays, even with agent_id. A row with no tool_use_id, a
     tool_use_id found nowhere (not yet flushed) or an unreadable transcript stays, unless it has agent_id.
     A row cleared by name is also recorded as (tool_name, reason) in the session's raised-refusals file, and a
-    later row with the same tool_name and the same non-empty reason is dropped without blocking: the owner
-    already heard of it. A different reason or tool, or an empty reason, still blocks. The refusals file goes
+    later row with the same tool_name and the same reason, not blank after strip, is dropped without blocking: the owner
+    already heard of it. A different reason or tool, or a blank reason, still blocks. The refusals file goes
     when none is left. One stat per Stop when the session had no refusal; the raised file is read only when
     the refusals file has rows, and written only when a row is cleared by name. Fails open: [] on any error;
     a raised file that cannot be written only means the repeat blocks once more.
@@ -1338,14 +1338,15 @@ def pending_refusals(hook, text):
             tool = row["tool_name"]
             use_id = row.get("tool_use_id")
             reason = row.get("reason")
+            has_reason = isinstance(reason, str) and bool(reason.strip())
             from_agent = (row.get("agent_id") or use_id in agent_ids) and use_id not in orchestrator_ids
             if from_agent:
                 continue
             if names_tool(section, tool) or says_refusal_right(text, tool):
-                if isinstance(reason, str) and reason and (tool, reason) not in raised + newly_raised:
+                if has_reason and (tool, reason) not in raised + newly_raised:
                     newly_raised.append((tool, reason))
                 continue
-            if isinstance(reason, str) and reason and (tool, reason) in raised:
+            if has_reason and (tool, reason) in raised:
                 continue
             kept.append((line, tool))
         if newly_raised and raised_path:
