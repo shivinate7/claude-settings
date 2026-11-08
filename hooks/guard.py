@@ -140,8 +140,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        Cost: one gh read per distinct (repo, N), two at most when a short name falls back, zero with no
                        pairing, and no git start: the repo is git_reads.github_repo(use_git=False), the one reading the
                        lane-repo-tag rule shares (it keeps git, which applies url rewrites). The count_file cases prove it.
-                       A wrong-pairing brief pays its one read (two at most) before the spawn checks and the load brake, even
-                       when an earlier check would refuse it anyway.
+                       A brief with any pairing pays its one read (two at most) before the spawn checks and the load brake, even
+                       when a later check would refuse it anyway.
                        Misses: a Workflow prompt held in a variable, a create_session `prompt` (unread), a pairing outside the
                        shapes above (`PR #N for branch X`, `PR #N (base branch Y), branch X`), and an in-process SendMessage
                        (another matcher). Known false alarm: `Diff PR #N with branch main` and `Compare PR #N with branch main`
