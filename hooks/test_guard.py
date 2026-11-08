@@ -8426,7 +8426,7 @@ sh("env-child: allow, bun x runs vitest, an app's own test command",
    "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
 # Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
 # flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
-# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+# ENV_CHILD_BOOL_FLAGS drops reads the next word as the flag's value, so the allow turns to a deny.
 sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
    "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
@@ -8453,6 +8453,85 @@ sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a co
    "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
    "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
+
+# The false alarms that decision env-file-stays-unread names. Each allow runs its program with env only
+# as an argument, and the flag before the program takes no value. The guard reads that flag's next word
+# as its value, so the program's word starts a child and env is read as the child. Each deny beside it
+# puts env in the child's place with the same flag, so a fix that stops reading these flags fails it.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter -k env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
+   "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
+   "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter -t env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --silent takes no value, so env is the child, the control for --silent",
+   "npx --env-file=" + ENV + " --silent env", "deny", "env-file", cwd=NOGIT)
+# pnpm reads its own flags before `exec`. After `exec` a word is the command's, so the pins put --stream
+# before it, where it takes no value and the word after it is the program.
+sh("env-child: allow, pnpm --stream before exec takes no value, so vitest runs with the filter env",
+   "pnpm --env-file=" + ENV + " --stream exec vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm --stream before exec takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " --stream exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream before exec takes no value, so jest -c env is jest's option",
+   "pnpm --env-file=" + ENV + " --stream exec jest -c env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " exec --stream env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream then -c env, so pnpm's own -c is a shell string, the control",
+   "pnpm --env-file=" + ENV + " exec --stream -c env", "deny", "env-file", cwd=NOGIT)
+# npm's --color takes a value (always, true or false), so the word after it is not the child. The deny
+# puts env after that value, and the allow puts jest there.
+sh("env-child: deny, npm exec --color takes a value, so env after always is the child",
+   "npm --env-file=" + ENV + " exec --color always env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color takes a value, so jest after always is the child, the control",
+   "npm --env-file=" + ENV + " exec --color always jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --color takes a value, so -- ends the options and env is the child",
+   "npm --env-file=" + ENV + " exec --color true -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color takes a value, so -- ends the options and jest is the child",
+   "npm --env-file=" + ENV + " exec --color true -- jest", "allow", cwd=NOGIT)
+# nopt reads a literal true or false after a bool flag as that flag's value. So the word after the flag
+# is not the child: the deny puts env there, and the allow puts the program there.
+sh("env-child: deny, pnpm --stream takes a literal true, so exec then env runs env",
+   "pnpm --env-file=" + ENV + " --stream true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream takes a literal true, so exec then vitest is the child",
+   "pnpm --env-file=" + ENV + " --stream true exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm --json takes a literal true, so exec then env runs env",
+   "npm --env-file=" + ENV + " --json true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm --json takes a literal true, so exec then jest is the child",
+   "npm --env-file=" + ENV + " --json true exec jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --json takes a literal true, so env is the child of npx",
+   "npx --env-file=" + ENV + " --json true env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --json takes a literal true, so vitest is the child of npx",
+   "npx --env-file=" + ENV + " --json true vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --dry-run takes a literal false, so env is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --dry-run takes a literal false, so jest is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false jest", "allow", cwd=NOGIT)
+# npm exec documents --no, which takes no value. The allow runs jest with the filter -t env; the deny
+# puts env in the child's place.
+sh("env-child: allow, npm exec --no takes no value, so jest runs with the filter -t env",
+   "npm --env-file=" + ENV + " exec --no jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --no takes no value, so env is the child, the control for --no",
+   "npm --env-file=" + ENV + " exec --no env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, bun x --bun takes no value, so vitest runs with the filter -t env",
+   "bun --env-file=" + ENV + " x --bun vitest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, bun x --bun takes no value, so env is the child, the control for --bun",
+   "bun --env-file=" + ENV + " x --bun env", "deny", "env-file", cwd=NOGIT)
+# `container` is the management word docker and podman give to run, so `container run` starts the same
+# child as `run`. The allows beside it run the image's own command, with env only as an argument.
+sh("env-child: deny, docker container run is docker run, so env runs in img",
+   "docker container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker container run --rm takes no value, so printenv runs in alpine",
+   "docker container run --env-file " + ENV + " --rm alpine printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, podman container run is podman run, so env runs in img",
+   "podman container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker container run with serve as the child, the control for the gap",
+   "docker container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, podman container run with serve as the child, the control for the gap",
+   "podman container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
 
 # A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
 # A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
