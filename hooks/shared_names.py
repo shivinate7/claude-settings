@@ -6,7 +6,7 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -99,22 +99,23 @@ _PAGE_URL = "https://claude.ai/artifact/"  # a Mac `slug` is the artifact id: th
 _MAC_ACTION = {"db_str_replace": "str_replace", "db_get": "get", "db_list": "list", "db_query": "query"}
 
 
-def _split_path(path):
+def _split_path(path: str) -> tuple[str, Optional[str]]:
     """(collection, doc_id) of a Mac `<collection>/<id>` path: the collection is the first segment, the id is the rest.
     A path with no id (`items/`, `items`) has doc_id None."""
     collection, _, doc_id = path.partition("/")
     return collection, doc_id or None
 
 
-def _mac_url(tool_input):
+def _mac_url(tool_input: dict[str, Any]) -> dict[str, Any]:
     slug = tool_input.get("slug")
     return {"url": _PAGE_URL + slug} if isinstance(slug, str) and slug else {}
 
 
-def _mac_write(entry):
+def _mac_write(entry: dict[str, Any]) -> dict[str, Any]:
     """The cloud write of one Mac db_write op. Mac `merge` has no cloud action: it changes fields, as an update does."""
     op = entry.get("op")
-    collection, doc_id = _split_path(entry.get("path") if isinstance(entry.get("path"), str) else "")
+    path = entry.get("path")
+    collection, doc_id = _split_path(path if isinstance(path, str) else "")
     write = {"op": "update" if op == "merge" else op, "collection": collection}
     if doc_id is not None:
         write["doc_id"] = doc_id
@@ -123,7 +124,7 @@ def _mac_write(entry):
     return write
 
 
-def cloud_twin(tool, tool_input):
+def cloud_twin(tool: Any, tool_input: Any) -> tuple[Any, Any]:
     """(tool, tool_input) of the cloud call a Mac artifact call stands for. Any other call, and a Mac call whose input
     is not the shape item 440 gives, comes back unchanged. One db_write op becomes a single write, several a cloud
     batch; a non-dict op is skipped, as the cloud judges skip a non-dict write. Assumed, not in item 440: a db_query
