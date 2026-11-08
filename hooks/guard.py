@@ -56,6 +56,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  stale-tree-commit    deny. A `git commit` from a tree its branch moved under: the index (or, for
+                       `-a` or named paths, the file) holds the old copy of a path the move
+                       changed. Squash, revert, pull, merge, rebase and a detached HEAD pass.
+                       (stale-tree-commit)
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -378,6 +382,7 @@ while True:
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
+        from guard_branch_worktree import STALE_TREE_REASON, stale_tree_commit_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
@@ -3588,6 +3593,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "silent-write",
                    reason.format(command=live.index(number) + 1, total=len(live), kind=kind,
                                  program=kind if " " in kind else "git " + kind), matched)
+
+    # 1c1. A commit from a tree its branch moved under (decision stale-tree-commit).
+    for number, segment in enumerate(segments):
+        if segment.strip():
+            matched = stale_tree_commit_hit(segments, number, cwd, ends)
+            if matched:
+                refuse(tool, "deny", "stale-tree-commit", STALE_TREE_REASON, matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):
