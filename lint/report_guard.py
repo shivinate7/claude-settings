@@ -547,7 +547,7 @@ MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # "design-reviewer" are matched whole, so they never read as "reviewer", and then dropped as untracked.
 _ROLE = r"(?<![\w-])(?:design[\s-]+reviewer|builder|reviewer|test-author|record-writer)(?![\w-])"
 ROLE_MODEL_RE = re.compile(
-    r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*`?(haiku|sonnet|opus|fable)\b",
+    r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(?:`+)?(haiku|sonnet|opus|fable)\b",
     re.I)
 ROLE_RE = re.compile(_ROLE, re.I)
 AGENTS_DIR = os.path.join(HERE, "..", "agents")
