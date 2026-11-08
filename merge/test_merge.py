@@ -11039,10 +11039,6 @@ def pull_file(name, status="added", additions=1, deletions=0):
     lines = [f"+{i}" for i in range(additions)] + [f"-{i}" for i in range(deletions)]
     return {"filename": name, "status": status, "additions": additions, "deletions": deletions, "changes": additions + deletions, "patch": "\n".join(lines)}
 
-def closed_pull(number, sha, merged=False):
-    """A pull request that is not open, as `pulls/<n>` answers it: state closed, and merged when it merged."""
-    return {**batch_pull(number, sha), "state": "closed", "merged": merged}
-
 def ready_calls(sha):
     """The five calls of one ready pull request with a record: the pull list, the comments, then its head's check runs, statuses and the
     branch protection. A record with no Findings line makes exactly these."""
@@ -12279,7 +12275,7 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse next to the Findings line: {rec.get('fix')!r}")
 
     def test_review_body_prints_the_findings_line_between_the_fix_line_and_net_value(self):
-        body = body_with_findings(self, REVIEW_PASS, "not owed", "2, this PR", fix=REVIEW_FIX_PASS)
+        body = body_with_findings(self, [(1, "reviewer", "sonnet", "PASS")], "not owed", "2, this PR", fix=REVIEW_FIX_PASS)
         self.assertEqual(body.splitlines(), [REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Guard or check: no",
                                              "Round 1: reviewer, sonnet, PASS", fix_check_line(), findings_line("2, this PR"), "Net value: not owed",
                                              REVIEW_CI_LINE])
@@ -12902,9 +12898,9 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
 class ReviewFixFiling(ReviewEnv):
-    """A fix check may pass only a push that files findings in this pull request (owner ruling item 394 a, decision pr-review-record). The diff,
-    reviewed head..new head, is read locally with git: it may add files under docs/debts/ or add lines to docs/debts/notes.md, and nothing else.
-    A `none` record never passes a push that files, so its fix check fails and the write refuses the PASS, naming the path wider than its finding."""
+    """A PASS fix check is accepted whatever its push changes: the tool reads no fix-check diff, and the fix-check reviewer judges the push. A
+    record that says `N, this PR` (owner ruling item 394 a: a fix check may pass a push that only files findings) and a record that says a small
+    fix gets a fix check (owner ruling item 203 a) both pass here."""
 
     def setUp(self):
         super().setUp()
@@ -12929,27 +12925,6 @@ class ReviewFixFiling(ReviewEnv):
         self.assertIn("Findings: 2, this PR", out)
         self.assertIn(fix_check_line(head=self.reviewed), out)
         self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
-
-    def test_a_filing_push_that_also_edits_another_file_is_refused(self):
-        new = self.push({"docs/debts/missing-cache.md": "a debt\n", "merge/widget.py": "two\n"})
-        rc, out, err = self.fix_run(new, "2, this PR")
-        self.assertNotEqual(rc, 0, "a push that edits merge/widget.py passed the fix check beside a filing:\n" + out + err)
-        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
-        self.assertIn("merge/widget.py", out + err, "the refusal does not name the file wider than the finding")
-
-    def test_a_filing_push_that_deletes_a_notes_line_is_refused(self):
-        new = self.push({"docs/debts/missing-cache.md": "a debt\n", "docs/debts/notes.md": ""})
-        rc, out, err = self.fix_run(new, "2, this PR")
-        self.assertNotEqual(rc, 0, "a push that deletes a notes line passed the fix check:\n" + out + err)
-        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
-        self.assertIn("docs/debts/notes.md", out + err, "the refusal does not name the notes line the push deletes")
-
-    def test_a_filing_push_on_a_none_record_is_refused(self):
-        new = self.push({"docs/debts/missing-cache.md": "a debt\n"})
-        rc, out, err = self.fix_run(new, "none")
-        self.assertNotEqual(rc, 0, "a push that files a debt passed the fix check of a record that says none:\n" + out + err)
-        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
-        self.assertIn("docs/debts/missing-cache.md", out + err, "the refusal does not name the filed path a none record cannot carry")
 
 
 class ReviewedList(ReviewEnv):
@@ -13079,11 +13054,12 @@ class ReviewedList(ReviewEnv):
     GREEN_CI = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the ready head's checks, so the head's own reads are the same in each case
     READY_READS = ["actions/runs", "issues/comments", "pulls"]  # the reads of one ready pull request's line with a green head, on this base
 
-    def this_pr(self, files, rounds=REVIEW_PASS, **record):
-        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, and the pull request's files. -> (host, out)."""
+    def this_pr(self, files, rounds=REVIEW_PASS, rc=0, **record):
+        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, and the pull request's files. The run
+        must exit `rc`. -> (host, out)."""
         comments = [review_comment(1, 7, record_text(rounds=rounds, findings="2, this PR", **record))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, files={7: files}, count_gh=True)
-        self.assertEqual(rc, 0, out + err)
+        host, got, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, files={7: files}, count_gh=True)
+        self.assertEqual(got, rc, out + err)
         return host, out
 
     def follow_up(self, findings, rounds=REVIEW_PASS, pulls=(), closed=None):
@@ -13161,12 +13137,14 @@ class ReviewedList(ReviewEnv):
         self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a stale record")
 
     def test_findings_this_pr_on_a_held_record_reads_no_files(self):
-        host, out = self.this_pr([pull_file("docs/debts/x.md")], net="negative")
-        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 (?!batch )\S.*\d+h( RED)?$")
+        # a held record gives no act of its own (the rules below it run), so its line is NO NEXT ACT, which is red, and the run exits 1
+        host, out = self.this_pr([pull_file("docs/debts/x.md")], rc=1, net="negative")
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 NO NEXT ACT 30h RED")
         self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a held record")
 
     def test_findings_follow_up_to_an_open_pr_is_done(self):
-        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA)])
+        # the follow-up is a draft: a draft with no record is a lane round, not a red NO NEXT ACT, so the run exits 0
+        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA, draft=True)])
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
         self.assertEqual(host.gh_calls.count("pulls/8"), 1, "the follow-up pull request was not read once")
 
@@ -13187,7 +13165,7 @@ class ReviewedList(ReviewEnv):
         # no pull request 8: the read answers 404, so the record is not done, and its line names the missing number. The list still prints.
         host, out = self.follow_up("2, follow-up #8")
         line = list_line(self, out, 7)
-        self.assertRegex(line, r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertRegex(line, r"^#7 feat7 lane round \d+: follow-up #8 does not exist \d+h( RED)?$")
         self.assertIn("#8", line, "the line does not name the follow-up pull request that does not exist")
 
     def test_findings_follow_up_whose_read_fails_is_unknown_and_holds(self):
@@ -13205,27 +13183,28 @@ class ReviewedList(ReviewEnv):
                 self.assertIn("#8", line, "the unknown line does not name the follow-up pull request that could not be read")
 
     def test_findings_follow_up_needs_every_named_pr_to_pass(self):
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])  # control: both open
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True), batch_pull(9, OTHER_SHA, draft=True)])  # control: both open
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA)], closed={9: closed_pull(9, OTHER_SHA)})
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True)], closed={9: closed_pull(9, OTHER_SHA, merged=False)})
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
 
     def test_findings_follow_up_on_an_open_round_reads_no_pull(self):
-        host, out = self.follow_up("2, follow-up #8", rounds=("Round 1: reviewer, sonnet, FAIL",), pulls=[batch_pull(8, OTHER_SHA)])
+        host, out = self.follow_up("2, follow-up #8", rounds=("Round 1: reviewer, sonnet, FAIL",), pulls=[batch_pull(8, OTHER_SHA, draft=True)])
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
         self.assertNotIn("pulls/8", host.gh_calls, "the follow-up pull request was read for a record that was open on its rounds")
 
     def test_findings_follow_up_reads_each_named_pr_once(self):
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA, draft=True), batch_pull(9, OTHER_SHA, draft=True)])
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
         self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/8", "pulls/9"]), "one read per named pull request is the cost")
 
-    def test_findings_follow_up_on_another_base_does_not_move_the_ready_pr_protection_read(self):
-        # Host.pr sets the base of the host to the one it reads, so a follow-up on `release` must not change the protection read of pull request 7
-        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA, base="release")])
+    def test_findings_follow_up_on_another_base_does_not_move_the_ready_pr_base(self):
+        # Host.pr sets the base of the host to the one it reads, so a follow-up on `release` must not make the host read `release`. The read of
+        # the follow-up is `pulls/8` alone: no branch read, and the host's base stays main.
+        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA, base="release", draft=True)])
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
-        self.assertEqual([c for c in host.gh_calls if c.startswith("branches/")], ["branches/main/protection/required_status_checks"],
-                         "reading the follow-up pull request moved the protection read of the ready pull request off main")
+        self.assertEqual(host.base, "main", "reading the follow-up pull request moved the host's base off main")
+        self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/8"]), "the follow-up read made a call beyond pulls/8")
 
 
 # The ledger: `merge --reviewed` gives every open pull request one next act, read from GitHub alone. Ages come from one clock, LEDGER_NOW, so no
