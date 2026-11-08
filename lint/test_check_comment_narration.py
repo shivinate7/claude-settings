@@ -62,6 +62,10 @@ RUN_STATE = [
     "if X; it passed on main", "when ready: this passed on main", "if cold, skip. The run is red on main",
 ]
 
+# Date text that stays flagged: a date with no ruling word, with or without a time, and an owner word with a date but
+# no time. The `date` pattern flags each hit. The list also joins FLAGGED, so every flagged test runs it.
+DATE_CONTROLS = ["Fixed on 2026-11-01.", "Changed 2026-11-01 16:30 CST.", "Owner, 2026-11-01"]
+
 # Text the check must flag, in a comment or in a docstring line.
 FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
@@ -78,7 +82,7 @@ FLAGGED = [
     "Fixed in round 2 places where the rows were summed", "Previously, this returned None",
     "Previously used a dict", "Added after code review", "Added after review of the PR feedback",
     "Changed from returning None to raising",
-] + RUN_STATE
+] + RUN_STATE + DATE_CONTROLS
 
 # Near misses. No pattern may flag any of them.
 CLEAN = [
@@ -271,6 +275,15 @@ class FlagsAddedLines(Case):
                 self.assertHit(out, "h%d.py" % i, 2)
                 self.assertIn("history phrase:", self.hit_line(out, "h%d.py" % i, 2))
 
+    def test_date_controls_hit_the_date_pattern(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"d%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, text in enumerate(DATE_CONTROLS)})
+        _, out = self.lint()
+        for i, text in enumerate(DATE_CONTROLS):
+            with self.subTest(text):
+                self.assertHit(out, "d%d.py" % i, 2)
+                self.assertIn("date:", self.hit_line(out, "d%d.py" % i, 2))
+
     def test_docstring_kinds(self):
         self.base({"keep.py": "x = 1\n"})
         kinds = {
@@ -436,6 +449,19 @@ class Quiet(Case):
                 self.assertNoHit(out, "c%d.py" % i, 3)
                 self.assertNoHit(out, "d%d.py" % i, 4)
         self.assertEqual(rc, 0, out)
+
+    def test_ruling_cite_with_a_time_in_a_docstring_passes(self):
+        src = ('def f():\n    """Does a thing.\n\n    Owner, 2026-11-01 16:30 CST: a re-pointed case.\n    """\n'
+               '    # fixed in round 2\n    return 1\n')
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "re-pointed case"))
+
+    def test_ruling_cite_with_a_time_in_a_comment_passes(self):
+        src = "x = 1\n# (owner, 2026-10-30 16:20 CDT)\n# fixed in round 2\ny = 2\n"
+        rc, out = self.scan({"cite.py": src})
+        self.assertHit(out, "cite.py", at(src, "fixed in round 2"))
+        self.assertNoHit(out, "cite.py", at(src, "16:20 CDT"))
 
     def test_same_words_in_string_literals_do_not_fail(self):
         src = '''\
@@ -930,6 +956,11 @@ class ShellScan(Case):
         rc, out = self.scan({"hooks/x.sh": "# (incident 2026-11-07, /base_run.txt)\n"})
         self.assertHit(out, "hooks/x.sh", 1)
         self.assertEqual(rc, 1, out)
+
+    def test_ruling_cite_with_a_time_in_a_shell_comment_passes(self):
+        rc, out = self.scan({"x.sh": "# (owner, 2026-10-30 16:20 CDT)\n# fixed in round 2\necho hi\n"})
+        self.assertHit(out, "x.sh", 2)
+        self.assertNoHit(out, "x.sh", 1)
 
     def test_extensionless_sh_shebang_script_is_flagged(self):
         rc, out = self.scan({"bin/run-sh": "#!/bin/sh\n# fixed in round 2\n"})
