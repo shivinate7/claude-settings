@@ -434,7 +434,7 @@ class LeaseExpiry(LeaseCase):
 
 class Renew(LeaseCase):
     """A live holder renews its lease: `renew` stamps the grant time with now, so SIM_LEASE_MAX counts the silence since
-    the last renew (owner, 2026-11-07 13:00: a holder that stops answering loses its turn)."""
+    the last renew (decision sim-lease-tool: a holder that stops answering loses its turn)."""
 
     def clock(self, now, max_s=None):
         extra = {"SIM_LEASE_NOW": str(now)}
