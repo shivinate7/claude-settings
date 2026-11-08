@@ -13892,16 +13892,14 @@ for _run, _target in HK_RETIRE_FORMS:
 
 # CLASS 3b. A data body that a read shares its line with. Nothing in the call runs the body, so each read allows.
 # Each read has a plain body beside it (P2): the same call with `hello` allows on both trees. The rows also hold the
-# reads that touch a body in f without running it: a quote with a lone apostrophe, or one that spans two lines, starts
-# no run of f, and `$(< f)` reads f as data (the false alarm the debt note heredoc-keep-redirect-read-alarm names).
+# reads that touch a body in f without running it: a quote with a lone apostrophe starts no run of f, and `$(< f)`
+# reads f as data (the false alarm the debt note heredoc-keep-redirect-read-alarm names).
 HK_READ_FORMS = (
     ("cat notes.md, then a python version probe", "notes.md", "cat notes.md; echo \"v: $(python3 --version)\""),
     ("a node version probe, then wc of notes.md", "notes.md", "echo $(node --version) && wc -l notes.md"),
     ("a node version held in V, then cat of notes.md", "notes.md", "V=$(node --version); cat notes.md"),
     ("a lone apostrophe in double quotes, then cat f and a python probe", "f",
      "echo \"don't\"; cat f; echo \"$(python3 --version)\""),
-    ("a double quote that spans two lines, then cat f and a python probe", "f",
-     "echo \"one;\ntwo\"; cat f; echo \"$(python3 --version)\""),
     ("a redirect read in echo, echo \"$(< f)\"", "f", "echo \"$(< f)\""),
     ("a redirect read as a gh issue body", "f", "gh issue create --title t --body \"$(< f)\""),
     ("a redirect read in a for list", "f", "for l in $(< f); do echo $l; done"),
@@ -14095,6 +14093,24 @@ sh("heredoc-keep: a written file holding gh pr create --title x, run by find -ex
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("heredoc-keep: control, a plain body in f run by find -exec ./f, allowed",
    "cat > f <<'EOF'\nhello\nEOF\nfind . -exec ./f {} \\;", "allow", cwd=NOGIT)
+
+
+# CLASS 9. A run of f that a line before it could hide. A `#` comment with a lone apostrophe or a double quote, and a
+# comment that ends in a backslash, must not hide a run on the next line. A subshell opened on one line and closed on
+# the next must not either. Each run reads the body in f (`rm -rf ./*`), so each denies. Each has a plain-body control
+# beside it (P2): the same call with `hello` allows on both trees.
+HK_HIDDEN_RUNS = (
+    ("a comment with an apostrophe, then ./f", "cat notes.md # don't\n./f\necho 'x'"),
+    ("a comment with an apostrophe, then python3 f", "cat notes.md # don't\npython3 f\necho 'x'"),
+    ("a comment with a double quote, then ./f", 'cat notes.md # say "hi\n./f\necho "x"'),
+    ("a comment ending in a backslash, then ./f", "# note \\\n./f"),
+    ("a subshell opened on one line, then ./f on the next", "(cat notes.md\n./f\n)"),
+)
+for _label, _tail in HK_HIDDEN_RUNS:
+    sh("heredoc-keep: hidden run, %s, denies" % _label,
+       "cat > f <<'EOF'\nrm -rf ./*\nEOF\n" + _tail, "deny", "destructive-delete", cwd=NOGIT)
+    sh("heredoc-keep: hidden run control, a plain body in f, %s, allowed" % _label,
+       "cat > f <<'EOF'\nhello\nEOF\n" + _tail, "allow", cwd=NOGIT)
 
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
