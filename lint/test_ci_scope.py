@@ -3,7 +3,8 @@
 
 Each scope case builds a scratch git repo, commits a base, commits the changed paths, runs the script
 with EVENT and BASE_SHA set, and reads the name=value lines it wrote to $GITHUB_OUTPUT.
-CI_SCOPE overrides the script path (for a successor). Needs bash on PATH. The mod runner cases build a
+CI_SCOPE overrides the script path (for a successor). CI_SCOPE_MERGE overrides the merge.py the script reads the
+guard import closure from. Needs bash on PATH. The mod runner cases build a
 scratch tree with a copy of mod-tests.sh and run it there; they need node on PATH.
 
 Output names pinned (the `scope` job re-exports them as job outputs):
@@ -14,6 +15,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -41,9 +43,10 @@ def git(cwd, *a):
     return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref=""):
+def run(paths, event="pull_request", base="auto", existing=(), landed=None, head_ref="", extra_env=None):
     """-> {name: 'true'|'false'} the script wrote. `paths` are committed on top of one base commit. `head_ref` is HEAD_REF,
-    empty when not given, so no HEAD_REF of the caller's environment reaches the script."""
+    empty when not given, so no HEAD_REF of the caller's environment reaches the script. `extra_env` adds variables to the
+    script's environment. CI_SCOPE_MERGE is dropped from the caller's environment first, so only `extra_env` can set it."""
     with tempfile.TemporaryDirectory() as d:
         git(d, "init", "-q")
         git(d, "config", "user.email", "t@t")
@@ -72,11 +75,54 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
         out = os.path.join(d, "..", f"out-{os.getpid()}.txt")
         env = dict(os.environ, EVENT=event, GITHUB_OUTPUT=out, HEAD_REF=head_ref,
                    BASE_SHA=sha if base == "auto" else base)
+        env.pop("CI_SCOPE_MERGE", None)
+        env.update(extra_env or {})
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
         lines = open(out).read().split()
         os.remove(out)
         return dict(l.split("=", 1) for l in lines)
+
+
+def code_text(text):
+    """The shell text with its comments removed. A `#` opens a comment only at the start of a word and outside quotes,
+    so `"a # b"`, `$#` and a `#` line inside a multi-line string stay code. Quotes carry across lines."""
+    out, quote, i = [], None, 0
+    while i < len(text):
+        ch = text[i]
+        if quote is None and ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|()"):
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        if ch == "\\" and quote != "'":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if quote is None and ch in "\"'":
+            quote = ch
+        elif ch == quote:
+            quote = None
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+# The scanner's own cases. No shell comment splitter exists in lint/ (its tools cover Python, JS, TS and Swift), so the
+# splitter lives here, with the three traps the scanner rule names. These cases test the splitter, not the script.
+class ScriptTextTraps(unittest.TestCase):
+    def test_a_comment_opener_inside_a_string_is_code(self):
+        self.assertIn('echo "a # python3 merge"', code_text('echo "a # python3 merge"\n'))
+        self.assertIn("echo $# args", code_text("echo $# args\n"))
+
+    def test_a_hash_line_inside_a_multi_line_string_is_code(self):
+        text = 'x="one\n# python3 merge/merge.py\nthree"\n'
+        self.assertIn("# python3 merge/merge.py", code_text(text))
+
+    def test_a_lone_quote_in_a_comment_opens_no_string(self):
+        self.assertEqual(code_text("# don't\npython3 merge.py\n"), "\npython3 merge.py\n")
+
+    def test_a_trailing_comment_is_removed_and_the_code_before_it_stays(self):
+        self.assertEqual(code_text("run x  # a note\n"), "run x  \n")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -278,6 +324,68 @@ class Scope(unittest.TestCase):
         self.assertEqual(self.true_set(run([p])), {"checks_windows", "checks_macos", "shell_macos", "code", "guard"})
         self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows", "checks_macos", "code", "guard"})
 
+    # Guard closure: hooks/guard.py's import closure (merge/merge.py guard_import_closure) reaches the files below, so a
+    # change to one must set the flags hooks/guard.py sets. The reference is checked first, then the subject against it.
+    GUARD_FLAGS = ["checks_windows", "checks_windows_rest", "checks_macos", "code", "guard", "sweep"]
+    # Names only the closure supplies. The script must name none of them, or a copy of the list goes stale.
+    CLOSURE_ONLY_NAMES = ["janitor/sweep.py", "janitor/temp_sweep.py", "stale_pages", "splice.py", "export_page", "rule_audit.py"]
+
+    def assertSameFlagsAsGuardPy(self, p, edit):
+        """p sets the flags hooks/guard.py sets, as a new file (edit=False) or as an edit (edit=True)."""
+        ref = run(["hooks/guard.py"], existing=["hooks/guard.py"] if edit else ())
+        self.assertTrue(set(self.GUARD_FLAGS) <= self.true_set(ref), f"hooks/guard.py lacks {self.GUARD_FLAGS}: {ref}")
+        got = run([p], existing=[p] if edit else ())
+        self.assertEqual(self.true_set(got), self.true_set(ref),
+                         f"{p} ({'edit' if edit else 'new file'}): missing {sorted(self.true_set(ref) - self.true_set(got))}, "
+                         f"extra {sorted(self.true_set(got) - self.true_set(ref))}")
+
+    def test_guard_closure_janitor_file_edit_sets_the_same_flags_as_guard_py(self):
+        for p in ("janitor/sweep.py", "janitor/temp_sweep.py"):
+            with self.subTest(path=p):
+                self.assertSameFlagsAsGuardPy(p, edit=True)
+
+    # Control: a new janitor file gets guard.py's flags, since the landed-dir rule adds the install suite and the guard
+    # flags to every new file in a landed dir. A fix must keep it so.
+    def test_guard_closure_new_janitor_file_already_sets_the_same_flags_as_guard_py(self):
+        for p in ("janitor/sweep.py", "janitor/temp_sweep.py"):
+            with self.subTest(path=p):
+                self.assertSameFlagsAsGuardPy(p, edit=False)
+
+    def test_guard_closure_stale_pages_edit_sets_exactly_guard_py_flags(self):
+        # Only a closure rule gives this file guard.py's flags. Without one, the catch-all turns every flag on.
+        self.assertSameFlagsAsGuardPy("skills/waiting-page/stale_pages.py", edit=True)
+
+    # Control: a janitor file outside the closure keeps the janitor/* flags, and no guard flag.
+    def test_guard_closure_janitor_file_outside_it_keeps_the_janitor_flags(self):
+        p = "janitor/install_launchd.py"
+        self.assertEqual(self.true_set(run([p], existing=[p])), {"checks_windows_rest", "checks_macos", "code", "sweep"})
+
+    # Control: hooks/guard.py keeps its own flags.
+    def test_guard_closure_guard_py_keeps_its_own_flags(self):
+        self.assertEqual(self.true_set(run(["hooks/guard.py"], existing=["hooks/guard.py"])), set(self.GUARD_FLAGS))
+
+    # Control: a docs-only edit in a closure folder keeps every flag off. The closure is Python modules only.
+    def test_guard_closure_docs_file_in_a_closure_folder_keeps_every_flag_off(self):
+        p = "skills/waiting-page/SKILL.md"
+        self.assertFlags(run([p], existing=[p]), want_false=ALL)
+
+    # Control: the script names no closure-only member.
+    def test_guard_closure_script_names_no_closure_member_only_the_closure_supplies(self):
+        self.assertTrue(os.path.isfile(SCRIPT), SCRIPT)  # scope: the script under test is there
+        with open(SCRIPT) as f:
+            text = f.read()
+        self.assertTrue(text.strip(), SCRIPT)
+        for name in self.CLOSURE_ONLY_NAMES:
+            self.assertFalse(name in text, f"ci-scope.sh names {name}, a closure member; the closure must come from merge.py")
+
+    # The script asks merge.py for the closure through a python call and the CI_SCOPE_MERGE seam. The check reads code
+    # only, so a comment that names them does not pass.
+    def test_guard_closure_script_asks_merge_py_for_the_closure(self):
+        with open(SCRIPT) as f:
+            code = code_text(f.read())
+        self.assertTrue(re.search(r"\bpython3?\b", code), "ci-scope.sh runs no python, so it does not ask merge.py")
+        self.assertTrue("CI_SCOPE_MERGE" in code, "ci-scope.sh has no CI_SCOPE_MERGE seam")
+
     # Mod and map-skill tests run as a step of the checks, checks-windows and checks-macos jobs, run only on the
     # `mods` flag. A job runs on its own flag, so a path that turns on `mods` must turn on checks_windows and
     # checks_macos too, or a mod-only pull request starts neither job and the step never runs there.
@@ -423,6 +531,46 @@ class Scope(unittest.TestCase):
         self.assertFlags(got, want_false=["code", "shoot"])
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "false", f"checks_guard: {got}")
+
+
+# A failed closure read turns every flag on. Each case points the read at a fixture through CI_SCOPE_MERGE; the fixtures
+# live in this run's folder, which the class removes.
+@unittest.skipUnless(BASH, "bash not on PATH")
+class GuardClosureFailSafe(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.run_dir = _test_temp.run_folder()
+        cls.missing = os.path.join(cls.run_dir, "absent", "merge.py")
+        cls.empty = os.path.join(cls.run_dir, "empty", "merge.py")
+        cls.broken = os.path.join(cls.run_dir, "broken", "merge.py")
+        for path, body in ((cls.empty, ""), (cls.broken, "def (:\n")):
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as f:
+                f.write(body)
+
+    @classmethod
+    def tearDownClass(cls):
+        tracked_tree.rm_tree(cls.run_dir)
+
+    def assertAllOn(self, got, label):
+        for n in ALL + DERIVED_FLAGS:
+            self.assertEqual(got.get(n), "true", f"{label}: {n} is not on: {got}")
+
+    def test_guard_closure_missing_merge_py_turns_every_flag_on(self):
+        self.assertFalse(os.path.exists(self.missing))  # scope: the read points at no file
+        got = run(["janitor/sweep.py"], existing=["janitor/sweep.py"], extra_env={"CI_SCOPE_MERGE": self.missing})
+        self.assertAllOn(got, "a missing merge.py")
+
+    def test_guard_closure_empty_or_broken_merge_py_turns_every_flag_on(self):
+        self.assertEqual(os.path.getsize(self.empty), 0)  # scope: the empty fixture is empty
+        with open(self.broken) as f:  # scope: the broken fixture does not parse
+            with self.assertRaises(SyntaxError):
+                compile(f.read(), self.broken, "exec")
+        # An empty read is a failed read: a real closure always holds hooks/guard.py.
+        for label, path in (("an empty merge.py", self.empty), ("a merge.py that does not parse", self.broken)):
+            with self.subTest(label=label):
+                got = run(["janitor/sweep.py"], existing=["janitor/sweep.py"], extra_env={"CI_SCOPE_MERGE": path})
+                self.assertAllOn(got, label)
 
 
 # The mod phase must run each mods check script (mods/**/check.mjs), not only *.test.mjs. The script cds to its own
