@@ -2220,6 +2220,37 @@ class RefusalCiteFixtureTests(unittest.TestCase):
                          '    return None\n')
         self.assertEqual(status_of(src, "single-id"), ["cited"])
 
+    def test_a_later_run_time_walrus_does_not_unresolve_an_earlier_cited_read(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        if hit:\n'
+                         '            refuse(tool, "deny", "later-walrus-id", hit[1], hit[0])\n'
+                         '    if seg == "b" and (hit := pick(seg)):\n'
+                         '        return hit\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "later-walrus-id"), ["cited"],
+                         "a walrus in a later if runs after the read, so it must not pool into the read")
+
+    def test_a_run_time_binding_before_the_read_stays_not_resolved(self):
+        src = branch_src('    hit = pick(seg)\n'
+                         '    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '    if hit[0]:\n'
+                         '        refuse(tool, "deny", "before-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "before-id"), ["not resolved"],
+                         "the run-time binding before the read reaches it when seg is not a, so it stays unresolved")
+
+    def test_a_loop_rebinding_after_the_read_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    for x in seg:\n'
+                         '        if x:\n'
+                         '            refuse(tool, "deny", "loop-id", hit[1], hit[0])\n'
+                         '        hit = pick(x)\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "loop-id"), ["not resolved"],
+                         "the run-time rebinding after the read reaches it when the loop re-enters")
+
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
 
