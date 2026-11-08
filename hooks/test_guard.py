@@ -9126,8 +9126,9 @@ sh("merge-checks: a read run in the wrong folder is unknown, and denies",
 add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
     tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
     env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
-# The name is pinned by the mutant list in hooks/mutate_guard.py. Its verdict is now the auto-merge rule's, which runs first.
-sh("merge-checks: --auto is guarded like any merge", "gh pr merge 12 --auto --squash", "deny",
+# The name is pinned by the mutant "auto-merge: --auto is never read as auto-merge" in hooks/mutate_guard.py.
+# Its verdict is the auto-merge rule's, which runs first.
+sh("auto-merge: --auto is never read as auto-merge", "gh pr merge 12 --auto --squash", "deny",
    AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
    config=MERGECFG)
 sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
@@ -9276,6 +9277,13 @@ sh("auto-merge: gh pr merge --auto in a repo with a merge block is refused, and 
 sh("auto-merge: a cd into a repo with a merge block does not lift the refusal",
    "cd " + slash(STAMPREPO) + " && gh pr merge 5 --auto", "deny", AUTO_MERGE, carries=AUTO_SAYS,
    lacks=AUTO_LACKS, cwd=NOGIT, **_BARE_GUARD)
+# A subshell hides the `--auto` word: the call's last word reads `--auto)`. Each form is refused as the bare call is.
+sh("auto-merge: (cd /tmp && gh pr merge 5 --auto) is refused on a green head with no merge tool",
+   "(cd /tmp && gh pr merge 5 --auto)", "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_GREEN)
+sh("auto-merge: (cd /tmp; gh pr merge 5 --auto) is refused on a green head with no merge tool",
+   "(cd /tmp; gh pr merge 5 --auto)", "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_GREEN)
+sh("auto-merge: a subshell split over two lines, with --auto last, is refused on a green head with no merge tool",
+   "(cd /tmp &&\ngh pr merge 5 --auto)", "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_GREEN)
 # A pending or failed head still prints the auto-merge reason, not the merge-checks one (lacks names its wording).
 sh("auto-merge: gh pr merge --auto on a pending head prints the auto-merge reason", "gh pr merge 5 --auto",
    "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_PENDING)
@@ -9341,6 +9349,8 @@ sh("auto-merge: a plain gh pr merge on a pending head keeps the merge-checks ver
    "merge-checks", carries="pending", cwd=NOGIT, **_AUTO_PENDING)
 sh("auto-merge: a plain gh pr merge in a repo with a merge block keeps the bare-merge ask", "gh pr merge 5", "ask",
    BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+sh("auto-merge: a subshell gh pr merge without --auto keeps the merge-checks verdict", "(cd /tmp && gh pr merge 5)", "deny",
+   "merge-checks", carries="not settled", cwd=NOGIT, **_AUTO_PENDING)
 # gh api PUT of a merge path merges the head: judged as `gh pr merge 5 -R o/r`, in each spelling of the method.
 for _spell in ("-X PUT", "--method PUT", "--method=PUT", "-XPUT"):
     sh("merge-checks: gh api %s of the merge path is refused on a pending head" % _spell,
