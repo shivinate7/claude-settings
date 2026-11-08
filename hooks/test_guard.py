@@ -12087,6 +12087,21 @@ for _n, _c in (
 ):
     sh("frozen shell: r2, " + _n + ", writes the config settings, denies [r2 red]", _c, "deny",
        "frozen-path", cwd=NOGIT)
+# r5 gap: the output flag of sort and of git diff writes the file it names, so an output flag aimed at a
+# frozen path DENIES, in either spelling. The git diff space form is the twin of the builder-test pin above.
+for _n, _c in (
+    ("sort -o", "sort -o " + CFG_SETTINGS + " src/x"),
+    ("sort --output=", "sort --output=" + CFG_SETTINGS + " src/x"),
+    ("git diff --output=", VCS + " diff --output=" + CFG_SETTINGS),
+    ("git diff --output with a space", VCS + " diff --output " + CFG_SETTINGS),
+):
+    sh("frozen shell: r5 gap, " + _n + " names the config settings, denies [r5 gap]", _c, "deny",
+       "frozen-path", cwd=NOGIT)
+# The controls: an output flag aimed at a product file or at /tmp is no frozen write, so each allows.
+sh("frozen shell: r5 control, sort -o src/out.txt src/x, allows [r5 control]",
+   "sort -o src/out.txt src/x", "allow", cwd=NOGIT)
+sh("frozen shell: r5 control, git diff --output=/tmp/d.patch, allows [r5 control]",
+   VCS + " diff --output=/tmp/d.patch", "allow", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
@@ -13633,6 +13648,21 @@ sh("builder-test: shell write, r4 gap B, sort --output=tests/test_a.py on src/x,
    "sort --output=tests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: shell, r4 gap B control, sed e command runs sort on src/x, no -i, on src/app.py, is allowed",
    "sed 'e sort src/x' src/app.py", "allow", **BR)
+# r5 gap: an output flag of a reader or of git diff writes the file it names, as sort -o does. less -o and
+# less --log-file copy the input into the named file, and git diff --output writes the diff into it. Each
+# names a test, so each is refused. The controls name a product file or /tmp, and are allowed.
+sh("builder-test: shell write, r5 gap, less -o tests/test_a.py on src/x, is refused",
+   "less -o tests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r5 gap, less --log-file=tests/test_a.py on src/x, is refused",
+   "less --log-file=tests/test_a.py src/x", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r5 gap, git diff --output=tests/test_a.py, is refused",
+   "git diff --output=tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, r5 gap, git diff --output tests/test_a.py, is refused",
+   "git diff --output tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell, r5 control, sort -o src/out.txt src/x, is allowed",
+   "sort -o src/out.txt src/x", "allow", **BR)
+sh("builder-test: shell, r5 control, git diff --output=/tmp/d.patch, is allowed",
+   "git diff --output=/tmp/d.patch", "allow", **BR)
 # Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
 sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
    "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
