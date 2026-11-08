@@ -1,0 +1,11 @@
+{
+  "title": "An agent does not run a script another agent left in the shared scratchpad",
+  "phase": "next",
+  "status": "todo",
+  "order": 639,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "A builder in lane notes-fix-large-1 ran probe2.py, which another agent had left in the shared scratchpad; no guard stopped it (lane report, 06:57 CST Nov 8).",
+  "note": "Done check: a red test where the guard asks before an agent runs a scratchpad script it did not write, or a record says why per-agent scratch folders replace the check. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
+  "updatedAt": "2026-11-08T06:58:00-06:00"
+}
