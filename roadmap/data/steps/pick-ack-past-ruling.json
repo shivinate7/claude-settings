@@ -1,11 +1,11 @@
 {
   "title": "A lane or coordinator that takes or agrees to a departing pick cites the past rulings it checked",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 676,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL2KVnRww4daXVBQyAK",
   "why": "The coordinator agreed at 07:59 CST Nov 8 to lane guard-relative-write-escape's pick (refuse a top-level `git -C` write into an agent worktree). Neither searched docs/decisions, and the pick contradicted owner rulings in decision agent-worktree-discard-is-noted. Review round 1 caught it (coordinator 08:24 CST; lane session_013NEJKzJxDxuXzuwNe7fhYn 08:23 CST). The past-ruling check (step question-checks-past-rulings, done) runs only on questions to the owner.",
-  "note": "Merges the coordinator's pick-ack-past-ruling and the lane's pick-checks-owner-rulings, one incident. Scope: a pick a lane takes that departs from main, and a coordinator message that agrees to one, names the decisions it checked; the check asks when none is named. Candidate homes: the brief template and hooks/agent_brief.py, or the past-ruling search that question-checks-past-rulings built; the lane picks one and calls it, no copy. Done check: a red test where an agreement to a departing pick with no decisions named is asked. Build lane. Filed by triage 08:25 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:25:00-06:00"
+  "note": "Merges the coordinator's pick-ack-past-ruling and the lane's pick-checks-owner-rulings, one incident. Scope: a pick a lane takes that departs from main, and a coordinator message that agrees to one, names the decisions it checked; the check asks when none is named. Candidate homes: the brief template and hooks/agent_brief.py, or the past-ruling search that question-checks-past-rulings built; the lane picks one and calls it, no copy. Done check: a red test where an agreement to a departing pick with no decisions named is asked. Build lane. Filed by triage 08:25 CST Nov 8. Started by the coordinator 08:27 CST Nov 8 in lane session_013NEJL2KVnRww4daXVBQyAK.",
+  "updatedAt": "2026-11-08T08:27:00-06:00"
 }

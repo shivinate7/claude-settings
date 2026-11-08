@@ -1,11 +1,11 @@
 {
   "title": "A PR body update that is a lone placeholder, or far shorter than the live body, is refused",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 674,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzpRGRNNVi8C4bL4wM",
   "why": "Lane notes-fix-page sent \"PLACEHOLDER\" as #1969's whole body by mistake, and restored it within a minute (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:23 CST Nov 8). A lost PR body loses review records and Merge-after lines that the lane lint reads.",
-  "note": "Done check: a red test where a PR body update of a lone placeholder word, or one far shorter than the live body, is refused or asked. The lane sets the length cut and states it. Build lane. Filed by triage 08:25 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:25:00-06:00"
+  "note": "Done check: a red test where a PR body update of a lone placeholder word, or one far shorter than the live body, is refused or asked. The lane sets the length cut and states it. Build lane. Filed by triage 08:25 CST Nov 8. Started by the coordinator 08:27 CST Nov 8 in lane session_013NEJKzpRGRNNVi8C4bL4wM.",
+  "updatedAt": "2026-11-08T08:27:00-06:00"
 }

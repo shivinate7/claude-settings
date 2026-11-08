@@ -1,11 +1,11 @@
 {
   "title": "bin/shoot takes a stub script per page, so a page that needs window.claude can be shot",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 675,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL3cfg1yrBuezf45D4i",
   "why": "bin/shoot cannot load the stand-in for the waiting page's data store (window.claude), and the repo has no .claude/shoot.json. So the #2034 design check used a scratch Playwright script (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:23 CST Nov 8). A scratch script is a second home for the screenshot capability.",
-  "note": "Extends bin/shoot (decision shoot-is-one-shared-command), one home. Done check: a red test where bin/shoot with a page's stub script shoots the waiting page with its data shown. Build lane. Filed by triage 08:25 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:25:00-06:00"
+  "note": "Extends bin/shoot (decision shoot-is-one-shared-command), one home. Done check: a red test where bin/shoot with a page's stub script shoots the waiting page with its data shown. Build lane. Filed by triage 08:25 CST Nov 8. Started by the coordinator 08:27 CST Nov 8 in lane session_013NEJL3cfg1yrBuezf45D4i. It rides in lane shoot-touch-per-size, because both edit bin/shoot.",
+  "updatedAt": "2026-11-08T08:27:00-06:00"
 }

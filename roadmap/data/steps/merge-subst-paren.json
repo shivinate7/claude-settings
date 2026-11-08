@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool judges a merge command whose args hold a $( ) substitution",
+  "phase": "guards",
+  "status": "doing",
+  "order": 678,
+  "owner": "coordinator",
+  "lane": "session_013NEJL19PYKPFXLekGuTmnX",
+  "why": "The merge tool skips judging `merge -C /other $(echo 5) --confirm`, because the `)` that closes a `$(` cuts the args (round 3 on #1982, 91dfc65b1; the same on #1166's head; coordinator 08:26 CST Nov 8).",
+  "note": "Done check: a red test where that form is judged. Merge after #1982. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag (session_013NEJL19PYKPFXLekGuTmnX). Filed by triage 08:27 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:27:00-06:00"
+}
