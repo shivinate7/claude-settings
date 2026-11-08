@@ -38,9 +38,10 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               (even beside an unrelated add), an unchanged row, and a second row beside a kept base row pass. A merge of main
               that changes a base row passes, since the base is the merge base. A notes file git moves is read at its new
               path. Each slug is named once, with its path. No merge base while a note is at head is UNKNOWN. Cost, per run:
-              one `git merge-base`. For a file with a note at head, 3 git reads in all (`show` head, `merge-base`, `show`
-              base); a file absent at head adds its `ls-tree` and, when the base holds a note there, the rename lookup (up to
-              two `git diff-tree`). No process stays running, and no log or file is written.
+              one `git merge-base`. For a file at its path with a note at head, 3 git reads in all (`show` head,
+              `merge-base`, `show` base). A moved file takes 7 in all, within edited_notes: the base text is read once, and
+              the file's absence at head adds its `ls-tree` and the rename lookup (up to two `git diff-tree`). No process
+              stays running, and no log or file is written.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -643,7 +644,9 @@ def note_rows(text):
     return rows
 
 
-SAME_NOTE = 0.85  # a reworded row reads 0.90 against its base row; unrelated rows of the same shape read 0.80 or less
+# A reworded row reads 0.90 against its base row. Measured on the real notes on main (1587 rows): 1 of 1586 consecutive
+# pairs reads 0.85 or more, and of 1.26M pairs under different slugs, 2 reach 0.85. So 0.85 keeps false findings rare.
+SAME_NOTE = 0.85
 
 
 def edited_notes(cwd, upstream, head):
@@ -655,9 +658,10 @@ def edited_notes(cwd, upstream, head):
     keeps each: a dedupe leaves a base text. A notes file git moves (`renamed`, base to head) is read at its head path, so
     a row edited in a moved file is a finding and a pure rename passes. A file missing at the base has no finding. A note
     with no `- <slug>:` form has no slug, so the check does not see it. No merge base while a note is at head is Unknown.
-    Cost, per run: one `git merge-base`. Per notes path, a file with a note at head: three git reads in all (`show` head,
-    `merge-base`, `show` base). A file absent at head also reads its `ls-tree`, and, when the base holds a note there, the
-    rename lookup (up to two `git diff-tree`). No process stays running, and no log or file is written."""
+    Cost, per run: one `git merge-base`. Per notes path, a file at its path with a note at head: three git reads in all
+    (`show` head, `merge-base`, `show` base). A moved file takes seven in all: the base text is read once, and the file's
+    absence at head adds its `ls-tree` and the rename lookup (up to two `git diff-tree`). No process stays running, and
+    no log or file is written."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import layout  # lazy, as revived_notes loads it
     try:
@@ -678,10 +682,12 @@ def edited_notes(cwd, upstream, head):
             base = merge_base()
         if now and not base:
             raise Unknown("upstream and head share no merge base: the notes in %s have nothing to be compared with" % path)
+        then = None  # the base's rows, read once: a moved file needs them to decide it moved
         if not now:
             if not base:
                 continue
-            if not note_rows(blob(cwd, base, path)):
+            then = note_rows(blob(cwd, base, path))
+            if not then:
                 continue
             pair = renamed(cwd, base, head, raw_files(cwd, base, head)).get(path)
             if not pair:
@@ -690,8 +696,9 @@ def edited_notes(cwd, upstream, head):
             now = note_rows(blob(cwd, head, where))
             if not now:
                 continue
-        then = note_rows(blob(cwd, base, path))
-        fresh = [(s, line) for s in now if s not in then for line in now[s]]  # rows under a slug the base lacks
+        if then is None:
+            then = note_rows(blob(cwd, base, path))
+        fresh =[(s, line) for s in now if s not in then for line in now[s]]  # rows under a slug the base lacks
         for slug in sorted(then):
             had, has = then[slug], now.get(slug, set())
             if slug in now:
