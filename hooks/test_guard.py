@@ -5361,6 +5361,20 @@ sh("git-after-cd: a check in a process substitution, then ; a git push -u, is re
    "echo <(pytest -q); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a check in an output process substitution, then ; a git push -u, is refused",
    "echo >(pytest -q); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# A CHECK'S EXIT TAIL THAT SPANS LINES, AND A GROUP OR SUBSHELL THAT HOLDS THE PUSH. An `if !` whose then body is
+# `echo bad; exit 1` stops the shell on the check's failure, so the push after its `fi` passes, on one line or over
+# newlines. A check joined by `;` to a `{ }` group or a `( )` subshell that holds the push is refused: the push runs
+# whatever the check did.
+sh("git-after-cd: a check, then ; a { } group with a for loop holding a git push, is refused",
+   "pytest -q; { for r in a b; do %s push -u origin $r; done; }" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a ( ) subshell with an if holding a git push, is refused",
+   "pytest -q; ( if true; then %s push -u origin b; fi )" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: an if ! check whose then body is echo then exit 1, then ; a git push -u, passes",
+   "if ! pytest -q; then echo bad; exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: the same if ! check over three lines, then a git push -u, passes",
+   "if ! pytest -q; then\necho bad; exit 1\nfi\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
