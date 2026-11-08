@@ -13,7 +13,7 @@ The model and effort of each hook named here are rows of the model table (decisi
 - The Agent spawn judge and the AskUserQuestion reviewer are one command hook, `hooks/call_judge.py`, so an override can lift them.
 - The SendMessage wording judge is a command hook, `hooks/sendmessage_state.py`, so an override can lift it. It judges `parallelism-no-mid-task-talk` by wording alone.
 - The Edit and Write judge on `docs/decisions/` is a command hook, `hooks/prose_judge.py`, at Haiku `xhigh`. It judges `speak-rewrite-superseded-in-place` and `rulings-declare-kind`.
-- A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-agent`.
+- A prompt hook sees only the event's input, never the chat. On Stop that input holds the final reply (`last_assistant_message`), but no earlier message. So no prompt hook judges `roles-one-role-per-agent`. For `style-question-inside-box`, a Stop prompt hook could see whether a reply's question stands alone, but no prompt hook sees the text written before a question box.
 - The rules that these hooks read stay `unmechanized` in `lint/rule_mechanisms.json` until a hook catches a real defect.
 - A hook that cries wolf is spent (`verification-cry-wolf-guard-is-spent`). Remove one that refuses good input. The trial review of 2026-10-17 11:33 CDT: the refusing judges stay.
 
