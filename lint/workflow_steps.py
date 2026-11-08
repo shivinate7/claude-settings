@@ -163,6 +163,6 @@ def run_lines(step):
 
 
 def suite_paths(step):
-    """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge/test_<name>.py`, with
+    """The suites a CI step runs: the path of each of its run: lines that is `python3 hooks|merge|lint/test_<name>.py`, with
     arguments allowed. Any other line of the step stays in it, so a picked step runs whole, as CI runs it."""
     return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]

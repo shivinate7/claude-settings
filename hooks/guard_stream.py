@@ -258,24 +258,38 @@ LANE_LINT_REASON = (
 )
 
 
+def _lane_lint_command(tokens, at: int) -> str:
+    """The matched text when the command at TOKENS[AT] is merge with the lane-lint flag, else ''."""
+    word = basename(tokens[at]).lower()
+    if word in ("python", "python3"):  # `python3 .../merge.py`: the script is the first word that is no flag
+        at = next((i for i in range(at + 1, len(tokens)) if not tokens[i].startswith("-")), None)
+        if at is None:
+            return ""
+        word = basename(tokens[at]).lower()
+    if word in LANE_LINT_MERGE_WORDS and LANE_LINT_FLAG in tokens[at + 1:]:
+        return basename(tokens[at]) + " " + LANE_LINT_FLAG
+    return ""
+
+
+def _lane_lint_segment(segment: str) -> str:
+    """The matched text when one segment runs merge's lane lint, at its own command, at each command after a
+    `(` or `$(`, or inside a script it hands on (`bash -c`, `eval`, `pwsh -c`), else ''."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    for at in command_indexes(tokens):
+        hit = _lane_lint_command(tokens, at)
+        if hit:
+            return hit
+    return next((h for text in inner_commands(tokens) for part in split_segments(text)
+                 if (h := _lane_lint_segment(part))), "")
+
+
 def lane_lint_hit(segments, background: bool) -> str:
     """The matched text when a foreground call runs merge's lane lint, else ''. A call with run_in_background true is allowed."""
     if background:
         return ""
-    for segment in segments:
-        tokens = segment_tokens(segment)
-        index = resolve_command(tokens) if tokens else None
-        if index is None:
-            continue
-        word = basename(tokens[index]).lower()
-        if word in ("python", "python3"):  # `python3 .../merge.py`: the script is the first word that is no flag
-            index = next((i for i in range(index + 1, len(tokens)) if not tokens[i].startswith("-")), None)
-            if index is None:
-                continue
-            word = basename(tokens[index]).lower()
-        if word in LANE_LINT_MERGE_WORDS and LANE_LINT_FLAG in tokens[index + 1:]:
-            return basename(tokens[index]) + " " + LANE_LINT_FLAG
-    return ""
+    return next((h for segment in segments if (h := _lane_lint_segment(segment))), "")
 
 
 WAITER_REASON = (
