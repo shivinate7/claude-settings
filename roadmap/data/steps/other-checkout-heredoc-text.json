@@ -1,11 +1,11 @@
 {
   "title": "The other-checkout guard does not read a harmless python heredoc body as shell",
   "why": "The other-checkout shell scan reads words inside a python heredoc body, so text that only quotes a path or a `cp` line is refused (triage's own refusals, Nov 7-8; step other-checkout-cp-own).",
-  "note": "Fix: drop a python heredoc body from the shell scan only when the body parses and names none of os, subprocess, shutil, importlib, exec, eval or __import__. Review round 1 listed forms that must stay refused. The perl/ruby write gap (debt note other-checkout-perl-ruby-bodies) rides in the same follow-up. Built in lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator, 03:14 CST Nov 8. Filed 03:16 CST Nov 8.",
+  "note": "Fix: drop a python heredoc body from the shell scan only when the body parses and names none of os, subprocess, shutil, importlib, exec, eval or __import__. Review round 1 listed forms that must stay refused. The perl/ruby write gap (debt note other-checkout-perl-ruby-bodies) rides in the same follow-up. Built in lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator, 03:14 CST Nov 8. Filed 03:16 CST Nov 8. Built: PR #1906 (head ef1597875) with runner 8, Merge after #1867; R1 haiku FAIL, R2 sonnet FAIL, R3 sonnet PASS, net value positive. Files owner item 408 a in the frozen-path record and closes debt note other-checkout-perl-ruby-bodies. The lane's next follow-up retires stale note perl-ruby-bodies-unread (notes.md line 193) (lane, 07:58 CST Nov 8).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 578,
   "owner": "triage",
   "lane": "session_013NEJL3R2CBFavz7grtbJY8",
-  "updatedAt": "2026-11-08T03:13:00-06:00"
+  "updatedAt": "2026-11-08T07:59:00-06:00"
 }
