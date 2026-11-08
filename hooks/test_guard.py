@@ -10140,6 +10140,78 @@ bash_post("review-record: a stale record is refused, gh issue comment --body-fil
 for _label, _command in issue_forms(review_record(), os.path.join(GHRECORDDIR, "ok.md")):
     bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
 
+# `gh issue comment N --edit-last` edits the comment, and is judged on its shape before any read, as a post is.
+bash_post("review-record: prose after the CI line is refused, gh issue comment 12 --edit-last --body",
+          "%s --edit-last --body '%s'" % (ISSUE_CMD, REVIEW_TRAILING), "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+
+
+# THE ANSI-C FORMS, on `gh issue comment`. The guard decodes a `$'...'` word as bash does, then judges the body. Each deny holds
+# prose after the CI line, written in its form, so the refusal turns on the decode. Each allow control holds the same form in a
+# bare record: in the marker's brackets where the form can write them, else after `---`, since a record has no free text and the
+# parse ignores the footer.
+def ansi_word(text, sub=None, tail=""):
+    """A `$'...'` word for `text`: backslashes, quotes and newlines escaped as ansi_c does, each char in `sub` (a dict) written as
+    its escape, then `tail`, written as it is, so a case names each escape it means."""
+    body = ansi_c(text)[2:-1]
+    for char, escape in (sub or {}).items():
+        body = body.replace(char, escape)
+    return "$'" + body + tail + "'"
+
+
+def ansi_issue(name, word, expected):
+    """A case for `gh issue comment 12 --body` with the body `word`. A refusal names the record's shape, as the other forms do."""
+    deny = expected == "deny"
+    bash_post(name, "%s --body %s" % (ISSUE_CMD, word), expected, rule=REVIEW_RULE if deny else None,
+              carries=SHAPE_TEXT if deny else ())
+
+
+RECORD_HEX = {"<": r"\x3c", ">": r"\x3e"}   # the marker's brackets, in each escape form
+RECORD_UNI = {"<": r"<", ">": r">"}
+RECORD_OCT = {"<": r"\074", ">": r"\076"}
+RECORD_FIRST = REVIEW_MARKER_TEXT + "\n"     # the record's first line, and the lines after it
+RECORD_REST = review_record()[len(RECORD_FIRST):]
+
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C backslash-quote and an apostrophe in prose, gh issue comment --body",
+           ansi_word(review_record(), None, r"\'Lane note: it\'s after the record.\n"), "deny")
+ansi_issue("review-record: a record with its footer is allowed, ANSI-C backslash-quote and an apostrophe, gh issue comment --body",
+           ansi_word(review_record(), None, r"---\nGenerated with Claude Code, it\'s free\n"), "allow")
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C hex escapes, gh issue comment --body",
+           ansi_word(review_record(), RECORD_HEX, r"Lane note: \x41fter the record.\n"), "deny")
+ansi_issue("review-record: a bare record in ANSI-C hex escapes is allowed, gh issue comment --body",
+           ansi_word(review_record(), RECORD_HEX), "allow")
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C unicode escapes, gh issue comment --body",
+           ansi_word(review_record(), RECORD_UNI, r"Lane note: After the record.\n"), "deny")
+ansi_issue("review-record: a bare record in ANSI-C unicode escapes is allowed, gh issue comment --body",
+           ansi_word(review_record(), RECORD_UNI), "allow")
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C octal escapes, gh issue comment --body",
+           ansi_word(review_record(), RECORD_OCT, r"Lane note: \101fter the record.\n"), "deny")
+ansi_issue("review-record: a bare record in ANSI-C octal escapes is allowed, gh issue comment --body",
+           ansi_word(review_record(), RECORD_OCT), "allow")
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C tab escape, gh issue comment --body",
+           ansi_word(review_record(), None, r"Lane note:\tafter the record.\n"), "deny")
+ansi_issue("review-record: a record with its footer is allowed, ANSI-C tab escape, gh issue comment --body",
+           ansi_word(review_record(), None, r"---\nGenerated\twith Claude Code\n"), "allow")
+ansi_issue("review-record: prose before a NUL cut is refused, and the footer after the cut is not read, gh issue comment --body",
+           ansi_word(review_record(), None, r"Lane note after the record.\n\0---\nGenerated with Claude Code\n"), "deny")
+ansi_issue("review-record: a bare record before a NUL cut is allowed, gh issue comment --body",
+           ansi_word(review_record(), None, r"\0Lane note after the cut.\n"), "allow")
+ansi_issue("review-record: prose after the CI line is refused, ANSI-C word then double quotes, gh issue comment --body",
+           ansi_word(RECORD_FIRST) + '"' + RECORD_REST + "Lane note after the record.\n" + '"', "deny")
+ansi_issue("review-record: a bare record in an ANSI-C word then double quotes is allowed, gh issue comment --body",
+           ansi_word(RECORD_FIRST) + '"' + RECORD_REST + '"', "allow")
+ansi_issue("review-record: prose after the CI line is refused, double quotes then ANSI-C word, gh issue comment --body",
+           '"' + RECORD_FIRST + '"' + ansi_word(RECORD_REST + "Lane note after the record.\n"), "deny")
+ansi_issue("review-record: a bare record in double quotes then an ANSI-C word is allowed, gh issue comment --body",
+           '"' + RECORD_FIRST + '"' + ansi_word(RECORD_REST), "allow")
+ansi_issue("review-record: prose after the CI line is refused, a // inside the ANSI-C word, gh issue comment --body",
+           ansi_word(review_record(), None, "//Lane note after the record.\n"), "deny")
+ansi_issue("review-record: a record with its footer is allowed, a // inside the ANSI-C word, gh issue comment --body",
+           ansi_word(review_record(), None, "---\n//x and /* y\n"), "allow")
+ansi_issue("review-record: prose after the CI line is refused, a /* inside the ANSI-C word, gh issue comment --body",
+           ansi_word(review_record(), None, "/*Lane note after the record.\n"), "deny")
+ansi_issue("review-record: a record with its footer is allowed, a /* inside the ANSI-C word, gh issue comment --body",
+           ansi_word(review_record(), None, "---\nSee /*x and // y\n"), "allow")
+
 # RED on the head this branch starts from: the marker is in a body the guard reads as one undecoded word, so it is not on line 1
 # and the record is never judged. The same text in plain quotes is refused, so the decoded text must be refused too.
 bash_post("review-record: prose after the CI line is refused, gh pr comment --body with ANSI-C quoting",
@@ -10288,6 +10360,20 @@ REVIEW_LOG_CHECKS.append(("review-record:prose after the CI line in an edit is r
                          review_reads(UPDATE_TOOL, update_input(REVIEW_TRAILING), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:an edit's head is not judged, so a record for an old head is allowed with no gh read",
                          review_reads(UPDATE_TOOL, update_input(review_record(head=REVIEW_OLD)), "allow", 0)))
+# The issue word costs what the pull request word costs: one read per marked post at a number, and two with no number in a repo.
+REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh issue comment --body",
+                         review_reads("Bash", {"command": "%s --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh issue comment 12 --edit-last --body",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post with no pull request number makes two gh reads, gh issue comment --edit-last",
+                         review_reads("Bash", {"command": "gh issue comment --edit-last --body '%s'" % review_record()}, "allow", 2,
+                                      cwd=GHRECORDBRANCH, path_dirs=(GIT_PATH,))))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post with a wrong head tail makes one gh read, gh issue comment 12 --edit-last",
+                         review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record(head=REVIEW_TAIL))},
+                                      "deny", 1)))
+# An edit in place names a comment, not a pull request: the PATCH route reads no head, as the edit tool does.
+REVIEW_LOG_CHECKS.append(("review-record:a well-formed record in a PATCH makes no gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s -f 'body=%s'" % (API_EDIT_CMD, review_record())}, "allow", 0)))
 
 
 # =========================================================================== 5g. archive of a lane
