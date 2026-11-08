@@ -2,10 +2,11 @@
 
 **What.** The lost-sentence check pairs a removed note with an added note in three cases. The slug is the same. The added text names the old slug (a fold). Or a new slug carries a clause of it, held at `PAIR_HELD` (0.75). That last pair is a rename. A removed note with no pair is a plain retire, and no finding. These forms still pass:
 - A rename that rewords every clause below `PAIR_HELD`.
+- A rename whose clauses each have under `PAIR_WORDS` (5) content words. It passes as a plain retire, even when it drops a sentence.
 - A fold into an existing note that does not name the removed note. An existing slug never pairs as a rename.
 - A fold across two commits that names the old slug in the later commit only.
 - A rewrite inside a merge commit. The replay reads non-merge commits only.
-- A clause that an unrelated note line in the same commit holds at `HELD`, on the words the two share. Words that a tenth of head's note lines carry do not count (`generic_words`). Commit baf4d61d7 lost "no check ties the 90% n/a share" and passes. `restates-na-by-copied-anchors`, added in that commit, holds 90, n and share.
+- A clause that an unrelated note line in the same commit holds at `HELD`, on the words the two share. Words that a tenth of head's note lines carry do not count (`generic_words`). Commit baf4d61d7 lost "no check ties the 90% n/a share" and passes. `restates-na-by-copied-anchors`, edited in that commit, holds 90, n and share. The chance rises with the lines a commit adds: a sim over 150 lost clauses passes 48 at the start, 57 at 10 added notes, and 78 at 50 (the coordinator's sim, not re-run here).
 
 Incident closed: commit 6c8b057cb (PR #2002) renamed `find-time-pinned-donotfake-date` to `find-time-pinned-fake-overhide` and lost "The sleep scan reads fake timers the same way."; the check now refuses it. A looser pair stays out. Pairing by shared topic words, a shared `Decision:` tag or a slug prefix false-alarmed on a real retire (PR #2059, round 1).
 
