@@ -28299,6 +28299,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Done**
            "Check the floor fix.\n**Done**: FAIL, round 1 of 3\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Context: prior round result—FAIL line, no space at the dash",
            "Check the floor fix.\nContext: prior round result—FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round result-FAIL line, hyphen with no spaces",
+           "Check the floor fix.\nPrior round result-FAIL\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: line that asks for a verdict, PASS or FAIL",
           "Check the floor fix.\nDone: read the diff, then give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Context: line saying the prior verdict is in the PR thread",
