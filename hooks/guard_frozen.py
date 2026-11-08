@@ -10,8 +10,8 @@ import re
 import guard_core
 from guard_core import (
     LOOP_KEYWORDS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
-    _walk_wrappers, basename, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens,
-    split_segments,
+    _walk_wrappers, basename, checkout_root_by_stat, dir_before_segment, is_powershell, norm,
+    path_is_inside, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words, _substitutions
 
@@ -803,9 +803,9 @@ def _text_roots(text: str, cwd: str = "", predicate=None) -> list:
             continue   # empty, not the last of its pipeline, or a count
         chain, stage = [], at
         while stage is not None:
-            chain = _roots(parsed[stage]) + chain
+            chain = _dot_roots(_roots(parsed[stage]), cwd, predicate, _name_filters(parsed[stage])) + chain
             stage = fed_by[stage]
-        roots.extend(word for word in _dot_roots(chain, cwd, predicate) if word not in roots)
+        roots.extend(word for word in chain if word not in roots)
     return roots
 
 
@@ -863,12 +863,13 @@ _TREE_SKIP = frozenset(("node_modules", "__pycache__", "venv"))
 _TREE_LIMIT = 20000   # files read before the walk gives up
 
 
-def _first_test_under(where: str, predicate, glob: str = "") -> str:
+def _first_test_under(where: str, predicate, glob: str = "", only=()) -> str:
     """The first path under the folder `where` (relative to it) that `predicate` accepts, else ''.
     With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`; a
-    glob that starts with `_SEGMENT_GLOB`, one the shell expands: `*` stays in one segment). The glob
-    is tested against the name before `predicate` runs. Read from disk, top down, skipping hidden
-    folders, `node_modules`, `venv` and `__pycache__`.
+    glob that starts with `_SEGMENT_GLOB`, one the shell expands: `*` stays in one segment). With
+    `only` (`_name_filters`), only a file whose own name matches one of them, as `find -name` and
+    `grep --include` match. Both are tested before `predicate` runs. Read from disk, top down,
+    skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
     ponytail: a tree of more than `_TREE_LIMIT` files with no test found early reads as holding none."""
     segmented = glob.startswith(_SEGMENT_GLOB)
     glob = glob.removeprefix(_SEGMENT_GLOB)
@@ -879,6 +880,8 @@ def _first_test_under(where: str, predicate, glob: str = "") -> str:
         prefix = "" if prefix == "." else prefix + "/"
         for name in sorted(files):
             seen += 1
+            if only and not any(fnmatch.fnmatchcase(name, wanted) for wanted in only):
+                continue
             if glob:
                 rel = prefix + name
                 if (segmented and rel.count("/") != glob.count("/")) or not fnmatch.fnmatchcase(rel, glob):
@@ -892,41 +895,80 @@ def _first_test_under(where: str, predicate, glob: str = "") -> str:
 
 
 def _folder_root(root: str, cwd: str) -> str:
-    """The folder a root names when it is a plain relative path to a folder inside `cwd` that exists
-    on disk (`hooks`, `./hooks/`), else ''. A word with a quote, `$`, `~`, a glob character or a
-    backslash, a leading `-`, an absolute path and a path that leaves `cwd` are not read."""
+    """The folder a root names when it is a plain path to a folder that exists on disk and sits inside
+    the checkout that holds `cwd` (`hooks`, `./hooks/`, `../hooks` after a `cd`, an absolute path), else
+    ''. A relative path that stays inside `cwd` needs no checkout. A word with a quote, `$`, `~`, a glob
+    character or a backslash, a leading `-`, and a path outside the checkout are not read."""
     text = _unquoted(root)
-    if (text in ("", ".", "./") or re.search(r"[$`~*?\[\\]", text)
-            or text.startswith(("-", "/", ":"))):
+    if text in ("", ".", "./") or re.search(r"[$`~*?\[\\]", text) or text.startswith(("-", ":")):
         return ""
-    inside = os.path.normpath(text)
-    if inside == ".." or inside.startswith(".." + os.sep) or not os.path.isdir(os.path.join(cwd, inside)):
+    full = os.path.normpath(os.path.join(cwd, text))
+    if not os.path.isdir(full):
         return ""
+    if os.path.isabs(text) or path_is_inside(full, cwd) is not True:
+        top = checkout_root_by_stat(os.path.realpath(cwd))
+        if not top or path_is_inside(os.path.realpath(full), top) is not True:
+            return ""
     return text
 
 
-def _dot_roots(roots, cwd: str, predicate) -> list:
+def _name_filters(words) -> tuple:
+    """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name`, or of
+    `--include`, so a walk of its folder roots counts only the files it reaches. () when there is none, and
+    for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
+    for a value that holds `$` or a backtick. A `find` stops at its first `-exec`."""
+    index = resolve_command(tuple(words))
+    if index is None:
+        return ()
+    name, args = _name(words[index]), list(words[index + 1:])
+    values = []
+    if name == "find":
+        for at, word in enumerate(args):
+            if word in _FIND_EXEC:
+                break
+            if word in ("-o", "-or", "-not", "!", "\\!", "(", "\\("):
+                return ()
+            if word == "-name" and at + 1 < len(args):
+                values.append(args[at + 1])
+    elif name in _GREP_COMMANDS and name != "rg":
+        for at, word in enumerate(args):
+            if word == "--":
+                break
+            if word.startswith("--include="):
+                values.append(word.partition("=")[2])
+            elif word == "--include" and at + 1 < len(args):
+                values.append(args[at + 1])
+    values = [_unquoted(value) for value in values]
+    return () if any(re.search(r"[$`]", value) for value in values) else tuple(values)
+
+
+def _dot_roots(roots, cwd: str, predicate, names=()) -> list:
     """`roots` with each `.` or `./` put as the first test path under it, so a writer fed from the whole
     checkout is judged by a test it can reach. A `.` root that holds no test stays as it is, and so
     does one when `cwd` or `predicate` is not given. A folder root (`_folder_root`) is read the same
-    way, from disk, under that folder. A glob pathspec root (`_glob_root`) is put the
-    same way, as the first test path under its folder that the glob matches. When none matches, or
-    `cwd` or `predicate` is not given, it names nothing that is judged and is dropped."""
+    way, from disk, under that folder; a brace list of them (`{docs,hooks}`) is read one folder at a
+    time (`_brace_words`). `names` (`_name_filters`) limit the walk to the files the segment reaches. A
+    glob pathspec root (`_glob_root`) is put the same way, as the first test path under its folder
+    that the glob matches. When none matches, or `cwd` or `predicate` is not given, it names nothing
+    that is judged and is dropped."""
     reading = bool(cwd) and predicate is not None
     out = []
     for root in roots:
-        if root.startswith(_GLOB_MARK):
+        variants = [] if root.startswith(_GLOB_MARK) or not reading else _brace_words(root)
+        if len(variants) > 1:
+            out.extend(_dot_roots(variants, cwd, predicate, names))
+        elif root.startswith(_GLOB_MARK):
             folder, _mark, glob = root[len(_GLOB_MARK):].partition(_GLOB_MARK)
             found = _first_test_under(os.path.join(cwd, folder), predicate, glob) if reading else ""
             if found:
                 out.append(os.path.join(folder, found) if folder != "." else "./" + found)
         elif reading and root in (".", "./"):
-            found = _first_test_under(cwd, predicate)
+            found = _first_test_under(cwd, predicate, only=names)
             out.append("./" + found if found else root)
         elif reading and _folder_root(root, cwd) and not predicate(root, cwd):
             # a folder that is itself a test path (`tests`) stays as it is: it is judged as it stands
             folder = _folder_root(root, cwd)
-            found = _first_test_under(os.path.join(cwd, folder), predicate)
+            found = _first_test_under(os.path.join(cwd, folder), predicate, only=names)
             out.append(os.path.join(folder, found) if found else root)
         else:
             out.append(root)
@@ -964,9 +1006,9 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
         words = _fill_loop_variables(words, loops)
         rewritten = [words]
 
-        def dot_roots(roots):
+        def dot_roots(roots, names=()):
             where = (dir_before_segment(out + [segment], len(out), cwd, out_ends) or cwd) if cwd else ""
-            return _dot_roots(roots, where, predicate)
+            return _dot_roots(roots, where, predicate, names)
 
         index, chain = _walk_wrappers(tuple(words))
         xargs = next((flags for word, flags in chain if word == "xargs"), None)
@@ -975,7 +1017,7 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
             if back is not None and _prints_a_count(out_words[back]):
                 back = None
             while back is not None:
-                roots = _roots(out_words[back]) + roots
+                roots = dot_roots(_roots(out_words[back]), _name_filters(out_words[back])) + roots
                 back = _piped_into(out_ends, out_words, back)
             replace = None
             for flag, value in xargs:
@@ -984,10 +1026,10 @@ def _fed_segments(segments, ends, cwd: str = "", predicate=None):
                 elif flag in ("-i", "--replace"):
                     replace = value or "{}"
             if roots:
-                command, roots = words[index:], dot_roots(roots)
+                command = words[index:]
                 rewritten = [command + roots] if not replace else _put_roots(command, replace, roots)
         elif index is not None and _name(words[index]) == "find":
-            roots, commands, at = dot_roots(_roots(words)), [], index + 1
+            roots, commands, at = dot_roots(_roots(words), _name_filters(words)), [], index + 1
             while at < len(words):
                 if words[at] in _FIND_EXEC:
                     stop = at + 1

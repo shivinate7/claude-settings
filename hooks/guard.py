@@ -347,7 +347,7 @@ while True:
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            checkout_root_by_stat as _checkout_root_by_stat, clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
@@ -4241,19 +4241,6 @@ def _owning_checkout(path: str, roots) -> str:
     primary's `.claude/worktrees/` is deeper than the primary, so it owns its own files."""
     owners = [root for root in roots if path_is_inside(path, root) is True]
     return max(owners, key=len) if owners else ""
-
-
-def _checkout_root_by_stat(folder: str) -> str:
-    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
-    worktree's file), found by stat alone, else ''. No git is spawned."""
-    while folder:
-        if os.path.exists(os.path.join(folder, ".git")):
-            return folder
-        parent = os.path.dirname(folder)
-        if parent == folder:
-            return ""
-        folder = parent
-    return ""
 
 
 def _git_common_dir(root: str) -> str:
