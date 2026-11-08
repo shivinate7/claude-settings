@@ -8337,22 +8337,47 @@ const lowCell = (loc) => loc.evaluate((el) => {
   return { size: s.backgroundSize, pos: s.backgroundPosition, repeat: s.backgroundRepeat, image: s.backgroundImage, shadow: s.boxShadow };
 });
 const hexOf = (rgb) => "#" + rgb.match(/\d+/g).slice(0, 3).map((v) => Number(v).toString(16).padStart(2, "0")).join("");
-for (const [name, scope] of BARS_W) test(`the paused cell in ${name} paints its lower half in --muted, with no inset ring, in light and dark`, async (t) => {
-  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+// The paused part as drawn: the cell, or its run in a narrow bar. A cell or a run at 0 width is not drawn, so it is not the part.
+const drawnPaused = async (page, scope) => {
+  const all = page.locator(`${scope} i.pzd`);
+  const drawn = [];
+  for (let i = 0; i < (await all.count()); i++) {
+    const box = await all.nth(i).boundingBox();
+    if (box && box.width > 0) drawn.push(all.nth(i));
+  }
+  return drawn;
+};
+for (const width of [390, 1280]) for (const [name, scope] of BARS_W) test(`the paused cell in ${name} at ${width} wide paints its lower half in --muted, with no inset ring, in light and dark`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
   await openStatus(page);
   assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme });
-    const paused = page.locator(`${scope} > i.pzd`);
-    assert.equal(await paused.count(), 1, `${name} draws no paused cell (i.pzd) in ${scheme}`);
+    const dark = await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches);
+    assert.equal(dark, scheme === "dark", `the page did not take the ${scheme} scheme`);
+    const drawn = await drawnPaused(page, scope);
+    assert.equal(drawn.length, 1, `${name} at ${width} wide draws ${drawn.length} paused part(s) in ${scheme}, not one (a cell or a run)`);
     assert.ok(await tokenDefined(page, "--muted"), `--muted is not defined on :root in ${scheme}`);
     const muted = await tokenColour(page, "--muted");
-    const c = await lowCell(paused);
+    const c = await lowCell(drawn[0]);
     assert.equal(c.size, "100% 50%", `${name} in ${scheme}: the paused cell's background-size is "${c.size}", not "100% 50%"`);
     assert.match(c.pos, /100%$/, `${name} in ${scheme}: the paused cell's background-position "${c.pos}" is not at the bottom`);
     assert.equal(c.repeat.split(" ").pop(), "no-repeat", `${name} in ${scheme}: the paused cell repeats its paint, so it fills the top half too ("${c.repeat}")`);
     assert.ok(c.image.includes(muted), `${name} in ${scheme}: the paused cell's background-image is not --muted (${muted}): "${c.image}"`);
     assert.equal(c.shadow, "none", `${name} in ${scheme}: the paused cell still draws a ring: box-shadow "${c.shadow}"`);
+  }
+});
+// The low cell has no ::after: the old solid stripe under 3px lived there, so a stripe would still show on a narrow cell.
+for (const width of [390, 1280]) for (const [name, scope] of BARS_W) test(`the paused part in ${name} at ${width} wide draws no ::after content, in light and dark`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+  for (const scheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    const drawn = await drawnPaused(page, scope);
+    assert.equal(drawn.length, 1, `${name} at ${width} wide draws ${drawn.length} paused part(s) in ${scheme}, not one (a cell or a run)`);
+    const after = await drawn[0].evaluate((el) => getComputedStyle(el, "::after").content);
+    assert.equal(after, "none", `${name} at ${width} wide: the paused part has ::after content ${after} in ${scheme}`);
   }
 });
 for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read from the computed :root, each reach 3:1 against --surface in ${scheme}`, async (t) => {
@@ -8381,9 +8406,10 @@ const barLayers = (loc) => loc.evaluate((bar) => {
   const runs = bar.querySelector(":scope > .runs");
   return { barW: bar.getBoundingClientRect().width, cells: parts([...bar.querySelectorAll(":scope > i")]), runs: runs ? parts([...runs.querySelectorAll(":scope > i")]) : [] };
 });
-for (const width of [390, 1280]) for (const [name, scope] of BARS_W) test(`${name} at ${width} wide draws one layer, cells or runs by the narrow rule, and each drawn part is at least 3px`, async (t) => {
+for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (const [name, scope] of BARS_W) test(`${name} at ${width} wide in ${scheme} draws one layer, cells or runs by the narrow rule, and each drawn part is at least 3px`, async (t) => {
   const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
   await openStatus(page);
+  await page.emulateMedia({ colorScheme: scheme });
   assert.equal(await page.locator(scope).count(), 1, `${name} at ${width} wide is missing (${scope})`);
   const L = await barLayers(page.locator(scope));
   const cellsDrawn = L.cells.filter((p) => p.w > 0), runsDrawn = L.runs.filter((p) => p.w > 0);
