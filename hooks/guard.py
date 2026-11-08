@@ -116,7 +116,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
-                       its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
+                       its record, and a marker brief with no record of the target, are refusals. A brief to a lane that
+                       clears those checks is refused unless its text names `Triage: session_<id>` and
+                       `Batch runner: session_<id>` (label without case, optional number and parenthetical gloss, anywhere
+                       in the message). A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
