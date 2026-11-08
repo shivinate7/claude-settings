@@ -23,7 +23,7 @@ DEFAULT_BRANCH_FALLBACK = ("main", "master")
 
 def names_default_branch(ref: str) -> bool:
     """True when a pushed ref, with or without its `refs/heads/` prefix, is main or master. The one home of that test."""
-    return ref.strip().removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK
+    return ref.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK
 
 
 def _push_config(cwd: str, key: str, overrides=None):

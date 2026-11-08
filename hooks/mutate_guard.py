@@ -367,10 +367,10 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                return "main"',
+     '            elif names_default_branch(source):\n                return "main"',
      '            elif False:\n                return "main"', "guard", 'a push of main from a feature branch asks'),
     ("push-main: a refspec target of main is not a destination",
-     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                    return "main"',
+     '                if names_default_branch(target):\n                    return "main"',
      '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
     ("push-main: --all no longer asks",
      '    if every:\n        return "main"',
