@@ -1526,6 +1526,42 @@ def case_step_folder_without_slash_names_the_slash_remedy():
          ("command-in-item", "end it with /"))
 
 
+def case_step_backslash_cmdlet_path_after_a_prefix_is_a_shell_line():
+    # A Verb-Noun cmdlet at a backslash path is a shell line after `&`, after a VAR=value prefix and after sudo, as it is
+    # alone (case_step_path_cmdlet_is_a_shell_line). The forward-slash and the quoted forms are refused on main already:
+    # they are the controls, and they stay refused.
+    refused = ("command-in-item", "shell line")
+    for span in (r"& C:\tools\Get-Thing", r"FOO=1 C:\tools\Get-Thing", r"sudo ~\Get-Item"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    for span in ("& C:/tools/Get-Thing", r"& 'C:\tools\Get-Thing'"):
+        page("a step holding `%s` is refused as a shell line, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
+def case_step_span_flag_after_a_prose_determiner_is_text():
+    # A prose determiner (your, that, each, these) as a span's first word marks a flag phrase, so `your -x flag` is text,
+    # as `the -x flag` is (case_step_span_flag_after_a_determiner_is_text). The span-flag rule keeps its refusal for a
+    # command word that is no determiner: `grep -r x`, `chmod +x f` and `ok --force` stay refused.
+    for span in ("your -x flag", "that -x flag", "each -x option", "these -v flags"):
+        page("a step holding `%s` is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    for span in ("grep -r x", "chmod +x f", "ok --force"):
+        page("a step holding `%s` is refused as a shell line, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+
+
+def case_step_camel_verb_cmdlet_is_a_shell_line():
+    # A Verb-Noun cmdlet whose verb is CamelCase (`ConvertTo-Json`, `ConvertFrom-Json`) is a shell line, as a lowercase
+    # verb is (SHELL_CMDLET reads only `[A-Z][a-z]+-`). The control `docs/Read-Me` is a file name and stays text.
+    refused = ("command-in-item", "shell line")
+    for span in ("ConvertTo-Json x", "ConvertFrom-Json"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    page("a step holding `docs/Read-Me` alone is text and passes, a control", "set",
+         entry_of(task_item(["Check the output of `docs/Read-Me`"])), None)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2245,6 +2281,8 @@ def main():
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
                  case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
+                 case_step_backslash_cmdlet_path_after_a_prefix_is_a_shell_line,
+                 case_step_span_flag_after_a_prose_determiner_is_text, case_step_camel_verb_cmdlet_is_a_shell_line,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
