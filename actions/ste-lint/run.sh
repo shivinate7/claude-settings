@@ -109,7 +109,7 @@ LOG_OUT="$(mktemp)"
 # (STALE008). Scope changed only. It runs before the "no markdown changed" exit, so a code-only PR is
 # checked. Its findings never go through the split script below: the split would make a finding on an
 # untouched line report-only, and these findings keep their own exit whether the line is touched or not
-# (STALE008 and STALE010 judge lines the range adds). FAIL=false prints them and keeps the exit 0, as it
+# (STALE010 judges only added lines; STALE008 also judges a line whose cited literal changed). FAIL=false prints them and keeps the exit 0, as it
 # does for the STE findings.
 STALE_EXIT=0
 if [ "$SCOPE" != "all" ]; then
