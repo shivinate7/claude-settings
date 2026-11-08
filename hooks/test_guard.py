@@ -11683,6 +11683,21 @@ sh("frozen: grep -rn of the bare frozen hooks folder is a read, and is allowed",
    "grep -rn x " + CFG_HOOK_DIR, "allow", cwd=NOGIT)
 sh("frozen: find of the bare frozen hooks folder by name is a read, and is allowed",
    "find " + CFG_HOOK_DIR + " -name '*.py'", "allow", cwd=NOGIT)
+# A SUBSTITUTED ASSIGNMENT, A REDIRECT AHEAD OF THE COMMAND, OR A FUNCTION BODY IS STILL A WRITE TO ITS PATH.
+# Each row names a frozen file as the cp target and denies as frozen-path. ionice and runuser are wrappers
+# the frozen scan reads, so their rows pin that the write behind them is still read.
+sh("frozen: a cp behind an env assignment with a $(date) value, onto the config hook, is denied",
+   'FOO="$(date)" cp x ' + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp behind an A=$(date +%s) assignment, onto bin/verdict, is denied",
+   'A="$(date +%s)" cp x ' + CFG_VERDICT, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp behind a 2>/dev/null redirect, onto the config hook, is denied",
+   "2>/dev/null cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp in a function body that is called at once, onto the config hook, is denied",
+   "f() { cp x " + CFG_HOOK + "; }; f", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an ionice -c3 wrapped cp onto the config hook is denied",
+   "ionice -c3 cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a runuser -u u -- wrapped cp onto the config hook is denied",
+   "runuser -u u -- cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -21881,6 +21896,19 @@ sh("other-checkout: a backtick copy into a separate clone, inside a commit messa
    VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
    "deny", "other-checkout", cwd=XCL_LANE)
 
+# A SUBSTITUTED ASSIGNMENT, A REDIRECT AHEAD OF THE COMMAND, A FUNCTION BODY OR A WRAPPER IS STILL A WRITE INTO
+# ANOTHER CHECKOUT. Each row denies as other-checkout. setsid takes -w: a bare setsid is refused by
+# detached-launch before any write is read, so only the -w form reaches the other-checkout scan.
+OTHER_WRITE_TARGET = slash(os.path.join(XCL_SEP, "f"))
+sh("other-checkout: an env assignment with a $(echo a b) value, before a cp into a separate clone, is refused",
+   "FOO=$(echo a b) cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a cp behind a 2>/dev/null redirect into a separate clone is refused",
+   "2>/dev/null cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a cp in a function body that is called at once, into a separate clone, is refused",
+   "f() { cp x " + OTHER_WRITE_TARGET + "; }; f", "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a setsid -w wrapped cp into a separate clone is refused",
+   "setsid -w cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
 XCL_REMOTE = os.path.join(ROOT, "xcl_remote.git")  # the bare repository both clones name as origin
@@ -21957,6 +21985,41 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a cd into a se
                          xcl_override_cd_case))
 LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd's relative write",
                          xcl_override_stranded_case))
+
+
+def worktree_home_agent_perl_outside_home_case():
+    """Rule 0, worktree-home, an agent run from the primary, outside the worktree it recorded as its home:
+    a `perl -pi` into a sibling worktree is refused by worktree-home, which runs before other-checkout, and
+    the same edit from its own home passes. The agent records its home first, from the home folder, as
+    worktree_home_red_write_case does."""
+    primary, home, sibling, _ = _cross_checkout_fixture(
+        "xcoperl", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    problems = []
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow":
+        problems.append("the agent's recording call: want allow, got %s (%s)" % (got, reason[:120]))
+    target = slash(os.path.join(sibling, "src", "app.py"))
+    got, reason = _decide_full("Bash", primary, agent_id=CD_AGENT_HOME,
+                               command="perl -pi -e s/a/b/ " + target)
+    if got != "deny" or "worktree-home" not in reason:
+        problems.append("an agent at the primary, perl -pi into a sibling worktree: want deny by worktree-home, "
+                        "got %s (%s)" % (got, reason[:160]))
+    if any(text in reason for text in (ROOT, slash(ROOT), sibling, slash(sibling))):
+        problems.append("an agent at the primary, perl -pi into a sibling worktree: the refusal names a path: %s"
+                        % reason[:160])
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME,
+                               command="perl -pi -e s/a/b/ src/app.py")
+    if got != "allow":
+        problems.append("control, the agent's perl -pi in its own home: want allow, got %s (%s)"
+                        % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "an agent's perl -pi from outside its home into a sibling worktree is refused; its own home passes"
+
+
+LOG_CHECKS_EXTRA.append(("worktree-home: an agent run from the primary, outside its recorded home, may not "
+                         "perl -pi a sibling worktree, and its own home passes",
+                         worktree_home_agent_perl_outside_home_case))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
