@@ -1,10 +1,11 @@
 {
   "title": "The child-repo runner batches each repo in parallel, so one repo's hand-offs never wait on another repo's batch",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.66,
   "owner": "coordinator",
   "why": "banchi lanes #1076 and #1077 sat about 1 h 16 min with no lane running while runner 9 built q_max batch 1107t (coordinator, 21:17 CST Nov 7). Idle PRs are the owner's stated top problem.",
-  "note": "Fix, one of: the child-repo runner opens a repo's batch as soon as its hand-offs pass lane lint, while another repo's batch CI runs; or each repo gets its own runner. Context: banchi #1078 merged as bdafdc9be at 21:16 CST (runner 9). Filed from the coordinator, 21:17 CST Nov 7; no earlier step held it. Filed 21:17 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:17:00-06:00"
+  "note": "Fix, one of: the child-repo runner opens a repo's batch as soon as its hand-offs pass lane lint, while another repo's batch CI runs; or each repo gets its own runner. Context: banchi #1078 merged as bdafdc9be at 21:16 CST (runner 9). Filed from the coordinator, 21:17 CST Nov 7; no earlier step held it. Filed 21:17 CST Nov 7. Started by the coordinator, 21:18 CST Nov 7, in lane session_013NEJKzGm25T6yUwjjibfGN. Updated 21:18 CST.",
+  "updatedAt": "2026-11-07T21:18:00-06:00",
+  "lane": "session_013NEJKzGm25T6yUwjjibfGN"
 }
