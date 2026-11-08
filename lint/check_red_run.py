@@ -13,9 +13,22 @@ records that run as a trailer on the commit that adds the test:
                                                     sha has the same shape as the failed form's
     Red-run: none: <reason>                         a change that adds no new claim, such as a re-pointed fixture
 
+A message passes only when it has at least one Red-run line and every Red-run line is valid: one malformed line fails the
+commit, even beside a valid one. A line counts as a Red-run line when its key reads `red-run` followed by optional spaces and a colon at line
+start, in any case (`Red-Run:`, `red-run:`, `Red-run :`); a key that is not exactly `Red-run:` is malformed. Prose that
+mentions red-run mid-line is not judged. The failed form judges the first word of its command in two layers, so a
+typo is not read as a failed form. First, it refuses a word that starts with `mutant` or `mutation` (`mutants:`,
+`mutant(A)`, `mutant-A`, `mutant=x`, a no-colon `mutant A (...)`), or is exactly `none` or `non` once a trailing
+colon is dropped. Second, unless the word is an environment assignment (`NAME=value`, quoted or not, such as
+`MUTATE_ONLY=x` or main commit 049f8d8c0's `MUTATE_ONLY="worktree-home: ..."`), it refuses a word that starts with
+`mutat` or `mutan` (`mutate`, `mutated`, `mutan:`), or that ends in a colon (`runner:`, `nonee:`). The valid `mutant:` and `none:`
+forms are routed to their own patterns before the failed form, so neither layer reads them. Real commands pass
+(`mutmut run`, `./mutation_probe.sh`, `NONE=1 python3 ...`, `env X=1 python3 ...`, `nonstop ...`). Three main commits
+(408340997, 1762ec79f, b2f0fb754) wrote the no-colon mutant form.
+
 A line whose keyword reads `mutant` is judged by the mutant form alone, never by the command form. The mutant
 pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case,
-any whitespace before the colon, the colon, then a literal space. The failed and none forms need a literal space after
+any whitespace before the colon, the colon, then one or more spaces. The failed and none forms need a literal space after
 `Red-run:`. The check reads the sha's shape only, as it does for the
 failed form, and never that the sha exists or that the mutation was made: those parts are claimed. A rebase or a
 cherry-pick rewrites the commit a sha names, so a reach check raised false alarms.
@@ -46,6 +59,13 @@ MUTANT_KEY = re.compile(r"^Red-run:\s*(?i:mutant)\s*:")  # routes a line to the 
 MUTANT = re.compile(r"^Red-run:\s*(?i:mutant)\s*: \s*\S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
+RED_KEY = re.compile(r"^red-run\s*:", re.IGNORECASE)  # a Red-run line in any case; only `Red-run:` exactly can be valid
+# First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
+# keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
+REFUSED_NONE_WORDS = frozenset(("none", "non"))
+# An environment assignment as the first word (`MUTATE_ONLY=x`, `MUTATE_ONLY="a: b"`). It is a real command's prefix, so
+# the second layer of the word rule (`mutant_like`, `refused_word`) does not read it.
+ENV_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 FIELD = "\x1f"
 MAX_PATHS = 5
 
@@ -61,20 +81,54 @@ def git(root, *args):
     return r.stdout
 
 
+def first_word(line):
+    """The first word of a failed-form line's command, as written."""
+    words = line[len("Red-run:"):].split()
+    return words[0] if words else ""
+
+
+def command_of(line):
+    """The first word of a failed-form line's command, lower case, with trailing colons dropped."""
+    return first_word(line).rstrip(":").lower()
+
+
+def valid_line(line):
+    """True when one Red-run line is a valid mutant, failed or none form. Pure."""
+    line = line.rstrip()
+    if MUTANT_KEY.match(line):
+        mutant = MUTANT.match(line)
+        return bool(mutant) and int(mutant.group(1)) >= 1
+    if NONE.match(line):
+        return True
+    red = RED.match(line)
+    return bool(red) and int(red.group(1)) >= 1 and not mutant_like(line) and not refused_word(line)
+
+
+def mutant_like(line):
+    """True when the failed-form command starts like the mutant keyword: it starts with `mutant` or `mutation` (an
+    environment assignment too, so `mutant=x` stays refused), or, unless it is an environment assignment
+    (`MUTATE_ONLY=x`), with `mutat` or `mutan`. The one home of the mutant-like refusal and of the hint that names the
+    mutant form. Pure."""
+    word = command_of(line)
+    if word.startswith(("mutant", "mutation")):
+        return True
+    return not ENV_WORD.match(word) and word.startswith(("mutat", "mutan"))
+
+
+def refused_word(line):
+    """True when the failed-form command's first word is a none typo (`none`, `non`), or, unless it is an environment
+    assignment, ends in a colon: a keyword typo such as `runner:` or `nonee:`. The valid `mutant:` and `none:` lines are
+    routed to their own forms before this is read. Pure."""
+    word = first_word(line)
+    if command_of(line) in REFUSED_NONE_WORDS:
+        return True
+    return not ENV_WORD.match(word) and word.endswith(":")
+
+
 def has_valid_trailer(message):
-    """True when a Red-run line has 1 or more failures, or is none with a reason. Pure: it reads no repo."""
-    for line in message.splitlines():
-        if not line.startswith("Red-run:"):
-            continue
-        if MUTANT_KEY.match(line):
-            mutant = MUTANT.match(line)
-            if mutant and int(mutant.group(1)) >= 1:
-                return True
-            continue
-        red = RED.match(line)
-        if (red and int(red.group(1)) >= 1) or NONE.match(line.rstrip()):
-            return True
-    return False
+    """True when the message has a Red-run line and every Red-run line is valid. Pure: it reads no repo."""
+    lines = [line for line in message.splitlines() if RED_KEY.match(line)]
+    return bool(lines) and all(valid_line(line) for line in lines)
 
 
 def commits(root, base):
@@ -118,8 +172,11 @@ def gaps(root, base):
         if not paths:
             continue
         if not has_valid_trailer(message):
+            hint = ""
+            if any(mutant_like(l) and not valid_line(l) for l in message.splitlines() if RED_KEY.match(l)):
+                hint = "; a mutant line reads `Red-run: mutant: <mutation> -> <N> failed on <sha>`"
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
-            lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown))
+            lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer%s" % (sha[:7], subject, shown, hint))
     return lines
 
 
