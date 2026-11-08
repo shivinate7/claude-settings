@@ -11884,6 +11884,31 @@ sh("frozen: a parallel wrapped cat of the config hook is a read and is allowed",
    "parallel cat ::: " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen: an eatmydata wrapped grep of the config hook is a read and is allowed",
    "eatmydata grep x " + CFG_HOOK, "allow", cwd=NOGIT)
+# RUNNER FORMS THE WRAPPER TABLE DOES NOT SPLIT. parallel takes its command as one quoted string, a flag that takes
+# no value, or a flag that takes one; nsenter takes a value glued to its letter. Each row holds one form and one
+# verb, and its allow twin differs by the verb alone.
+sh("frozen: a parallel command given as a quoted string, rm of the config hook, is denied",
+   "parallel 'rm {}' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel command given as a quoted string, cp onto the config hook, is denied",
+   "parallel 'cp x {}' ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter -m value glued to a path, wrapped cp onto the config hook, is denied",
+   "nsenter -m/proc/1/ns/mnt cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an nsenter -n value glued to a path, wrapped cp onto the config hook, is denied",
+   "nsenter -n/proc/1/ns/net cp x " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --shuf flag that takes no value, wrapped rm of the config hook, is denied",
+   "parallel --shuf rm {} ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --tmux flag that takes no value, wrapped rm of the config hook, is denied",
+   "parallel --tmux rm {} ::: " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --semaphore-name value, wrapped rm of the config hook, is denied",
+   "parallel --semaphore-name x rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel --id value, wrapped rm of the config hook, is denied",
+   "parallel --id x rm " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a parallel command given as a quoted string, cat of the config hook, is a read and is allowed",
+   "parallel 'cat {}' ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: a parallel --shuf flag, wrapped cat of the config hook, is a read and is allowed",
+   "parallel --shuf cat {} ::: " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: an nsenter -m value glued to a path, wrapped cat of the config hook, is a read and is allowed",
+   "nsenter -m/proc/1/ns/mnt cat " + CFG_HOOK, "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -22171,6 +22196,29 @@ sh("other-checkout: a parallel wrapped cat of a separate clone is a read and is 
    "parallel cat ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: an eatmydata wrapped grep of a separate clone is a read and is allowed",
    "eatmydata grep x " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+# The runner forms of the frozen family above, aimed at a separate clone: each denies, and each read twin is allowed.
+sh("other-checkout: a parallel command given as a quoted string, rm into a separate clone, is refused",
+   "parallel 'rm {}' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel command given as a quoted string, cp into a separate clone, is refused",
+   "parallel 'cp x {}' ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter -m value glued to a path, wrapped cp into a separate clone, is refused",
+   "nsenter -m/proc/1/ns/mnt cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter -n value glued to a path, wrapped cp into a separate clone, is refused",
+   "nsenter -n/proc/1/ns/net cp x " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --shuf flag that takes no value, wrapped rm into a separate clone, is refused",
+   "parallel --shuf rm {} ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --tmux flag that takes no value, wrapped rm into a separate clone, is refused",
+   "parallel --tmux rm {} ::: " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --semaphore-name value, wrapped rm into a separate clone, is refused",
+   "parallel --semaphore-name x rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --id value, wrapped rm into a separate clone, is refused",
+   "parallel --id x rm " + OTHER_WRITE_TARGET, "deny", "other-checkout", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel command given as a quoted string, cat of a separate clone, is a read and is allowed",
+   "parallel 'cat {}' ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: a parallel --shuf flag, wrapped cat of a separate clone, is a read and is allowed",
+   "parallel --shuf cat {} ::: " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
+sh("other-checkout: an nsenter -m value glued to a path, wrapped cat of a separate clone, is a read and is allowed",
+   "nsenter -m/proc/1/ns/mnt cat " + OTHER_WRITE_TARGET, "allow", cwd=XCL_PRIMARY)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
