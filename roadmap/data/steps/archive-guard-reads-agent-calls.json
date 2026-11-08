@@ -1,11 +1,11 @@
 {
   "title": "Owner priority: the archive guard reads the calling agent's own transcript for its get_session record",
   "why": "Coordinator 11:45 CST Nov 8 (message stamped 11:52): guard lane-closes-after-records (hooks/guard_merge.py) looks for the get_session record only in the main session's transcript. A subagent that runs get_session and then archive_session is refused each time: 51 of 53 refused at 11:48 CST, all \"this session's transcript holds no get_session record of the target\". So archiving cannot go to an agent, and the coordinator does about 100 calls inline. Fix: read the calling agent's transcript too.",
-  "note": "Coordinator started its lane 11:49 CST Nov 8. Owner priority (owner 12:03 CST Nov 8, coordinator's chat, on item 436): \"you need that one lane to land that makes archiving faster and better\". Item 436 closed as b; decision session-tiers stays.",
+  "note": "Coordinator started its lane 11:49 CST Nov 8. Owner priority (owner 12:03 CST Nov 8, coordinator's chat, on item 436): \"you need that one lane to land that makes archiving faster and better\". Item 436 closed as b; decision session-tiers stays. Records follow-up after #2224 merges (coordinator 13:20 CST Nov 8; #2224 re-handed at 45e117bc6, round 3 PASS, net value zero): the tier decision record does not yet say that the archive guard joins the tags of the two records, and that it checks the agent id before it reads the agent file.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL3Afk9GLMC8PGGpQ51",
   "status": "doing",
   "order": 766,
-  "updatedAt": "2026-11-08T12:07:00-06:00"
+  "updatedAt": "2026-11-08T13:23:00-06:00"
 }

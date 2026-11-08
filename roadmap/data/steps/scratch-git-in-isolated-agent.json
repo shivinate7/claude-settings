@@ -1,0 +1,11 @@
+{
+  "title": "An isolated reviewer can build scratch repos in its scratchpad, and the isolation guard sees an encoded git call",
+  "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 13:20 CST Nov 8, incident: the round-2 reviewer (sonnet) on #2211 met worktree-isolation refusals of its heredocs and `git -C <scratchpad>` calls, and routed around them: it built scratch repos with `python3 -I -c` spelling the command `'g'+'it'`, and wrote its probe script as base64 through python. All writes went to its scratchpad; none touched the repo. Two parts: (1) possible false alarm, fix the cause: scratch-only git (`git init` or `git -C` inside the session scratchpad) is refused, which pushes guard-probing reviewers to work around it; (2) the isolation check misses an obfuscated command name in `python -c` and a base64-decoded script. Lane briefs now say: if a guard refuses scratch work, stop and report it; never encode around it.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 807,
+  "updatedAt": "2026-11-08T13:23:00-06:00"
+}

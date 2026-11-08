@@ -1,0 +1,11 @@
+{
+  "title": "Before an archive-then-delete, the archive holds origin's tip, not only the local tip",
+  "why": "Lane agent-report-shas-resolve (session_013NEJL1333yS5ziKFeWsjHC), 13:22 CST Nov 8, its own mistake: it amended local send-message-refs-resolve to 660db61b0, then archived it, so archive/send-message-refs-resolve got 660db61b0, not origin's 576ec5b5c (closed #1864's head). The remote delete did nothing, so 576ec5b5c is still kept on that branch. Harm: an archive that does not hold the commit it should keep. Fix: the archive step checks that local tip equals origin's tip, or archives origin's tip too, before any delete.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 806,
+  "updatedAt": "2026-11-08T13:23:00-06:00"
+}
