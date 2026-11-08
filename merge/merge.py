@@ -3235,8 +3235,12 @@ def dropped_round_lines(last, rec):
     None. A line is the same when its round number, role, model and verdict match. Extra lines in `rec` are not refused. Every line is kept, in its
     order, so the new record stays a faithful copy. Only the last design-reviewer line, by position, decides whether a design FAIL keeps the record
     open, so a dropped or swapped design line can turn an open record done."""
-    rest = iter(rec["rounds"])  # `line in rest` consumes up to its match, so a line found out of order reads as missing
-    lost = [f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in last["rounds"] if (i, role, model, verdict) not in rest]
+    new, pos, lost = list(rec["rounds"]), 0, []  # a found line moves pos past it; a missing line leaves pos, so the lines after it are still matched
+    for line in last["rounds"]:
+        if line in new[pos:]:
+            pos += new[pos:].index(line) + 1
+        else:
+            lost.append("Round {}: {}, {}, {}".format(*line))
     if lost:
         return (f"this record drops or reorders {'; '.join(lost)} of the record on head {last['head'][:9]}. "
                 "Copy every Round line of that record unchanged and in its order, then add the new lines after them")
