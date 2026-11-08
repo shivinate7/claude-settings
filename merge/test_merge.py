@@ -14201,6 +14201,19 @@ class ReviewParseBadLine(unittest.TestCase):
         self.assertIsNone(rec, "a record cut by a rule where the Stamp was owed parsed:\n" + body)
         self.assertEqual(bad, (9, "---"), "the line where the Stamp was owed is not named:\n" + body)
 
+    def test_a_bad_kind_on_line_four_is_named_before_a_malformed_guard_line_five(self):
+        # Kind is bad on line 4 and line 5 has no colon. Line 4 is the earliest bad line, so it is named, not the line below it. The Stamp is
+        # computed over the two bad lines, so the only defects are the two lines above it.
+        text = record_text(rounds=REVIEW_PASS, kind="bogus")
+        lines = text.splitlines()
+        lines[4] = "Guard or check no"
+        i = stamp_index(self, text)
+        lines[i] = "Stamp: " + review_fn(self, "review_stamp")(lines[:i])
+        body = "\n".join(lines) + "\n"
+        rec, bad = bad_parse(self, body)
+        self.assertIsNone(rec, "a record with a bad Kind parsed:\n" + body)
+        self.assertEqual(bad, (4, "Kind: bogus"), "the bad Kind on line 4 is not named before the malformed line 5:\n" + body)
+
     def test_a_six_line_body_missing_the_guard_field_names_line_five(self):
         # A missing field is bad where it was owed: with no Guard or check line, line 5 is the first line that is not that field.
         body = "\n".join([REVIEW_MARKER, "PR: #7", f"Head: {REVIEW_HEAD}", "Kind: normal", "Net value: not owed", REVIEW_CI_LINE]) + "\n"
