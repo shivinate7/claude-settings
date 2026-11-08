@@ -2581,6 +2581,11 @@ ROUND3_ALLOWED = (
     ("a question ending ?!", "Which check will fail?!", ()),
     ("a quoted question as a subject", "'Which check will fail?' is what I asked.", ()),
     ("a question split over two sentences", "Which check will fail. Do you know?", ()),
+    ("a yes-no question, do you think, the guard as the subject", "Do you think the guard will refuse it?", ()),
+    ("a yes-no question, would you say, the guard as the subject", "Would you say the guard will refuse it?", ()),
+    # Passes on the old code too: a modal that opens the sentence has no actor before it. It guards the fix against
+    # refusing a yes-no question that opens with its modal.
+    ("a yes-no question, will opens it, the guard as the subject", "Will the guard refuse it?", ()),
 )
 ROUND3_REFUSED = (
     ("an adverb between will and the verb", "the check will probably refuse it."),
@@ -2601,6 +2606,11 @@ ROUND3_REFUSED = (
     ("a relative which before the guard, after a comma and is why", "The test is in place, which is why the guard will refuse it."),
     ("an imperative before which, no run", "Tell me which check will fail."),
     ("don't know before which, no run", "I don't know which check will fail."),
+    ("an ask word in the subject, verify, no run", "The verify hook will refuse it."),
+    ("an ask word in the subject, unknown, no run", "The unknown-reads check will refuse it."),
+    # The last two are pins: each is a plain claim with no run, refused on the old code too.
+    ("a plain claim, the guard, no run", "The guard will refuse it."),
+    ("a plain claim, the read check, no run", "The read check will refuse it."),
 )
 
 
