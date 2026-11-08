@@ -5700,6 +5700,114 @@ for _label, _command in (
             command=_command, **({"run_in_background": True} if _bg else {}))
 
 
+# ------------------------------------------------------------------ wait-until: a wait for a clock time
+#
+# Owner ask, waiting page item ask-mw74y9cw3z: a session waits until a clock time, then runs one command.
+# Two forms of that wait were refused: a pause of 600 s under run_in_background, and a loop whose test
+# reads the clock, under run_in_background. A loop whose test compares `date` output with a literal time
+# ends at that time, so it is allowed under run_in_background. Every loop with no clock bound, every
+# foreground loop and every foreground pause stays refused. The one helper for a wait on a time is
+# `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
+WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
+WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
+                         r'do sleep 15; done; node tool.mjs')
+
+# ALLOW under run_in_background. A pause of 25 s or more is refused on main, and so is a loop around a pause.
+# A loop whose test compares the clock is a deadline, so it is allowed. A quote, a `#` or a line break ahead
+# of the loop is text, and does not hide the loop from the scan.
+add("wait-until: a pause of 600 s, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command="sleep 600; node tool.mjs", run_in_background=True)
+add("wait-until: a clock loop, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command=WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+add("wait-until: the same clock loop split over lines is allowed under run_in_background", "allow",
+    cwd=NOGIT, run_in_background=True,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \\> "2026-11-06T22:48:00" ]\ndo sleep 15; done\nnode tool.mjs')
+add("wait-until: a quote and a # ahead of the clock loop are text, and the loop is allowed under run_in_background",
+    "allow", cwd=NOGIT, command='echo "it\'s # fine"; ' + WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+
+# DENY, kept. Each one is refused on main, and each stays refused: the clock loop in the foreground, a
+# pause in the foreground, two pauses, a loop with no clock bound, a loop that names the date only inside a
+# string, and gh run watch.
+sh("wait-until: the clock loop in the foreground stays refused", WAIT_UNTIL_CLOCK_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+sh("wait-until: a 30 s pause in the foreground stays refused", "sleep 30", "deny", "waiter", cwd=NOGIT)
+add("wait-until: two pauses under run_in_background stay refused", "deny", "waiter", cwd=NOGIT,
+    command="sleep 5; sleep 5; node tool.mjs", run_in_background=True)
+add("wait-until: a loop with no clock bound stays refused under run_in_background", "deny", "waiter",
+    cwd=NOGIT, command="until grep -q x f; do sleep 15; done", run_in_background=True)
+add("wait-until: a loop that names the date only inside a string stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until grep -q "date" f; do sleep 15; done; node tool.mjs',
+    run_in_background=True)
+for _bg in (False, True):
+    add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
+        "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
+
+# The remedy of a pause names the time form in backticks, so the remedy check below reads it.
+sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
+   carries=("`wait-until",))
+
+# The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
+# pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
+for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
+    sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
+    command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
+
+# THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
+# foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
+# from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
+WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
+REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
+
+
+def remedy_forms(reason):
+    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES. A placeholder
+    with no sample is kept as `<NAME>`, so the check names it."""
+    forms = []
+    for span in re.findall(r"`([^`]+)`", reason):
+        for form in (re.sub(r"[\[\]]", "", span), re.sub(r"\s*\[[^\]]*\]", "", span)):
+            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w) else w
+                     for w in form.split()]
+            forms.append(" ".join(words))
+    return list(dict.fromkeys(forms))
+
+
+def remedy_refusal(form):
+    """'' when the guard allows `form` in the foreground and under run_in_background, else what it refused."""
+    for background in (False, True):
+        tool_input = {"command": form}
+        if background:
+            tool_input["run_in_background"] = True
+        got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+                              "env_path": None, "tool_input": tool_input})
+        if got != "allow":
+            return "%s%s is %s (%s)" % (form, " under run_in_background" if background else "", got, reason[:70])
+    return ""
+
+
+def remedy_check(constant):
+    """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
+    the check can fill, and the guard allows every form."""
+    def check():
+        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        reason = getattr(guard_stream, constant, None)
+        if not isinstance(reason, str):
+            return False, "guard_stream has no %s to read the remedy from" % constant
+        forms = remedy_forms(reason)
+        if not forms:
+            return False, "%s names no command form in backticks, so the check reads nothing" % constant
+        unfilled = [f for f in forms if "<" in f]
+        if unfilled:
+            return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
+        refused = [m for m in (remedy_refusal(f) for f in forms) if m]
+        if refused:
+            return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
+        return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
+    return check
+
+
 # =========================================================================== background end condition
 #
 # Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
@@ -13719,6 +13827,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
+# registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
+for _constant in REMEDY_CONSTANTS:
+    _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
+    LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
+    LOG_FAMILY[_remedy_label] = "stream"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -23791,6 +23905,9 @@ OV_ACTS = (
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
+    ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
+     WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
 )
 
 
