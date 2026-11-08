@@ -13555,9 +13555,10 @@ chained_ask("ask-alone: r3-bd a body with a cd and a push delete of main, writte
             cwd=PUSHFEAT)
 
 # (h) A KEPT HEREDOC BODY IS TEXT, NOT A SHELL STEP. A heredoc body that a later command runs is kept in view,
-# and the guard reads it. An interpreter body runs no `$( )` and no backtick, so a push named in its prose is
-# data, and the shapes below allow. A push line that `sh` runs, and a substitution in a shell body, still run
-# and still deny. The words `git` and `.env` are built from VCS and ENV, as in the rest of this file.
+# and the guard reads it. An interpreter body that calls no shell runs no `$( )` and no backtick, so a push named
+# in its prose is data, and the shapes below allow. A push line that `sh` runs, and a substitution in a shell body,
+# still run and still deny. A body that calls a shell runs its `$( )`, and the (h) shell-out block below denies it.
+# The words `git` and `.env` are built from VCS and ENV, as in the rest of this file.
 SCRATCH = slash(os.path.join(ROOT, "scratch"))
 REPRO_LINE = ('cases = {"subst": "' + VCS + ' commit -m \\"$(cat <<\'EOF\'\\nfix: no ' + VCS
               + ' push --force here\\nEOF\\n)\\" && ' + VCS + ' push origin lane-x"}')
@@ -13581,7 +13582,7 @@ SCAN = ("python3 - <<'PY'\n# don't re-run this by hand\nnote = \"\"\"Do not run 
 sh("ask-alone: a python body with a # line, a lone apostrophe and a two-line backtick span, then a push to lane-x, allows",
    SCAN, "allow", cwd=PUSHFEAT)
 
-# Python runs no shell, so a $( ) in its print text is text, as a quoted commit message is.
+# A python body without a shell-out call runs no shell, so a $( ) in its print text is text, as a quoted commit message is.
 sh("ask-alone: a python body that prints a $( ) around a forced push to main is text, allows",
    "python3 - <<'PY'\nprint(\"$(" + VCS + " push --force origin HEAD:main) is refused\")\nPY",
    "allow", cwd=PUSHFEAT)
@@ -13635,6 +13636,50 @@ sh("ask-alone: a quoted body piped to sh on the next line, a forced push in $( )
 sh("ask-alone: a quoted body under an eval whose backtick is on the line before, a forced push in $( ), denies as force-push",
    'eval `\ncat <<\'EOF\'\n' + BODY_PUSH + '\nEOF\n`', "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY, lacks=(CHAIN_ASK,))
+
+# (h) SHAPES THAT SHELL OUT FROM AN INTERPRETER BODY. A body that hands a string to a shell (`os.system`, `os.popen`,
+# `subprocess` with `shell=True` or a `bash -c` argv, `create_subprocess_shell`, `execSync`, a perl `system(`, a ruby
+# backtick) makes the shell run the `$( )` in it. Each body holds a forced push to lane-x inside `$( )` and denies as a
+# force-push. The two git-env bodies hold a GIT_DIR set inside `$( )` and deny as a git-env set. The file-run body is
+# written to f.py and run by python3: the shell-out arm keeps its body, and the written-file arm reads the run.
+PY_HEADER = "python3 - <<'PY'\n"
+PY_PUSH = "$(" + FORCE_LANE + ")"
+PY_ENV = "$(GIT_DIR=/tmp/x " + VCS + " status)"
+sh("ask-alone: (h) a python body calling os.system around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import os\nos.system(\"echo " + PY_PUSH + "\")\nPY", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling os.popen around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import os\nos.popen(\"echo " + PY_PUSH + "\")\nPY", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling subprocess.run with shell=True around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import subprocess\nsubprocess.run(\"echo " + PY_PUSH + "\", shell=True)\nPY", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling subprocess.run with a bash -c argv around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import subprocess\nsubprocess.run([\"bash\", \"-c\", \"echo " + PY_PUSH + "\"])\nPY", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling subprocess.Popen with a sh -c argv around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import subprocess\nsubprocess.Popen([\"sh\", \"-c\", \"echo " + PY_PUSH + "\"])\nPY", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling asyncio create_subprocess_shell around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import asyncio\nasyncio.create_subprocess_shell(\"echo " + PY_PUSH + "\")\nPY", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a perl body calling system around a forced push in $( ), denies as force-push",
+   "perl - <<'PL'\nsystem(\"echo " + PY_PUSH + "\");\nPL", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a node body calling execSync around a forced push in $( ), denies as force-push",
+   "node - <<'JS'\nrequire('child_process').execSync(\"echo " + PY_PUSH + "\")\nJS", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a ruby body holding a backtick around a forced push in $( ), denies as force-push",
+   "ruby - <<'RB'\nputs `echo " + PY_PUSH + "`\nRB", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python os.system body written to f.py and run by python3, a forced push in $( ), denies as force-push",
+   "cat > f.py <<'EOF'\nimport os\nos.system(\"echo " + PY_PUSH + "\")\nEOF\npython3 f.py", "deny", "force-push",
+   cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling os.system around a GIT_DIR set in $( ), denies as git-env-set",
+   PY_HEADER + "import os\nos.system(\"echo " + PY_ENV + "\")\nPY", "deny", GIT_ENV_RULE, cwd=NOGIT)
+sh("ask-alone: (h) a python body calling subprocess.run with shell=True around a GIT_DIR set in $( ), denies as git-env-set",
+   PY_HEADER + "import subprocess\nsubprocess.run(\"echo " + PY_ENV + "\", shell=True)\nPY", "deny", GIT_ENV_RULE,
+   cwd=NOGIT)
 
 
 # =========================================================================== ordinary work
