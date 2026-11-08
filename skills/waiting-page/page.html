@@ -84,6 +84,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
 .ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
 .ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
 .chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
 .nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nchip:hover { border-color: var(--acc); }
@@ -105,6 +106,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
   .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -247,7 +249,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
-.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 .btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
 .btn:disabled { opacity: .45; cursor: default; }
 .note { display: grid; gap: 6px; }
@@ -342,12 +344,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
 .pkb[aria-pressed="true"] .on { visibility: visible; }
 .btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
-/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
-.btn.dash.pkb { border-color: var(--faint); }
-.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
 /* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
    This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
-   This rule stays after .btn.dash.pkb: both have the same weight, so the source order decides. */
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
 .btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
 .btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
