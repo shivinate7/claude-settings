@@ -14064,7 +14064,7 @@ def rpush_route(argv):
 
 def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, origin=False, comments=(),
                others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False, repo=None):
-    """Register one check of reviewed-head-push. `want` is the decision, "ask" or "allow". `reads` are the gh routes the
+    """Register one check of reviewed-head-push. `want` is the decision, "ask", "allow" or "deny". `reads` are the gh routes the
     run makes, in order. `lines` is the stderr lines the run prints: 0, or 1 for a read that fails open, naming the rule.
     `origin` runs the push in rpush_repo(), a repo with an origin. `repo`, a callable that builds a checkout and returns
     its folder, names the checkout the push runs in instead. `comments` and `others` are a list, or a callable that
@@ -14093,6 +14093,12 @@ def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, o
                 return False, "the ask does not name the rule and say to stack the change: %s" % reason[:110]
             if names_the_target(reason, RPUSH_RULE):
                 return False, "the ask names a forbidden fragment %r" % names_the_target(reason, RPUSH_RULE)
+        elif want == "deny":
+            # A chained ask denies and names the ask it holds (ask-commands-run-alone). The reads ran before the deny.
+            if RPUSH_RULE not in reason:
+                return False, "the deny does not name the reviewed-head-push ask: %s" % reason[:110]
+            if names_the_target(reason, RPUSH_RULE):
+                return False, "the deny names a forbidden fragment %r" % names_the_target(reason, RPUSH_RULE)
         elif reason:
             return False, "an allow printed a reason: %s" % reason[:110]
         if made != list(reads):
@@ -14249,6 +14255,21 @@ rpush_case("reviewed-head-push: a -u push of a newer local commit onto the lane 
            "ask", RPUSH_BOTH, repo=rpush_newer_repo, command=VCS + " push -u origin " + RPUSH_BRANCH,
            others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_newer_repo, "HEAD~1"))],
            comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_newer_repo, "HEAD~1"), fix=RPUSH_FIX))])
+
+# A commit chained before the push. The guard judges the push before the chain runs, so local HEAD still equals the
+# pull request's live head, and the push would send the commit the chain makes. The ask is held, and an ask command
+# chained with another command denies (decision ask-commands-run-alone). Both reads still run, so each case proves the push was judged, not dropped. The bare push names its lane
+# through the branch's upstream, so it is judged on an origin lane too.
+rpush_case("reviewed-head-push: a commit chained before an explicit push to the lane denies, "
+           "because a chained ask runs alone, after both reads",
+           "deny", RPUSH_BOTH, repo=rpush_up_to_date_repo, command=VCS + " commit -am x && " + RPUSH_PUSH,
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_up_to_date_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_up_to_date_repo), fix=RPUSH_FIX))])
+rpush_case("reviewed-head-push: a commit chained before a bare push on an origin lane denies, "
+           "because a chained ask runs alone, after both reads",
+           "deny", RPUSH_BOTH, repo=rpush_origin_branch_repo, command=VCS + " commit -am x && " + VCS + " push",
+           others=lambda: [dict(RPUSH_OPEN, head=rpush_sha(rpush_origin_branch_repo))],
+           comments=lambda: [rpush_comment(rpush_record(head=rpush_sha(rpush_origin_branch_repo), fix=RPUSH_FIX))])
 
 
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,

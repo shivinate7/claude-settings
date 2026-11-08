@@ -93,7 +93,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   reviewed-head-push   ask. A push onto the head of an open pull request whose newest review record is done
                        and already holds its fix check. Only in a merge-tool repo. A read that fails lets the push through.
-  env-file            deny. Any read or write of an environment file.
+  env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
@@ -3507,7 +3507,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
+    push_segments = split_segments(stripped)
+    for number, segment in enumerate(push_segments):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
@@ -3529,9 +3530,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # read_verb above), for any push that deletes, for a remote other than origin, for `--all`, `--mirror`
                 # or a tags-only push, and when every destination is a glob or unresolved. Otherwise one pull request
                 # list read per push; one more paged repo-wide comment read when an open pull request has the
-                # destination as its head. Limit: only the current branch's destinations are checked, never `--all`,
-                # `--mirror` or a remote other than origin.
-                elif uses_merge_tool(where) and reviewed_head_push_hit(args, where, overrides):
+                # destination as its head. Limit: every destination the push names is checked, globs and unresolved
+                # names skipped, never `--all`, `--mirror` or a remote other than origin. Only a push that is the first
+                # command may count as sending nothing: a commit chained before it has not run when the guard reads HEAD.
+                elif uses_merge_tool(where) and reviewed_head_push_hit(
+                        args, where, overrides, first=not any(s.strip() for s in push_segments[:number])):
                     ask_command("reviewed-head-push", REVIEWED_HEAD_PUSH_REASON, "git push " + " ".join(args),
                                 "push onto a reviewed head")
 
