@@ -291,7 +291,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
     deletion, a forced push, a mirror, and a push of tags alone are never judged here. 'unread' (rule
-    push-unread-folder, owner ruling 413 a): a bare push, `HEAD` or `@` whose folder cannot be read (`cwd` is
+    push-unread-folder, decision plain-push-asks): a bare push, `HEAD` or `@` whose folder cannot be read (`cwd` is
     '' or no directory), so its destination is unknown, as `push_verdict` asks on the same folder. A folder
     that exists but is no repository, a detached HEAD and a push.default that names no branch are allowed.
     Reads: none for a literal destination; the current branch for an implied one; one `git config
