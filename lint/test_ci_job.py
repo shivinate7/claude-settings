@@ -2321,7 +2321,7 @@ class PinnedSettings(Job):
         os.chmod(stub, 0o755)
         return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}, calls
 
-    def test_lint_with_no_base_fetches_and_adds_no_worktree_for_pull_request_pins_it_skips(self):
+    def test_lint_with_no_base_fetches_and_adds_no_worktree_for_pull_request_pins_it_reads_unknown(self):
         self.settings(fetch_only=True)  # the clone lacks pin A: a run that needed it would fetch it
         env, calls = self.git_shim_env()
         rc, lines, out = self.run_pinned(
@@ -2330,11 +2330,14 @@ class PinnedSettings(Job):
             args=("--lint",), env=env)
         self.assertIn("no base resolved", out, "precondition: no base was resolved, so the pull-request steps are skipped:\n" + out)
         self.assertTrue(os.path.isfile(calls), "precondition: the git shim was never called:\n" + out)
-        self.assertEqual((by_step(lines).get("code check"), by_step(lines).get("ste lint")), ("skipped", "skipped"),
-                         "each pull-request lint step must print skipped with no base:\n" + out)
+        self.assertEqual((by_step(lines).get("code check"), by_step(lines).get("ste lint")), ("unknown", "unknown"),
+                         "each pull-request lint step must read unknown with no base:\n" + out)
+        for name in ("code check", "ste lint"):
+            self.assertIn("skipped for want of a base", line_of(lines, name) or "",
+                          "the %s line must say it was skipped for want of a base:\n" % name + out)
         with open(calls, encoding="utf-8") as f:
             made = [c for c in f.read().splitlines() if c.startswith(("fetch", "worktree add"))]
-        self.assertEqual(made, [], "every lint step was skipped, yet the run fetched pin A or made a pinned worktree:\n" + out)
+        self.assertEqual(made, [], "every lint step was skipped for want of a base, yet the run fetched pin A or made a pinned worktree:\n" + out)
 
     def local_code_check(self, uses, exit_code):
         """Write the repo under test's own code_check.py, which a local uses: step runs, and return that step. Its run
