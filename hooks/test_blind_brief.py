@@ -279,11 +279,29 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
-    def test_long_digit_run_is_fast(self):
-        import time
-        start = time.time()
-        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
-        self.assertLess(time.time() - start, 2)
+    def test_digit_runs_keep_their_guard_in_the_token_spacing_patterns(self):
+        # A digit run is scanned from its first digit only. Each token-spacing pattern that starts a digit
+        # run must keep a guard before its first \d+: the lookbehind (?<![\w.]) or a \b. Without it the
+        # pattern restarts at every digit of the run, and the scan grows as the square of the run's length.
+        # The patterns are read from the module, so this holds no copy of them.
+        unguarded = []
+        for pat in self.m.COMPILED["token-spacing"]:
+            text = pat.pattern
+            at = text.find("\\d+")
+            if at < 0:
+                continue
+            before = text[:at]
+            if not (before.endswith("(?<![\\w.])") or before.endswith("\\b")):
+                unguarded.append(text)
+        self.assertEqual(unguarded, [],
+                         "token-spacing digit-run pattern lost its guard (?<![\\w.]) before \\d+: %s"
+                         % unguarded)
+
+    def test_long_digit_run_gives_the_right_verdict(self):
+        # The verdict, not the time: a long run of digits is no fault, and the same run with a unit is a
+        # spacing value.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + "1" * 5000)), [])
+        self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\n" + "1" * 5000 + " px"))))
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."

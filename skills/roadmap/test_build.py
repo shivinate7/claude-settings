@@ -14,6 +14,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -1642,6 +1643,18 @@ class PageRulings(UpkeepFixture):
         self.assertEqual(self.rulings(out), (1, "c153 (page item 9)"))
 
 
+def pinned_datetime(instant):
+    """The `datetime` module as build.py reads it, with datetime.datetime.now() reading `instant`."""
+    class Pinned(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz)
+
+    ns = types.SimpleNamespace(**{name: getattr(datetime, name) for name in dir(datetime) if not name.startswith("__")})
+    ns.datetime = Pinned
+    return ns
+
+
 class DatedClaims(UpkeepFixture):
     """The upkeep row for each doing or active step whose note's newest dated claim is STALE_DAYS or more
     whole days old. A claim is `Finding` or `Checked` (any case), then a date with no "." or newline between
@@ -1649,12 +1662,21 @@ class DatedClaims(UpkeepFixture):
     `YYYY-MM-DD`. A date with no year takes this year, or the year before if it is in the future. The row
     reads `<step id> (<date as written>)` per step."""
 
+    # The one clock of this class, 23:59:59.9 UTC. The build reads its own clock (upkeep's now) and the cases
+    # read today(); both read this instant, so a midnight cannot fall between a fixture and the build.
+    PIN_UTC = datetime.datetime(2026, 11, 3, 23, 59, 59, 900000, tzinfo=datetime.timezone.utc)
     ROW = "dated claims to re-check before a lane starts"
     MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
               "September", "October", "November", "December")
 
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(build, "datetime", pinned_datetime(self.PIN_UTC))
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def today(self):
-        return datetime.datetime.now(datetime.timezone.utc).date()  # the clock the build reads
+        return self.PIN_UTC.date()  # the day the build reads too: one pinned clock
 
     def ago(self, days):
         return self.today() - datetime.timedelta(days=days)
@@ -1675,7 +1697,11 @@ class DatedClaims(UpkeepFixture):
 
     def build(self):
         """The build with no --live file: the row reads notes only, so it must not need the live file."""
-        return self.build_from_main()[1]
+        page, out = self.build_from_main()
+        # Scope first (P7): the build read the pinned instant, so its dates are the cases' dates.
+        self.assertEqual(build_info(page)["builtAt"], self.PIN_UTC.isoformat(timespec="seconds"),
+                         "the build did not read the pinned instant")
+        return out
 
     def control(self):
         """A doing step whose claim is STALE_DAYS old, so each negative case also has a listed row. Returns its entry."""
