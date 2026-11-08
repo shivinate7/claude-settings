@@ -274,6 +274,19 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
+    def commit(self, branch, files, base=None):
+        """One commit on `branch` from the second clone, pushed to origin: cut from `base` (a ref or a sha) when given, else added to the
+        branch's own origin head. -> the new head sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, base or f"origin/{branch}")
+        for rel, text in files.items():
+            put(os.path.join(o, rel), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"{branch}: {', '.join(files)}")
+        sh(o, "git", "push", "-q", "-f", "origin", branch)
+        return sh(o, "git", "rev-parse", "HEAD")
+
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
@@ -12888,6 +12901,57 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
+class ReviewFixFiling(ReviewEnv):
+    """A fix check may pass only a push that files findings in this pull request (owner ruling item 394 a, decision pr-review-record). The diff,
+    reviewed head..new head, is read locally with git: it may add files under docs/debts/ or add lines to docs/debts/notes.md, and nothing else.
+    A `none` record never passes a push that files, so its fix check fails and the write refuses the PASS, naming the path wider than its finding."""
+
+    def setUp(self):
+        super().setUp()
+        self.reviewed = self.commit("feat", {"merge/widget.py": "one\n", "docs/debts/notes.md": "first note\n"}, base="origin/main")
+
+    def push(self, files):
+        """One push on the feature branch, cut from the reviewed head, with `files`. -> its head, fetched into the checkout the merge runs in."""
+        new = self.commit("feat", files, base=self.reviewed)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return new
+
+    def fix_run(self, new, findings):
+        """`--review-record` for pull request 7 at `new`, with the fix check of the reviewed head and the Findings value given on both the
+        earlier record and the new one. -> (rc, out, err)."""
+        host = self.record_host(review_comment(1, 7, record_text(head=self.reviewed, rounds=REVIEW_PASS, findings=findings)), head=new)
+        return self.run_args("7", "--review-record", *self.flags_with_findings(findings), "--fix-check", f"{self.reviewed}:reviewer:haiku:PASS", host=host)
+
+    def test_a_filing_only_push_passes_the_fix_check_and_the_record_reads_done(self):
+        new = self.push({"docs/debts/missing-cache.md": "a debt\n"})
+        rc, out, err = self.fix_run(new, "2, this PR")
+        self.assertEqual(rc, 0, "a push that only files a debt was refused as a fix check:\n" + out + err)
+        self.assertIn("Findings: 2, this PR", out)
+        self.assertIn(fix_check_line(head=self.reviewed), out)
+        self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
+
+    def test_a_filing_push_that_also_edits_another_file_is_refused(self):
+        new = self.push({"docs/debts/missing-cache.md": "a debt\n", "merge/widget.py": "two\n"})
+        rc, out, err = self.fix_run(new, "2, this PR")
+        self.assertNotEqual(rc, 0, "a push that edits merge/widget.py passed the fix check beside a filing:\n" + out + err)
+        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
+        self.assertIn("merge/widget.py", out + err, "the refusal does not name the file wider than the finding")
+
+    def test_a_filing_push_that_deletes_a_notes_line_is_refused(self):
+        new = self.push({"docs/debts/missing-cache.md": "a debt\n", "docs/debts/notes.md": ""})
+        rc, out, err = self.fix_run(new, "2, this PR")
+        self.assertNotEqual(rc, 0, "a push that deletes a notes line passed the fix check:\n" + out + err)
+        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
+        self.assertIn("docs/debts/notes.md", out + err, "the refusal does not name the notes line the push deletes")
+
+    def test_a_filing_push_on_a_none_record_is_refused(self):
+        new = self.push({"docs/debts/missing-cache.md": "a debt\n"})
+        rc, out, err = self.fix_run(new, "none")
+        self.assertNotEqual(rc, 0, "a push that files a debt passed the fix check of a record that says none:\n" + out + err)
+        self.assertNotIn("Fix check: ", out, "a refused push printed a fix line")
+        self.assertIn("docs/debts/missing-cache.md", out + err, "the refusal does not name the filed path a none record cannot carry")
+
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments, at the
     fixed clock LEDGER_NOW. The record parse, the newest-record rule and the next act are the real code. Output: one line per open pull request
@@ -14580,19 +14644,6 @@ class BuildEnv(ReviewEnv):
     def linted(self):
         """Every branch whose file one lint tree held, over the case."""
         return set().union(*self.lint_calls)
-
-    def commit(self, branch, files, base=None):
-        """One commit on `branch` from the second clone, pushed to origin: cut from `base` (a ref or a sha) when given, else added to the
-        branch's own origin head. -> the new head sha."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", branch, base or f"origin/{branch}")
-        for rel, text in files.items():
-            put(os.path.join(o, rel), text)
-        sh(o, "git", "add", "-A")
-        sh(o, "git", "commit", "-q", "-m", f"{branch}: {', '.join(files)}")
-        sh(o, "git", "push", "-q", "-f", "origin", branch)
-        return sh(o, "git", "rev-parse", "HEAD")
 
     def lane(self, n, files=None, base="origin/main", branch=None):
         """PR branch `branch` (feat<n> by default), cut from `base` with its own file and `files`. -> its head sha."""
