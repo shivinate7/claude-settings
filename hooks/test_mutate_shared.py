@@ -20,6 +20,10 @@ or when MUTATE_FULL=1 asks for it.
 
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
+
+The fifth part pins the clean-layout control: a target's mutants count as kills only after one full-suite
+run of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED. The control
+runs inside the MUTATE_JOBS cap, and a control that raises reads its mutants UNKNOWN too.
 """
 import contextlib
 import io
@@ -29,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from unittest import mock
 
@@ -229,6 +234,242 @@ class GuardMutantLayoutTests(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0,
                          "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
+
+
+def tree_text(copy_path):
+    """Every module beside `copy_path`, joined: a mutant's new text lands in one of them."""
+    folder = os.path.dirname(copy_path)
+    texts = []
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".py"):
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                texts.append(handle.read())
+    return "\n".join(texts)
+
+
+def fail_result(*names):
+    lines = ["FAIL  allow (want deny) [Bash] " + name for name in names]
+    return 1, lines, list(lines), []
+
+
+def pass_result(*names):
+    lines = ["PASS  allow (want allow) [Bash] " + name for name in names]
+    return 0, [], lines, []
+
+
+JOIN_WAIT = 0.5  # a call waits this long for a second call to join it, so overlap shows without a fixed sleep
+RELEASE_WAIT = 1.0  # a held control waits this long for the mutant it is held on, so no case hangs
+RUN_LIMIT = 4.0  # main must return within this long, or the case reads a stall, not a hang
+
+
+class _FakeSuite:
+    """A stand-in for `mutate_guard.run_suite`, called as (suite, variable, copy_path, config_dir, only).
+
+    A call is keyed by its copy_path, which holds the name its copy was laid out under: a mutant's label,
+    or a target's clean-layout control name. The key, not the text of a folder, says which call it is, so a
+    watch copy stays apart from the other watch copies that share `work`. A mutant's call FAILs its required
+    case. A control (`only` None) is green when `control_passes`, red otherwise.
+
+    `hooks` maps a key to a zero-argument function that runs in place of that call's answer, so a case can
+    hold a call or raise from it. `join` holds each call up to JOIN_WAIT for a second call to join it.
+    `release` maps a key to an Event that is set once that call has ended and been logged. `active` and
+    `peak` count the calls in flight, `events` lists each call's end by key in order, and `calls` records
+    each call's key, `only`, `tree` and `mutant`. The counts sit under one lock."""
+
+    def __init__(self, entries, control_passes, hooks=None, join=False, release=None):
+        self.names = {}  # key -> required case, or None for a target's clean-layout control
+        self.required = []
+        for entry in entries:
+            label, _old, _new, target, required, _only_on = mutate_guard.mutation_parts(entry)
+            self.names[label] = required
+            self.names[mutate_guard.control_name(target)] = None
+            self.required.append(required)
+        self.control_passes = control_passes
+        self.hooks = hooks or {}
+        self.join = join
+        self.release = release or {}
+        self.calls = []
+        self.events = []
+        self.active = 0
+        self.peak = 0
+        self.cond = threading.Condition()
+
+    def key_of(self, copy_path):
+        for name in self.names:
+            if mutate_shared.safe_name(name) in copy_path:
+                return name
+        raise KeyError("no entry keys the copy at " + copy_path)
+
+    def __call__(self, suite, variable, copy_path, config_dir, only=None):
+        key = self.key_of(copy_path)
+        tree = tree_text(copy_path)
+        with self.cond:
+            self.calls.append({"key": key, "only": only, "tree": tree, "mutant": self.names[key] is not None})
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            self.cond.notify_all()
+            if self.join:
+                self.cond.wait_for(lambda: self.active >= 2, timeout=JOIN_WAIT)
+        try:
+            if key in self.hooks:
+                return self.hooks[key]()
+            if self.names[key] is None:
+                return pass_result(*self.required) if self.control_passes else fail_result(*self.required)
+            return fail_result(self.names[key])
+        finally:
+            with self.cond:
+                self.active -= 1
+                self.events.append(key)
+                self.cond.notify_all()
+            if key in self.release:
+                self.release[key].set()
+
+
+class CleanLayoutControlTests(unittest.TestCase):
+    """A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. Without
+    that control, a layout that crashes reads as a kill. Each target gets one full-suite control run on
+    the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED.
+    The control runs inside the MUTATE_JOBS cap, never holds a job slot the other targets need, and a
+    control that raises reads its own mutants UNKNOWN instead of crashing the run."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def guard_entries(self, *prefixes):
+        """The real guard entry whose label starts with each prefix, in the order given."""
+        return [next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
+                for prefix in prefixes]
+
+    def run_main(self, entries, suite, jobs=None):
+        """Run mutate_guard.main() over `entries` alone, with `suite` as run_suite. Return (exit code, stdout lines),
+        or raise what main raised. `jobs` sets MUTATE_JOBS for the run."""
+        code, lines, error = self.run_main_outcome(entries, suite, jobs)
+        if error is not None:
+            raise error
+        return code, lines
+
+    def run_main_outcome(self, entries, suite, jobs=None):
+        """As run_main, but return what main raised, with the lines it printed before, as (exit code or None,
+        stdout lines, exception or None). main runs on its own thread, so a run that does not return reads as a
+        TimeoutError here, not as a hang. main's work folder is made under this test's run folder, not the system
+        temp dir."""
+        out = io.StringIO()
+        real_mkdtemp = tempfile.mkdtemp
+        outcome = {}
+
+        def mkdtemp_in_run(suffix=None, prefix=None, dir=None):
+            return real_mkdtemp(suffix=suffix, prefix=prefix, dir=self.run)
+
+        def call_main():
+            try:
+                outcome["code"] = mutate_guard.main()
+            except Exception as caught:  # a crash is what the caller asserts on, not a test error
+                outcome["error"] = caught
+
+        env = {} if jobs is None else {"MUTATE_JOBS": str(jobs)}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(mutate_guard, "MUTATIONS", entries), \
+                mock.patch.object(mutate_guard, "run_suite", side_effect=suite), \
+                mock.patch.object(tempfile, "mkdtemp", side_effect=mkdtemp_in_run), \
+                contextlib.redirect_stdout(out):
+            runner = threading.Thread(target=call_main, daemon=True)
+            runner.start()
+            runner.join(RUN_LIMIT)
+        error = outcome.get("error")
+        if runner.is_alive():
+            error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % RUN_LIMIT)
+        return outcome.get("code"), out.getvalue().splitlines(), error
+
+    def test_a_red_clean_layout_reads_unknown_not_killed(self):
+        entries = self.guard_entries("role-model: Explore loses its audit exemption")
+        label = mutate_guard.mutation_parts(entries[0])[0]
+        code, lines = self.run_main(entries, _FakeSuite(entries, control_passes=False))
+        self.assertFalse([line for line in lines if line.startswith("KILLED")],
+                         "a red clean layout still reads the mutant as KILLED: %r" % lines)
+        self.assertTrue([line for line in lines
+                         if line.startswith("UNKNOWN") and label in line and "clean layout" in line],
+                        "no UNKNOWN line names the mutant and 'clean layout': %r" % lines)
+        self.assertEqual(code, 1, "a red clean layout must exit 1, not %r" % code)
+
+    def test_a_green_clean_layout_keeps_the_kill(self):
+        entries = self.guard_entries("role-model: Explore loses its audit exemption")
+        label = mutate_guard.mutation_parts(entries[0])[0]
+        code, lines = self.run_main(entries, _FakeSuite(entries, control_passes=True))
+        self.assertTrue([line for line in lines if line.startswith("KILLED") and label in line],
+                        "a green clean layout lost the kill of the mutant: %r" % lines)
+        self.assertFalse([line for line in lines if line.startswith("UNKNOWN")],
+                         "a green clean layout still reads a mutant UNKNOWN: %r" % lines)
+        self.assertEqual(code, 0, "a green clean layout with every mutant killed must exit 0, not %r" % code)
+
+    def test_the_control_runs_once_per_target_unmutated(self):
+        entries = self.guard_entries("work-tree: the tree option goes unread",
+                                     "pointer-head: the git directory option goes unread")
+        suite = _FakeSuite(entries, control_passes=True)
+        _code, lines = self.run_main(entries, suite)
+        controls = [call for call in suite.calls if not call["mutant"] and call["only"] is None]
+        self.assertEqual(len(controls), 1,
+                         "the target runs %d full-suite clean-layout controls, want one: %r" % (len(controls), lines))
+        tree = controls[0]["tree"]
+        for entry in entries:
+            label, old, new = mutate_guard.mutation_parts(entry)[:3]
+            self.assertIn(old, tree, "the control's tree is not the unmutated guard for: " + label)
+            self.assertNotIn(new, tree, "the control's tree holds the mutated text of: " + label)
+
+    def test_controls_count_inside_the_job_cap(self):
+        entries = self.guard_entries("work-tree: the tree option goes unread")
+        label = mutate_guard.mutation_parts(entries[0])[0]
+        control = mutate_guard.control_name("guard")
+        suite = _FakeSuite(entries, control_passes=True, join=True)
+        _code, lines = self.run_main(entries, suite, jobs=1)
+        keys = [call["key"] for call in suite.calls]
+        self.assertTrue(control in keys and label in keys,
+                        "the run must make a control call and a mutant call, or the cap is not tested: %r" % keys)
+        self.assertEqual(suite.peak, 1,
+                         "%d suites ran at once with MUTATE_JOBS=1: the clean-layout control sits outside the "
+                         "job cap: %r" % (suite.peak, lines))
+
+    def test_a_slow_control_does_not_stall_the_other_targets_mutants(self):
+        entries = self.guard_entries("watch: never restore, only report",
+                                     "watch: restore in silence",
+                                     "work-tree: the tree option goes unread")
+        slow = mutate_guard.control_name("watch")
+        other = mutate_guard.mutation_parts(entries[2])[0]
+        released = threading.Event()
+
+        def slow_control():
+            released.wait(RELEASE_WAIT)  # bounded, and the case reads only the order the calls end in
+            return pass_result()
+
+        suite = _FakeSuite(entries, control_passes=True, hooks={slow: slow_control}, release={other: released})
+        self.run_main(entries, suite, jobs=2)
+        self.assertIn(other, suite.events, "the other target's mutant never ended: %r" % suite.events)
+        self.assertLess(suite.events.index(other), suite.events.index(slow),
+                        "the other target's mutant ended after the slow control: a control that holds a job "
+                        "slot stalls the mutants queued behind it. Call ends in order: %r" % suite.events)
+
+    def test_a_raising_control_reads_unknown_for_its_target(self):
+        entries = self.guard_entries("work-tree: the tree option goes unread",
+                                     "pointer-head: the git directory option goes unread",
+                                     "watch: never restore, only report")
+        guard_labels = [mutate_guard.mutation_parts(entry)[0] for entry in entries[:2]]
+        watch_label = mutate_guard.mutation_parts(entries[2])[0]
+
+        def crash():
+            raise RuntimeError("the clean layout suite crashed")
+
+        suite = _FakeSuite(entries, control_passes=True, hooks={mutate_guard.control_name("guard"): crash})
+        code, lines, error = self.run_main_outcome(entries, suite, jobs=2)
+        self.assertIsNone(error, "main raised %r: a control that raises ends the whole run, where its mutants "
+                                 "should read UNKNOWN" % (error,))
+        for label in guard_labels:
+            self.assertTrue([line for line in lines
+                             if line.startswith("UNKNOWN") and label in line and "clean layout" in line],
+                            "no UNKNOWN line names this mutant of the raising target, with 'clean layout': %r"
+                            % lines)
+        self.assertTrue([line for line in lines if line.startswith("KILLED") and watch_label in line],
+                        "the other target's mutant does not read KILLED: %r" % lines)
+        self.assertEqual(code, 1, "a run with an UNKNOWN mutant must exit 1, not %r" % code)
 
 
 def scaffold_sources(**extra):
