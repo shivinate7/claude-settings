@@ -13211,6 +13211,30 @@ class UnreviewedGuardRefused(UnreviewedGuardEnv):
         line = self.reviewed_line(h2, first, review_comment(2, 7, bad_body), carried)
         self.assert_open(line, h2, "the carried rounds read done, though an unparsed record sits between the reviewed head and the carried record, so the guard change after the reviewed head went unread")
 
+    def test_the_first_head_of_a_run_of_three_is_the_oldest_record_not_the_nearest(self):
+        # a, b and c carry the same rounds, so c carries them from b and b from a. The guard commit lies after a and before b. The run's first
+        # head is a's, so c owes the guard commit, though b's head lies after it.
+        ha = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the first review")
+        hb = self.lane_commit("docs/more.md", "more\n", "lane: docs, second record")
+        hc = self.lane_commit("docs/after.md", "after\n", "lane: docs, third record")
+        a, b, c = review_comment(1, 7, record_text(head=ha)), review_comment(2, 7, record_text(head=hb)), review_comment(3, 7, record_text(head=hc))
+        self.assert_done(self.reviewed_line(hc, b, c), hc, "control: c and b carry the rounds of b, and no guard change lies after b, so the line should read done")
+        self.assert_open_names(self.reviewed_line(hc, a, b, c), hc, ha, "lint/check_x.py")
+        files = [pr_file("docs/lane.md"), pr_file("lint/check_x.py"), pr_file("docs/more.md"), pr_file("docs/after.md")]
+
+        def write_record(*earlier):
+            host = PullsHost([batch_pull(7, hc)], {}, comments=list(earlier), files=files)
+            return self.run_args("7", "--review-record", "--head", hc, "--kind", "normal", "--guard", "yes", "--round", "1:reviewer:sonnet:PASS", host=host)
+
+        rc, out, err = write_record(b)
+        self.assertEqual(rc, 0, "control: the writer refused a record that carries the rounds of b, with no guard change after b:\n" + out + err)
+        rc, out, err = write_record(a, b)
+        self.assertEqual(rc, 1, "the writer printed a record that carries the rounds of a across the guard change, which no reviewer read:\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+        self.assertIn(ha[:7], err, f"the refusal does not name {ha[:7]}, the first head of the run:\n" + err)
+        self.assertIn("lint/check_x.py", err, "the refusal does not name lint/check_x.py, the guard path changed after the first head:\n" + err)
+
 class UnreviewedGuardAllowed(UnreviewedGuardEnv):
     """A carried record stays done when nothing unread changed. A clean merge of main brings only main's own change. A fix check names the first
     head. A first record has no earlier head. A test path is no guard change."""
