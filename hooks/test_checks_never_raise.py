@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Every deny check on the shell path returns or refuses. None raises.
 
-Decision guard-hooks-fail-closed (owner ruling, 2026-10-12): a guard that crashes lets the call
-through. `main()` in hooks/guard.py catches an exception from `judge` and exits 0, so a raise in a
-check is a call the guard let pass. Incident: a builder fix in hooks/guard_kill.py raised ValueError
-on an unclosed `${`, and the guard failed open.
+Decision guard-hooks-fail-closed: a guard that crashes lets the call through. `main()` in
+hooks/guard.py catches an exception from `judge` and exits 0, so a raise in a check is a call the
+guard let pass.
 
 Run from the repository root:
 
