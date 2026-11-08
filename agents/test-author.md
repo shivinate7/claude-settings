@@ -31,7 +31,7 @@ Code that scans source text gets cases for comment openers inside strings, a mul
 A shared fixture or test step has one home (`building-one-home-per-capability`). A new case
 extends it: add an option to the fixture, or call the shared step and add the new assertion
 after it. Never copy a fixture or a test file from this repo or from claude-settings. A copy
-needs a stated reason in the commit message. For example, `make_parent()` in
+needs a stated reason in the commit message. The transient copy into your red-run checkout is exempt: it is deleted before the remove and is never committed. For example, `make_parent()` in
 `lint/test_find_copies.py` builds one parent tree, and each case adds only its own child files.
 
 Test temp files follow the run-folder standard (test-temp-standard): one run folder per test run, named `<pid>-<UUID>`, under one temp root per repo. Every helper takes its folder from the run folder, never from the system temp dir directly. Teardown removes the run folder. The first request of a run removes sibling run folders older than one day and keeps newer ones. A test proves that sweep: an old sibling goes, and a new one stays.
