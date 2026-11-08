@@ -1126,6 +1126,53 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint(pr_body=make_body("```", BODY_COMMIT, "```", BODY_QUADRATIC))
         self.body_verdict(rc, out, ["a cost"])
 
+    # The body reader on the `Fix: none` lines of a PR body. A refused case names the cost it leaves unchecked. A passing
+    # case adds a bare commit line beside it, which is refused, so a case that over-refuses shows as an extra cause.
+
+    def body_case(self, *lines, causes):
+        """Check a PR body of `lines` on a clean branch, and assert the body verdict names exactly `causes`."""
+        self.clean_branch()
+        rc, out = self.lint(pr_body=make_body(*lines))
+        self.body_verdict(rc, out, causes)
+
+    def test_html_comment_opener_in_a_code_span_does_not_hide_a_later_fix_line(self):
+        self.body_case("- Mention `<!--` here.", "- n: Fix: none -- takes 3 ms", causes=["a cost"])
+
+    def test_bold_fix_label_with_a_cost_is_refused(self):
+        self.body_case("- n: **Fix:** none -- 3 ms", causes=["a cost"])
+
+    def test_capital_none_with_a_cost_is_refused(self):
+        self.body_case("- n: Fix: None -- 3 ms", causes=["a cost"])
+
+    def test_colon_after_none_with_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none: 3 ms", causes=["a cost"])
+
+    def test_en_dash_after_none_with_a_cost_is_refused(self):
+        self.body_case("- n: Fix: none – 3 ms", causes=["a cost"])
+
+    def test_backticked_none_with_a_cost_is_refused(self):
+        self.body_case("- n: Fix: `none` -- 3 ms", causes=["a cost"])
+
+    def test_cost_on_a_continuation_line_of_the_fix_bullet_is_refused(self):
+        self.body_case("- n: Fix: none -- slow and", "  takes 3 ms", causes=["a cost"])
+
+    def test_fix_none_in_a_code_span_is_read_only_to_the_span_end(self):
+        self.body_case("- n: said `Fix: none — rare and harmless`. Later: up to 58 s", BODY_COMMIT, causes=["a commit"])
+
+    def test_fix_none_in_a_code_span_ignores_a_day_count_after_the_span(self):
+        self.body_case("- n: the Until note says `Fix: none — owner decides` ... 14 days", BODY_COMMIT,
+                       causes=["a commit"])
+
+    def test_cost_followed_by_an_actions_run_url_passes(self):
+        self.body_case("- n: Fix: none -- takes 3 ms; https://github.com/shivinate7/claude-settings/actions/runs/12345678",
+                       BODY_COMMIT, causes=["a commit"])
+
+    def test_reach_a_second_passes(self):
+        self.body_case("- n: Fix: none -- the scan may reach a second before it stops", BODY_COMMIT, causes=["a commit"])
+
+    def test_cost_on_the_next_bullet_is_not_the_fix_lines_cost(self):
+        self.body_case("- n: Fix: none -- slow and", "- m: takes 3 ms", BODY_COMMIT, causes=["a commit"])
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
