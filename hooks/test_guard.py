@@ -5832,7 +5832,7 @@ for _label, _trigger in (
 # ------------------------------------------------------------------ wait-pid: the one wait on a pid
 #
 # Roadmap step wait-for-pid-form: after the stall watch trips, the session holds a stranded job's
-# pid and the guard refuses every way to wait on it. `bin/wait-pid PID [--timeout SECS]` is the one
+# pid and the guard refuses every way to wait on it. `wait-pid PID [--timeout SECS]` is the one
 # allowed form (its own cases: lint/test_wait_pid.py). The guard allows the helper and keeps
 # refusing the loops, so each refusal case pins that it did not move. The three remedies below
 # point at the helper.
@@ -5857,17 +5857,18 @@ for _label, _trigger, _rule, _lacks in (
 ):
     add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
         carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
-# The three triggers, each reaching one waiter-family remedy by its own rule. The bin-path cases of wait-pid
+# The three triggers, each reaching one waiter-family remedy by its own rule. The bare-name cases of wait-pid
 # and of wait-until both loop over them.
 REMEDY_TRIGGERS = (
         ("a followed stream", "tail -f app.log", "live-stream"),
         ("a pause", "sleep 30", "waiter"),
         ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter"),
 )
-# A bare `wait-pid` is not on PATH in an agent worktree, so each remedy names the helper by its bin path.
+# A remedy names the helper by its bare name. Session start puts ~/.claude/bin on PATH through CLAUDE_ENV_FILE,
+# so the name resolves in any checkout. A bin/ path resolves only in this repo.
 for _label, _trigger, _rule in REMEDY_TRIGGERS:
-    sh("wait-pid: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
-       cwd=NOGIT, carries=("bin/wait-pid",))
+    sh("wait-pid: the remedy of %s names the helper by its bare name" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("`wait-pid",), lacks=("bin/",))
 # The path forms a remedy may name are allowed, in the foreground and under run_in_background.
 for _command in ("~/.claude/bin/wait-pid 12345", "bin/wait-pid 12345"):
     sh("wait-pid: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
@@ -5915,7 +5916,7 @@ for _label, _command in (
 # ends at that time, so it is a deadline and not a wait with no end. Equality, a second test, a second
 # loop, a poll of a file and the other direction never reach the time, so each stays refused. A pause of
 # 25 s or more is allowed under run_in_background only when a command follows it. The one helper for a
-# wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
+# wait on a time is `wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
 WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
 WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
                          r'do sleep 15; done; node tool.mjs')
@@ -6062,11 +6063,11 @@ add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_bac
 add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
     command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
 
-# Each waiter-family remedy names the helper by its bin path in backticks, since a bare `wait-until` is not on
-# PATH in a session. The remedy check below reads those forms.
+# Each waiter-family remedy names the helper by its bare name in backticks, with no bin/ path. The remedy check
+# below reads those forms.
 for _label, _trigger, _rule in REMEDY_TRIGGERS:
-    sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
-       cwd=NOGIT, carries=("`bin/wait-until",))
+    sh("wait-until: the remedy of %s names the helper by its bare name" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("`wait-until",), lacks=("bin/",))
 
 # The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
 # pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
@@ -6127,6 +6128,32 @@ def remedy_check(constant):
         if refused:
             return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
         return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
+    return check
+
+
+def remedy_helper_form_check(constant):
+    """A log check: each backticked form that starts with a helper in bin/ names the helper by its bare name, and
+    that name is an executable in this repo's bin/. A form that starts with no bin/ helper (curl) is not judged,
+    since it resolves in any session. At least one helper form must be read, so the check cannot pass on nothing."""
+    def check():
+        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        reason = getattr(guard_stream, constant, None)
+        if not isinstance(reason, str):
+            return False, "guard_stream has no %s to read the remedy from" % constant
+        bin_dir = os.path.join(REPO, "bin")
+        heads = []
+        for span in re.findall(r"`([^`]+)`", reason):
+            words = span.split()
+            if words and os.path.isfile(os.path.join(bin_dir, words[0].rsplit("/", 1)[-1])):
+                heads.append(words[0])
+        if not heads:
+            return False, "%s names no bin/ helper in backticks, so the check reads nothing" % constant
+        for head in heads:
+            if "/" in head or ".claude" in head:
+                return False, "%s names a helper by a path, not its bare name: %s" % (constant, head)
+            if not os.access(os.path.join(bin_dir, head), os.X_OK):
+                return False, "%s names %s, which is not an executable in bin/" % (constant, head)
+        return True, "%s names %d helper forms, each by its bare name" % (constant, len(heads))
     return check
 
 
@@ -14575,6 +14602,9 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
+    _helper_label = "wait-until remedy: each helper the %s names is its bare name, an executable in bin/" % _constant
+    LOG_CHECKS_EXTRA.append((_helper_label, remedy_helper_form_check(_constant)))
+    LOG_FAMILY[_helper_label] = "stream"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
