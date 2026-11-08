@@ -14155,7 +14155,7 @@ class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 8)
         remedy = self.remedy_line(out)
         self.assertIn("wrong pull request", remedy, "the remedy does not say the record is on the wrong pull request:\n" + out)
-        self.assertRegex(remedy, r"post\w* .*#8", "the remedy does not name posting the record on #8, the pull request it names:\n" + out)
+        self.assertRegex(remedy, r"post it on .*#8", "the remedy does not tell Claude to post it on #8, the pull request it names:\n" + out)
         self.assertNotIn("Get round 3 done", out, "the remedy asks for the third round, which a record posted on another pull request does not owe:\n" + out)
         self.assertNotIn("round 3 is owed", out, "the refusal says the third round is owed on a record posted on another pull request:\n" + out)
         self.assertEqual([l for l in out.splitlines() if re.fullmatch(r"Round \d+: .*PASS", l)], [], "the refusal prints a passing record line:\n" + out)
@@ -14170,6 +14170,23 @@ class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 8)
         self.assertIn("Get round 3 done", out, "the refusal does not ask for the third round on a record posted on its own pull request:\n" + out)
         self.assertNotIn("wrong pull request", out, "the refusal says the record is on the wrong pull request, though it is posted on #8:\n" + out)
+
+    def test_two_lanes_with_records_on_the_wrong_pull_requests_pair_each_posting_pull_request_with_the_one_its_record_names(self):
+        # lane one's record is posted on #7 and names #8; lane two's is posted on #9 and names #10. The remedy pairs each posting pull request with the one
+        # its record names, one clause for each lane, and does not list the named pull requests bare
+        tips = lane_batch(self, "agent/lane1", "agent/lane2")
+        misfiled_one = review_comment(1, 7, record_text(n=8, head=tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS))
+        misfiled_two = review_comment(2, 9, record_text(n=10, head=tips["agent/lane2"], guard="yes", rounds=REVIEW_PASS))
+        host = self.batch_host(tips, [misfiled_one, misfiled_two])
+        self.scope(tips, host)
+        self.assertEqual(parse_text(self, misfiled_one["body"])["n"], 8, "the first record does not name pull request 8, so the case does not reach the wrong-pull-request state")
+        self.assertEqual(parse_text(self, misfiled_two["body"])["n"], 10, "the second record does not name pull request 10, so the case does not reach the wrong-pull-request state")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        remedy = self.remedy_line(out)
+        self.assertRegex(remedy, r"#7[^#]{1,60}#8\b", "the remedy does not pair the record posted on #7 with #8, the pull request it names:\n" + out)
+        self.assertRegex(remedy, r"#9[^#]{1,60}#10\b", "the remedy does not pair the record posted on #9 with #10, the pull request it names:\n" + out)
+        self.assertNotRegex(remedy, r"#(?:8|10)\b, #(?:8|10)\b", "the remedy lists the named pull requests bare, not paired with the pull request each record was posted on:\n" + out)
 
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
