@@ -155,16 +155,22 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
+STD_STREAMS = frozenset(("/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2", "/proc/self/fd/1", "/proc/self/fd/2"))
+
+def git_env():
+    """The one home of the env a git child runs in. A GIT_TRACE* variable (GIT_TRACE2* too) set to 1, 2, true, a file descriptor or a
+    standard-stream path (STD_STREAMS) writes its trace to the child's stderr or stdout, where it would become part of the text a caller
+    parses (a sha, a path, a branch). So the child keeps such a variable only when its value is an absolute path that is not a standard
+    stream, a file target."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or (os.path.isabs(v) and v not in STD_STREAMS)}
+
 def git(cwd, *a, input=None, timeout=None):
-    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text. A GIT_TRACE* variable
-    (GIT_TRACE2* too) set to 1, 2, true or a file descriptor writes its trace to stderr or an open stream, where it would become
-    part of that text (a sha, a path). So the child keeps such a variable only when its value is an absolute path, a file target."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or os.path.isabs(v)}
-    return sh(["git", "-C", cwd, *a], input=input, env=env, timeout=timeout)
+    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text, in the env `git_env` builds."""
+    return sh(["git", "-C", cwd, *a], input=input, env=git_env(), timeout=timeout)
 
 def repo_root():
     """The one home of root discovery. -> (exit code, root). Stdout only: a stderr line (GIT_TRACE) must not become part of the path; stderr passes through."""
-    return sh(["git", "rev-parse", "--show-toplevel"], live_stderr=True)
+    return sh(["git", "rev-parse", "--show-toplevel"], env=git_env(), live_stderr=True)
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -819,7 +825,7 @@ class Host:
             return int(m.group(1))
         branch = s
         if not branch:
-            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd, live_stderr=True)  # stdout only: a trace line is no branch
+            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd, env=git_env(), live_stderr=True)  # stdout only: a trace line is no branch
             if c or not out.strip() or out.strip() == "HEAD":
                 raise Stop("no pull request is named, and the branch of the working directory cannot be read: " + out)
             branch = out.strip()
@@ -1837,7 +1843,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
             return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
         # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
-        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
+        env = {**{k: v for k, v in git_env().items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
         c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
@@ -2461,7 +2467,7 @@ def ci_job_run(wt, *args):
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    env = {k: v for k, v in git_env().items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2484,7 +2490,7 @@ def unshallow_for_lint(root):
     def stop(why, remedy="Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again."):
         raise Stop(f"the lint is unknown, not a pass: {why}\n{remedy} {LANE_LINT_CITE}")
     def shallow():  # stdout only: a stderr line (GIT_TRACE) must not change the answer; stderr passes through
-        c, out = sh(["git", "-C", root, "rev-parse", "--is-shallow-repository"], live_stderr=True)
+        c, out = sh(["git", "-C", root, "rev-parse", "--is-shallow-repository"], env=git_env(), live_stderr=True)
         if c or out not in ("true", "false"):
             stop(f"git rev-parse --is-shallow-repository answered {out!r} (exit {c}), so this clone cannot be called full.")
         return out == "true"
