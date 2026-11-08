@@ -13701,6 +13701,133 @@ sh("builder-set: commit that adds %s to AUTHOR_MUTATION_TESTS is allowed" % PROB
    cwd=_set_add, agent_id="bld1", agent_type="builder")
 add("builder-set: stop after a change that adds %s to AUTHOR_MUTATION_TESTS is allowed" % PROBE_NAME, "allow",
     event="SubagentStop", cwd=_set_add, agent_id="bld1", agent_type="builder")
+# ---- the set's remaining defects. Each case is red on the guard of the branch's product code unless its
+# comment says CONTROL: a green case there, which a mutant of the guard must break (hooks/mutate_guard.py names
+# the case that kills it).
+
+# A builder's commit or stop from a folder under the repository top. The diff names files from the top, but the
+# guard reads a working-tree file at the command's folder, so a file read there is missing and every set name in
+# it reads as dropped.
+SUB_SET_TEXT = _set_text(AUTHOR_SET_NAMES).replace("OTHER_CONSTANT = 1", "OTHER_CONSTANT = 2")
+_sub_set = diff_repo("g-set-sub", _put(SET_FILE, SUB_SET_TEXT), files=SET_FILES)
+sh("builder-set: commit from the top after an edit that keeps every set name in hooks/guard.py is allowed",
+   COMMIT, "allow", cwd=_sub_set, agent_id="bld1", agent_type="builder")  # CONTROL
+sh("builder-set: commit from hooks/ after an edit that keeps every set name in hooks/guard.py is allowed",
+   "cd hooks && " + COMMIT, "allow", cwd=_sub_set, agent_id="bld1", agent_type="builder")
+sh("builder-set: git -C hooks commit after an edit that keeps every set name in hooks/guard.py is allowed",
+   VCS + " -C hooks commit -m x", "allow", cwd=_sub_set, agent_id="bld1", agent_type="builder")
+add("builder-set: stop from hooks/ after an edit that keeps every set name in hooks/guard.py is allowed", "allow",
+    event="SubagentStop", cwd=os.path.join(_sub_set, "hooks"), agent_id="bld1", agent_type="builder")
+_sub_shared = diff_repo("g-shared-sub", _put("hooks/mutate_shared.py", "MUTANT_FIXTURE = 1\nMUTANT_EXTRA = 3\n"),
+                        files=SET_FILES)
+sh("builder-set: commit from hooks/ that only adds a line to hooks/mutate_shared.py is allowed",
+   "cd hooks && " + COMMIT, "allow", cwd=_sub_shared, agent_id="bld1", agent_type="builder")
+
+# A shell command that unstages, copies or prints hooks/mutate_guard.py writes nothing to it: allowed. The `git add`
+# and `perl -ne` cases are CONTROLS: the guard allows them already.
+sh("builder-add-only: git restore --staged of hooks/mutate_guard.py is allowed, since it writes no file",
+   "git restore --staged hooks/mutate_guard.py", "allow", **BM)
+sh("builder-add-only: git rm --cached of hooks/mutate_guard.py is allowed, since it keeps the file",
+   "git rm --cached hooks/mutate_guard.py", "allow", **BM)
+sh("builder-add-only: rsync that reads hooks/mutate_guard.py into /tmp/x is allowed",
+   "rsync hooks/mutate_guard.py /tmp/x", "allow", **BM)
+sh("builder-add-only: perl -Mstrict -ne that prints hooks/mutate_guard.py is allowed",
+   "perl -Mstrict -ne print hooks/mutate_guard.py", "allow", **BM)
+sh("builder-add-only: perl -ne that prints hooks/mutate_guard.py is allowed",
+   "perl -ne print hooks/mutate_guard.py", "allow", **BM)  # CONTROL
+sh("builder-add-only: git add of hooks/mutate_guard.py is allowed", "git add hooks/mutate_guard.py", "allow",
+   **BM)  # CONTROL
+
+# The two other files the set lists. A builder's commit or stop that changes an existing line of one is refused, and
+# one that only adds a line is allowed.
+for _rel in ("hooks/mutate_shared.py", "janitor/mutate_sweep.py"):
+    _slug = _rel.replace("/", "-").replace(".py", "")
+    _changed = diff_repo("g-other-changed-" + _slug, _put(_rel, "MUTANT_FIXTURE = 2\n"), files=SET_FILES)
+    _added = diff_repo("g-other-added-" + _slug, _put(_rel, "MUTANT_FIXTURE = 1\nMUTANT_EXTRA = 3\n"),
+                       files=SET_FILES)
+    sh("builder-set: commit that changes an existing line of %s is refused" % _rel, COMMIT, "deny", rule=BDIFF,
+       cwd=_changed, agent_id="bld1", agent_type="builder")  # CONTROL
+    add("builder-set: stop after a change of an existing line of %s is blocked" % _rel, "deny", rule=BDIFF,
+        event="SubagentStop", cwd=_changed, agent_id="bld1", agent_type="builder")  # CONTROL
+    sh("builder-set: commit that only adds a line to %s is allowed" % _rel, COMMIT, "allow", cwd=_added,
+       agent_id="bld1", agent_type="builder")  # CONTROL
+    add("builder-set: stop after an add to %s is allowed" % _rel, "allow", event="SubagentStop", cwd=_added,
+        agent_id="bld1", agent_type="builder")  # CONTROL
+
+# The set written as a set expression cannot be read, so its names cannot be checked: an Edit that makes it one is
+# refused at edit time. An Edit that leaves a syntax error outside the set passes the edit, since a file may be
+# half-written; the commit that holds the error is refused.
+SET_EXPR_LINE = _set_line(AUTHOR_SET_NAMES) + ' - {"hooks/mutate_shared.py"}'
+add("builder-set: Edit of hooks/guard.py that turns AUTHOR_MUTATION_TESTS into a set expression is refused", "deny",
+    rule=BT, tool="Edit", file_path=SET_FILE, old_string=_set_line(AUTHOR_SET_NAMES), new_string=SET_EXPR_LINE,
+    carries=("test-author",), **SET_BUILDER)
+add("builder-set: Edit of hooks/guard.py that leaves a syntax error outside the set is allowed", "allow", tool="Edit",
+    file_path=SET_FILE, old_string="OTHER_CONSTANT = 1", new_string="OTHER_CONSTANT = (", **SET_BUILDER)  # CONTROL
+_set_expr = diff_repo("g-set-expr", _put(SET_FILE, SET_EXPR_LINE + "\nOTHER_CONSTANT = 1\n"), files=SET_FILES)
+sh("builder-set: commit that turns AUTHOR_MUTATION_TESTS into a set expression is refused", COMMIT, "deny",
+   rule=BDIFF, cwd=_set_expr, agent_id="bld1", agent_type="builder")  # CONTROL
+_set_broken = diff_repo("g-set-broken", _put(SET_FILE, _set_line(AUTHOR_SET_NAMES) + "\nOTHER_CONSTANT = (\n"),
+                        files=SET_FILES)
+sh("builder-set: commit that leaves hooks/guard.py unparseable is refused", COMMIT, "deny", rule=BDIFF,
+   cwd=_set_broken, agent_id="bld1", agent_type="builder")  # CONTROL
+
+# A reordered entry changes the file: every line HEAD holds must stay, in order.
+add("builder-test: Write of hooks/mutate_guard.py that reorders two mutant entries is refused", "deny", rule=BT,
+    tool="Write", file_path=MUTATE_PATH, content="MUTATIONS = [\n" + MUTANT_TWO + MUTANT_ONE + "]\n",
+    carries=("test-author",), **BM)  # CONTROL
+
+# A folder whose `.git` names no repository: the guard finds its root there, and git cannot read HEAD. Unreadable
+# HEAD refuses, never passes.
+HEADLESS = os.path.join(ROOT, "headless")
+write(os.path.join(HEADLESS, ".git"), "gitdir: " + os.path.join(ROOT, "no-such-git-dir") + "\n")
+write(os.path.join(HEADLESS, "hooks", "mutate_guard.py"), MUTANT_FILE)
+write(os.path.join(HEADLESS, "hooks", "guard.py"), _set_text(AUTHOR_SET_NAMES))
+add("builder-add-only: Edit of hooks/mutate_guard.py in a folder whose HEAD cannot be read is refused", "deny",
+    rule=BT, tool="Edit", file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=MUTANT_ONE + MUTANT_NEW,
+    carries=("test-author",), agent_id="bld1", agent_type="builder", cwd=HEADLESS)  # CONTROL
+add("builder-set: Edit of hooks/guard.py in a folder whose HEAD cannot be read is refused", "deny", rule=BT,
+    tool="Edit", file_path=SET_FILE, old_string="OTHER_CONSTANT = 1", new_string="OTHER_CONSTANT = 2",
+    carries=("test-author",), agent_id="bld1", agent_type="builder", cwd=HEADLESS)  # CONTROL
+
+# A file the disk no longer holds: the edit cannot be read, so it refuses.
+_mutants_gone = diff_repo("g-mutants-gone", _rm(MUTATE_PATH), files={**BASE_FILES, MUTATE_PATH: MUTANT_FILE})
+add("builder-add-only: Edit of hooks/mutate_guard.py that is not on disk is refused", "deny", rule=BT, tool="Edit",
+    file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=MUTANT_ONE + MUTANT_NEW, carries=("test-author",),
+    **dict(B, cwd=_mutants_gone))  # CONTROL
+_set_gone = diff_repo("g-set-gone", _rm(SET_FILE), files=SET_FILES)
+add("builder-set: Edit of hooks/guard.py that is not on disk is refused", "deny", rule=BT, tool="Edit",
+    file_path=SET_FILE, old_string="OTHER_CONSTANT = 1", new_string="OTHER_CONSTANT = 2", carries=("test-author",),
+    **dict(B, cwd=_set_gone))  # CONTROL
+
+# A repository with no commit: HEAD names nothing, so every line the builder writes is its own.
+_no_commit = os.path.join(DIFFROOT, "g-no-commit")
+
+
+def _build_no_commit():
+    os.makedirs(_no_commit, exist_ok=True)
+    made = run_vcs(_no_commit, "init", "-q", "-b", "main", ".")
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: init in %r: %s" % (_no_commit, made.stderr.strip()))
+
+
+lazy_fixture([_no_commit], _build_no_commit)
+add("builder-add-only: Write of hooks/mutate_guard.py in a repository with no commit is allowed", "allow", tool="Write",
+    file_path=MUTATE_PATH, content=MUTANT_FILE, **dict(B, cwd=_no_commit))  # CONTROL
+# A file HEAD does not hold yet: the builder's write creates it, so every line is its own.
+_absent = diff_repo("g-mutants-absent", lambda w: None, files=BASE_FILES)
+add("builder-add-only: Write that creates hooks/mutate_guard.py, which HEAD lacks, is allowed", "allow", tool="Write",
+    file_path=MUTATE_PATH, content=MUTANT_FILE, **dict(B, cwd=_absent))  # CONTROL
+
+# Each shell writer named in the add-only list rewrites its file, so each is refused. All four are CONTROLS.
+sh("builder-add-only: ed -s on hooks/mutate_guard.py is refused, since ed writes its file",
+   "ed -s hooks/mutate_guard.py < /dev/null", "deny", rule=BT, carries=("test-author",), **BM)  # CONTROL
+sh("builder-add-only: dd of=hooks/mutate_guard.py is refused, since dd writes its file",
+   "dd if=/dev/null of=hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)  # CONTROL
+sh("builder-add-only: ruby -pi on hooks/mutate_guard.py is refused, since it edits in place",
+   "ruby -pi -e 'gsub(/a/, \"b\")' hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)  # CONTROL
+sh("builder-add-only: awk -i inplace on hooks/mutate_guard.py is refused, since it edits in place",
+   "awk -i inplace '{ print }' hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)  # CONTROL
+
 FAMILY = "diff"
 _inh_main = os.path.join(DIFFROOT, "g-inherited-main")
 _inh = os.path.join(DIFFROOT, "g-inherited")
