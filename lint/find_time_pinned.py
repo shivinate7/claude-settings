@@ -695,10 +695,11 @@ def scan_python(text):
                 if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
                     todo.append(child)
 
-    def exits(ifnode):
-        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the loop that
-        holds the if. A raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop
-        leaves that loop, so the walk reads that loop's body for a `return` only. Its `else` is read in full."""
+    def exits(ifnode, in_inner_loop=False):
+        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the wait loop. A
+        raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop leaves that loop, so
+        the walk reads that loop's body for a `return` only. Its `else` is read in full. in_inner_loop is True
+        when the if itself sits in a loop nested in the wait loop: then a `break` in its branch is no exit."""
         def leaves(stmts, in_inner_loop):
             for n in stmts:
                 if isinstance(n, ast.Return) or (isinstance(n, ast.Break) and not in_inner_loop):
@@ -717,7 +718,7 @@ def scan_python(text):
                 if hasattr(ast, "Match") and isinstance(n, ast.Match) and any(leaves(c.body, in_inner_loop) for c in n.cases):
                     return True
             return False
-        return leaves(ifnode.body, False)
+        return leaves(ifnode.body, in_inner_loop)
 
     def stops(ifnode):
         """True when the if's own branch raises or fails the test: it ends a hang, not the wait."""
@@ -729,9 +730,9 @@ def scan_python(text):
                 return True
         return False
 
-    def poll_loop_of(call):
-        """The loop whose body holds this call directly in its own scope, or None."""
-        child, node = call, parents.get(id(call))
+    def poll_loop_of(start):
+        """The nearest loop whose body holds start in its own scope, or None. A loop's `else` is not its body."""
+        child, node = start, parents.get(id(start))
         while node is not None and not isinstance(
                 node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
             if isinstance(node, (ast.While, ast.For, ast.AsyncFor)) and child in node.body:
@@ -743,10 +744,11 @@ def scan_python(text):
         """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
         wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
         comparison, or an if in the body that returns or breaks and tests something other than a clock. A cap
-        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if that
-        only raises or fails is never the condition. Its clock comparison is a cap only when the while test
-        holds the condition: in `while True` the return or break is the wait's end, and a deadline that only
-        fails leaves the sleep a fixed window."""
+        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if in a
+        nested loop ends the wait only by a `return`. An if that only raises or fails is never the condition.
+        Its clock comparison is a cap only when the while test holds the condition. So a `while True` poll that
+        breaks on its condition and only fails at its deadline is listed as sleep, though it is a real poll: a
+        known limit."""
         loop = poll_loop_of(call)
         if loop is None:
             return False
@@ -762,7 +764,7 @@ def scan_python(text):
             return isinstance(t, ast.Constant) and bool(t.value)
 
         all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
-        ifs = [n for n in all_ifs if exits(n)]
+        ifs = [n for n in all_ifs if exits(n, poll_loop_of(n) is not loop)]
         has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
         cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
         if isinstance(loop, ast.While):
@@ -771,7 +773,7 @@ def scan_python(text):
             has_cond = has_cond or while_cond
             cap = cap or any(clock_term(t) for t in terms)
             if while_cond:
-                cap = cap or any(clock_term(t) for i in all_ifs if not exits(i) and stops(i)
+                cap = cap or any(clock_term(t) for i in all_ifs if i not in ifs and stops(i)
                                  for t in terms_of(i.test))
         else:
             it = loop.iter
