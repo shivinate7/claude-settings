@@ -588,9 +588,19 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
-# The rule ids the two new asks name. Each is the one home for its id in this file.
+# Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
+# checkout. PUSHAGENT holds the name the 2026-11-08 stray push sent to origin, with no upstream. The other
+# shapes and the near misses sit beside it.
+PUSHAGENT = os.path.join(ROOT, "pushagent")            # claude/agent-<hex>
+PUSHAGENTWT = os.path.join(ROOT, "pushagentwt")        # worktree-agent-<hex>
+PUSHAGENTBARE = os.path.join(ROOT, "pushagentbare")    # agent-<hex>
+PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix with no hex after it
+PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
+PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
+# The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1920,6 +1930,24 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
 
+    # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
+    # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
+    for where, branch in ((PUSHAGENT, "claude/agent-a22bb0ed47825117b"),
+                          (PUSHAGENTWT, "worktree-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
+                          (PUSHAGENTNOTES, "agent-notes"),
+                          (PUSHAGENTMYABC, "my-agent-abc"),
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", branch)
+        if run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip() != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
+        if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+            sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2221,7 +2249,8 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7073,6 +7102,43 @@ push_case("stray branch, a second refspec that names the current branch asks",
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
+# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# without -u. The 2026-11-08 stray push sent claude/agent-<hex> to origin, and push-stray-branch stays silent
+# on a branch with no upstream. The names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8
+# or more hex characters after the prefix. PUSHAGENT sits on claude/agent-a22bb0ed47825117b, with no upstream.
+push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
+          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
+sh("push: agent branch, a bare push under push.default current asks",
+   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
+push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
+push_case("explicit agent destination from a branch with no upstream asks",
+          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+
+# SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
+# are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
+push_case("agent branch, HEAD to lane-x is silent", "origin HEAD:lane-x", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, HEAD to refs/heads/lane-x is silent", "origin HEAD:refs/heads/lane-x", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a dry run of HEAD is not this rule", "--dry-run origin HEAD", "allow",
+          cwd=PUSHAGENT, silent=True)
+push_case("agent branch, --delete of the agent name is not this rule",
+          "--delete origin claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent branch, a colon delete of the agent name is not this rule",
+          "origin :claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
+push_case("agent-notes, -u HEAD is silent (no hex after the prefix)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTNOTES, silent=True)
+push_case("my-agent-abc, -u HEAD is silent (too short to be hex)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYABC, silent=True)
+push_case("my-agent-<hex>, -u HEAD is silent (the shape must open the name)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTMYHEX, silent=True)
+
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
@@ -7169,6 +7235,14 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+sh("push: text, an echo that names a push to an agent name, is silent",
+   'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
+sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
+   'echo "one line\n' + VCS + ' push origin HEAD"', "allow", cwd=PUSHAGENT, silent=True)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
