@@ -30,7 +30,8 @@ step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
 
 Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane hands off, run
-`~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
+`~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. The lane session runs it, never a builder in an
+isolated worktree, because Claude Code's worktree check refuses it there. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
 

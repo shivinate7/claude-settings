@@ -63,6 +63,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- `merge --reviewed --root DIR ...` makes these calls once per root. Each root adds a repo-name read, a default-branch read when origin/HEAD is unset, and, when its base has a done PR, the batch-line reads. The usage text of `merge/merge.py` gives the formula, and a `ReviewedRoots` case in `merge/test_merge.py` pins it.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.

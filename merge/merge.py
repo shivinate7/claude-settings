@@ -32,9 +32,10 @@
                           or that is itself ready with CI running, is left off the batch line. A root whose read fails, or whose folder is
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
-                          Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
-                          new process, file or timer.
+                          Cost per root: one repo-name read, one default-branch read when origin/HEAD is unset, one `git fetch` of the
+                          base, and the gh calls of one --reviewed. When the base has a done PR, add one protection read and the CI reads
+                          of each ready PR on the base, and one compare per done PR and open PR on the base. Pinned by a ReviewedRoots case.
+                          No new process, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
