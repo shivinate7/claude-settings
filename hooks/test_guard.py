@@ -12191,6 +12191,19 @@ sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes pairs with 
    "Set-Content onto the config settings, denies [pwsh-followups red]",
    "Set-Content docs/a.md “it's”; Set-Content -Path " + CFG_SETTINGS + " -Value 'y'", "deny", "frozen-path",
    tool="PowerShell", cwd=NOGIT)
+# Round 2 F3, frozen: the same apostrophe pair ahead of a Remove-Item or a positional Set-Content of the config
+# settings, each path in smart quotes. Each DENIES on the frozen path. The control after them is a docs path.
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then Remove-Item of the config settings "
+   "in smart quotes, denies [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Remove-Item " + SMART_CFG_SETTINGS, "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a positional Set-Content of the config "
+   "settings in smart quotes, denies [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Set-Content " + SMART_CFG_SETTINGS + " v", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a Set-Content of a docs file, "
+   "is allowed [pwsh-followups F3 green]",
+   "Set-Content docs/a.md “it's”; Set-Content docs/b.md v", "allow", tool="PowerShell", cwd=NOGIT)
 # NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
 # rules, through `_powershell_scripts_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
 # in Bash backgrounds the first command, and detached-launch denies that before the write is read.
@@ -13642,6 +13655,52 @@ sh("pwsh-followups: pwsh -c, an apostrophe inside smart quotes pairs with a late
    "Set-Content onto a test file, is refused [pwsh-followups red]",
    "pwsh -c \"Set-Content src/app.py “it's”; Set-Content tests/test_app.py 'expected'\"", "deny", rule=BT,
    carries=("test-author",), **BR)
+# Round 2 F3: an ASCII apostrophe inside smart-quoted text joins two statements into one segment, and a later
+# write whose path is quoted (ASCII or smart, in PowerShell or in pwsh -c) reads as text. Each DENIES on that
+# test-file write. The allow controls beside them are the same shape with a product file.
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Add-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto an "
+   "ASCII-double-quoted test file, is refused [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Set-Content \"hooks/test_x.py\" v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "single-quoted test file, is refused [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Set-Content 'hooks/test_x.py' v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Set-Content onto a "
+   "smart-quoted test file, is refused [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “it's”; Set-Content “hooks/test_x.py” v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto a bare "
+   "test file after a Copy-Item, is refused [pwsh-followups F3 red]",
+   "Copy-Item docs/a.md “it's”; Add-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "test file, is refused [pwsh-followups F3 red]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'hooks/test_x.py' v\"", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# Also deny, the same cause: smart-quoted text holding an ASCII apostrophe or a `#` leaves the statement after it
+# unseen. Each DENIES on the test-file write that follows.
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes after Write-Host, then Set-Content "
+   "onto a test file, is refused [pwsh-followups F3 red]",
+   "Write-Host “it's”; Set-Content hooks/test_x.py v", "deny", rule=BT, carries=("test-author",),
+   tool="PowerShell", **BR)
+sh("pwsh-followups F3: PowerShell tool, a # inside smart quotes, then Set-Content onto a test file, "
+   "is refused [pwsh-followups F3 red]",
+   "Set-Content docs/a.md “see #3”; Set-Content hooks/test_x.py v", "deny", rule=BT,
+   carries=("test-author",), tool="PowerShell", **BR)
+sh("pwsh-followups F3: pwsh -Command ni onto a smart-quoted test file, is refused [pwsh-followups F3 red]",
+   "pwsh -Command ni ‘hooks/test_x.py’", "deny", rule=BT, carries=("test-author",), **BR)
+# Green controls beside the new denies: the same shapes onto a product file, which stay allowed.
+sh("pwsh-followups F3: PowerShell tool, an apostrophe inside smart quotes, then Add-Content onto an "
+   "ASCII-double-quoted product file, is allowed [pwsh-followups F3 green]",
+   "Set-Content docs/a.md “it's”; Add-Content \"src/app.py\" v", "allow", tool="PowerShell", **BR)
+sh("pwsh-followups F3: pwsh -c, an apostrophe inside smart quotes, then Add-Content onto a single-quoted "
+   "product file, is allowed [pwsh-followups F3 green]",
+   "pwsh -c \"Set-Content docs/a.md “it's”; Add-Content 'src/app.py' v\"", "allow", **BR)
 # A copy into a folder writes a file that keeps the test's name, so each DENIES as a write to a test file.
 sh("pwsh-followups: PowerShell tool Copy-Item of a test file into a folder is refused [pwsh-followups red]",
    "Copy-Item hooks/test_x.py docs/", "deny", rule=BT, carries=("test-author",), tool="PowerShell", **BR)
