@@ -13514,6 +13514,9 @@ SHELL_TEST_WRITES = (
     # The path a writer names, or a path that find or xargs feeds it, is judged as a test.
     ("sed --in-place on tests/a.py", "sed --in-place s/a/b/ tests/a.py"),
     ("perl -pi on tests/a.py", "perl -pi -e s/a/b/ tests/a.py"),
+    # r3 gap L4: a quoted perl script with two statements split by ; is still one script that writes tests/x.
+    ("r3 gap L4 perl -pi, quoted script with ; between two statements, on tests/x",
+     "perl -pi -e 's/a/b/;s/c/d/' tests/x"),
     ("xargs -I{} cp of tests found by find, to {}.bak",
      "find tests -name '*.py' | xargs -I{} cp {} {}.bak"),
     # A destination whose literal prefix is inside a test root is refused, with or without a substitution.
@@ -13602,6 +13605,15 @@ sh("builder-test: shell, sed e command runs cat on tests/x, no -i, on src/app.py
    "sed 'e cat tests/x' src/app.py", "allow", **BR)
 sh("builder-test: shell write, sed e command runs touch on tests/x, no -i, on src/app.py, is refused",
    "sed 'e touch tests/x' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+# r3 gap L2: the e command's printer is echo, but its pipe runs xargs rm on the test it names. Each word of
+# the e command is read, so the rm that the pipe feeds is judged as a write to tests/x.
+sh("builder-test: shell write, r3 gap L2, sed e command pipes echo of tests/x into xargs rm, no -i, on src/app.py, is refused",
+   "sed 'e echo tests/x | xargs rm' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+# r3 gap L3: a read command in the e command (head, ls) reads a test and writes nothing, as cat does.
+sh("builder-test: shell, r3 gap L3, sed e command runs head on tests/x, no -i, on src/app.py, is allowed",
+   "sed 'e head tests/x' src/app.py", "allow", **BR)
+sh("builder-test: shell, r3 gap L3, sed e command runs ls on tests, no -i, on src/app.py, is allowed",
+   "sed 'e ls tests' src/app.py", "allow", **BR)
 # Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
 sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
    "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
@@ -13810,6 +13822,34 @@ sh("builder-test: shell write, find . excluding tests by -not -path, piped to xa
    "find . -name '*.py' -not -path './tests/*' | xargs sed -i s/a/b/", "allow", **DR)
 sh("builder-test: shell write, find . for *.py with no exclusion, piped to xargs, sed -i, is refused",
    "find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
+# r3 gap L1: an exclusion drops only the files it covers. Each deny lists a test that its exclusion does not
+# cover (tests/test_a.py sits outside src/ and is not named README.md), so the write is refused. Each
+# control's exclusion covers that test, so the write is allowed. A guard that drops every file on any
+# exclusion passes the denies, and the suite must go red on it.
+for _name, _command in (
+    ("find . with -not -path of src, piped to xargs, sed -i", "find . -not -path './src/*' | xargs sed -i s/a/b/"),
+    ("find . with -not -name of README.md, piped to xargs, sed -i", "find . -not -name 'README.md' | xargs sed -i s/a/b/"),
+    ("grep -rl over . with --exclude=README.md, piped to xargs, sed -i", "grep -rl old . --exclude=README.md | xargs sed -i s/a/b/"),
+    ("git ls-files with the :^src exclusion, piped to xargs, sed -i", "git ls-files ':^src' | xargs sed -i s/a/b/"),
+    ("git ls-files with the :(exclude)src pathspec, piped to xargs, sed -i", "git ls-files ':(exclude)src' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, r3 gap L1, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+for _name, _command in (
+    ("find . with -not -name of test_*.py, piped to xargs, sed -i", "find . -not -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("grep -rl over . with --exclude=test_*.py, piped to xargs, sed -i", "grep -rl old . --exclude='test_*.py' | xargs sed -i s/a/b/"),
+    ("git ls-files with the :^tests exclusion, piped to xargs, sed -i", "git ls-files ':^tests' | xargs sed -i s/a/b/"),
+    ("git ls-files with the :(exclude)tests pathspec, piped to xargs, sed -i", "git ls-files ':(exclude)tests' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, r3 gap L1 control, %s, is allowed" % _name, _command, "allow", **DR)
+# r3 gap L3: an exclusion that leaves no test to write is allowed, as main allows it. Each command below lists
+# only product files once the test folder is excluded: the walk reads the exclusion, and no test is left.
+for _name, _command in (
+    ("git ls-files of *.py with the :!tests exclusion, piped to xargs, sed -i", "git ls-files '*.py' ':!tests' | xargs sed -i s/a/b/"),
+    ("git ls-files of . with the :!tests exclusion, piped to xargs, sed -i", "git ls-files . ':!tests' | xargs sed -i s/a/b/"),
+    ("grep -rl over . with --exclude-dir=tests, piped to xargs, sed -i", "grep -rl a . --exclude-dir=tests | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, r3 gap L3, %s, is allowed" % _name, _command, "allow", **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
