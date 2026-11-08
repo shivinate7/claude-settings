@@ -352,7 +352,36 @@ class PageStatusTests(unittest.TestCase):
                 with self.subTest(copy=label, landed=landed):
                     self.assert_unknown(repo, text, landed)
 
+    def test_ps_red_letters_joined_by_or_or_comma_are_no_ruling_cite(self):
+        # Catches: a letter list joined by "or" or "," reads as a ruling, so "item 214 a or b" passes a closed cite.
+        # A letter list joins only with "+", "/" or "and".
+        for line in ("item 214: pick a or b", "item 214 a or b"):
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_blocks(copy_repo(), report(["None new.", line]), (214,), landed=landed)
+
+    def test_ps_red_a_ruling_letter_before_a_parenthetical_dash_or_option_word_passes(self):
+        # Catches: a ruling letter followed by " (", an em or en dash, or a closing bold is read as no ruling, so a
+        # closed item the owner has ruled on blocks. "option <letter>" counts like "pick <letter>". The bold form sits
+        # mid-line: a bold word at a line start trips the report-shape guard.
+        for line in ("item 109 pick a (2026-11-04 17:55 CST)",
+                     "item 109 b (owner, 11-04 17:55 CST)",
+                     "item 109 a (Nov 4 17:44 CST)",
+                     "per item 109 option b",
+                     "Choice: **item 109 b**",
+                     "item 109 b — Nov 1",
+                     "item 109 b – Nov 1"):
+            for landed in (True, False):
+                with self.subTest(line=line, landed=landed):
+                    self.assert_quiet(copy_repo(), report([line]), landed)
+
     # --- controls: each passes today, and each stays green after the build ---
+
+    def test_ps_green_a_bare_cite_before_a_non_letter_parenthetical_still_blocks(self):
+        # Catches: a parenthetical after a bare cite is read as a ruling, so a closed item with a note passes.
+        for landed in (True, False):
+            with self.subTest(landed=landed):
+                self.assert_blocks(copy_repo(), report(["item 214 (waiting since Nov 4)"]), (214,), landed=landed)
 
     def test_ps_green_an_open_item_cite_passes(self):
         # Catches: a cite of an open item blocks, so the owner is refused a question the page still holds open.
