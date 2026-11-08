@@ -62,7 +62,8 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
   2026-11-07, on main 5cc641f78, it found 85 copies in 44 files. Lane `one-home-check` cleared them all: each now
   names its rule id.
 - Reworded rule text: `lint/stale_cites.py`, code STALE006, 5-word floor (item 340). It skips a
-  rule sentence that only gained words.
+  rule sentence that only gained words, unless the added words hold a negator (`NEGATORS`). "unless" and "except"
+  are negators. "without" is not: growth by it skips like other growth (lane pick, 2026-11-07 15:00 CST).
 - Child repos: the ste-lint step runs `find_copies.py --in-repo --parent` from its own checkout.
   Child exceptions use the `exempt` marker (item 338), codes EXEMPT001 to EXEMPT003. In claude-settings
   itself the step runs `--in-repo` with no `--parent`, and a copy fails it. In a child the step only
