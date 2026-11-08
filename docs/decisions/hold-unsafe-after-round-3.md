@@ -10,7 +10,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 `roles-review-cap-three` (a change gets three review rounds, CLAUDE.md) holds the rule that follows. This record holds what that rule lacks:
 
 - The judgment is semantic.
-- The owner's grant can allow work on a held change. A merge still needs zero or positive net value.
+- The owner's grant can allow work on a held change. A merge still needs zero or positive net value. With a `Grant:` line in the review record (the review-record decision, `pr-review-record`), round 4 is the last round. The net-value test then runs after round 4 instead of round 3.
 - A main ask that the change turns into a refusal is a safety hole closed.
 - Owner, 2026-10-15 13:40 CDT: a held change that is red in CI gets no red-CI split. A change that is not held keeps the split (red CI is split, not a safety hole).
 - Owner, 2026-10-17 11:56 and 12:53 CDT: a change that only deletes and adds nothing gets one review round. It skips rounds 2 and 3 and the net-value test. A delete-only change opens no safety hole unless it removes a guard or check, which round 1 must judge. The owner gave no other reason. If round 1 finds a safety hole Claude could hit in normal work, the normal path applies. A change that adds anything takes the normal path.
