@@ -23070,6 +23070,241 @@ spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A'
 spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: asked", ovw_case_7)
 
 
+# Rule scratchpad-owner, more cases. Each case is red on head where its label says asked, allowed or passes,
+# and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
+
+SPO_PROBE_TEXT = "print(2)\n"
+SPO_HELPERS = ("scratchpad_agent", "scratchpad_writes", "scratchpad_owner_write", "scratchpad_owner_hit",
+               "session_scratchpad_root", "under_session_scratchpad", "scratchpad_writer_record",
+               "scratchpad_record_writer", "scratchpad_writer_of")
+# The guard run as the harness runs it, with the disk calls of the scratchpad-owner helpers counted. A call
+# counts while a helper is on the stack, so the count holds whichever module imported the helper.
+SPO_COUNTING_GUARD = '''import atexit, builtins, json, os, runpy, sys, tempfile
+HELPERS = frozenset(os.environ["SPO_HELPERS"].split(","))
+FILES = ("guard.py", "guard_shared_tree.py")
+COUNTS = {"os.path.realpath": 0, "open": 0, "tempfile.gettempdir": 0}
+
+
+def in_helper():
+    frame = sys._getframe(2)
+    while frame is not None:
+        if frame.f_code.co_name in HELPERS and os.path.basename(frame.f_code.co_filename) in FILES:
+            return True
+        frame = frame.f_back
+    return False
+
+
+def counted(name, real):
+    def call(*args, **kwargs):
+        if in_helper():
+            COUNTS[name] += 1
+        return real(*args, **kwargs)
+    return call
+
+
+def save():
+    with builtins.open(os.environ["SPO_COUNTS"], "w", encoding="utf-8") as handle:
+        json.dump(COUNTS, handle)
+
+
+os.path.realpath = counted("os.path.realpath", os.path.realpath)
+builtins.open = counted("open", builtins.open)
+tempfile.gettempdir = counted("tempfile.gettempdir", tempfile.gettempdir)
+sys.path.insert(0, os.path.dirname(os.environ["SPO_GUARD"]))
+atexit.register(save)
+runpy.run_path(os.environ["SPO_GUARD"], run_name="__main__")
+'''
+
+
+def spo_outside(name, path):
+    """Scope before subject for a cost case: `path` names no scratchpad, by its real path or its text."""
+    if "scratchpad" in os.path.realpath(path) or "scratchpad" in path:
+        return "%s: setup, the path names a scratchpad: %s" % (name, path)
+    return ""
+
+
+def spo_counted(fx, tag, tool, agent, **tool_input):
+    """One guard call as `spo_call` makes it, through the counting wrapper. Returns (decision, reason, counts),
+    where counts maps each counted call to its number, or is None when the run wrote no count."""
+    folder = os.path.dirname(fx["work"])
+    wrapper = os.path.join(folder, "counting_guard.py")
+    write(wrapper, SPO_COUNTING_GUARD)
+    counts = os.path.join(folder, "counts-%s.json" % tag)
+    got, reason = decide({"raw": None, "tool": tool, "cwd": fx["work"], "session": fx["sid"],
+                          "env_path": None, "config": None, "agent_id": agent, "process_cwd": None,
+                          "temp": fx["tmp"], "tool_input": dict(tool_input), "guard": wrapper,
+                          "env": {"SPO_GUARD": GUARD, "SPO_COUNTS": counts,
+                                  "SPO_HELPERS": ",".join(SPO_HELPERS)}})
+    if not os.path.exists(counts):
+        return got, reason, None
+    with open(counts, encoding="utf-8") as handle:
+        return got, reason, json.load(handle)
+
+
+def spo_run_case(tag, name, script_name, command_of, passed, text=PY_TEXT):
+    """Agent A writes `script_name` with Write. Agent B's call `command_of(fx, path)` acts on the file and is
+    asked. Agent A's same call is the control, and is allowed."""
+    fx = spo_fixture(tag)
+    path = os.path.join(fx["scratch"], script_name)
+    problems = [spo_scope(fx, name, path)] + spo_wrote(fx, name, SPO_WRITER, path, text)
+    got, reason = spo_run(fx, SPO_OTHER, command_of(fx, path))
+    problems.append(spo_asked(name, got, reason, (fx["scratch"], script_name)))
+    got, reason = spo_run(fx, SPO_WRITER, command_of(fx, path))
+    problems.append(spo_allowed(name + ", control: agent A's own call", got, reason))
+    return spo_result(problems, passed)
+
+
+def spo_flag_1():
+    return spo_run_case("flag1", "flag 1", "probe2.py", lambda fx, p: "python3 -W ignore %s" % p,
+                        "agent B's python3 -W ignore run of agent A's script is asked")
+
+
+def spo_flag_2():
+    return spo_run_case("flag2", "flag 2", "probe2.py", lambda fx, p: "python3 -X dev %s" % p,
+                        "agent B's python3 -X dev run of agent A's script is asked")
+
+
+def spo_flag_3():
+    return spo_run_case("flag3", "flag 3", "x.js", lambda fx, p: "node --require /x %s" % p,
+                        "agent B's node --require run of agent A's script is asked", text="console.log(1)\n")
+
+
+def spo_variable_1():
+    return spo_run_case("var1", "variable 1", "probe2.py",
+                        lambda fx, p: 'S=%s; python3 "$S/probe2.py"' % os.path.dirname(p),
+                        "agent B's run of agent A's script by a shell variable path is asked")
+
+
+def spo_removal_1():
+    return spo_run_case("rm1", "removal 1", "msg.txt", lambda fx, p: "rm %s" % p,
+                        "agent B's rm of agent A's file is asked", text="from A\n")
+
+
+def spo_move_1():
+    return spo_run_case("mv1", "move 1", "msg.txt",
+                        lambda fx, p: "mv %s %s" % (p, os.path.join(fx["work"], "moved.txt")),
+                        "agent B's mv of agent A's file is asked", text="from A\n")
+
+
+def spo_approved_case():
+    """Agent A writes probe2.py. Agent B's overwrite is asked. The owner types `override 15m` at 30 s, and B's
+    overwrite at 60 s is lifted. Once the override has ended, B's run and B's rewrite pass with no override in
+    effect, so the approved overwrite must have moved the record to B. The approval is the override file, the
+    way the suite simulates an owner override for other rules."""
+    fx = spo_fixture("approved")
+    config = ov_config("spo-approved")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "approved", probe)] + spo_wrote(fx, "approved", SPO_WRITER, probe, PY_TEXT)
+
+    def call(tool, tool_input, seconds):
+        return ov_call(tool, tool_input, fx["work"], config, fx["sid"], seconds, agent_id=SPO_OTHER,
+                       temp=fx["tmp"])
+
+    overwrite = {"file_path": probe, "content": SPO_PROBE_TEXT}
+    got, reason = call("Write", overwrite, 0)
+    problems.append(spo_asked("approved, B's overwrite before the override", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    note = ov_type(config, fx["sid"], "override 15m", 30)
+    got, reason = call("Write", overwrite, 60)
+    problems.append(spo_allowed("approved, B's overwrite under the override", got, reason))
+    later = OV_TIMED_SECONDS + 120   # the override typed at 30 s ends 15 min on
+    got, reason = call("Bash", {"command": "python3 %s" % probe}, later)
+    problems.append(spo_allowed("approved, B's run after the override ended", got, reason))
+    got, reason = call("Write", overwrite, later + 60)
+    problems.append(spo_allowed("approved, B's rewrite after the override ended", got, reason))
+    if note and any(problems):
+        problems.append("the override was not typed through override.grant: " + note)
+    return spo_result(problems, "an approved overwrite moves the record: B's later run and rewrite are allowed")
+
+
+def spo_top_write(fx, probe):
+    return spo_call(fx, "Write", None, file_path=probe, content=SPO_PROBE_TEXT)
+
+
+def spo_top_redirect(fx, probe):
+    return spo_run(fx, None, "echo 'print(2)' > %s" % probe)
+
+
+def spo_top_level_case(tag, name, overwrite):
+    """Agent A writes probe2.py, and agent B's run is asked (the control). A call with no agent_id then overwrites
+    the file, and that call is allowed. Agent B's run after it passes: a top-level overwrite leaves no record."""
+    fx = spo_fixture(tag)
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, name, probe)] + spo_wrote(fx, name, SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_asked(name + ", control before the overwrite", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    got, reason = overwrite(fx, probe)
+    problems.append(spo_allowed(name + ", the top-level overwrite", got, reason))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_allowed(name + ", B's run after it", got, reason))
+    return spo_result(problems, "a top-level overwrite leaves no record: B's run after it is allowed")
+
+
+def spo_removed_case():
+    """Agent A writes probe2.py, and agent B's overwrite is asked (the control). The file is then removed outside
+    the guard. Agent B's Write of a new probe2.py at the same path is allowed: the record of the removed file
+    does not name B's new file."""
+    fx = spo_fixture("removed")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "removed", probe)] + spo_wrote(fx, "removed", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=SPO_PROBE_TEXT)
+    problems.append(spo_asked("removed, control before the removal", got, reason, (fx["scratch"], "probe2.py")))
+    os.remove(probe)
+    if os.path.exists(probe):
+        problems.append("removed, setup: probe2.py still exists after the removal")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=PY_TEXT)
+    problems.append(spo_allowed("removed, B's new probe2.py", got, reason))
+    return spo_result(problems, "a new file at a removed file's path is allowed")
+
+
+def spo_cost_case():
+    """Agent A writes probe2.py. Its own run is the control: the helpers read its record, so the counter is live.
+    Agent B's Write and B's run, outside any scratchpad and naming none, make no realpath, open or gettempdir call
+    inside a helper, and both are allowed."""
+    fx = spo_fixture("cost")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "cost", probe)] + spo_wrote(fx, "cost", SPO_WRITER, probe, PY_TEXT)
+    got, reason, counts = spo_counted(fx, "control", "Bash", SPO_WRITER, command="python3 %s" % probe)
+    problems.append(spo_allowed("cost, control: agent A's own run", got, reason))
+    if not counts or not any(counts.values()):
+        problems.append("cost, control: the scratchpad's own run counted no helper call, so the counter is not live")
+    notes = os.path.join(fx["work"], "notes.txt")
+    tool = os.path.join(fx["work"], "tool.py")
+    write(tool, PY_TEXT)
+    problems += [spo_outside("cost, notes.txt", notes), spo_outside("cost, tool.py", tool)]
+    outside = (("write", "Write", {"file_path": notes, "content": "x\n"}),
+               ("run", "Bash", {"command": "python3 %s" % tool}))
+    for label, tool_name, tool_input in outside:
+        got, reason, counts = spo_counted(fx, label, tool_name, SPO_OTHER, **tool_input)
+        problems.append(spo_allowed("cost, %s" % label, got, reason))
+        if counts is None:
+            problems.append("cost, %s: no count was written" % label)
+        elif any(counts.values()):
+            problems.append("cost, %s: a helper made disk calls on a call outside any scratchpad: %s"
+                            % (label, counts))
+    return spo_result(problems, "a call outside any scratchpad makes no helper realpath, open or gettempdir call")
+
+
+spo_register("scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore: asked", spo_flag_1)
+spo_register("scratchpad-owner: flag 2 agent B runs agent A's script past python3 -X dev: asked", spo_flag_2)
+spo_register("scratchpad-owner: flag 3 agent B runs agent A's script past node --require: asked", spo_flag_3)
+spo_register("scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path: asked",
+             spo_variable_1)
+spo_register("scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record: "
+             "B's later run and rewrite pass", spo_approved_case)
+spo_register("scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write: "
+             "B's later run passes", lambda: spo_top_level_case("top1", "top-level 1", spo_top_write))
+spo_register("scratchpad-owner: top-level 2 a call with no agent_id overwrites agent A's file with a shell "
+             "redirect: B's later run passes", lambda: spo_top_level_case("top2", "top-level 2", spo_top_redirect))
+spo_register("scratchpad-owner: removed 1 agent A's file removed outside the guard: B's new file at its path "
+             "is allowed", spo_removed_case)
+spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: asked", spo_removal_1)
+spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: asked", spo_move_1)
+spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
+             "gettempdir call", spo_cost_case)
+
+
 # =========================================================================== mask_script lexemes
 FAMILY = "mask-script"
 
