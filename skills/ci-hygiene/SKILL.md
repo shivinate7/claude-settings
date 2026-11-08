@@ -63,9 +63,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    each lane head before the join. The one exception: a head whose merge base holds main's newest lint
    change and that edits no path a lint step reads skips that run, and `merge --build-batch` says so. A red
    lane does not join. The batch runner builds the batch with
-   `~/.claude/bin/merge --build-batch [--push <new branch>]`: it joins each PR with a done review record in
-   PR order, a stack whole or not at all, lints each in parallel, and posts `Lint: red <head> <steps>` on a
-   red one. Before it marks the integration PR
+   `~/.claude/bin/merge --build-batch [--push <new branch>]`: it joins each PR with a done review record, in PR order. A PR with a held, parked or
+   replaced label stays out. A stack joins whole or not at all. It lints each PR in parallel and posts
+   `Lint: red <head> <steps>` on a red one. Before it marks the integration PR
    ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR> --integration` on the batch
    head; a PASS sets the `batch` label, which `merge --reviewed` reads as `batch run`. A FAIL keeps it a draft and sets no label. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
