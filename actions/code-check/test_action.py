@@ -487,6 +487,14 @@ def error_payloads(out):
     return [row[len(prefix):] for row in out.splitlines() if row.startswith(prefix)]
 
 
+def read_calls(log):
+    """The tool shims' log: one line per tool that started. Empty when none did."""
+    if not os.path.exists(log):
+        return ""
+    with open(log, encoding="utf-8") as f:
+        return f.read()
+
+
 def path_with(*tools):
     """A PATH folder that links only the named tools from this machine. Returns the folder."""
     folder = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -643,25 +651,28 @@ class RulingCheck(unittest.TestCase):
     # Every tool a layer or a child process could start. A shim logs its call and exits 0.
     TOOLS = ("npm", "npx", "pipx", "node", "tsc", "astro-check", "ruff", "mypy", "shellcheck")
     PACKAGE_JSON = '{"name": "widget", "version": "1.0.0"}\n'
+    # A repo that tracks TypeScript and a tsconfig: its tsc layer runs whenever the layer is not skipped.
+    TS_BASE = {"tsconfig.json": '{"compilerOptions": {"strict": true}}\n', "src/a.ts": "export const n: number = 1;\n"}
 
-    def run_head(self, body, when, files=None, base_files=None, main_files=None, **env):
+    def run_head(self, body, when, files=None, base_files=None, main_files=None, send_base=True,
+                 subject="Drop the widget docs", **env):
         """A base with a README, then a head commit dated `when` whose message is a subject and the body. base_files
-        replaces the base's files; main_files, when given, is a commit on main past the base, passed as --main; env
-        adds variables to the run."""
+        replaces the base's files; main_files, when given, is a commit on main past the base, passed as --main;
+        send_base=False omits --base; env adds variables to the run."""
         return check(files or {"docs/widget.md": "Widget docs.\n"},
-                     base_files=base_files or {"README.md": "# Widget\n"}, main_files=main_files,
-                     head_message="Drop the widget docs\n\n" + body + "\n", head_date=when, **env)
+                     base_files=base_files or {"README.md": "# Widget\n"}, main_files=main_files, send_base=send_base,
+                     head_message=subject + "\n\n" + body + "\n", head_date=when, **env)
 
-    def run_docs_only_pr(self, body, when):
+    def run_docs_only_pr(self, body, when, files=None, extra_base=None, send_base=True, subject="Drop the widget docs"):
         """A docs-only PR in a repo with a package.json and no node_modules. The base holds .code-check.json, so the
-        shrink check reads a list, and main has moved on past it. Returns (exit, output, log): the log exists only if a
-        tool shim ran."""
+        shrink check reads a list, and main has moved on past it. extra_base adds files to the base; files replaces the
+        head's files. Returns (exit, output, log): read_calls(log) names each tool that started."""
         log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "calls.log")
         shims = os.pathsep.join(path_shim(tool, 'echo "%s $*" >> %s' % (tool, shlex.quote(log))) for tool in self.TOOLS)
-        rc, out = self.run_head(body, when,
-                                base_files={".code-check.json": config([]), "README.md": "# Widget\n",
-                                            "package.json": self.PACKAGE_JSON},
-                                main_files={"CHANGELOG.md": "Main moved on.\n"},
+        base = {".code-check.json": config([]), "README.md": "# Widget\n", "package.json": self.PACKAGE_JSON}
+        base.update(extra_base or {})
+        rc, out = self.run_head(body, when, files=files, base_files=base,
+                                main_files={"CHANGELOG.md": "Main moved on.\n"}, send_base=send_base, subject=subject,
                                 PATH=shims + os.pathsep + os.environ["PATH"])
         return rc, out, log
 
@@ -706,6 +717,51 @@ class RulingCheck(unittest.TestCase):
         self.assertIn("comment check: pass", out, "the comment check did not pass a docs-only PR:\n" + out)
         self.assertEqual(rc, 0, "a fully cited ruling claim on a docs-only PR failed the action:\n" + out)
         self.assertIn("ruling check: pass", out, "the ruling check did not pass the cited commit:\n" + out)
+
+    def test_ts_repo_docs_only_uncited_starts_no_tool(self):
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+                                               extra_base=self.TS_BASE)
+        self.assertEqual(read_calls(calls), "", "tsc started on an uncited docs-only diff in a TypeScript repo:\n" + out)
+
+    def test_ts_repo_docs_only_names_the_typecheck_skip_in_one_line(self):
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+                                               "2026-11-20T10:00:00-06:00", extra_base=self.TS_BASE)
+        rows = re.findall(r"^code-check: typescript typecheck: .*$", out, re.M)
+        self.assertEqual(len(rows), 1, "the typecheck layer did not print one line on a docs-only diff:\n" + out)
+        self.assertIn("skipped", rows[0], "the typecheck layer ran instead of skipping on a docs-only diff:\n" + out)
+
+    def test_ts_repo_docs_only_cited_exits_zero_and_starts_no_tool(self):
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+                                               "2026-11-20T10:00:00-06:00", extra_base=self.TS_BASE)
+        self.assertEqual(read_calls(calls), "", "tsc started on a cited docs-only diff in a TypeScript repo:\n" + out)
+        self.assertEqual(rc, 0, "a fully cited docs-only diff in a TypeScript repo failed the action:\n" + out)
+
+    def test_ts_repo_docs_only_uncited_claim_still_fails_the_ruling_check(self):
+        """Control, green on the old code: the ruling FAIL still fires in a TypeScript repo."""
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+                                               extra_base=self.TS_BASE)
+        self.assertEqual(rc, 1, "an uncited claim on a docs-only diff in a TypeScript repo passed the action:\n" + out)
+        self.assertTrue(one_line_with(out, "check_red_run: FAIL:", "Drop the widget docs", "no home and no time"),
+                        "the ruling FAIL is missing or names another cause:\n" + out)
+
+    def test_ts_repo_ts_change_still_runs_tsc(self):
+        """Control, green on the old code: a .ts change in the same repo still starts tsc."""
+        rc, out, calls = self.run_docs_only_pr("Tighten the widget type.", "2026-11-20T10:00:00-06:00",
+                                               files={"src/a.ts": "export const n: number = 2;\n"},
+                                               extra_base=self.TS_BASE, subject="Tighten the widget type")
+        self.assertIn("tsc --noEmit", read_calls(calls), "a .ts change did not start tsc:\n" + out)
+
+    def test_no_base_runs_the_layers_and_skips_the_ruling_check(self):
+        """Control, green on the old code: with no --base the ruling and comment checks skip with their reasons, the
+        shrink check reads unknown, and the layers still run, so tsc starts on a .md-only diff."""
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00",
+                                               extra_base=self.TS_BASE, send_base=False)
+        self.assertIn("tsc --noEmit", read_calls(calls), "the layers did not run with no base:\n" + out)
+        self.assertIn("ruling check: skipped, no base to diff against", out, "the ruling check did not skip:\n" + out)
+        self.assertIn("comment check: skipped, no base to diff against", out, "the comment check did not skip:\n" + out)
+        self.assertIn("code-check: list shrink check unknown: no base ref given", out,
+                      "the shrink check did not report unknown:\n" + out)
+        self.assertEqual(rc, 0, "an uncited claim with no base failed the action:\n" + out)
 
 
 def tearDownModule():
