@@ -13,7 +13,8 @@ actions/zizmor/run.sh, one line per action, and that a workflow pinning both act
 Also asserts the installed copy: install.sh run into a temp HOME, in cloud (copy) mode and in local (symlink) mode, lands
 bin/ste-changed where its own folder holds no actions/. The command still finds the claude-settings checkout the global
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
-Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
+Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
+Also asserts an uncommitted markdown edit is linted or fails bin/ste-changed, never a plain PASS, and a clean tree still passes."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -481,6 +482,48 @@ for label, change, base, want in [
     check("exit parity, %s: both exit %d" % (label, want),
           s_rc == want and c_rc == want and parts(s_out) == parts(c_out),
           s_out + "\n--- command ---\n" + c_out)
+
+
+# An uncommitted markdown edit is outside origin/main...HEAD, so the diff finds no markdown. The command then
+# printed "no markdown changed" and passed: a false green for a file that fails lint at hand-off. It must lint the
+# file (listed in its scope) or exit non-zero and name it. Each case checks git's own state first (P7): HEAD is
+# origin/main's commit and the edit is uncommitted, read before the command runs.
+UNCOMMITTED_BASE = {"draft-note.md": "# Draft\n\nShort line.\n", "data.txt": "x\n"}
+
+
+def edit_draft(work):
+    write(work, "draft-note.md", "# Draft\n\n" + LONG + "\n", "w")  # a markdown edit, not committed
+
+
+def edit_data(work):
+    write(work, "data.txt", "y\n", "w")  # a non-markdown edit, not committed
+
+
+def git_read(cwd, *a):
+    return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True).stdout
+
+
+def uncommitted_run(change):
+    """A topic fixture with `change` applied and not committed, then bin/ste-changed main there. Returns whether
+    HEAD is origin/main's commit, git status, and the command's exit code and output."""
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
+        work = make_repo(d, UNCOMMITTED_BASE, change)
+        at_base = git_read(work, "rev-parse", "HEAD") == git_read(work, "rev-parse", "origin/main")
+        status = git_read(work, "status", "--porcelain")
+        rc, out = run_command(work)
+    return at_base, status, rc, out
+
+
+at_base, status, rc, out = uncommitted_run(edit_draft)
+check("uncommitted scope: HEAD is origin/main and draft-note.md is modified, not committed",
+      at_base and " M draft-note.md" in status, status)
+check("uncommitted: the command lints draft-note.md or exits 1 naming it, never a plain PASS",
+      ("draft-note.md" in parts(out)["files"] or (rc != 0 and "draft-note.md" in out)) and "Traceback" not in out, out)
+at_base, status, rc, out = uncommitted_run(edit_data)
+check("uncommitted control scope: HEAD is origin/main, data.txt is modified, no markdown is",
+      at_base and " M data.txt" in status and ".md" not in status, status)
+check("uncommitted control: no markdown changed still passes with exit 0",
+      rc == 0 and "ste-lint: no markdown changed" in out and "Traceback" not in out, out)
 
 
 # Shadowed imports. The step runs from the linted repo's root, so a planted json.py, json/ package or
