@@ -913,6 +913,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
     scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
+    if command_position and not guard_core.is_powershell(cmd):
+        scripts = [_expand_braces(words) for words in scripts]   # indexes must match `parsed`
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
