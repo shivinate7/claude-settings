@@ -8053,8 +8053,7 @@ sh("env: interpreter heredoc: deny, a quoted python body with a comment line, th
 # Decision env-file-stays-unread, "Interpreter code": code that a runner takes with `-c`, `-e`, `-p` or
 # `--eval`, and the body of a quoted python or node heredoc, reads the file as the interpreter does, so
 # the guard judges it as it judges `cat` of the file. Names start "env: interpreter code", so
-# MUTATE_ONLY="env: interpreter code" runs this block alone. The denies are the gap recorded as debt
-# env-interpreter-code-reads, red on the base until the guard judges this code.
+# MUTATE_ONLY="env: interpreter code" runs this block alone.
 sh("env: interpreter code: deny, python3 -c, an open of the file",
    "python3 -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
 sh("env: interpreter code: deny, python -c, a pathlib read of the file",
@@ -8108,6 +8107,43 @@ sh("env: interpreter code: allow, node --env-file, a runner handed the file and 
    "node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
 sh("env: interpreter code: allow, python3, a runner of a script file",
    "python3 app.py", "allow", cwd=NOGIT)
+
+sh("env: interpreter code: deny, uv run python -c, an open of the file",
+   "uv run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, uv run python heredoc, an open of the file",
+   "uv run python <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, poetry run python -c, an open of the file",
+   "poetry run python -c \"print(open('" + ENV + "').read())\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a python heredoc written to a file that python then runs",
+   "cat > dbg.py <<'PY'\nprint(open(\"" + ENV + "\").read())\nPY\npython3 dbg.py", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, a node heredoc written to a file that node then runs",
+   "cat > dbg.js <<'JS'\nconsole.log(require('fs').readFileSync('" + ENV + "', 'utf8'))\nJS\nnode dbg.js",
+   "deny", "env-file", cwd=NOGIT)
+
+sh("env: interpreter code: allow, python3 -c, a print of the name as a string",
+   "python3 -c \"print('" + ENV + "')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a json dump with the name as a value",
+   "python3 -c \"import json; print(json.dumps({'env_file': '" + ENV + "'}))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a write of the name to the gitignore",
+   "python3 -c \"open('.gitignore','a').write('" + ENV + "\\n')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, a membership test against a listing",
+   "python3 -c \"import os; print('" + ENV + "' in os.listdir('.'))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, node -e, a console.log of the name",
+   "node -e \"console.log('" + ENV + "')\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test through os.path.join",
+   "python3 -c \"import os; print(os.path.exists(os.path.join('.', '" + ENV + "')))\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an existence test through a two-part Path",
+   "python3 -c \"from pathlib import Path; print(Path('.', '" + ENV + "').exists())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, a quoted node heredoc with an existence test through path.join",
+   "node <<'EOF'\nconst fs=require('fs'), path=require('path');\n"
+   "console.log(fs.existsSync(path.join(__dirname, '" + ENV + "')));\nEOF", "allow", cwd=NOGIT)
+
+sh("env: interpreter code: deny, python3 -c, a getsize of the file",
+   "python3 -c \"import os; print(os.path.getsize('" + ENV + "'))\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a subprocess cat of the file",
+   "python3 -c \"import subprocess; subprocess.run(['cat', '" + ENV + "'])\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, a write to the file",
+   "python3 -c \"open('" + ENV + "','w').write('X=1')\"", "deny", "env-file", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
