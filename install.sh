@@ -1035,6 +1035,17 @@ if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "
   log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
 fi
 
+# A cloud session reads no rc file, so ~/.claude/bin reaches its shells only through CLAUDE_ENV_FILE, the file a
+# SessionStart hook writes to persist environment variables for the shell commands Claude runs later. The marker
+# keeps a second install from appending a second line. A failed write never fails the install.
+if [ "$CLOUD" = 1 ] && [ -n "${CLAUDE_ENV_FILE:-}" ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$CLAUDE_ENV_FILE"; then
+  if printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' 2>/dev/null >> "$CLAUDE_ENV_FILE"; then
+    log "added ~/.claude/bin to PATH in $CLAUDE_ENV_FILE"
+  else
+    log "could not write the PATH line to $CLAUDE_ENV_FILE; skipped"
+  fi
+fi
+
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
 # sleeper each start under job control, so each leads its own process group (`set +m` inside keeps a
 # pipeline from splitting off into a group of its own): the sleeper's TERM then reaches

@@ -17,3 +17,4 @@ output-styles
 skills
 bin
 docs/design
+actions/code-check
