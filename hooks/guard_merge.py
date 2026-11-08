@@ -1142,6 +1142,77 @@ def brief_hit(tool: str, tool_input, transcript: str):
     return None
 
 
+# ---- one live lane per step (rule lane-step-dup)
+CREATE_TOOL = "mcp__claude-code-remote__create_session"
+STEP_DUP_TAIL = " (decision session-tiers, a step has one live lane)"
+STEP_DUP_REASON = (
+    "session %s is live and carries cs-step:%s in the same repo, so this would start a second lane on one step. "
+    "Send the work to that session with send_message instead." + STEP_DUP_TAIL
+)
+STEP_DUP_UNKNOWN_REASON = (
+    "this session's transcript does not prove that no other live lane carries cs-step:%s in this repo: it holds no "
+    "whole list_sessions result, the newest one has more pages or did not parse, or the subject has no cs-repo tag "
+    "to match by. Run list_sessions (every page) in its own turn, check that the target or the new lane carries a "
+    "cs-repo tag, then retry." + STEP_DUP_TAIL
+)
+
+
+def _tag_values(tags, prefix: str):
+    """The non-empty values of the tags that start with `prefix`, stripped."""
+    return [v for v in (str(t)[len(prefix):].strip() for t in tags if str(t).startswith(prefix)) if v]
+
+
+def step_dup_hit(tool: str, tool_input, transcript: str):
+    """Return (decision, matched, reason) when this call would put a second live lane on a step, else None. The
+    call is a lane brief (send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.`, parsed as
+    brief_hit parses it) or a create_session tagged cs-step:<step>. It is denied when another live session, not the
+    brief's target, carries that step and shares a cs-repo tag with the subject (the target's record, or the create's
+    own tags); the reason names that session. A session is live unless its newest sight in this transcript is
+    archived (hooks/own_session.py session_rows_read). With no carrier found, anything short of a whole
+    list_sessions read, or a subject with no cs-repo tag, is an ask: unknown, never an allow. Fails closed: an error
+    in the reads is an ask, because the guard-wide crash path fails open. Known limit: only this transcript is read,
+    so a session started after the newest list read is not seen.
+    Cost: one transcript read per brief or create with a step; no file written, no process, no extra tool call."""
+    if not isinstance(tool_input, dict) or tool not in (BRIEF_TOOL, CREATE_TOOL):
+        return None
+    target = None
+    if tool == BRIEF_TOOL:
+        message = tool_input.get("message")
+        first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
+        found = _BRIEF_LINE.match(first) if _BRIEF_MARKER_LINE.match(first) else None
+        steps = [found.group("step")] if found else []
+        target = tool_input.get("session_id")
+    else:
+        tags = tool_input.get("tags")
+        steps = _tag_values(tags, ARCHIVE_STEP_PREFIX) if isinstance(tags, list) else []
+    if not steps:
+        return None
+    unknown = ("lane step with no proof", STEP_DUP_UNKNOWN_REASON % steps[0])
+    try:  # cost: one transcript read per brief or create with a step
+        if not transcript:
+            raise ValueError("no transcript")
+        records, listing = own_session.session_rows_read(transcript)
+        if tool == BRIEF_TOOL:
+            if not isinstance(target, str) or target not in records:
+                raise ValueError("no record of the target")
+            subject = records[target][0]
+        else:
+            subject = tool_input["tags"]
+        repos = {r.lower() for r in _tag_values(subject, ARCHIVE_REPO_PREFIX)}
+        if repos:
+            for sid, (tags, archived) in records.items():
+                if sid == target or archived:
+                    continue
+                for step in steps:
+                    if step in _tag_values(tags, ARCHIVE_STEP_PREFIX) and repos & {r.lower() for r in _tag_values(tags, ARCHIVE_REPO_PREFIX)}:
+                        return "deny", "lane step " + step + " carried by " + sid, STEP_DUP_REASON % (sid, step)
+        if not repos or listing != own_session.LIST_FULL:
+            raise ValueError("not proved")
+    except Exception:
+        return ("ask",) + unknown
+    return None
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"

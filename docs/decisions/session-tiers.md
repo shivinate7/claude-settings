@@ -136,6 +136,15 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise. No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
+- **Lane step dup** (rule `lane-step-dup`, guard rule that denies a second live lane on one step). Risk kind: incident. Incident: 11:45 CST 2026-11-08, step `draft-pr-guard-heredoc` was briefed to a second session while another live session carried its `cs-step` tag. The duplicate cost $37.51.
+  - Verdict: a lane brief (the `lane-one-topic` marker line) or a `create_session` tagged `cs-step:<step>` is denied when another live session, not the brief's target, carries `cs-step:<step>` and shares a `cs-repo` tag with the subject (the target's record, or the create's own tags). The reason names that session and says to send the work there.
+  - Live: a session is not live when its newest sight in the transcript has an archived `session_status`, or an `archive_session` call on it, answered without error, follows that sight.
+  - Unknown reads ask, never allow: no whole `list_sessions` read in the transcript (the newest one has more pages, did not parse, or there is none) with no carrier found, a brief whose target has no record, and a subject with no `cs-repo` tag. A carrier found on a page with more pages is a deny. An override lifts it.
+  - Steer: send the work to the carrier. To start a lane anyway, run `list_sessions` first.
+  - Known limit: the guard sees only records in this transcript, so a session started after the coordinator's last `list_sessions` read is not seen. The coordinator runs `list_sessions` before a brief.
+  - Cost: one transcript read per brief or create with a step; none otherwise. No file written, no process, no extra tool call.
+  - Tests: family `lane-step-dup` in `hooks/test_guard.py`.
+  - Landed at merge.
 
 ## How it works
 
