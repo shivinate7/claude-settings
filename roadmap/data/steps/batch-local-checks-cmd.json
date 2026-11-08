@@ -1,0 +1,11 @@
+{
+  "title": "One command runs a batch's local checks, with the flags read from checks.yml",
+  "phase": "now",
+  "status": "doing",
+  "order": 260.2,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2Xmid8Pt8sh5sDtSw",
+  "why": "A runner that runs each batch check by hand, with flags copied by hand, can miss one or run it differently from CI.",
+  "note": "Topic merge-tool. The checks: narration, silent-undo --strict, red-run, ste-changed. Extends merge --lane-lint where it can. From runner 8's report, via the coordinator 19:49 CST Nov 7.",
+  "updatedAt": "2026-11-07T19:49:00-06:00"
+}
