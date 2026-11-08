@@ -31,6 +31,8 @@ The modes, as the builder implements them. This file is their interface.
   repository that loads the module `<stem>`: an `import`, an `importlib.import_module` or `__import__` call, or a file
   loader (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`) whose path names `<stem>.py`. The loads are
   found with `ast`, never a grep. A tracked test that fails to parse is skipped.
+- `--lint-suites BASE`. It prints each suite that tests a file of `git diff BASE...HEAD`, and each changed suite. A suite
+  reaches a changed file through a module it loads, followed through the imports of that module (LintSuitesChainTests).
 
 Each mode is dispatched from main() in hooks/mutate_guard.py and has an entry point beside `report_main` and
 `replay_main`: `changed_main`, `known_defects_main`, `tests_for_main`. A case checks for its entry point first and
@@ -71,7 +73,8 @@ from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  t
 PY = sys.executable
 CLI_LIMIT = 300  # seconds a mode run may take before its case fails
 KNOWN_DEFECTS_FILE = ".github/known-defects.json"
-ENTRY = {"--changed": "changed_main", "--known-defects": "known_defects_main", "--tests-for": "tests_for_main"}
+ENTRY = {"--changed": "changed_main", "--known-defects": "known_defects_main", "--tests-for": "tests_for_main",
+         "--lint-suites": "lint_suites_main"}
 
 RUN = ""  # this run's folder, made in setUpModule and removed in tearDownModule
 CACHE = {}  # the fixture of a case built once per run, where a case reuses it
@@ -1455,6 +1458,58 @@ class TestsForTests(unittest.TestCase):
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
         self.assertIn(loader, out.splitlines(),
                       "%s runs bin/ci-job by its CI_JOB path constant, so --tests-for %s must print it" % (loader, target))
+
+
+CHAIN_SUITE = "hooks/test_chain.py"  # opens hooks/entry.py by a path constant, so it loads entry.py
+CHAIN_OPENS = ("import os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\nENTRY = os.path.join(HERE, \"entry.py\")\n"
+               "with open(ENTRY, encoding='utf-8') as handle:\n    handle.read()\n")
+CHAIN_LOADS = {"import": "import leaf\n\nVALUE = leaf.V\n",  # entry.py loads leaf.py by an import
+               "importlib": "import importlib\n\nleaf = importlib.import_module(\"leaf\")\n"}  # or by importlib
+
+
+def chain_repo(entry_text, lane):
+    """A repository whose base holds CHAIN_SUITE, hooks/entry.py (`entry_text`) and hooks/leaf.py. The branch `lane` then
+    writes `lane` (path -> text) and commits, so main...HEAD is the files `lane` names."""
+    repo = new_repo()
+    put(repo, {CHAIN_SUITE: CHAIN_OPENS, "hooks/entry.py": entry_text, "hooks/leaf.py": "V = 1\n"})
+    commit(repo, "base")
+    git(repo, "checkout", "-qb", "lane")
+    put(repo, lane)
+    commit(repo, "change")
+    return repo
+
+
+class LintSuitesChainTests(unittest.TestCase):
+    """`--lint-suites BASE` picks a suite that reaches a changed file through a module the suite loads. CHAIN_SUITE opens
+    hooks/entry.py by a path constant, and entry.py loads hooks/leaf.py by an import, or by importlib.import_module. A diff
+    that changes only leaf.py picks the suite (one case per form). A diff that changes entry.py picks it too (the control)."""
+
+    def picked(self, repo):
+        code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        return out.splitlines()
+
+    def changed(self, repo):
+        return git(repo, "diff", "--name-only", "main...HEAD").split("\n")
+
+    def test_a_diff_of_only_a_module_that_a_suite_reaches_by_import_picks_the_suite(self):
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/leaf.py": "V = 2\n"})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: entry.py imports it, and the suite opens entry.py"
+                      % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_that_a_suite_reaches_by_importlib_picks_the_suite(self):
+        repo = chain_repo(CHAIN_LOADS["importlib"], {"hooks/leaf.py": "V = 2\n"})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: entry.py loads it by importlib, and the suite "
+                      "opens entry.py" % CHAIN_SUITE)
+
+    def test_a_diff_that_changes_the_file_the_suite_opens_picks_the_suite(self):  # the control
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/entry.py": CHAIN_LOADS["import"] + "# changed\n"})
+        self.assertEqual(self.changed(repo), ["hooks/entry.py"], "the scope: the diff holds only entry.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo), "--lint-suites must pick %s for a diff of the file it opens" % CHAIN_SUITE)
 
 
 if __name__ == "__main__":
