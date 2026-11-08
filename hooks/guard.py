@@ -1559,6 +1559,12 @@ def _piped_cat_file(previous) -> str:
     return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
 
 
+def _api_input_named(args) -> bool:
+    """True when a `gh api` call takes its request body from `--input`, bare (`--input FILE`) or glued (`--input=FILE`). The guard
+    does not read that body, and a heredoc on the call feeds it, not a `body` field."""
+    return any(a == "--input" or a.startswith("--input=") for a in args)
+
+
 def _api_bodies(args):
     """Return (texts, files, stdin) for the `body` fields of a `gh api` call. A `body` field
     is text for -f and --raw-field, and for -F and --field text too unless it starts with `@`, which names a file (`@-` is stdin)."""
@@ -1629,7 +1635,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             texts.remove(text)
             files.append(named)
     judged_stdin = False
-    if "<<" in segment and "--input" not in rest:
+    if "<<" in segment and not _api_input_named(rest):
         heredocs = own_heredoc_bodies(segment, raw, before)
         texts.extend(heredocs)
         judged_stdin = bool(heredocs)
@@ -1638,15 +1644,19 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         if piped:
             files.append(piped)
             judged_stdin = True
+    unread = ""
     for name in files:
         try:
             with open(os.path.normpath(_absolute(name, where)), encoding="utf-8", errors="replace") as handle:
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
-            review_note("the body file " + name + " could not be read")
-    if stdin and not judged_stdin:
+            unread = unread or name
+            if edit is None:   # the not-checked note is a post's fail-open line; an edit fails closed
+                review_note("the body file " + name + " could not be read")
+    unseen = (stdin and not judged_stdin) or _api_input_named(rest)   # an edit's new body the guard cannot see
+    if stdin and not judged_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
-    return review_record_hit(texts, repo, selector, where, edit, variable=variable)
+    return review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread)
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:

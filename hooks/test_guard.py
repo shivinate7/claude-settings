@@ -964,14 +964,17 @@ def api_error(code, message):
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, apart=False):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    `apart` prints an array list's pages one array each, back to back, as gh does with --paginate and no --slurp."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
         return json.dumps(bodies)
+    if key is None and apart:
+        return "".join(json.dumps(c) for c in chosen)
     return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
 
 
@@ -1044,7 +1047,7 @@ else:
         rows = [{"id": int(c), "body": state["comment_bodies"].get(c, ""), "user": {"login": "claude-bot"},
                  "issue_url": "https://api.github.com/" + path.split("/issues/")[0] + "/issues/%d" % number}
                 for c, n in sorted(state["comments"].items(), key=lambda kv: int(kv[0])) if n == number]
-        print(json.dumps(rows))
+        print(listing(rows, None, fields, flags, apart=True))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1088,7 +1091,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     GraphQL with HTTP 403, and so does this stand-in): the pull request, the open pull requests, the
     check runs of its head and the commit statuses of its head. `statuses` are commit statuses in
     the check-row form; a head with none has the combined state "pending" on GitHub, as here.
-    `page_cap` is the page size GitHub gives: a list read takes one page unless it asks for all.
+    `page_cap` is the page size GitHub gives: a list read takes one page unless it asks for all. A pull request's comment
+    listing prints one array per page with --paginate and no --slurp, as gh does, so a listing of two pages is two arrays.
 
     `delay_s` is a plain float number of seconds, slept inside the fake's own Python process
     before it answers. It needs no external `sleep`/`ping` and so has none of the whole-second or
@@ -9947,6 +9951,8 @@ GHRECORD = os.path.join(ROOT, "ghrecord")                # the live head, for pu
 GHRECORDREPO = os.path.join(ROOT, "ghrecordrepo")        # the same, and a read of any repo but y/x breaks
 GHRECORDBROKEN = os.path.join(ROOT, "ghrecordbroken")    # every call fails, so the live head cannot be read
 GHRECORDCOUNT = os.path.join(ROOT, "ghrecordcount")      # the same as GHRECORD, and every call is logged
+GHRECORDPAGES = os.path.join(ROOT, "ghrecordpages")      # the same, and its comment listing spans two pages of two (page_cap 2)
+REVIEW_PAGED_COMMENTS = {REVIEW_COMMENT: REVIEW_PR, 4300: REVIEW_PR, 4417: REVIEW_PR}  # page 1: 4242, 4300; page 2: 4417 (REVIEW_COMMENT_ID)
 GHRECORDOLD = os.path.join(ROOT, "ghrecordold")          # the same, and comment 4417 holds a stamped record: the body an edit replaces
 GHRECORDDIR = os.path.join(ROOT, "record-bodies")        # the body files the Bash forms name
 GHRECORDBRANCH = os.path.join(ROOT, "ghrecordbranch")    # a checkout on `feat`, the head branch of the fake's pull request 12
@@ -10011,6 +10017,9 @@ def build_record_fixtures():
     make_fake_gh(GHRECORDBROKEN, "main", broken=True, head_sha=REVIEW_LIVE)
     make_fake_gh(GHRECORDOLD, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS,
                  comment_bodies={REVIEW_COMMENT_ID: review_record()})
+    # The newest comment, on page 2, holds no marker: an edit of it reads its old body from the second page.
+    make_fake_gh(GHRECORDPAGES, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_PAGED_COMMENTS, page_cap=2,
+                 comment_bodies={REVIEW_COMMENT: review_record(), 4300: review_record(), REVIEW_COMMENT_ID: UNMARKED_BODY})
     write(os.path.join(GHRECORDDIR, "ok.md"), review_record())
     write(os.path.join(GHRECORDDIR, "wrong_tail.md"), review_record(head=REVIEW_TAIL))
     write(os.path.join(GHRECORDDIR, "stale.md"), review_record(head=REVIEW_OLD))
@@ -10024,7 +10033,7 @@ def build_record_fixtures():
                  % (GHRECORDBRANCH, switched.stderr.strip()))
 
 
-lazy_fixture([GHRECORD, GHRECORDREPO, GHRECORDBROKEN, GHRECORDOLD, GHRECORDDIR, GHRECORDBRANCH], build_record_fixtures)
+lazy_fixture([GHRECORD, GHRECORDREPO, GHRECORDBROKEN, GHRECORDOLD, GHRECORDPAGES, GHRECORDDIR, GHRECORDBRANCH], build_record_fixtures)
 
 
 def mcp_input(body, number=REVIEW_PR, comment_id=None):
@@ -10354,11 +10363,13 @@ bash_post("review-record: a full-URL gh api post with a malformed record is allo
           "gh api https://api.github.com/repos/y/x/issues/%d/comments -f 'body=%s'" % (REVIEW_PR, REVIEW_TRAILING), "allow")
 
 
-def review_counted_fake():
-    """The counted pull request tool, with its log emptied. Each call it answers is logged."""
-    make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS,
-                 count_file=os.path.join(GHRECORDCOUNT, REVIEW_CALLS))
-    gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
+def review_counted_fake(folder=GHRECORDCOUNT, bodies=None):
+    """The counted pull request tool, with its log emptied. Each call it answers is logged. `bodies` maps a comment id to the body
+    it holds, the old body an edit replaces. `edit.json` in the folder is an edit body the guard is not shown: it holds no marker."""
+    make_fake_gh(folder, "main", need=["12"], head_sha=REVIEW_LIVE, comments=REVIEW_COMMENTS,
+                 count_file=os.path.join(folder, REVIEW_CALLS), comment_bodies=bodies)
+    write(os.path.join(folder, "edit.json"), json.dumps({"body": UNMARKED_BODY}))
+    gh_calls_taken(folder, REVIEW_CALLS)
 
 
 def review_case(tool, tool_input, env_path, cwd=NOGIT):
@@ -10382,20 +10393,24 @@ def review_counter_works():
     return True, "the counter logs a direct call"
 
 
-def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=()):
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=(), folder=GHRECORDCOUNT, bodies=None, carries=()):
     """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
-    folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number."""
+    folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number.
+    `folder` is the counted fake the post runs against, with the comment `bodies` it names. `carries` are fragments the reason must hold."""
     def check():
         if reads == 0:
             ok, note = review_counter_works()
             if not ok:
                 return False, note
-        review_counted_fake()
-        env_path = os.pathsep.join((GHRECORDCOUNT,) + tuple(path_dirs) + (PY_PATH,))
+        review_counted_fake(folder, bodies)
+        env_path = os.pathsep.join((folder,) + tuple(path_dirs) + (PY_PATH,))
         decision, reason = decide(review_case(tool, tool_input, env_path, cwd))
-        calls = gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
+        calls = gh_calls_taken(folder, REVIEW_CALLS)
         if decision != want:
             return False, "want %s, got %s: %s" % (want, decision, reason[:90])
+        missing = [fragment for fragment in carries if fragment not in reason]
+        if missing:
+            return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
         if len(calls) != reads:
             return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
         return True, "%s, with %d gh call(s)" % (want, reads)
@@ -10614,8 +10629,10 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused with no gh r
                          review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT), "deny", 0)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail is refused with no gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_COMMENT), "deny", 0)))
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
 REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes one gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_COMMENT), "allow", 1)))
+# Decision pr-review-record, the edit-read cost: an unmarked edit makes exactly 1 read of the old body.
 REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes one gh read, MCP update_issue_comment",
                          review_reads(MCP_UPDATE, mcp_input(REVIEW_PROSE, comment_id=REVIEW_COMMENT), "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked update is refused under pr-review-record even when its comment cannot be read, MCP update_issue_comment",
@@ -10735,6 +10752,84 @@ REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judg
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a fresh post with -e (--editor) is judged as a post, gh issue comment -e --body",
                          review_reads("Bash", {"command": "%s -e --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
+
+
+# THE OLD-BODY CASES. Decision pr-review-record, the edit-read cost: a marked new body is refused with no read; any other edit makes
+# exactly one read of the old body, and is refused when that body holds a record or the read cannot run. An edit whose new body the
+# guard cannot see (an --input file, a body read from stdin) is judged on its old body alone. A body file that cannot be read refuses
+# the edit with "could not run". An edit through a shell variable id refuses as a read that could not run, and its remedy writes the
+# literal comment id.
+GHRECORDOLDCOUNT = os.path.join(ROOT, "ghrecordoldcount")   # the counted fake, and comment 4417 holds a stamped record: the old body
+REVIEW_OLD_RECORD = {REVIEW_COMMENT_ID: review_record()}    # the bodies the counted fake holds for an edit of a record
+REVIEW_OLD_UNMARKED = {REVIEW_COMMENT_ID: UNMARKED_BODY}    # the same, over a comment with no marker
+OLD_INPUT = os.path.join(GHRECORDOLDCOUNT, "edit.json")     # the --input file of the record fake: an unseen body, no marker
+UNMARKED_INPUT = os.path.join(GHRECORDCOUNT, "edit.json")   # the --input file of the unmarked fake: an unseen body, no marker
+
+# A new body the guard cannot see, over a stamped record: refused after one read of the old body.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot see is refused over a stamped record after one gh read, gh api -X PATCH --input",
+                         review_reads("Bash", {"command": "%s --input %s" % (API_EDIT_CMD, OLD_INPUT)}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot see is refused over a stamped record after one gh read, gh api -X PATCH -F body=@-",
+                         review_reads("Bash", {"command": "%s -F body=@-" % API_EDIT_CMD}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+# The same unseen body over a comment with no marker is allowed, on its one read of the old body.
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose new body the guard cannot see is allowed over an unmarked comment after one gh read, gh api -X PATCH --input",
+                         review_reads("Bash", {"command": "%s --input %s" % (API_EDIT_CMD, UNMARKED_INPUT)}, "allow", 1,
+                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
+
+# The `=` form of --input is the same unseen body as the bare token. The method may be `-X PATCH` or `--method=PATCH`; the edit
+# route judges both alike. Decision pr-review-record, the edit-read cost: each form reads the old body once.
+API_METHOD_EQ_EDIT_CMD = "gh api --method=PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is refused over a stamped record after one gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_EDIT_CMD, OLD_INPUT)}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is refused over a stamped record after one gh read, gh api --method=PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_METHOD_EQ_EDIT_CMD, OLD_INPUT)}, "deny", 1,
+                                      folder=GHRECORDOLDCOUNT, bodies=REVIEW_OLD_RECORD, carries=WITHDRAW_REMEDY)))
+REVIEW_LOG_CHECKS.append(("review-record:an edit whose --input=FILE body the guard cannot see is allowed over an unmarked comment after one gh read, gh api -X PATCH",
+                         review_reads("Bash", {"command": "%s --input=%s" % (API_EDIT_CMD, UNMARKED_INPUT)}, "allow", 1,
+                                      folder=GHRECORDCOUNT, bodies=REVIEW_OLD_UNMARKED)))
+
+
+def review_refused_quietly(tool, tool_input, carries):
+    """A checker for one edit the guard must refuse over the stamped record that GHRECORDOLD holds for comment 4417. `decide` keeps the
+    stderr of its run in LAST_RUN. Decision pr-review-record: a post fails open and prints the not-checked note; an edit fails closed,
+    so a refused edit must not print that note."""
+    def check():
+        decision, reason = decide(review_case(tool, tool_input, GHRECORDOLD + os.pathsep + PY_PATH))
+        note = LAST_RUN.get("stderr", "")
+        if decision != "deny":
+            return False, "want deny, got %s: %s" % (decision, reason[:90])
+        missing = [fragment for fragment in carries if fragment not in reason]
+        if missing:
+            return False, "refused, but the reason lacks %s: %s" % (missing, reason[:90])
+        if "review-record: not checked" in note:
+            return False, "refused, but stderr carries the not-checked note: %r" % note.strip()[:120]
+        return True, "refused, with no not-checked note on stderr"
+    return check
+
+
+REVIEW_LOG_CHECKS.append(("review-record:a refused edit whose body file cannot be read prints no not-checked note on stderr, gh api -F body=@",
+                         review_refused_quietly("Bash", {"command": "%s -F body=@no-such-body.md" % API_EDIT_CMD}, carries=("could not run",))))
+
+# A bare edit names no pull request. This pins the count the code makes today, not a ruling: the open-PR list, then the comment listing.
+REVIEW_LOG_CHECKS.append(("review-record:a bare edit with no pull request number makes two gh reads today, the open-PR list and the listing, gh pr comment --edit-last",
+                         review_reads("Bash", {"command": "gh pr comment --edit-last --body x"}, "allow", 2,
+                                      cwd=GHRECORDBRANCH, path_dirs=(GIT_PATH,))))
+
+# An edit of the newest comment on a listing of two pages: the read takes both pages, and the newest holds no marker, so it is allowed.
+sh("review-record: an edit of the newest comment on a two-page listing is allowed, gh pr comment 12 --edit-last",
+   "%s --edit-last --body x" % PR_CMD, "allow", cwd=NOGIT, env_path=GHRECORDPAGES + os.pathsep + PY_PATH)
+
+# A body file that cannot be read, over a stamped record: refused, and the refusal says the read could not run.
+old_bash("review-record: an edit whose body file cannot be read is refused over a stamped record, gh api -F body=@ with no such file",
+         "%s -F body=@no-such-body.md" % API_EDIT_CMD, "deny", rule=REVIEW_RULE, carries=("could not run",))
+
+# A variable comment id: refused as a read that could not run, and the remedy writes the literal comment id.
+for _label, _command in (("$ID", "gh api -X PATCH repos/y/x/issues/comments/$ID -f 'body=x'"),
+                         ("${ID}", "gh api -X PATCH repos/y/x/issues/comments/${ID} -f 'body=x'")):
+    bash_post("review-record: an edit through a variable id is refused as a read that could not run, and its remedy names the literal id, %s" % _label,
+              _command, "deny", rule=REVIEW_RULE, carries=("could not run", "literal"))
 
 
 # =========================================================================== 5g. archive of a lane
