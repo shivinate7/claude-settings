@@ -20438,8 +20438,6 @@ def worktree_home_cross_checkout_copy_case():
           command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
     check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
           command='cp "%s/x" "$f"' % other)
-    # A quoted interpreter body that only quotes a path in another checkout: roadmap step other-checkout-heredoc-text.
-
     # Controls: each write into another checkout stays refused.
     check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
           command='B=%s; cp bin/x "$B/bin/ci-job"' % other)
@@ -20456,10 +20454,10 @@ def worktree_home_cross_checkout_copy_case():
           command="python3 - <<'PY'\nimport shutil; shutil.copy('a', '%s/x')\nPY" % other)
     check("control: bash heredoc body that copies into another checkout", "deny", "Bash", lane_a,
           command="bash <<'EOF'\ncp a %s/x\nEOF" % other)
-    # New deny: a quoted heredoc whose interpreter writes a file in another checkout.
+    # A quoted heredoc whose interpreter writes a file in another checkout.
     check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
           lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
-    # Interpreter bodies that run a write through another call. Main refuses each one.
+    # Interpreter bodies that run a write through another call: the body stays in the shell scan.
     check("python os.system runs a copy into another checkout", "deny", "Bash", lane_a,
           command="python3 - <<'PY'\nimport os; os.system('cp a %s/x')\nPY" % other)
     check("python os.system runs an echo redirect into another checkout", "deny", "Bash", lane_a,
