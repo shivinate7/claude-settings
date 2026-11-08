@@ -1,0 +1,11 @@
+{
+  "title": "A check matches each step note's \"the owner picked X\" claim against the page's recorded answers",
+  "why": "Lane past-ruling-on-send (session_013NEJL3ZtjRrvWWB5nAzQiv, #2195 round 3), relayed by the coordinator 14:49 CST Nov 8: a step note that restated a pick was read as an owner ruling (the lane's sighting 2). Today the only limit is question-form line 19 and note past-ruling-restated-pick. Step page-ruling-reaches-step checks only the other direction: a page answer reaches its step.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 817,
+  "updatedAt": "2026-11-08T14:50:00-06:00"
+}
