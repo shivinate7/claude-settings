@@ -2407,7 +2407,9 @@ class NotesUnionRevival(unittest.TestCase):
     a row that one side deleted when the other side adds next to it, with no conflict marker, so union revives the row.
     One read covers every merge of upstream..head: a line of a merge=union file (a file is union when either parent says
     merge=union) that is in the merge base of the two parents, absent from one parent, and present in the merge result is a
-    finding naming path and line. Duplicate rows count by copies. A Drops-lines trailer still excuses its path."""
+    finding naming path and line. Duplicate rows count by copies. A Drops-lines trailer, on a commit or in the PR body,
+    excuses a revival only when its reason names the revived row: the row's slug (the text after `- ` up to the colon) or
+    the whole line. Other reads keep the path-level excuse."""
 
     PATH = "docs/debts/notes.md"
     ALPHA = "- note alpha: pin the tag"
@@ -2879,6 +2881,65 @@ class NotesUnionRevival(unittest.TestCase):
         self.assertNotIn("FAIL", text, "an octopus merge with no revival prints a FAIL line")
         self.assertIn("UNKNOWN", text, "an octopus merge with no revival prints no UNKNOWN line")
         self.assertEqual(rc, 1, "an octopus merge with no revival does not exit 1 under --strict")
+
+    def test_a_drops_lines_trailer_whose_reason_does_not_name_the_revived_row_does_not_excuse_it(self):
+        stray = "Drops-lines: %s -- reworded the beta note" % self.PATH
+        for where in ("lane B commit", "integ merge"):
+            with self.subTest(where=where):
+                if where == "lane B commit":
+                    r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), lane_msgs={"B": "lane B\n\n" + stray})
+                else:
+                    r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), b_msg="Merge lane B\n\n" + stray)
+                self.assertIn(stray, r.sh("log", "--format=%B", "origin/main..%s" % head), "premise: the trailer is in the range")
+                self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                problems, notes = C.check(r.dir, "origin/main", head)
+                self.assertTrue(any(self.PATH in p and self.GAMMA in p for p in problems), "a reason that does not name the row excused the revival: %s" % notes)
+                self.assertFalse(any(n.startswith("ALLOWED %s:" % self.PATH) for n in notes), "a reason that does not name the row printed ALLOWED: %s" % notes)
+
+    def test_a_drops_lines_trailer_whose_reason_names_the_revived_row_excuses_it(self):
+        for form, reason in (("slug", "kept the note gamma row on purpose"), ("whole line", "kept '%s' on purpose" % self.GAMMA)):
+            with self.subTest(form=form):
+                msg = "lane B\n\nDrops-lines: %s -- %s" % (self.PATH, reason)
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), lane_msgs={"B": msg})
+                self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                problems, notes = C.check(r.dir, "origin/main", head)
+                self.assertEqual(problems, [], "a reason that names the row did not excuse the revival: %s" % problems)
+                self.assertIn("ALLOWED %s: %s" % (self.PATH, reason), notes, "the excused revival prints no ALLOWED line with its reason: %s" % notes)
+
+    def test_a_stray_reason_trailer_on_the_notes_file_still_excuses_a_lost_line_there(self):  # control
+        """The ruling narrows the excuse for a revival only. A lost line on the same path keeps the path-level excuse."""
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "feat", "origin/main")
+        r.commit("feat", other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.put(self.PATH, self.text(self.ROWS + [self.NEW]))
+        r.commit("main adds a row")
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.put(self.PATH, self.text(self.ROWS))
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main\n\nDrops-lines: %s -- reworded the beta note" % self.PATH)
+        head = r.sh("rev-parse", "HEAD")
+        self.assertNotIn(self.NEW, self.rows_at(r, head, self.PATH), "premise: the merge drops the row main added")
+        problems, notes = C.check(r.dir, "origin/main", head)
+        self.assertEqual(problems, [], "a stray reason stopped excusing a lost line on the notes file: %s" % problems)
+        self.assertIn("ALLOWED %s: reworded the beta note" % self.PATH, notes, "the lost line on the notes file is not excused: %s" % notes)
+
+    def test_a_pr_body_line_whose_reason_does_not_name_the_revived_row_does_not_excuse_it(self):
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        problems, notes = C.check(r.dir, "origin/main", head, pr_body="Drops-lines: %s -- reworded the beta note\n" % self.PATH)
+        self.assertTrue(any(self.PATH in p and self.GAMMA in p for p in problems), "a PR-body reason that does not name the row excused the revival: %s" % notes)
+        self.assertFalse(any(n.startswith("ALLOWED") for n in notes), "a PR-body reason that does not name the row printed ALLOWED: %s" % notes)
+
+    def test_a_pr_body_line_whose_reason_names_the_revived_row_excuses_it(self):
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        reason = "kept the note gamma row on purpose"
+        problems, notes = C.check(r.dir, "origin/main", head, pr_body="Drops-lines: %s -- %s\n" % (self.PATH, reason))
+        self.assertEqual(problems, [], "a PR-body reason that names the row did not excuse the revival: %s" % problems)
+        self.assertIn("ALLOWED %s: %s" % (self.PATH, reason), notes, "the excused revival prints no ALLOWED line with its reason: %s" % notes)
 
 
 if __name__ == "__main__":
