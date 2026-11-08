@@ -91,6 +91,17 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_mcp_file_writes(self):
+        # Rule push-main asks on a file write to main or master, and rule pr-review-record judges an update of a review record,
+        # so a guard matcher must see each of these calls by its full name.
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "settings.json has no guard matcher")
+        for tool in ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file",
+                     "mcp__github__update_issue_comment"):
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no guard matcher covers %s: %r" % (tool, matchers))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
