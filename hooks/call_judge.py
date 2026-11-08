@@ -793,10 +793,11 @@ def turn_commands(transcript_path):
 # names the file and runs nothing, so it backs no forecast about the file. A versioned name (python3.12) is its base.
 RUN_COMMANDS = frozenset({"python3", "python", "node", "bash", "sh", "pytest"})
 # shlex gives a run of these characters as one token. Such a token ends a command when it holds a SEPARATOR_CHARS
-# character or is `&` or `&&`: `;`, `|`, `||`, `|&`, `(`, `)`, `$(`'s `(`, `<(` and a backtick. Any other one is a
+# character or is one of AMPERSAND_SEPARATORS: `;`, `|`, `||`, `|&`, `(`, `)`, `$(`'s `(`, `<(` and a backtick. Any other one is a
 # redirect (`<`, `>`, `>>`, `>&`, `<<`), and the word after it is its target, which runs nothing.
 SHELL_PUNCTUATION = "();<>|&`"
 SEPARATOR_CHARS = "();|`"
+AMPERSAND_SEPARATORS = frozenset({"&", "&&"})
 # Words that open a command without being it: `if python3 x; then`, `do python3 x`, `! python3 x`, `{ python3 x; }`.
 SHELL_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
 # Programs that run the command after them. The words they take before it are skipped: an option, its value where it
@@ -869,7 +870,7 @@ def runs_file(command, name, _depth=0):
         parts, part, words, skip = [], [], [], False
         for token in tokens:
             if token and all(char in SHELL_PUNCTUATION for char in token):
-                if any(char in SEPARATOR_CHARS for char in token) or token in ("&", "&&"):
+                if any(char in SEPARATOR_CHARS for char in token) or token in AMPERSAND_SEPARATORS:
                     parts.append(part)
                     part, skip = [], False
                 else:
