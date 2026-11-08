@@ -12,7 +12,7 @@ import re
 # the record, then a closing tag. Only a closing tag with the opening nonce ends the wrapper.
 _OTHER_SESSION = re.compile(
     r'<other-session nonce="([0-9A-Fa-f]+)" untrusted="true">(.*)</other-session nonce="\1">', re.DOTALL)
-_CREATED_ID = re.compile(r"session_[A-Za-z0-9_-]+")
+SESSION_ID = re.compile(r"session_[A-Za-z0-9_-]+")  # a session id; also the id a create_session result names
 
 
 def _created_session_id(body):
@@ -28,7 +28,7 @@ def _created_session_id(body):
         for key in ("id", "session_id"):
             if isinstance(parsed.get(key), str):
                 return parsed[key]
-    found = _CREATED_ID.search(body)
+    found = SESSION_ID.search(body)
     return found.group(0) if found else None
 
 

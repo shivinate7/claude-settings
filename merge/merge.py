@@ -3350,9 +3350,10 @@ def newest_review(bodies, n):
 HAND_OFF_EPOCH = "1970-01-01T00:00:00Z"  # the comment read's `since` when a pull request row has no creation time
 
 def hand_off_read(h, numbers):
-    """-> {n: "open" | "cleared" | "skip"} for the numbers a hand-off message names, in the repo of `h`. "skip": the number is a closed or merged pull
-    request, or an issue. "cleared": an open pull request whose newest review record parses and has Head equal to the live head, and whose live head has its
-    lane-lint marker on this machine (a marker is per machine, so a record with no marker here is "open"). "open": any other open pull request. Cost: one pulls read per number (one issues read more for a number that is no pull request) and, when a
+    """-> {n: "open" | "unlinted" | "cleared" | "skip"} for the numbers a hand-off message names, in the repo of `h`. "skip": the number is a closed or
+    merged pull request, or an issue. "cleared": an open pull request whose newest review record parses and has Head equal to the live head, and whose
+    live head has its lane-lint marker in this container. "unlinted": the same record, but no marker here (a marker is per container), so the remedy is
+    the lint alone. "open": any other open pull request. Cost: one pulls read per number (one issues read more for a number that is no pull request) and, when a
     number is an open pull request, one paged read of the repo's issue comments since the oldest of them opened. A failed read raises Stop, or
     the timeout of the surrounding shared_deadline: never a guess."""
     live = {}
@@ -3373,7 +3374,10 @@ def hand_off_read(h, numbers):
     found = {n: "skip" for n in numbers}
     for n, row in open_rows.items():
         rec = newest_review(records.get(n), n)
-        found[n] = "cleared" if record_at_head(rec, row["head"]) and lane_lint_passed(row["head"]) else "open"
+        if record_at_head(rec, row["head"]):
+            found[n] = "cleared" if lane_lint_passed(row["head"]) else "unlinted"
+        else:
+            found[n] = "open"
     return found
 
 def reviewed_read(h):

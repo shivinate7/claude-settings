@@ -122,13 +122,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        override lifts it.
   lane-lint-send      deny. A send_message to a target whose newest record (get_session, create_session or a
                        list_sessions row) is tagged cs-build:batch-runner, when its text names an open pull request
-                       (`#n`, or a github.com pull URL; at most five) with no parseable review record whose Head equals
-                       the live head. A closed or merged pull request, an issue, a target that is no runner (no pull
-                       request read) and a message that names no pull request pass. A target with no record, or one
-                       retagged after it, is refused once per session with a steer to get_session; a send after that
-                       refusal passes. A read that fails, a read past LANE_LINT_SEND_SECONDS (25 s), an unknown repo
-                       (a bare #n with no cs-repo tag and no GitHub origin) and a sixth pull request read as unknown:
-                       allowed, with one guard.log line and one stderr line. An override lifts it. (lane-lint-send)
+                       (`#n`, `PR#n`, `owner/name#n` or a github.com pull URL; at most five) with no parseable review
+                       record whose Head equals the live head, or with one but no lint marker of that head in this
+                       container. Each refusal names its remedy: post the review record, or run merge --lane-lint. A
+                       closed or merged pull request, an issue, a target that is no runner (no pull request read), a
+                       target with no record that is no session_ id (such as @parent) and a message that names no pull
+                       request pass. A session_ target with no record, or one retagged after it, is refused with a steer
+                       to get_session; the exact retry passes once a get_session on the target follows that refusal,
+                       and a readable record from it judges the retry. Each repo is judged alone: a read that fails, a
+                       read past LANE_LINT_SEND_SECONDS (25 s, one budget for the message), a token that is no
+                       owner/name and a bare #n with no repo leave only that repo's pull requests unknown. A sixth pull
+                       request leaves the whole message unknown. Unknown is allowed, with one guard.log line and one
+                       stderr line. An override lifts it. (lane-lint-send)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -5227,12 +5232,12 @@ def judge(payload) -> None:
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
-    # A hand-off to a batch runner that names an open pull request with no review record at its live head (rule lane-lint-send).
-    # Cost: none for a message that names no pull request or a target that is no runner; else one pulls read per pull request
-    # (at most five) and one comment list per repo (see guard_merge.py, lane-lint-send).
+    # A hand-off to a batch runner that names an open pull request with no review record at its live head, or no lint marker here
+    # (rule lane-lint-send). Cost: none for a message that names no pull request or a target that is no runner; else one pulls read
+    # per pull request (at most five) and one comment list per repo with an open one (see guard_merge.py, lane-lint-send).
     def lane_send_note(why):
         record(tool, "noted", "lane-lint-send", "unknown: " + why)
-        print("lane-lint-send: unknown, %s. The hand-off is allowed, not judged." % cap_safe(why, 300), file=sys.stderr)
+        print("lane-lint-send: unknown, %s. That part of the hand-off is not judged." % cap_safe(why, 300), file=sys.stderr)
 
     sent = lane_lint_send_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", cwd, lane_send_note)
     if sent:

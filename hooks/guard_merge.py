@@ -1623,18 +1623,25 @@ LANE_SEND_ENV = "LANE_LINT_SEND_SECONDS"  # the seconds one hand-off's pull requ
 LANE_SEND_MAX = 5  # pull requests judged in one message; a sixth makes the whole message unknown
 RUNNER_TAG = ROLE_TAG_PREFIX + ROLE_TIERS[0]
 _SEND_PR_URL = re.compile(r"(?<![\w./-])(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)(?!\d)")  # the scheme and `www.` are optional; not `notgithub.com`
-_SEND_PR_BARE = re.compile(r"(?:(?<![\w&/])|(?<=\b[Pp][Rr]))#(\d{1,5})(?!\w)")  # `#41` and `PR#41`; not `&#39;`, a colour, `name#41`, or a number in a longer digit run
+# `#41`, `PR#41`, and each `#n` of `#41/#42`; not `&#39;`, a colour, `name#41`, `docs/#41`, or a number in a longer digit run
+_SEND_PR_BARE = re.compile(r"(?:(?<![\w&/])|(?<=\d/)|(?<=\b[Pp][Rr]))#(\d{1,5})(?!\w)")
 _SEND_PR_QUALIFIED = re.compile(r"(?<![\w/.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d{1,5})(?!\w)")  # `owner/name#41`; a bare `name#41` has no owner and is not judged
+_SEND_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}")  # a GitHub owner/name; any other token is read as nothing
+LANE_SEND_CITE = "(decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
 LANE_SEND_REASON = (
-    "lane-lint-send: this hand-off names %s, with no review record at its live head, or no lint marker for that head on this machine. Run `merge --lane-lint <pr>` on the "
-    "lane's pushed head, fix any finding, write the review record with `merge <pr> --review-record`, post it on the pull "
-    "request, then send again. (decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
+    "this hand-off names %s, with no review record at its live head. Run `merge --lane-lint <pr>` on the lane's pushed head, fix any "
+    "finding, write the review record with `merge <pr> --review-record`, post the review record on the pull request, then send again. "
+)
+LANE_SEND_LINT_REASON = (
+    "this hand-off names %s, whose review record is at its live head, but this container holds no lint marker for that head. The marker "
+    "is per container, so a sender in another container than the one that linted must lint here first: run `merge --lane-lint <pr>` on "
+    "the live head, then send again. "
 )
 LANE_SEND_NO_RECORD_REASON = (
     "lane-lint-send: this hand-off names a pull request, and this session's transcript holds no get_session, create_session or "
     "list_sessions record of the target, so the guard cannot tell whether the target is a batch runner. Run get_session on the "
-    "target alone, in its own turn, then retry; an exact retry of this message passes. "
-    "(decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
+    "target alone, in its own turn, then send this message again: once a get_session on the target follows this refusal, the "
+    "exact retry passes, or is judged by the record that get_session read. " + LANE_SEND_CITE
 )
 
 
@@ -1652,10 +1659,12 @@ def _send_refs(message: str):
     return refs
 
 
-def _send_refused_before(transcript: str, target: str, message: str) -> bool:
-    """True when this transcript holds an earlier send_message to `target` with exactly this `message` whose result names LANE_SEND_RULE: the
-    refusal of this text is spent, so its exact retry passes. A send with other text is no retry and is judged afresh."""
-    sends = set()
+def _send_refusal_spent(transcript: str, target: str, message: str) -> bool:
+    """True when this transcript holds a send_message to `target` with exactly this `message` whose result names LANE_SEND_RULE, and a
+    get_session call on `target` after that refusal, whatever it returned. A readable record from that get_session is judged before
+    this is asked, so here it was unreadable: the exact retry passes, and so does each later identical one, so the guard never loops.
+    A send with other text is no retry and is judged afresh."""
+    sends, refused = set(), False
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
@@ -1665,16 +1674,19 @@ def _send_refused_before(transcript: str, target: str, message: str) -> bool:
             for block in content if isinstance(content, list) else ():
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("send_message"):
-                    given = block.get("input")
+                kind, name, given = block.get("type"), str(block.get("name", "")), block.get("input")
+                if kind == "tool_use" and name.endswith("send_message"):
                     if isinstance(given, dict) and given.get("session_id") == target and given.get("message") == message:
                         sends.add(block.get("id"))
-                elif block.get("type") == "tool_result" and block.get("tool_use_id") in sends:
+                elif kind == "tool_use" and name.endswith("get_session"):
+                    if refused and isinstance(given, dict) and given.get("session_id") == target:
+                        return True
+                elif kind == "tool_result" and block.get("tool_use_id") in sends:
                     body = block.get("content")
                     if isinstance(body, list):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if isinstance(body, str) and LANE_SEND_RULE in body:
-                        return True
+                        refused = True
     return False
 
 
@@ -1702,14 +1714,17 @@ def _send_default_repo(tags, cwd):
 
 
 def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
-    """Return (matched, reason) when this send_message hands a batch runner an open pull request whose live head has no review record,
-    else None. A message that names no pull request reads nothing. A target whose newest record (get_session, create_session or a
-    list_sessions row) has no cs-build:batch-runner tag is not judged and costs no pull request read. With no usable record of the
-    target the first such send is refused with a steer, and an exact retry of that message passes; any other send is judged afresh. Each pull request (at most
-    LANE_SEND_MAX) is read through the merge tool's hand_off_read: a closed or merged pull request and an issue pass, and an open one passes
-    only with a review record at its live head and the lint marker of that head. A read that
-    fails, a read past LANE_SEND_ENV, an unknown repo, a missing merge tool and a sixth pull request are unknown: allowed, with `note(why)`
-    called once. Fails open: the guard-wide crash path allows too, and a bug here never blocks a hand-off."""
+    """Return (matched, reason) when this send_message hands a batch runner an open pull request whose live head has no review record, or
+    no lint marker in this container, else None. A message that names no pull request reads nothing. A target whose newest record
+    (get_session, create_session or a list_sessions row) has no cs-build:batch-runner tag is not judged and costs no pull request read.
+    A target with no usable record that is not a `session_` id (such as `@parent`) is not judged either. A `session_` target with no
+    usable record is refused with a steer to get_session; the exact retry passes once a get_session on the target follows the refusal
+    (see _send_refusal_spent), and any other send is judged afresh. Each pull request (at most LANE_SEND_MAX) is read through the merge
+    tool's hand_off_read: a closed or merged pull request and an issue pass, and an open one passes only with a review record at its
+    live head and the lint marker of that head. Each repo is judged alone: a read that fails, a read past LANE_SEND_ENV, a repo token
+    that is no owner/name, and a bare `#n` with no repo leave only that repo's pull requests unknown. A missing merge tool and a sixth
+    pull request leave the whole message unknown. Unknown is allowed, with `note(why)` called once. Fails open: the guard-wide crash path
+    allows too, and a bug here never refuses a hand-off."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
         return None
     message, target = tool_input.get("message"), tool_input.get("session_id")
@@ -1718,15 +1733,17 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
     refs = _send_refs(message)
     if not refs:
         return None
-    try:  # cost: one transcript read per send that names a pull request, a second when the target has no usable record
+    try:  # cost: one transcript read per send that names a pull request, a second when a session target has no usable record
         tags, tagged_after = _own_session_read(transcript, target, created=True, listed=True) if transcript else (None, False)
     except Exception:
         tags, tagged_after = None, False
+    if tags is None and not own_session.SESSION_ID.fullmatch(target):
+        return None  # an address such as `@parent` names no session the sender can read, so a steer to get_session could only loop
     if tags is None or tagged_after:
         try:  # with no transcript to read the refusal could never be spent: that is unknown, and the hand-off passes
             if not transcript:
                 raise OSError("no transcript path")
-            spent = _send_refused_before(transcript, target, message)
+            spent = _send_refusal_spent(transcript, target, message)
         except Exception as err:
             note("the transcript could not be read (%s)" % cap_safe(str(err), 100))
             return None
@@ -1736,31 +1753,43 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
     if len(refs) > LANE_SEND_MAX:
         note("the message names %d pull requests, past the %d the guard judges" % (len(refs), LANE_SEND_MAX))
         return None
-    try:
-        default = ""
-        if any(not repo for repo, _n in refs):
-            default = _send_default_repo(tags, cwd)
-            if not default:
-                note("the repo of a bare #n is unknown: the target has no cs-repo tag and the working directory has no GitHub origin")
-                return None
-        by_repo = {}
-        for repo, number in refs:
-            by_repo.setdefault(repo or default, []).append(number)
-        module = merge_module()
-        if module is None:
-            note("the merge tool could not be loaded")
-            return None
-        open_prs = []
-        with module.shared_deadline(_send_cap()):  # cost: one pulls read per number and one comment list per repo, under one budget
-            for repo, numbers in by_repo.items():
-                states = module.hand_off_read(module.Host(repo=repo), numbers)
-                open_prs += ["#%d" % n if repo == default else "%s#%d" % (repo, n) for n in numbers if states[n] == "open"]
-    except (Exception, SystemExit) as err:
-        note("the pull request read failed (%s: %s)" % (type(err).__name__, cap_safe(" ".join(str(err).split()), 120)))
+    module = merge_module()
+    if module is None:
+        note("the merge tool could not be loaded")
         return None
-    if open_prs:
-        return "hand-off of " + ", ".join(open_prs), LANE_SEND_REASON % ", ".join(open_prs)
-    return None
+    bare = any(not repo for repo, _n in refs)
+    default = _send_default_repo(tags, cwd) if bare else ""
+    unknown, by_repo = [], {}
+    if bare and not default:
+        unknown.append("the repo of a bare #n is unknown: the target has no cs-repo tag and the working directory has no GitHub origin")
+    for repo, number in refs:
+        if repo or default:
+            by_repo.setdefault(repo or default, []).append(number)
+    unrecorded, unlinted = [], []
+    with module.shared_deadline(_send_cap()):  # cost: one pulls read per number and one comment list per repo, under one budget
+        for repo, numbers in by_repo.items():
+            if not _SEND_REPO.fullmatch(repo):
+                unknown.append("%s is no owner/name, so its pull requests were not read" % cap_safe(repo, 60))
+                continue
+            try:
+                states = module.hand_off_read(module.Host(repo=repo), numbers)
+            except (Exception, SystemExit) as err:
+                unknown.append("the pull request read of %s failed (%s: %s)" % (cap_safe(repo, 60), type(err).__name__,
+                                                                              cap_safe(" ".join(str(err).split()), 120)))
+                continue
+            for n in numbers:
+                shown = "#%d" % n if repo == default else "%s#%d" % (repo, n)
+                if states[n] == "open":
+                    unrecorded.append(shown)
+                elif states[n] == "unlinted":
+                    unlinted.append(shown)
+    if unknown:
+        note("; ".join(unknown))
+    if not unrecorded and not unlinted:
+        return None
+    reason = (LANE_SEND_REASON % ", ".join(unrecorded) if unrecorded else "") + \
+        (LANE_SEND_LINT_REASON % ", ".join(unlinted) if unlinted else "")
+    return "hand-off of " + ", ".join(unrecorded + unlinted), reason + LANE_SEND_CITE
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
