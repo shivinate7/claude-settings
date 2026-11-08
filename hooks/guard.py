@@ -1585,13 +1585,13 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     return cited_in_texts(texts, is_commit)
 
 
-def cited_in_texts(texts, is_commit: bool) -> str:
+def cited_in_texts(texts, is_commit: bool, tool: str = "Bash") -> str:
     """Return the first record path the message texts cite, else ''. The shell scan and the MCP
     create tool's body both end here."""
     pattern = record_path_pattern()
     if pattern is None:
         # An unread folder list is logged, as every unread subject is, and the rule stands down.
-        record("Bash", "noted", "subject-unread", "cite-by-id: record folders unread")
+        record(tool, "noted", "subject-unread", "cite-by-id: record folders unread")
         return ""
     if is_commit:
         # Owner ruling 2026-10-12: a commit's trailer `Drops-lines: <path> -- <reason>`, the shape
@@ -5014,7 +5014,7 @@ def judge(payload) -> None:
     if tool == CREATE_PR_TOOL:
         body, title = (tool_input.get(k) for k in ("body", "title"))
         body_texts = [body] if isinstance(body, str) else []
-        matched = cited_in_texts(body_texts, False)
+        matched = cited_in_texts(body_texts, False, tool)
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
         matched = lane_in_texts(body_texts + ([title] if isinstance(title, str) else []))

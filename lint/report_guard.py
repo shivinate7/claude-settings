@@ -118,7 +118,7 @@ tool in backticks that hooks/refusal_note.py recorded for this session, or `(mea
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
 dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
 with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
-the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
+the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: every run imports hooks/shared_names.py at load (stdlib only); a reply with no such line opens no file and imports nothing more; one with it reads
 the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
@@ -136,7 +136,12 @@ from _transcript import (  # noqa: E402
 import layout  # noqa: E402
 # hooks/ is lint/'s sibling in the repo and under ~/.claude. shared_names is stdlib only and does not load the guard.
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-from shared_names import LANDING_TOOLS  # noqa: E402
+try:
+    from shared_names import LANDING_TOOLS  # noqa: E402
+except ImportError:
+    # An install lands lint/ before hooks/, so hooks/ may be missing or older. The Stop hook fails open: only the
+    # MCP landing read goes quiet, and the shell forms still work.
+    LANDING_TOOLS = frozenset()
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
