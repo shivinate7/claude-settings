@@ -55,9 +55,9 @@ Interface the hook must match:
 - The tradeoff rule (call_judge.TRADEOFF_RULE, a plain constant): when every option of a question loses something large, the
   judge blocks and asks the writer for an option that keeps the gains. It is appended exactly once after the question-format
   prompt: after WIDENING_RULE for a judged page write that is a set or update with 2+ options on a decision (not a task, which
-  is kind task or carries `steps`, and not one with a truthy `multi`), and after the box prompt when a box has a question with
-  2+ options and multiSelect not true. It is never appended for an Agent spawn, a str_replace, or a read. The cases read the
-  constant with load_file_module, never a copy, and a missing name fails its checks with a named cause.
+  is kind task or carries `steps`, and not one with a truthy `multi` or `ranked`), and after the box prompt when a box has a
+  question with 2+ options and multiSelect not true. It is never appended for an Agent spawn, a str_replace, or a read. The
+  cases read the constant with load_file_module, never a copy, and a missing name fails its checks with a named cause.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
@@ -1349,6 +1349,12 @@ def multi_decision():
     return good_page_item(multi=True)
 
 
+def ranked_decision():
+    """A decision with `ranked`, no `multi`, 2 options and a list `pick`: `ranked` implies `multi`, so the owner may pick
+    both, and no tradeoff is pushed back."""
+    return good_page_item(ranked=True, pick=["a", "b"])
+
+
 def multiselect_box():
     """A box whose only question with 2+ options allows several picks."""
     box = good_box()
@@ -1361,7 +1367,8 @@ def case_tradeoff_fixtures_pass_the_form():
     import question_form  # the one form check (hooks/question_form.py)
     for label, item in (("a task with 2 options", task_with_options()),
                         ("a decision with one option", one_option_decision()),
-                        ("a decision with multi", multi_decision())):
+                        ("a decision with multi", multi_decision()),
+                        ("a decision with ranked", ranked_decision())):
         got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
         check("tradeoff fixture: %s passes question_form.item_hit" % label, got == ("", ""), got)
     got = question_form.chat_hit(multiselect_box())
@@ -1370,9 +1377,9 @@ def case_tradeoff_fixtures_pass_the_form():
 
 def case_tradeoff_absent():
     # A context-only update, an update with empty options, a box whose only question has one option, an Agent spawn, a
-    # task with 2 options, a decision with one option, a decision with `multi`, a box whose only 2+ option question is
-    # multiSelect, and a str_replace on context never get TRADEOFF_RULE. Each absence first asserts that its call was made,
-    # so an early exit cannot pass it.
+    # task with 2 options, a decision with one option, a decision with `multi`, a decision with `ranked` and no `multi`, a
+    # box whose only 2+ option question is multiSelect, and a str_replace on context never get TRADEOFF_RULE. Each absence
+    # first asserts that its call was made, so an early exit cannot pass it.
     context = good_page_item()["context"]
     one = good_box()
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
@@ -1384,6 +1391,7 @@ def case_tradeoff_absent():
         ("a task with 2 options", page_input("set", task_with_options())),
         ("a decision with one option", page_input("set", one_option_decision())),
         ("a decision with multi and 2 options", page_input("set", multi_decision())),
+        ("a decision with ranked and 2 options", page_input("set", ranked_decision())),
         ("a box whose only 2+ option question is multiSelect", question_input(box=multiselect_box())),
         ("a str_replace on context", page_input("str_replace", None, field="context", old_str=PAGE_OLD,
                                                 new_str="The change lands this week. " + PAGE_NEW)),
