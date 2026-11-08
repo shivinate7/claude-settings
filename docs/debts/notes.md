@@ -1508,3 +1508,7 @@
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - Reply side: a bare item <n> with no page or triage word passes (scope ruling 22:45 CST Nov 7, lane item-cite-carries-name).
+- item-cite-pipe-gloss: a status cell passes as a name, `| item 46 | in progress |` and `| D12 | waiting on owner |` (lint/report_guard.py `GLOSS_AFTER_RE`). Rule: speak-cite-id-plus-gloss.
+- item-cite-name-forms: `` item 9 `search-pill` ``, `page item 9 [search pill clear](url)` and `item 9 "a b"` refuse, though each carries a name (lint/report_guard.py `ITEM_SLUG_AFTER_RE`). Rule: speak-cite-id-plus-gloss.
+- handoff-cite-whole-file: an Edit to the handoff refuses when a stale bare cite sits elsewhere in the file (hooks/guard.py `handoff_cite_hit`). Rule: speak-cite-id-plus-gloss.
+- item-cite-weak-lead: `` `foo.py` fails, item 3 `` passes, as the lead reads "py fails," (lint/report_guard.py `ITEM_RECORD_RE`, shared with the record-id reader). Rule: speak-cite-id-plus-gloss.
