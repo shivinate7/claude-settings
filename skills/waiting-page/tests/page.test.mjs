@@ -2922,7 +2922,7 @@ test("an answer that arrives while the tab is hidden is new at the next load, no
 test("the Ask seen stamp moves when the tab hides while the Ask section is on screen", async (t) => {
   const page = await tabOpen(t); if (!page) return;
   await page.locator("#asks").scrollIntoViewIfNeeded();
-  await page.waitForFunction(() => { const r = document.getElementById("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
+  await page.waitForFunction(() => { const r = document.getElementById("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
 });
@@ -2941,7 +2941,7 @@ test("the Ask seen stamp stays at the hide time when the page closes on a hidden
   // The Ask section is below the fold at load. The owner scrolls it into view, as the on-screen case above does, so the hide stamps it.
   const page = await open(t, { dbExtra: { asks: TAB_ASKS() }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE }); if (!page) return;
   await page.locator("#asks").scrollIntoViewIfNeeded();
-  assert.equal(await asksOnScreen(page), true, "the Ask section is off screen after it is scrolled into view, so this case cannot show a hidden tab's stamp");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the Ask section is scrolled into view, so this case cannot show a hidden tab's stamp");
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
   // An answer lands in the store while the tab is still hidden. The page then closes, later, still hidden, with the Ask section laid out where it was.
