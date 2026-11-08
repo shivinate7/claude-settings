@@ -91,6 +91,13 @@ class Job(unittest.TestCase):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
 
+    def body_file(self, body):
+        """A UTF-8 file in this run's folder that holds `body`: the form ci-job reads the pull request body in, named by CI_JOB_PR_BODY_FILE."""
+        fd, path = tempfile.mkstemp(prefix="body-", suffix=".txt", dir=RUN_FOLDER)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        return path
+
 
 class Steps(Job):
     def test_a_passing_step_passes_and_the_job_exits_zero(self):
@@ -486,16 +493,17 @@ class GithubBaseRef(Job):
     SEEN_PR_BODY = "printf '%s' \"${PR_BODY-<unset>}\" > seen.txt"
 
     def test_a_step_env_that_reads_the_pull_request_body_gets_the_body_ci_job_is_given(self):
-        """The pull request body reaches a step as `${{ github.event.pull_request.body }}`, which ci-job reads from env CI_JOB_PR_BODY."""
+        """The pull request body reaches a step as `${{ github.event.pull_request.body }}`, which ci-job reads from the UTF-8 file
+        that CI_JOB_PR_BODY_FILE names."""
         body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n"
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN_PR_BODY, env={"PR_BODY": "${{ github.event.pull_request.body }}"}),
-                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": body})
+                                              args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file(body)})
         self.assertEqual((verdicts, seen), (["PASS"], body), out)
 
     def test_a_run_line_that_holds_the_pull_request_body_reads_unknown(self):
         """The body is data, never shell text: a run: line with the body expression is unknown, exit 2, and no shell runs it."""
         rc, lines, out = self.run_job(step("inline", 'echo "${{ github.event.pull_request.body }}"'),
-                                      args=("--base", "origin/main"), env={"CI_JOB_PR_BODY": "Drops-lines: a -- b"})
+                                      args=("--base", "origin/main"), env={"CI_JOB_PR_BODY_FILE": self.body_file("Drops-lines: a -- b")})
         self.assertEqual(self.verdicts(lines), ["unknown"], out)
         self.assertEqual(rc, 2, out)
 

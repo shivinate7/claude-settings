@@ -33,8 +33,10 @@ LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+body_file = os.environ.get("CI_JOB_PR_BODY_FILE")  # the body ci-job is given: a UTF-8 file, read whole; None when no file is named
+body = None if body_file is None else open(body_file, encoding="utf-8", newline="").read()
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "pr_body": os.environ.get("CI_JOB_PR_BODY")}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "pr_body": body}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -252,9 +254,9 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("Push-only lint B", lines[0], out)
         self.assertRegex(lines[0], r"\b2\b", out)
 
-    def test_lane_lint_gives_ci_job_the_live_pr_body_as_ci_job_pr_body(self):
-        """The silent-undo step reads the PR body from env PR_BODY, and ci-job takes that from env CI_JOB_PR_BODY, so lane_lint passes
-        the body the host reports for the pull request now. The states are an empty body and the largest body GitHub keeps."""
+    def test_lane_lint_gives_ci_job_the_live_pr_body_in_its_body_file(self):
+        """ci-job takes the PR body from the UTF-8 file named by CI_JOB_PR_BODY_FILE, so lane_lint passes the body the host reports
+        for the pull request now. The states are an empty body and the largest body GitHub keeps."""
         self.use_ci_job(PASSING, 0)
         bodies = ("", "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nGenerated with Claude Code\n\nhttps://claude.ai/code/session_X",
                   "x" * 65536)
@@ -266,8 +268,9 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 runs = self.lint_calls()
                 self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
                 got = runs[0].get("pr_body")
-                self.assertTrue(got == body, "lane_lint gave ci-job CI_JOB_PR_BODY %s, want the PR's body of %d characters"
-                                % ("nothing" if got is None else "a value of %d characters" % len(got), len(body)))
+                self.assertIsNotNone(got, "lane_lint named no body file for ci-job: CI_JOB_PR_BODY_FILE was unset")
+                self.assertEqual(got, body, "lane_lint gave ci-job a body of %d characters, want the PR's body of %d characters"
+                                 % (len(got), len(body)))
 
     def test_a_lane_lint_merges_nothing_takes_no_lock_and_waits_for_no_check(self):
         self.use_ci_job(PASSING, 0)
@@ -343,16 +346,25 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
 
     def test_a_ref_target_gives_ci_job_an_empty_pr_body_whatever_the_run_holds(self):
-        """A commit or ref has no PR body, so lane_lint gives ci-job an empty CI_JOB_PR_BODY. The host body and the env of
-        the run are not empty here, so a body passed on from either source shows as a value."""
+        """A commit or ref has no PR body, so lane_lint gives ci-job an empty body file. The host body, and the body file and
+        event file the run inherits, all hold the body, so a body passed on from any of them shows as a value."""
         self.use_ci_job(PASSING, 0)
         body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X"
         self.host.body = body
+        inherited = os.path.join(self.t, "inherited-body.txt")
+        with open(inherited, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        event = os.path.join(self.t, "inherited-event.json")
+        with open(event, "w", encoding="utf-8") as f:
+            json.dump({"pull_request": {"body": body}}, f)
+        inherit = {"CI_JOB_PR_BODY": body, "CI_JOB_PR_BODY_FILE": inherited, "GITHUB_EVENT_PATH": event, "PR_BODY": body}
         for target in ("feat", self.head("feat")):
-            with self.subTest(target=target), unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY": body, "PR_BODY": body}):
+            with self.subTest(target=target), unittest.mock.patch.dict(os.environ, inherit):
                 rc, out = self.lint_run("--lane-lint", target, head=self.head("feat"))  # asserts: one lint run, at this head
                 self.assertEqual(rc, 0, out)
-                self.assertEqual(self.lint_calls()[0].get("pr_body"), "", "ci-job got a PR body for a ref target: %r" % (target,))
+                got = self.lint_calls()[-1].get("pr_body")
+                self.assertIsNotNone(got, "ci-job got no body file for a ref target: the empty body file is missing")
+                self.assertEqual(got, "", "ci-job got a PR body for a ref target: %r" % (got,))
 
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
@@ -914,8 +926,8 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         self.assertEqual(self.host.readies, [], out)
 
     def test_a_ready_check_that_reads_the_pr_body_gets_the_pull_requests_body(self):
-        """The ready check's ci-job run gets the PR's body as CI_JOB_PR_BODY, as the PR's own lint does, so a step that reads
-        PR_BODY (silent-undo) sees the body it sees in CI."""
+        """The ready check's ci-job run gets the PR's body in its body file (CI_JOB_PR_BODY_FILE), as the PR's own lint does, so a step
+        that reads the body (silent-undo) sees the body it sees in CI."""
         body = "Summary.\n\nDrops-lines: docs/decisions/first.md -- the lines are dead\n"
         self.host.body = body
         self.declare([SILENT_UNDO])
@@ -924,7 +936,8 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
         self.assertEqual(len(runs), 1, "the ready check did not run ci-job once: " + out)
-        self.assertEqual(runs[0].get("pr_body"), body, "the ready check's ci-job run got CI_JOB_PR_BODY %r, want the PR's body" % runs[0].get("pr_body"))
+        self.assertIsNotNone(runs[0].get("pr_body"), "the ready check's ci-job run named no body file (CI_JOB_PR_BODY_FILE was unset)")
+        self.assertEqual(runs[0].get("pr_body"), body, "the ready check's ci-job run got a different body than the PR's")
         self.assertEqual(rc, 0, out)
 
     def test_a_repo_that_declares_no_ready_checks_marks_ready_and_runs_no_ci_job(self):  # the control

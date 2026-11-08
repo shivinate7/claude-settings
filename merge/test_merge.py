@@ -9272,21 +9272,23 @@ class RecordsRebuild(RecordsEnv):
         # the lock's own extend_for, as the ready path does. Without it a rate wait there could outlive the lock.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.body = "Summary.\n"  # the PR body the draft step's proof must be given
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
         real_acquire, real_holds, seen = lock.acquire, merge.holds_base, []
         def acquire(*a, **k):
             token = real_acquire(*a, **k)
             self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
             return token
-        def holds(wt, base_ref, sha, before_run=None):
-            seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+        def holds(wt, base_ref, sha, before_run=None, **kw):  # kw holds pr_body when the draft step passes it
+            seen.append((before_run, kw.get("pr_body")))
+            return real_holds(wt, base_ref, sha, before_run, **kw)
         lock.acquire = acquire
         with unittest.mock.patch.object(merge, "holds_base", holds):
             rc, out = self.run_merge("7", "--confirm", lock=lock)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
-        self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual([b for b, _ in seen], [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual([p for _, p in seen], [self.host.body], "the draft step did not pass the PR's body to holds_base for the small-move proof")
         self.assertFalse(self.lock_ref(), "the lock was not released")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
