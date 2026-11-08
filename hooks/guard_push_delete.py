@@ -134,21 +134,39 @@ def _span_end(text: str, start: int, escapes: bool) -> int:
 # `ssh host "..."`.
 SCRIPT_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
-# Inside a script, a call that runs its string argument as a command. print and echo are not here.
+# ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`.
+INTERPRETER_RUNNER = re.compile(
+    r"(?:^|[\s;&|(])(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]\s*$")
+# Inside a script, a call that runs its string argument as a command, even inside a print.
 CALL_RUNNER = re.compile(
     r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
     r"\s*\(\s*\[?\s*$")
+# The printers: the one place that names the calls and commands that show their string and run
+# nothing. A pair inside a runner script is a command unless a printer holds it.
+PRINT_CALL = re.compile(
+    r"\b(?:print\w*|console\.\w+|puts|say|logger\.\w+|System\.out\.print\w*|Write-(?:Host|Output))\s*\(")
+PRINT_COMMAND = re.compile(r"^[\s\"'(]*(?:(?:sudo|command|builtin)\s+)?(?:echo|printf|print|puts)\b")
+
+
+def _printed(script: str) -> bool:
+    """True when the script text ahead of an escaped quote sits in a printer: its statement
+    (cut at `;`, `&`, `|` or a newline) starts with a printer command such as `echo` or
+    `printf`, or holds a print call that is still open."""
+    stmt = re.split(r"[;&|\n]", script)[-1]
+    return PRINT_COMMAND.search(stmt) is not None or PRINT_CALL.search(stmt) is not None
 
 
 def _nested_commands(span: str, before: str = "") -> str:
     """A double-quoted span that holds escaped quotes is a script handed to an interpreter
-    (`python3 -c "os.system(\\"git push\\")"`). An escaped-quote pair is a command only when the
-    call it sits in runs it: `os.system`, `subprocess.*`, `Popen`, `exec*`, or when the whole span
-    is the script of `bash -c`, `eval` or `ssh` (`before` is the segment text ahead of the span).
-    A pair inside a print or an echo is text. Give each command its own line, so the words that
-    follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+    (`python3 -c "os.system(\\"git push\\")"`). In a runner script (`bash -c`, `eval`, `ssh`,
+    `python -c`, `node -e`) each escaped-quote pair is a command unless a printer holds it
+    (`print`, `echo`, `printf`, `console.log`: see PRINT_CALL and PRINT_COMMAND). The call may
+    be named any way: an alias, a from-import, `shlex.split`, a variable. A CALL_RUNNER call runs
+    its pair even inside a print. Outside a runner script only a CALL_RUNNER pair is read
+    (`before` is the segment text ahead of the span). Give each command its own line, so the
+    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
     lines, piece, inner, run, index = ["\n"], [], False, False, 1
-    shell = SCRIPT_RUNNER.search(before) is not None
+    script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
     body = span[:-1]
     while index < len(body):
         if body.startswith('\\"', index):
@@ -157,7 +175,8 @@ def _nested_commands(span: str, before: str = "") -> str:
                     lines.append("".join(piece) + "\n")
                 piece = []
             else:
-                run = shell or CALL_RUNNER.search(body[:index]) is not None
+                ahead = body[:index]
+                run = CALL_RUNNER.search(ahead) is not None or (script and not _printed(ahead))
             inner = not inner
             width = 2
         else:
