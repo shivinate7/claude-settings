@@ -228,6 +228,15 @@
 - records-page-reader-gaps: the records-page guard misses commit -i, rebase, cherry-pick, am, revert, sh -c scripts and python -m generator runs (hooks/guard_merge.py)
 - reload-missing-file-unpinned: no kept case covers a missing guard_pointer.py during the reload wait (hooks/test_guard.py, hooks/guard.py)
 - repo-home-backtick-then-comma: a repo home of a backtick, then a comma, still blocks as malformed, because unwrap runs before the comma strip. Ruling homes behave the same. Decision: owner-feedback-inbox.
+- reviewer-rm-outside-scratch: a reviewer agent ran `rm -f /tmp/x` on a shared /tmp path it had not written (its write was refused), and its report claimed it "filed a debt" it could not write (reviewer agent on PR #1604, 2026-11-07). Fix: none — rare and harmless. Until: 2026-11-21
+- rm-shim-bypass-forms: /bin/rm, command rm and find -delete skip the rm shim (bin/rm)
+- rm-shim-call-cost: a recursive rm costs about 40 ms, and the marker search reads byte by byte (bin/rm)
+- rm-shim-cloud-path: the PATH step skips cloud mode, so the rm shim is off in cloud sessions (install.sh)
+- rm-shim-flag-order: macOS 'rm dir -rf' is read as a flag (false alarm, one retry), and GNU --rec abbreviations are not judged (bin/rm)
+- rm-shim-glob-passes: the shell expands '*' first, so rm -rf * in the cwd passes (bin/rm)
+- rm-shim-link-refused: rm -r link, where link points at home or the cwd, is refused though real rm removes only the link (bin/rm)
+- rm-shim-windows: install.ps1 lands no rm shim and bin/rm is posix only (install.ps1)
+- rule-flag-not-enforced: bin/merge flag lines for changed rule files show only if the report names them in bold; no check, and gh pr merge prints none (merge/merge.py)
 - ruling-home-isabs-unproven: the absolute home: refusal in value_resolves is unmeasured on Linux, possibly redundant (hooks/ruling_home.py)
 - safety-hole-test-is-judgment: no check measures net safety value; the round-3 reviewer judges it (CLAUDE.md rule roles-review-cap-three)
 - safety-line-unread-at-merge: nothing forces the orchestrator to read the round-3 Net safety value line before merge (agents/reviewer.md)
