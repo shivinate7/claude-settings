@@ -6920,11 +6920,14 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS,
+              form=None):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
     force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
-    names: the plain `git`, or a form of it that the shell reads as git."""
-    sh("push: " + name, word + " push " + tail, expected,
+    names: the plain `git`, or a form of it that the shell reads as git. `form`, when given, is the whole
+    command typed in place of `word push tail`, such as an interpreter or shell body that runs git."""
+    command = form if form is not None else word + " push " + tail
+    sh("push: " + name, command, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
@@ -7121,6 +7124,29 @@ for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
 sh("split word control: digit, a word with git inside, allows", "digit", "allow")
 sh("split word control: gitk-free, a word with git inside, allows", "gitk-free", "allow")
 sh("split word control: echo git, git as text, allows", "echo git", "allow")
+
+# A GIT ACT INSIDE AN INTERPRETER OR SHELL BODY. A call that runs git from inside `sh -c`, `bash -c`,
+# `python3 -c` or a PowerShell `&` is the same act as the plain push, so it gets the plain push's verdict.
+# A refused act is reported, never re-spelled (owner item 386). The controls name git only as text,
+# which runs nothing, so they stay allowed.
+push_case("interpreter: sh -c runs a forced push to main, asks", "", "ask",
+          form="sh -c 'git push --force origin main'")
+push_case("interpreter: bash -c runs a short forced push to main, asks", "", "ask",
+          form='bash -c "git push -f origin main"')
+push_case("interpreter: python3 subprocess.run list runs a forced push to main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 subprocess.run list with a split git word forces main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run(['gi'+'t','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os.system string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os; os.system('git push --force origin main')"''')
+push_case("interpreter: PowerShell call operator on 'git' forces main, asks", "", "ask", tool="PowerShell",
+          form="& ('git') push --force origin main")
+push_case("interpreter: PowerShell call operator on a split git word forces main, asks", "", "ask",
+          tool="PowerShell", form="& ('gi'+'t') push --force origin main")
+push_case("interpreter control: sh -c git status, allows", "", "allow", form="sh -c 'git status'")
+push_case("interpreter control: python3 print of git push --force as text, allows", "", "allow",
+          form=r'''python3 -c "print('git push --force')"''')
+push_case("interpreter control: bash -c echo hi, allows", "", "allow", form="bash -c 'echo hi'")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
