@@ -118,8 +118,11 @@ def log(record: dict, replace_run=None, give_up_at=None):
     (a `time.monotonic` time, the hook's own clock) when that is sooner.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    A write that cannot finish by the deadline raises LogWaitTimeout, the only way a row is
-    dropped for waiting. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    Only the new row can drop, never a row the log holds: every failure comes before the replace.
+    A write that cannot finish by the deadline raises LogWaitTimeout. A read of the log that is
+    refused (any OSError but a missing file) skips the rewrite and is not retried. A failed folder,
+    lock-file or temp write, or a replace refused with an OSError other than PermissionError, drops
+    it too. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
     deadline = time.monotonic() + LOG_WAIT_SECONDS
     if give_up_at is not None:
         deadline = min(deadline, give_up_at)
@@ -131,8 +134,8 @@ def log(record: dict, replace_run=None, give_up_at=None):
             try:
                 with open(path, encoding="utf-8") as handle:
                     kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
-            except OSError:
-                kept = []
+            except FileNotFoundError:
+                kept = []  # no log yet; any other read error propagates, so the log is never rewritten short
             if replace_run and kept and ('"run": "%s"' % replace_run) in kept[-1]:
                 kept = kept[:-1]  # our own start row: the finished row takes its place
             temp = "%s.%d.tmp" % (path, os.getpid())
