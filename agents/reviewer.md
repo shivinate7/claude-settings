@@ -60,6 +60,7 @@ Check for:
 - Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy and see the named case go red (P10). Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
+- A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
 
 If the repo has screens, the orchestrator runs design-review beside round 1, on the first built head. Any change to a screen file after round 1 gets a second design read by the design reviewer (decision `design-agents`). In a code review round, you do not recheck design findings. When your brief asks for the house checklist, mark each changed screen pass or fail per rule id in `~/.claude/docs/design/checklist.md`. The house design values are in `~/.claude/docs/design/tokens.md`.
 
