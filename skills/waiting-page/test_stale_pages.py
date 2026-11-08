@@ -1115,12 +1115,15 @@ class Stale(unittest.TestCase):
         items, answers = self.shaped([INCIDENT, *extra_items], [(INCIDENT_ID, INCIDENT_ANSWER), *extra_answers], as_folder)
         return self.items_run(current, items, {}, answers=answers)
 
-    def assert_kept_line(self, r, n, item_id):
-        """Exactly one kept-answer line names item `n` (id `item_id`), and it starts with the line the flag prints."""
+    def assert_kept_line(self, r, n, item_id, want=None):
+        """Exactly one kept-answer line names item `n` (id `item_id`), and it starts with `want`, the line the flag prints by default.
+        Returns that line."""
+        want = kept_line(n, item_id) if want is None else want
         named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
         self.assertEqual(len(named), 1, "want one kept-answer line for item %d (%s), got %d:\n%s"
                          % (n, item_id, len(named), r.stdout + r.stderr))
-        self.assertTrue(named[0].startswith(kept_line(n, item_id)), "the kept-answer line for item %d differs:\n%s" % (n, named[0]))
+        self.assertTrue(named[0].startswith(want), "the kept-answer line for item %d differs:\n%s" % (n, named[0]))
+        return named[0]
 
     def assert_not_named(self, r, item_id, case):
         """The run read the incident's answer first (the scope), and no kept-answer line names `item_id`, which is `case`."""
@@ -1293,6 +1296,7 @@ class Stale(unittest.TestCase):
                 unknown = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: unknown")]
                 self.assertEqual(len(unknown), 1, "want one kept-answer: unknown line for an items folder with no marker, got %d:\n%s"
                                  % (len(unknown), r.stdout + r.stderr))
+                self.assertIn("the items folder", unknown[0], "the unknown line does not name the items folder:\n" + unknown[0])
                 named = [line for line in kept_lines(r.stdout) if not line.startswith("kept-answer: unknown")]
                 self.assertEqual(named, [], "an items folder with no marker still names an item:\n" + r.stdout)
                 self.assert_page_word(r, "current", 0)
@@ -1308,6 +1312,7 @@ class Stale(unittest.TestCase):
         self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
                          % (len(kept), r.stdout + r.stderr))
         self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assertIn("the answers folder", kept[0], "the unknown line does not name the answers folder:\n" + kept[0])
         self.assert_page_word(r, "current", 0)
 
     def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
@@ -1325,13 +1330,9 @@ class Stale(unittest.TestCase):
     # answers/<id> only when its wait has ended.
 
     def assert_waits_kept_line(self, r, n, item_id):
-        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, it starts with the waits line, and a line
+        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, and it starts with the waits line. A line
         that says to delete answers/<id> also says when its wait has ended."""
-        named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
-        self.assertEqual(len(named), 1, "want one kept-answer line for closed item %d (%s) with waits, got %d:\n%s"
-                         % (n, item_id, len(named), r.stdout + r.stderr))
-        line = named[0]
-        self.assertTrue(line.startswith(waits_kept_line(n, item_id)), "the kept-answer line for closed item %d with waits differs:\n%s" % (n, line))
+        line = self.assert_kept_line(r, n, item_id, want=waits_kept_line(n, item_id))
         if "delete" in line:
             self.assertIn("when its wait", line, "the line says to delete answers/%s before its wait has ended:\n%s" % (item_id, line))
 
@@ -1373,50 +1374,22 @@ class Stale(unittest.TestCase):
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed item")
 
     def test_a_list_of_id_and_data_entries_names_the_incident_in_both_lists(self):
-        # The shape parked_mode reads and the store's list returns: one {"id", "data"} entry per doc, for the items and the answers.
+        # The shape parked_mode reads and the store's list returns: one {"id", "data"} entry per doc. The list of bare data objects
+        # is the control beside it: a pin that it keeps working.
         current, _ = self.current_and_behind()
-        items = self.list_file([{"id": INCIDENT_ID, "data": INCIDENT}], "items")
-        answers = self.list_file([{"id": INCIDENT_ID, "data": INCIDENT_ANSWER}], "answers")
-        r = self.items_run(current, items, {}, answers=answers)
-        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
-        self.assert_page_word(r, "current", 0)
-
-    def test_pin_a_list_of_bare_data_objects_still_names_the_incident_in_both_lists(self):
-        # Pin: a list of bare data objects, each holding its own `item` for an answer, keeps working beside the {"id", "data"} shape.
-        current, _ = self.current_and_behind()
-        items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
-        r = self.items_run(current, items, {}, answers=answers)
-        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
-        self.assert_page_word(r, "current", 0)
-
-    def test_pin_an_items_folder_with_no_complete_marker_names_the_items_folder(self):
-        # Pin: the unknown line names the folder that has no marker, so the reader knows which list may be cut short.
-        current, _ = self.current_and_behind()
-        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
-        os.remove(os.path.join(items, ".complete"))
-        r = self.items_run(current, items, {}, answers=self.list_file([INCIDENT_ANSWER], "answers"))
-        kept = kept_lines(r.stdout)
-        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an items folder with no marker, got %d:\n%s"
-                         % (len(kept), r.stdout + r.stderr))
-        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
-        self.assertIn("the items folder", kept[0], "the unknown line does not name the items folder:\n" + kept[0])
-        self.assert_page_word(r, "current", 0)
-
-    def test_pin_an_answers_folder_with_no_complete_marker_names_the_answers_folder(self):
-        # Pin: the unknown line names the answers folder when that is the folder with no marker, not the items folder.
-        current, _ = self.current_and_behind()
-        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
-        os.remove(os.path.join(answers, ".complete"))
-        r = self.items_run(current, self.items_file([INCIDENT]), {}, answers=answers)
-        kept = kept_lines(r.stdout)
-        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
-                         % (len(kept), r.stdout + r.stderr))
-        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
-        self.assertIn("the answers folder", kept[0], "the unknown line does not name the answers folder:\n" + kept[0])
-        self.assert_page_word(r, "current", 0)
+        shapes = (("entries", [{"id": INCIDENT_ID, "data": INCIDENT}], [{"id": INCIDENT_ID, "data": INCIDENT_ANSWER}]),
+                  ("bare data", [INCIDENT], [INCIDENT_ANSWER]))
+        for label, items_docs, answer_docs in shapes:
+            with self.subTest(label):
+                items = self.list_file(items_docs, "items")
+                answers = self.list_file(answer_docs, "answers")
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
 
     def test_items_with_answers_starts_no_more_gh_processes_than_items_alone(self):
-        # Cost: --answers reads files only, so its run starts no gh process beyond the ones --items alone starts for the same items.
+        # Cost: --answers reads files only. The run that prints the closed-with-waits line starts no gh process beyond the ones
+        # --items alone starts for the same items.
         current, _ = self.current_and_behind()
         items = [wait_item(154, {"repo": REPO, "run": RUN}), wait_item(155, {"repo": REPO, "pr": PR}),
                  decision_item(INCIDENT_N, INCIDENT_ID), decision_item(365, "waits-kept", waits={"repo": REPO, "run": RUN})]
@@ -1428,7 +1401,7 @@ class Stale(unittest.TestCase):
         env, both_folder = self.gh_env(gh_answers)
         items_arg, answers_arg = self.shaped(items, answers, as_folder=False)
         r_both = self.items_run(current, items_arg, env, answers=answers_arg)
-        self.assert_kept_line(r_both, INCIDENT_N, INCIDENT_ID)  # the scope: the answers were read in the run that is counted
+        self.assert_waits_kept_line(r_both, 365, "waits-kept")  # the scope: the path whose gh calls are counted prints its line
         self.assert_page_word(r_both, "current", 0)
         alone, both = self.gh_calls(alone_folder), self.gh_calls(both_folder)
         self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
