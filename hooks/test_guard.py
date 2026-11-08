@@ -5252,6 +5252,30 @@ sh("git-after-cd: a check joined to a push by ||, then a git push -u, passes",
    "pytest || %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a pipe into tee, then && a git push -u, passes",
    "make check | tee l && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# A CHAIN OVER NEWLINES, AND COMPOUNDS. A `&&` at a line's end joins the next line, so the lines are one chain.
+# An if, a while, a set -e line and an exit guard run the push only when the check passed. A check and a push
+# inside `{ }` or `( )`, joined by `;`, run the push whatever the check did, so both forms are refused.
+sh("git-after-cd: a check, then && and a newline, then a git push -u, is one chain and passes",
+   "pytest -q &&\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git add, commit and push joined by && over newlines is one chain and passes",
+   "%s add -A &&\n%s commit -m x &&\n%s push -u origin b" % (VCS, VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a push in the then branch of an if on a check, over newlines, passes",
+   "if pytest -q; then\n  %s push -u origin b\nfi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a push in the body of a while on a check, over newlines, passes",
+   "while pytest; do\n  %s push -u origin b\ndone" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then a check, then ; a git push -u, passes",
+   "set -e; pytest -q; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check protected by || a braced exit 1, then ; a git push -u, passes",
+   "pytest || { echo bad; exit 1; }; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check in an if that exits on failure, then ; a git push -u, passes",
+   "if ! pytest; then exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check and a push inside braces, joined by ;, is refused",
+   "{ pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check and a push inside a subshell, joined by ;, is refused",
+   "( pytest -q; %s push -u origin b )" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a cd into a missing folder, then && braces holding a check and a push joined by ;, is refused",
+   "cd x && { pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
