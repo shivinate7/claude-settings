@@ -32,6 +32,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -256,10 +257,10 @@ class StaleCase(unittest.TestCase):
                               encoding="utf-8", errors="replace")
         return done.returncode, done.stdout + done.stderr
 
-    def run_traced_commands(self, rng):
-        """(rc, out, the git commands a run started), read from a GIT_TRACE file."""
+    def run_traced_commands(self, rng, spec=None):
+        """(rc, out, the git commands a run started), read from a GIT_TRACE file. `spec` is the range text, as run_check takes it."""
         trace = os.path.join(rng.case, "git-trace.txt")
-        rc, out = self.run_check(rng, extra_env={"GIT_TRACE": trace})
+        rc, out = self.run_check(rng, spec=spec, extra_env={"GIT_TRACE": trace})
         return rc, out, git_commands(trace)
 
     def assert_flags(self, rng, expected):
@@ -1335,6 +1336,44 @@ class UnreadableReadTests(StaleCase):
 
     def test_an_unresolvable_base_in_a_full_clone_two_dot_range_exits_two_and_names_it(self):
         self.assert_base_missing_from_full_clone("nosuchbase..HEAD")
+
+    def test_a_failing_range_with_a_suffixed_base_starts_the_measured_git_processes_after_its_failed_read(self):
+        """The git starts the failing path adds after the read that failed, counted with GIT_TRACE. A suffixed base
+        (`nope^1`) also starts `rev-list`, which the published bounds (three for `a..b`, four for `a...b`, in
+        lint/stale_cites.py and the stale-cites-at-merge decision) leave out. Measured: `nope^1..HEAD` starts four
+        after `diff`, `nope^1...HEAD` starts five after `merge-base`."""
+        cases = (
+            ("nope^1..HEAD", "diff", 4, [
+                "rev-parse --verify --quiet HEAD^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --is-shallow-repository",
+                "rev-list --parents -n 1 HEAD",
+            ]),
+            ("nope^1...HEAD", "merge-base", 5, [
+                "rev-parse --verify --quiet HEAD^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --verify --quiet nope^1^{commit}",
+                "rev-parse --is-shallow-repository",
+                "rev-list --parents -n 1 HEAD",
+            ]),
+        )
+        for spec, failed_read, measured, expected in cases:
+            with self.subTest(spec=spec):
+                rng = self.moved_lib(cited=True)
+                self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+                self.assertFalse(has_object(rng.repo, "nope^1"), "scope: the base names nothing")
+                self.assertTrue(has_object(rng.repo, "HEAD^1"), "scope: HEAD has a parent, so it is not a root")
+                rc, out, traced = self.run_traced_commands(rng, spec=spec)
+                self.assertEqual(rc, 2, "a failing %s did not exit 2\n%s" % (spec, out))
+                commands = [" ".join(shlex.split(command)) for command in traced]  # the trace quotes `^{...}` arguments
+                reads = [i for i, command in enumerate(commands) if command.split()[0] == failed_read]
+                self.assertEqual(len(reads), 1, "scope: %s ran the %s read %d times, not once\n%s"
+                                 % (spec, failed_read, len(reads), commands))
+                after = commands[reads[0] + 1:]
+                self.assertEqual(len(after), measured, "%s starts %d git processes after its failed %s, expected %d\n%s"
+                                 % (spec, len(after), failed_read, measured, after))
+                self.assertEqual(after, expected, "%s starts other git processes after its failed %s than measured\n%s"
+                                 % (spec, failed_read, after))
 
     def test_an_unresolvable_base_in_a_depth_one_clone_two_dot_range_prints_unknown_and_exits_zero(self):
         rng = self.moved_lib(cited=True)
