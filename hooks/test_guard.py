@@ -10312,6 +10312,24 @@ def rr_cost_case():
 RR_COST_LABEL = "review-record-after-round: a refused builder spawn starts no child process and makes no network call"
 
 
+def review_send_matcher_case():
+    """A guard matcher in settings.json covers every send tool, so the guard sees each handoff the rule judges."""
+    with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+        entries = json.load(handle)["hooks"]["PreToolUse"]
+    matchers = [entry.get("matcher", "") for entry in entries
+                if any("guard.py" in hook.get("command", "") for hook in entry.get("hooks", []))]
+    if not matchers:
+        return False, "no PreToolUse entry runs guard.py in settings.json"
+    # Every name in SEND_TOOLS is checked, so the built-in SendMessage is not left out of the matcher.
+    for name in _transcript.SEND_TOOLS:
+        if not any(re.fullmatch(matcher, name) for matcher in matchers):
+            return False, "no guard matcher covers %s: %r" % (name, matchers)
+    return True, "a guard matcher covers every send tool"
+
+
+RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher routes every send tool to the guard"
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
@@ -13939,6 +13957,9 @@ LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 LOG_CHECKS_EXTRA.append((RR_COST_LABEL, rr_cost_case))
 LOG_FAMILY[RR_COST_LABEL] = "review-record-after-round"
 FIXTURELESS_CHECKS.add(rr_cost_case)
+LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
+LOG_FAMILY[RR_SEND_MATCHER_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(review_send_matcher_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
