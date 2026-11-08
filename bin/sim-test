@@ -9,7 +9,8 @@
 # (`sim-lease status`); with every booted Duo leased, it takes a fresh lease (slot 2 under the load bars) and boots that
 # slot. When every booted device is a Duo and another live pid leases each one (the cap is reached), a duo run does not stop
 # at the cap check: it queues with one `sim-lease take --udid --reuse U1 --reuse U2`, takes whichever Duo's slot frees first,
-# and the re-scan after the grant reuses that Duo, or boots it if its holder shut it down. At SIM_LEASE_WAIT it exits 1
+# and the re-scan after the grant reuses that Duo. If its holder shut it down, the run gives that lease back and boots only
+# under an own-boot lease, within the load bars. Each wait can last SIM_LEASE_WAIT; at its end the run exits 1
 # with no boot and no xcodebuild. Pro reuses the first booted iPhone whose name does not. A reuse takes the lease of the booted device's slot (below) and shuts nothing down. It never shuts down a simulator it did not boot.
 # Cross-role (13:51 CST: never a Duo and the 18 Pro booted together): a duo run with only a non-Duo iPhone booted, or a pro
 # run with only a Duo booted, boots nothing, runs nothing, names the booted device on stderr and exits 1.
@@ -248,7 +249,7 @@ scan() {
   duos=$(printf '%s\n' "$booted" | grep -c 'iPhone Duo')
   if [ "$role" = duo ] && [ "$count" -ge "$CAP" ] && [ "$duos" -eq "$count" ]; then
     # Every booted device is a Duo and another pid's lease holds each one: the run queues for whichever frees first. The
-    # holder shuts its Duo down before it gives the lease, so the grant is followed by the re-scan, which boots it if it is down.
+    # holder shuts its Duo down before it gives the lease. If the re-scan finds it down, the run boots it only under an own-boot lease.
     queued=$(printf '%s\n' "$booted" | udid_of)
     return 0
   fi
