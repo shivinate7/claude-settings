@@ -56,3 +56,11 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - reviewer-brief-blind-template-verdict (lane verdict-format-line, Nov 8 13:24 CST): decision reviewer-brief-blind (~line 49) misstates what a `${...}` Workflow template holding a verdict line gets: a verdict refusal, not the unread one.
 - test-guard-history-comment (lane verdict-format-line, Nov 8 13:24 CST): hooks/test_guard.py (~line 28410) has a comment that narrates history (rule building-comments-say-why).
 - isolation-refusal-outside-repo (#2211 round-2 reviewer, Nov 8 13:20 CST; measured by lane session_013NEJL116DFJWMhd5j3pqzr on origin/main 422cbbdfe): the refusal of scratch-only git came from Claude Code's built-in worktree-isolation check ("too complex to verify that it stays inside the worktree"), not the repo guard, which allows every scratch-only form. Unmeasured on Mac and Windows. The reviewer encoded around it (`'g'+'it'` in `python3 -I -c`, a base64 script); that encoded-command gap stays a note. Lane briefs: if a guard refuses scratch work, stop and report it.
+- replacement-pr-carries-review review notes (lane replacement-pr-carries-review, session_013NEJL1WFQtTFeWPY7r1qYP, #2207, rounds 1-3 PASS, net value positive; Nov 8 13:40 CST), none a debt yet:
+  1. A plain --fix-base-record stand-in counts one link per PR, so source chain 1 + stand-in + one same-PR fix gives 3 fix checks across a lineage (per-PR count kept under owner item 426 a, 11:03 CST).
+  2. source_chain_problem lists the repo's comments since the source PR opened; a long-lived source pages many lists. A per-issue read would be cheaper.
+  3. A carry does not compare the source PR's base branch with the new PR's; a same-tree head on a retargeted base merges a different diff than reviewed. The plain stand-in has the same gap.
+  4. docs/decisions/pr-review-record.md Cost bullet omits the plain stand-in's one source PR read.
+  5. `merge --reviewed` counts plain links with no tree reads, so it reads a carry chain as one link where the write step counts the cap.
+  6. The body match needs "replaces #N"; "replaces PR #N" is refused (safe; the remedy names the form).
+  7. A notes-only commit on the replacement breaks tree equality, so it gets full rounds where the same-PR path accepts notes diffs.
