@@ -3879,8 +3879,8 @@ def case_standing_grant_reason_names_the_once_bar():
     reason = next((s for s in out if "has no home" in s), "")
     check("standing once bar: the reason says a standing word bars the once: home",
           "standing" in reason.lower() and "once:" in reason, reason)
-    check("standing once bar: the reason names a ruling home and the page for a standing grant",
-          "[ruling]" in reason and "page" in reason, reason)
+    check("standing once bar: the reason names the standing homes",
+          mod.STANDING_HOMES in reason, reason)
     check("standing once bar: the reason does not offer the once: home itself",
           bool(reason) and "-> once:" not in reason, reason)
 
