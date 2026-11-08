@@ -1967,7 +1967,7 @@ JS_PREFIX_CALLEE = re.compile(r"([\w$]+)\.(?:startsWith|endsWith)")
 JS_FILE_CALLS = JS_READ_CALLS | JS_WRITE_CALLS | JS_COPY_CALLS | JS_MOVE_CALLS
 JS_IF_OPEN = re.compile(r"\bif\s*\(")
 # What may stand next to a negated name test for it to be a conjunct (_js_rules_out_env).
-JS_BEFORE_NEGATED = ("(", "{", ";", "=>", "&&")
+JS_BEFORE_NEGATED = ("(", "{", ";", "=>", "&&", ")")
 JS_AFTER_NEGATED = ("&&", "??", ")", "]", "}", ";", ",")
 # A word before `(` that opens no call: its parenthesis holds a condition or a parameter list.
 JS_NOT_CALLS = frozenset({"", "if", "while", "for", "switch", "catch", "function", "return", "typeof"})
@@ -2516,8 +2516,8 @@ def _js_rules_out_env(code: str, mask, test) -> bool:
     """True when a prefix test `(name, literal, start, end)` is a plain `!name.startsWith('.env')`, or the
     same in redundant parens `!(name.startsWith('.env'))` (nothing else inside them): the env-file base
     name under exactly one `!`, as a conjunct. What may stand before it: the start of the code, `(`, `{`, `;`,
-    `=>`, `return` or `&&`; after it: `&&`, `??`, a closer, `;`, `,` or the end. Any other
-    neighbour (`||`, `==`, `|`, `?`, `:`) can make the whole true for an env name. No `!(` group may
+    `=>`, `)`, `else`, `return`, `&&` or a plain `=` (before a `?`); after it: `&&`, `??`, `?`, a closer, `;`, `,` or the end. Any other
+    neighbour (`||`, `==`, `|`, `:`) can make the whole true for an env name. No `!(` group may
     surround the test beyond its own (`!(a && !f.startsWith('.env'))` is true for an env name when `a`
     is false), and no `||`, `?` or `,` may sit at the level of any group around it up to the `if`
     condition (`!f.startsWith('.env') || x` and `!f.startsWith('.env') ? a : b` are true for an env
@@ -2540,9 +2540,12 @@ def _js_rules_out_env(code: str, mask, test) -> bool:
         negations += 1
     before = "".join(code[i] for i in range(len(before)) if mask[i] != 2).rstrip()   # comments cut out
     after = "".join(code[i] for i in range(tail, len(code)) if mask[i] != 2).lstrip()
-    if negations != 1 or not (not before or before.endswith(JS_BEFORE_NEGATED) or re.search(r"\breturn$", before)):
+    ternary = after[:1] == "?" and not after.startswith("?.")   # `!test ? a : b`: `a` runs only when the name is ruled out
+    initial = ternary and re.search(r"[^=!<>]=$", before)   # `const s = !test ? a : b`
+    if negations != 1 or not (not before or before.endswith(JS_BEFORE_NEGATED) or initial
+                              or re.search(r"\b(?:return|else)$", before)):
         return False
-    if after and not after.startswith(JS_AFTER_NEGATED):
+    if after and not (after.startswith(JS_AFTER_NEGATED) or ternary):
         return False
     groups = []   # the brackets open at the test, outermost first; the test's own `!(` is not one of them
     for at in range(start):
