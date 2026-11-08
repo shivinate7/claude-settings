@@ -358,7 +358,7 @@ while True:
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            inner_commands, nested_script, norm,
+            inner_commands, nested_script, norm, python_runs_body,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
@@ -4033,8 +4033,9 @@ def shell_run_texts(raw: str) -> list:
     """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
     backticks it runs. A quoted body that only an interpreter keeps in view, and that holds a backtick, joins
-    as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. The
-    limits: a body with no backtick is not read, and a body with one is read anywhere, python's too."""
+    as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. A body
+    that python alone runs adds nothing. The limits: a body with no backtick is not read, and a body with
+    one is read anywhere, unless python alone runs it."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -4046,10 +4047,13 @@ def shell_run_texts(raw: str) -> list:
     shells = strip_heredoc_bodies(raw, shells_only=True)
     texts.append(shells)
     if "<<" in raw:
-        for quote, body, _ in _split_heredocs(raw)[1]:
+        earlier = {}   # heredocs already seen on each header text, so a body knows which `<<` is its own
+        for quote, body, header in _split_heredocs(raw)[1]:
+            nth = earlier[header] = earlier.get(header, -1) + 1
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-            elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):
+            elif ("`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)
+                  and not python_runs_body(raw, header, nth)):
                 # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
                 # backtick span as a shell. Quote rules differ by language, so no pairing of backticks is
                 # trusted: a lone backtick in a string would hide the real span. Each piece between
