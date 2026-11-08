@@ -1048,6 +1048,78 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push the branch"), *exit_bash("make test", 2, "tu_mt"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    # ---- the pr-open object window, the slugs in parentheses that skip a claim, the scripts named for a test, and the
+    # blocker states and joined blockers. Each case asserts behaviour only, so no identifier is named here.
+
+    def test_cc_red_pr_with_another_object_noun_still_claims(self):
+        # Catches: the pr-open object window that admits only a, an, the, new, draft and GitHub, so "the integration PR"
+        # and "two PRs" read as no act. Each line is a claim, and a notice is no try, so each blocks as no try.
+        lines = ("I can't open the integration PR.", "I can't open a follow-up PR.", "I can't open another PR.",
+                 "I can't open this PR.", "I can't open my PR.", "I can't create the batch PR.",
+                 "I can't create the follow-up pull request.", "I can't create two PRs.")
+        for line in lines:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), notice("github: failed to connect"),
+                                 trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_pr_for_another_number_is_no_claim(self):
+        # Control, already green: a preposition (for, of, to) after the object ends the window, so these are no claim.
+        lines = ("I can't open the logs for PR 12.", "I can't open the diff for PR 12.",
+                 "I can't create the tag for PR 12.")
+        for line in lines:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("show the logs"), notice("github: failed to connect"),
+                                 trg.assistant_text(line)])
+                self.assert_passes(out, "a noun phrase for another PR number: %r" % line)
+
+    def test_cc_red_slug_in_parens_skips_only_a_real_rule_id(self):
+        # Catches: any slug of two or more hyphens in parentheses read as a rule id, so a slug that names no rule or
+        # decision skips the claim. The first three lines are claims with no try; the last names a real rule, so it passes.
+        for human, line in (("push the branch", "I can't push the branch (cannot-claim-follow-up)."),
+                            ("open a PR", "I could not open the PR (connect-failure-notice)."),
+                            ("push", "I can't push (pre-push-hook).")):
+            with self.subTest(line=line):
+                out = self.stop([trg.human(human), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+        with self.subTest(line="I can't push to main (git-main-only-by-pr)."):
+            out = self.stop([trg.human("push to main"), trg.assistant_text("I can't push to main (git-main-only-by-pr).")])
+            self.assert_passes(out, "a slug that names a real rule id")
+
+    def test_cc_red_failed_test_script_is_no_try(self):
+        # Catches: a script whose name holds an act word and also a test name (test_merge.py, test-push.sh) read as a try
+        # of that act. A failed test run backs no claim of the act it tests.
+        for human, command, line in (
+                ("merge PR 12", "python3 merge/test_merge.py",
+                 "I could not merge PR 12: `python3 merge/test_merge.py` exited 1."),
+                ("push the branch", "./test-push.sh", "I could not push: `./test-push.sh` exited 1.")):
+            with self.subTest(command=command):
+                out = self.stop([trg.human(human), *failed_bash(command, "tu_t"), landed_reply(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_failed_push_script_still_backs_push(self):
+        # Control, already green: a failed script named for the act, with no test name, is still a try of that act.
+        line = "I could not push: `./push.sh` exited 1."
+        out = self.stop([trg.human("push the branch"), *failed_bash("./push.sh", "tu_p"), landed_reply(line)])
+        self.assert_passes(out, "a failed push script, named, backs a push claim")
+
+    def test_cc_red_blocker_states_and_joined_blockers_pass(self):
+        # Catches: a blocker that holds only in a list of states (still running, haven't passed, is red), or only with a
+        # because or while clause, so a true blocker joined to the claim by a comma, a semicolon, a colon or parens blocks.
+        lines = ("CI is still running, so I can't merge.", "I can't merge PR 12: CI is red.",
+                 "I can't merge PR 12 (CI is red).", "CI is red; I can't merge the PR.",
+                 "checks haven't passed, so I can't merge.")
+        for line in lines:
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
+                self.assert_passes(out, "a blocker that holds the claim: %r" % line)
+
+    def test_cc_green_connect_failure_after_a_colon_still_blocks(self):
+        # Control, already green: a connect failure after a colon is no blocker, so the claim blocks as no try.
+        line = "I can't open the PR: the MCP server failed to connect."
+        out = self.stop([trg.human("open a PR"), notice("github: failed to connect"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
 
 if __name__ == "__main__":
     unittest.main()
