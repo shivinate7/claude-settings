@@ -365,9 +365,8 @@ def _resolve_vars(cmd: str) -> str:
 # A word in view that holds a quote is read in whole: the text of each quote is its own words, so
 # `system("sh", "-c", "tee P")` shows its `tee P`.
 # RESIDUAL GAPS: a write made by a program's own code;
-# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `sort -o P`
-# (the builder test check reads it: `_output_targets`), `git diff --output=P`, `git config --file P`, `>| P` and a quoted redirect target with a space.
-# Main missed these too.
+# `cat <<EOF | sh`, an eval of a heredoc, a subshell `( ... > P)` and `"$( ... )"`; `git config --file P`, `>| P` and a quoted redirect target with a space.
+# Main missed these too. `sort -o`, `less -o` and `git diff --output` are read (`_output_targets`).
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
 # Read-only tools beside the printers, for a sed `e` command (`_sed_command_words`). Not part of `_PRINTERS`:
@@ -377,26 +376,34 @@ _READ_ONLY_TOOLS = frozenset(("head", "tail", "ls", "less", "sort", "uniq", "dif
 _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"))
 
 
-# The short flags of `sort` that take a value: what follows one in its cluster is that value, never a flag.
-_SORT_VALUE_SHORTS = "kStT"
+# Per command, the short flags that write a file (`_OUTPUT_SHORTS`), the short flags that take a value
+# (`_VALUE_SHORTS`: what follows one in its cluster is its value, never a flag), and the long flag that
+# writes a file with the shortest form a command reads for it (`_OUTPUT_LONGS`). `git diff` is the command
+# name `_output_targets` gives a `git` call whose subcommand is `diff`.
+_OUTPUT_SHORTS = {"sort": "o", "less": "oO"}
+_VALUE_SHORTS = {"sort": "kStT", "less": "bhjkPpTtxyzD#"}
+_OUTPUT_LONGS = {"sort": ("output", 1), "less": ("log-file", 3), "git diff": ("output", 6)}
 
 
 def _output_flag_value(command: str, word: str):
     """The one home of the flags that name the file a command writes. None when `word` is no such flag of
     `command`; else the file glued to it (`-ofile`, `--output=file`), or '' when the next word is the file
-    (`-o file`, `--output file`). `sort` only: `-o` in a short cluster, and `--output` or any prefix of it
-    (`--o`, `--out`), as GNU sort reads them."""
-    if command != "sort" or not word.startswith("-") or word == "-":
+    (`-o file`, `--output file`). `sort`: `-o` in a short cluster, `--output` or a prefix of it (`--o`, `--out`).
+    `less`: `-o` and `-O`, `--log-file` or a prefix of it from `--log`, in any case. `git diff`: `--output` only, as git
+    reads no shorter form (it is a prefix of other flags)."""
+    if command not in _OUTPUT_LONGS or not word.startswith("-") or word == "-":
         return None
     if word.startswith("--"):
         flag, equals, value = word.partition("=")
-        if len(flag) < 3 or not "output".startswith(flag[2:]):
+        name, least = _OUTPUT_LONGS[command]
+        typed = flag[2:].lower() if command == "less" else flag[2:]
+        if len(typed) < least or not name.startswith(typed):
             return None
         return value if equals else ""
     for place, letter in enumerate(word[1:], 1):
-        if letter == "o":
+        if letter in _OUTPUT_SHORTS.get(command, ""):
             return word[place + 1:]
-        if letter in _SORT_VALUE_SHORTS:
+        if letter in _VALUE_SHORTS.get(command, ""):
             return None
     return None
 
@@ -404,6 +411,8 @@ def _output_flag_value(command: str, word: str):
 def _output_targets(words):
     """The files that the output flags in one segment's unquoted `words` name (`_output_flag_value`)."""
     command, rest = _segment_command(words)
+    if command == "git" and "diff" in [word for word in rest if not word.startswith("-")][:2]:
+        command = "git diff"
     targets = []
     for at, word in enumerate(rest):
         value = _output_flag_value(command, word)
@@ -450,7 +459,8 @@ def _command_reads(command: str, args) -> bool:
     if command == "uniq":
         return sum(1 for word in args if not word.startswith("-")) <= 1
     if command == "less":
-        return not any("o" in word.lower() for word in shorts) and not any("log" in word.lower() for word in longs)
+        return not any(_output_flag_value("less", word) is not None for word in args) and not any(
+            "log" in word.lower() for word in longs)
     if command == "file":
         return not any("C" in word for word in shorts) and "--compile" not in longs
     return True
@@ -1436,11 +1446,10 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 words.extend((">", target))
                 shown.extend((">", target))
                 script.extend((">", target))
-        if command_position:   # the builder test check only: the file an output flag names (`sort -otests/x`) is written
-            for target in _output_targets([_unquoted(word) for word in raw]):
-                words.extend((">", target))
-                shown.extend((">", target))
-                script.extend((">", target))
+        for target in _output_targets([_unquoted(word) for word in raw]):   # the file an output flag names is written
+            words.extend((">", target))
+            shown.extend((">", target))
+            script.extend((">", target))
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         for _files, commands in sed_targets.values():
