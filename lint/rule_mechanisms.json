@@ -72,7 +72,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "message-role-scope",
-        "reason": "The guard (message-role-scope, hooks/guard.py message_role_hit) refuses one slice: a SendMessage that asks a builder to change a test or a test-author to change product code. It reads the receiver's spawn role from the transcript and a path only when an edit verb governs it. It does not see a plain message with no path, a role mixed in the spawn brief, or any other act of an agent."
+        "reason": "By agent type, the guard (hooks/guard.py) refuses a builder's test-file write, a test-author's or designer's write outside its paths, and a record-writer's non-Markdown write. The guard (message-role-scope, hooks/guard.py message_role_hit) also refuses one slice of a message: a SendMessage that asks a builder to change a test or a test-author to change product code. It reads the receiver's spawn role from the transcript and a path only when an edit verb governs it. It does not see a plain message with no path, a role mixed in the spawn brief, or one agent doing a second role's work inside its own paths. floor_hit reads a Haiku spawn's agent type only to judge its model."
       },
       "test": "hooks/test_guard.py::message-role: a test edit to a builder is refused, and the refusal names test-author"
     },
@@ -658,7 +658,7 @@
     "output-never-hand-off-doable-step": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place)."
+        "reason": "Whether a step handed to the user was doable, and whether its block is runnable as is, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) samples 1 Stop in 5 and judges every report that carries Input Needed, for the reason and the check on each item. A finding writes one guard.log line. A block that mixes shells has no code check. Guard rule task-names-check refuses a waiting-page task with no Why yours line (decision task-names-its-check). Guard rule task-why-cited refuses a waiting-page task whose Why yours line gives a capability reason with no cite that holds: a route row that says refused or asks, or a dated measured cite (decision claims-carry-backing, part (v)). The page reads no refusals file. Guard rule gh-login-switch refuses a waiting-page task whose command runs gh with no gh auth switch to a known login before it (decision act-in-place)."
       }
     },
     "style-table-gold-column": {
