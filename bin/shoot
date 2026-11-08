@@ -7,7 +7,8 @@
 //   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
 //   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
 //   fullPage (default true), timeoutMs (per route and per route step, default 15000), simulator (an iOS simulator UDID, optional),
-//   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate).
+//   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate),
+//   touchWidths (a list of widths that get touch; replaces the width-under-1024 default; [] means no width gets touch; null is unset).
 // Route keys beyond name and path, both optional (a bad value is a config error):
 //   steps (the route steps): a non-empty list, run in order after the page loads and its status passes, before the screenshot.
 //     Each route step is {click: css} or {wait: css, state: "visible" | "hidden"} (state defaults to visible).
@@ -21,7 +22,8 @@
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
 // Playwright: the installed package only. This tool never runs `playwright install`.
 // Exit: 0 every shot passed, 1 a shot failed, 2 it could not run (usage, config, no Playwright, no browser).
-// Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none. No config key.
+// Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none.
+//   A repo that sets touchWidths gets touch at exactly the listed widths instead (a width listed there need not be in sizes).
 //   Chromium drops the coarse match in a full-page capture however it is asked, and a resize to content height stretches each 100vh block.
 //   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
 //   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
@@ -77,8 +79,11 @@ function readConfig(file) {
   if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
   const themes = c.themes ?? ["light", "dark"];
   if (!Array.isArray(themes) || !themes.length || themes.some((t) => t !== "light" && t !== "dark")) die(`config ${file}: themes holds light and dark only`);
+  // A list, not a threshold: a repo's touch devices need not sit under one width. [] is valid and turns touch off at every width.
+  const touchWidths = c.touchWidths ?? null;
+  if (touchWidths !== null && (!Array.isArray(touchWidths) || touchWidths.some((w) => !Number.isInteger(w) || w < 1))) die(`config ${file}: touchWidths is a list of widths`);
   return {
-    baseUrl: c.baseUrl, routes, sizes, themes,
+    baseUrl: c.baseUrl, routes, sizes, themes, touchWidths,
     height: c.height ?? 900, fullPage: c.fullPage ?? true, timeoutMs: c.timeoutMs ?? 15000,
     simulator: c.simulator || null, ignoreHTTPSErrors: c.ignoreHTTPSErrors ?? false,
   };
@@ -316,7 +321,7 @@ async function main() {
   try {
     for (const theme of cfg.themes) {
       for (const width of cfg.sizes) {
-        const opts = { viewport: { width, height: cfg.height }, colorScheme: theme, ignoreHTTPSErrors: cfg.ignoreHTTPSErrors, hasTouch: width < TOUCH_BELOW };
+        const opts = { viewport: { width, height: cfg.height }, colorScheme: theme, ignoreHTTPSErrors: cfg.ignoreHTTPSErrors, hasTouch: cfg.touchWidths ? cfg.touchWidths.includes(width) : width < TOUCH_BELOW };
         const ctx = await browser.newContext(opts);
         try {
           for (const r of cfg.routes) {
