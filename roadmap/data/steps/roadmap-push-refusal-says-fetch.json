@@ -1,10 +1,11 @@
 {
   "title": "The roadmap-one-writer refusal tells the session to fetch before it asks the owner to push",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.68,
   "owner": "coordinator",
   "why": "A local triage session twice asked the owner to push a commit he had already pushed: its copy of the roadmap branch was stale, and the guard refuses before git reaches GitHub, so the refusal could not say the commit was already there (owner's ask ask-mw79vy66rf, 21:28 CST Nov 7).",
-  "note": "Fix: the refusal's remedy says to run `git fetch origin roadmap` and to ask the owner only when the commit is not on origin/roadmap. Remedy text only; the hook adds no network call. The debt local-triage-tier-proof removes the situation once local triage can push. Filed 21:30 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:30:00-06:00"
+  "note": "Fix: the refusal's remedy says to run `git fetch origin roadmap` and to ask the owner only when the commit is not on origin/roadmap. Remedy text only; the hook adds no network call. The debt local-triage-tier-proof removes the situation once local triage can push. Filed 21:30 CST Nov 7. Lane session_013NEJL4KjioFCNuafMd8V8Q started (coordinator, received 21:39 CST Nov 7).",
+  "updatedAt": "2026-11-07T21:40:00-06:00",
+  "lane": "session_013NEJL4KjioFCNuafMd8V8Q"
 }

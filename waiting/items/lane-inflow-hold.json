@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T03:41:00Z",
+  "context": "Goal: no PR that passed review sits idle.\nProblem (goal): lanes finish faster than batches merge. The coordinator keeps starting lanes while reviewed PRs pile up, so it needs your limit.\nBased on (notes): the coordinator's scan at 21:35 CST counts 215 reviewed PRs waiting, 142 of them finished in the last 6 h. No tool has checked this count yet.\nBased on (notes): 26 batch merges in 45 h, with 1-5 lanes in each (same scan).\nDeparts from: main, where the coordinator starts every ready step at once (rule parallelism-keep-going) \u2014 new lanes wait while the reviewed queue is above a limit, except safety fixes and your asks.\nMeanwhile: the coordinator starts no new lanes except safety fixes and your asks.",
+  "home": "pr-backlog-clear",
+  "id": "lane-inflow-hold",
+  "kind": "decision",
+  "n": 384,
+  "options": [
+    {
+      "gain": "Batches catch up, and no new work piles on.",
+      "how": "New lanes wait while 50 or more reviewed PRs wait to merge. Safety fixes and your asks still start.",
+      "key": "a",
+      "label": "Hold new lanes until fewer than 50 reviewed PRs wait (recommended)",
+      "lose": "Ready steps wait, so gap fixes land later."
+    },
+    {
+      "gain": "The queue stays near empty.",
+      "how": "The same hold, with a limit of 20.",
+      "key": "b",
+      "label": "Hold new lanes until fewer than 20 wait",
+      "lose": "Lanes stop for longer."
+    },
+    {
+      "gain": "No lane waits.",
+      "how": "Lanes start as today. The batch runner puts more lanes in each batch.",
+      "key": "c",
+      "label": "No hold, bigger batches only",
+      "lose": "The queue may keep growing."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "steps pr-backlog-clear and pr-state-is-on-the-pr; rule parallelism-keep-going",
+  "short": "Hold new lanes while the merge queue is long",
+  "status": "open",
+  "title": "Should new lanes wait while too many reviewed PRs wait to merge?",
+  "why": "The coordinator recommends a: the queue is past 200, and a limit of 50 lets batches catch up without stopping all work."
+}
