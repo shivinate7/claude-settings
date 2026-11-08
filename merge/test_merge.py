@@ -15022,12 +15022,12 @@ class HandedLaneCheck(RecordsEnv):
         self.host = HandedHost(self.co, self.other)
         self.on("feat", {"docs/records.md": page("ghost")})  # a stale page: a draft step that passes the check pushes its page
 
-    def fixture(self, body, handed, held=(), draft=True):
-        """The integration PR #7 with `body`, open and a draft unless draft is False; the open handed lanes `handed`, each with a done record at
+    def fixture(self, body, handed, held=(), draft=True, base="main"):
+        """The integration PR #7 with `body` into `base`, open and a draft unless draft is False; the open handed lanes `handed`, each with a done record at
         its own head; and the handed numbers in `held`, whose head the integration head holds. -> the integration head."""
         feat = self.head("feat")
         self.host.draft, self.host.body = draft, body
-        self.host.pulls = [batch_pull(7, feat, draft=draft)] + [batch_pull(n, handed_sha(n)) for n in handed]
+        self.host.pulls = [batch_pull(7, feat, base=base, draft=draft)] + [batch_pull(n, handed_sha(n)) for n in handed]
         self.host.comments = [record_of(n, handed_sha(n)) for n in handed]
         self.host.holds = {(handed_sha(n), feat) for n in held}
         return feat
@@ -15156,15 +15156,40 @@ class HandedLaneCheck(RecordsEnv):
         """A line of `out` names #n and holds `fact`."""
         self.assertTrue(any(re.search(rf"#{n}\b", l) and fact in l for l in out.splitlines()), f"no line names #{n} with {fact!r}:\n{out}")
 
-    def merge_parents(self):
-        """-> the parents of each merge commit above origin/main on origin/feat, one list of shas per merge."""
+    def merge_parents(self, base="main"):
+        """-> the parents of each merge commit above origin/`base` on origin/feat, one list of shas per merge."""
         sh(self.co, "git", "fetch", "-q", "origin")
-        out = sh(self.co, "git", "log", "--merges", "--format=%P", "origin/main..origin/feat")
+        out = sh(self.co, "git", "log", "--merges", "--format=%P", f"origin/{base}..origin/feat")
         return [line.split() for line in out.splitlines() if line.strip()]
 
     def assert_head_merges_lane(self, name):
         """The scope, read first: the head merges lane `name`'s tip (a merge commit's second parent), and the body has no Lanes line."""
         self.assertTrue(any(self.tips[name] in parents[1:] for parents in self.merge_parents()), f"the head does not merge {name}")
+        self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
+
+    def release_base(self):
+        """The integration PR is into `release`, cut from main before main moves on, so main's tip is not on release. main then moves one
+        commit past the cut, as a person's push would. The head does not merge that commit yet."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
+        self.host.base = "release"
+        self.main_moves()
+
+    def reachable(self, sha, ref):
+        """True when `sha` is an ancestor of origin/`ref`. A read git cannot make fails the case: unknown is never a pass."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        r = subprocess.run(["git", "merge-base", "--is-ancestor", sha, f"origin/{ref}"], cwd=self.co, capture_output=True, text=True)
+        self.assertIn(r.returncode, (0, 1), f"git could not tell whether {sha[:9]} is on origin/{ref}: {r.stderr}")
+        return r.returncode == 0
+
+    def assert_head_merges_main_tip_off_release(self):
+        """The scope, read first: the base is release; the head merges origin/main's tip as a merge commit's second parent; that tip is not on
+        origin/release; and the body has no Lanes line, so the no-Lanes check reads the merge."""
+        self.assertEqual(self.host.base, "release", "the pull request is not into release")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        main_tip = sh(self.co, "git", "rev-parse", "origin/main")
+        self.assertFalse(self.reachable(main_tip, "release"), "main's tip is already on release, so the fixture does not reach the defect")
+        self.assertTrue(any(main_tip in parents[1:] for parents in self.merge_parents("release")), "the head does not merge origin/main's tip")
         self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
 
     def assert_lanes_variant_read(self, line):
@@ -15239,6 +15264,30 @@ class HandedLaneCheck(RecordsEnv):
         self.assertIn("could not read the merge commits", out, f"the failed read's stop is not printed:\n{out}")
         self.assert_refused_untouched(rc, out, refs)
         self.assertEqual(self.host.readies, [], out)
+
+    def test_handed_lane_no_lanes_release_head_merging_main_is_not_a_lane(self):
+        self.release_base()
+        head_takes_base(self)  # the head merges origin/main's new tip, as a lane does before its run
+        self.fixture("", handed=[], base="release", draft=False)  # the draft step runs handed_local only on the default base or with ready checks
+        self.assert_head_merges_main_tip_off_release()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertNotIn("merges lanes", out, f"the no-Lanes check read main's merge into a release head as a lane:\n{out}")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), f"the ready merge did not land:\n{out}")
+
+    def test_handed_lane_no_lanes_release_head_merging_a_lane_is_refused(self):
+        self.release_base()
+        lane_batch(self, "lane-a")  # the lane is cut from main's new tip, and is on neither main nor release
+        self.fixture("", handed=[], base="release", draft=False)  # lane_batch gave the body a Lanes line: this body has none
+        self.assert_head_merges_lane("lane-a")
+        tip = self.tips["lane-a"]
+        self.assertFalse(self.reachable(tip, "release"), "lane-a is already on release, so the fixture does not reach the check")
+        self.assertFalse(self.reachable(tip, "main"), "lane-a is already on main, so the fixture does not reach the check")
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
+        self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
