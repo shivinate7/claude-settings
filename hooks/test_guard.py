@@ -10574,7 +10574,7 @@ AGENT_FIXTURES = {
                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_LANE_TAGS))]),
     "main-lane-agent-triage": (role_target_call("g1", ARCH_LANE_TAGS),
                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
-    "agent-malformed-id": (AGENT_QUIET, [("../x", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
+    "agent-malformed-id": (AGENT_QUIET, [("x.y", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
     "agent-own-triage-slug": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_SLUG_TAGS))]),
     "agent-file-absent": (role_target_call("g1", ARCH_TRIAGE_TAGS), []),
     "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
@@ -10638,9 +10638,10 @@ archive_refuse("a lane in the main record is refused though the agent's own reco
                role_path("main-lane-agent-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
                carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
 # A malformed agent_id: the file its raw text names holds a non-lane record. It is not read, so the call is refused for no
-# record. A reader that skipped the AGENT_ID check would read that record and allow the archive.
+# record. A reader that skipped the AGENT_ID check would read that record and allow the archive. The id `x.y` has a dot,
+# which AGENT_ID refuses, and its file name is legal on Windows, unlike an id with a path separator.
 archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
-               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="../x",
+               role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
                carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
 # No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
 # archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
