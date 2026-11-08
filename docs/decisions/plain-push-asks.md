@@ -22,7 +22,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
   01:10 CST, under item 206 a. A test-author or builder pushing a lane-named branch unasked is
   not read here; roadmap step `push-ask-reads-brief` holds it.
 - Silent:
-  - a push to the branch's own upstream;
+  - a push to the branch's own upstream, unless that name is an agent-worktree name;
   - a first push with no upstream, unless its destination is an agent-worktree name;
   - a `-u` push whose destination is the local branch's own name, not an agent-worktree name, even when the branch tracks
     another lane. It sets the new upstream on purpose. Source: coordinator brief, 2026-11-03
