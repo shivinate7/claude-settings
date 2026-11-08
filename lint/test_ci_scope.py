@@ -210,7 +210,7 @@ def join_all(parts, rel, scopes, depth):
     return [posixpath.join(*combo) for combo in itertools.product(*options)]
 
 
-# A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (ruling 2026-11-07 22:12 CST).
+# A subprocess target (bin/ci-job, run as a child process) is no load and stays out of the closure (decision ci-scope-merge-closure).
 def file_loads(rel, source, files):
     """-> the files in `files` that the file `rel`, with this `source`, loads when it runs. A load is: an import at any depth
     (`import x`, `import x.y`, `from x import y`, `from . import y`) that names a file x.py in `files`; LOADER("<name>") as
@@ -403,7 +403,7 @@ class MergeFlagFiles(unittest.TestCase):
         return loads
 
     # Named failure: a file that merge.py loads, directly or through imports, gets no merge flag from the script, so a change to
-    # it runs no merge suite. Ruling (coordinator, 2026-11-07 21:03 CST): the merge flag covers the whole closure.
+    # it runs no merge suite. Ruling (decision ci-scope-merge-closure): the merge flag covers the whole closure.
     def test_every_file_merge_py_loads_gets_the_merge_flag(self):
         loads = self.merge_closure()
         no_flag = sorted(p for p in loads if run([p], existing=[p]).get("checks_windows_merge") != "true")
@@ -588,7 +588,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
-    # Ruling (coordinator, 2026-11-07 21:03 CST): the merge flag covers every file in the closure merge/merge.py loads.
+    # Ruling (decision ci-scope-merge-closure): the merge flag covers every file in the closure merge/merge.py loads.
     # merge.py imports hooks/git_reads.py by path, so a change to it sets the merge flag. The guard and sweep flags stay as
     # guard.py's: guard_core.py and the janitor's sweep.py import it, so the guard and sweep suites run on it.
     def test_git_reads_change_sets_the_guard_flags_and_the_merge_flag(self):
@@ -707,7 +707,7 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-lease is in merge.py's load closure (ruling ci-scope-merge-closure, coordinator 2026-11-07 21:03 CST: the
+    # bin/sim-lease is in merge.py's load closure (decision ci-scope-merge-closure: the
     # merge flag covers that closure), so an edit to it also sets checks_windows_merge.
     def test_sim_lease_edit_turns_on_the_macos_shell_job_and_the_merge_check(self):
         p = "bin/sim-lease"
