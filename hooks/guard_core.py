@@ -1054,7 +1054,8 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, skipped=None):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, skipped=None,
+                       read_variables=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1071,7 +1072,10 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     that never runs from a folder it cannot read), and its own `cd` moves nothing. `failed_cd_stays`
     is off by default, so a rule that fails closed on an untrusted `cd` keeps doing so. With it on, a
     `cd` into a folder an earlier `mkdir` of this walk makes reads as a move to the nearest folder that
-    exists now (the shell will be in the new folder, which sits in that one's checkout)."""
+    exists now (the shell will be in the new folder, which sits in that one's checkout). `read_variables`
+    reads a `cd` through a variable the guard's environment sets as the value it holds
+    (`expand_folder_word`); a name that is not set stays unknown. It is off by default, so a rule that
+    fails closed on a variable keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     made = []   # folders an earlier `mkdir` makes, absolute and normalized
@@ -1118,6 +1122,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             old = where
             word = basename(tokens[resolve_command(tokens)]).lower()
             pushes = word in ("pushd", "push-location")
+            if read_variables and isinstance(move, str) and move not in ("", "-"):
+                move = expand_folder_word(move) or move
             if move is CD_UNKNOWN:
                 if word in POP_WORDS and dirs and len(_operands(tokens)) == 0:
                     where = dirs.pop()   # popd: back to the folder the matching pushd left
@@ -1148,6 +1154,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             if stack:
                 where, prev, dirs = stack.pop()
     return where
+
+
+def expand_folder_word(word: str):
+    """The folder a command names in `word`, with `~` and each variable the guard's environment sets replaced
+    by its value, or None when it still runs through the shell: a name that is not set, a `$(...)`, a
+    backtick or a `%`. The one reader of a variable in a folder word."""
+    expanded = os.path.expandvars(os.path.expanduser(word))
+    return None if any(mark in expanded for mark in "$%`") else expanded
 
 
 def _mkdir_targets(tokens, where):

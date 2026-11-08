@@ -10,7 +10,7 @@ import stat
 import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move,
-    _segment_git_c_target, dir_before_segment, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
+    _segment_git_c_target, dir_before_segment, expand_folder_word, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
     bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
@@ -100,9 +100,11 @@ def push_target(segments, ends, number: int, cwd: str):
     tokens = segment_tokens(segments[number])
     if tokens is None:
         return "", {}
-    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, read_variables=True)
     git_c = _segment_git_c_target(tokens)
     if git_c is not None:
+        if expand_folder_word(git_c) is None:
+            return "", {}
         where = _absolute(git_c, where or "")
     if not where or not os.path.isabs(where):
         return "", {}

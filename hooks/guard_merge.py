@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, expand_folder_word, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import guard_ste  # the ste-lint reads and run that bin/ste-changed shares (hooks/guard_ste.py)
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -891,7 +891,7 @@ def _commit_folder(segments, number, cwd, ends):
     runs (`dir_before_segment`, after each earlier `cd`), moved by the segment's `-C`; `--work-tree` moves only
     `files`. None when a folder cannot be read: a `-C` or `--work-tree` target that holds `$` or a backtick,
     or that is no directory. `_SKIPPED` when the chain never runs the segment."""
-    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, skipped=_SKIPPED)
+    where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True, skipped=_SKIPPED, read_variables=True)
     if where is _SKIPPED:
         return _SKIPPED
     target = _segment_git_c_target(segment_tokens(segments[number]) or [])
@@ -912,8 +912,9 @@ def _commit_folder(segments, number, cwd, ends):
 
 
 def _unread_target(target):
-    """True when a `-C` or `--work-tree` target runs through the shell (`$` or a backtick): no folder to read."""
-    return "$" in target or "`" in target
+    """True when a `-C` or `--work-tree` target runs through the shell (a name that is not set, `$(...)` or a
+    backtick): no folder to read. A variable the environment sets reads as its value."""
+    return expand_folder_word(target) is None
 
 
 def _top_of(where):
