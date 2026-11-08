@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-142 rows: exact 88, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+144 rows: exact 90, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -80,6 +80,8 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `cite-by-id` | git-cite-by-id | "Ids, not paths. A path breaks when its file moves." | exact | exact | a commit message "see docs/decisions/foo.md" is denied | - |
 | `lane-by-slug` | lane-by-slug | "the guard refuses a session number that names a lane, such as `N20` or `(N16)`" | exact | exact | `N20` in a commit message is denied | - |
 | `draft-pr` | draft-until-reviewed | "refuses `gh pr create` without `--draft` or `-d`." | exact | exact | `gh pr create --fill` is denied | - |
+| `pr-body-placeholder` | pr-body-placeholder | "denies an update whose stripped body is empty, or one word with no whitespace and at most 40 characters." | exact | exact | an MCP update with body `PLACEHOLDER` is denied; a 41-character word and two words pass | - |
+| `pr-body-shrink` | pr-body-placeholder | "asks when the live body is at least 400 characters and the new body is under one third of it." | exact | exact | 120 characters over a live 1700 asks; 567 over 1700, and 100 over a live 399, pass | - |
 | `load-brake` | machine-load-brake | "a call that starts a lane or an agent reads the machine's load. A busy or full machine refuses new lanes and agents" | exact | exact | a busy machine refuses a background Agent | - |
 | `guard-crash` | guard-hooks-fail-closed | "a guard that times out or crashes does not ... except a missing guard module, which refuses" | exact | exact | a raise is allowed and logged; a missing module is denied | rule rewrite: the guard index line says only "allowed"; add the missing-module deny |
 

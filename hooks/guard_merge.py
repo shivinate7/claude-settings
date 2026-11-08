@@ -108,20 +108,18 @@ MERGE_READ_TIMEOUT = 25
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
 
-def merge_call_of(segment: str):
-    """Return (selector, repo) for a `gh pr merge` segment, else None.
-
-    `selector` is the first positional word, '' for the current branch's pull request. `--auto` is
-    judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base with none
-    merges at once.
-    """
+def pr_call_of(segment: str, verb: str, value_flags):
+    """Return (selector, repo) for a `gh pr <verb>` segment, else None. One reader of the positional
+    word and the repo flag for every `gh pr` act the guard judges; `value_flags` are the flags of that
+    act that take a value, whose next word is data. `selector` is the first positional word, '' for the
+    current branch's pull request. Help returns None: it acts on nothing."""
     rest = gh_call_of(segment)
-    if rest is None or rest[:2] != ["pr", "merge"]:
+    if rest is None or rest[:2] != ["pr", verb]:
         return None
     selector, repo = "", ""
     args = rest[2:]
     if "-h" in args or "--help" in args:
-        return None   # help merges nothing
+        return None
     index = 0
     while index < len(args):
         arg = args[index]
@@ -131,13 +129,22 @@ def merge_call_of(segment: str):
             index += 1
         elif arg.startswith("--repo="):
             repo = arg[len("--repo="):]
-        elif arg in MERGE_VALUE_FLAGS:
+        elif arg in value_flags:
             index += 1
         elif arg.startswith("-"):
             continue
         elif not selector:
             selector = arg
     return selector, repo
+
+
+def merge_call_of(segment: str):
+    """Return (selector, repo) for a `gh pr merge` segment, else None.
+
+    `--auto` is judged like any merge: GitHub's auto-merge waits only on REQUIRED checks, and a base
+    with none merges at once.
+    """
+    return pr_call_of(segment, "merge", MERGE_VALUE_FLAGS)
 
 
 _MERGE_MODULE = []
@@ -314,6 +321,74 @@ def undrafted_pr_create(segment: str) -> bool:
         elif arg.startswith(("--draft=", "-d=")):
             draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
     return not draft
+
+
+# ---- a pull request body update that wipes the body (decision pr-body-placeholder)
+#
+# One cloud lane sent "PLACEHOLDER" as the whole body of its pull request (#1969) through the MCP update
+# tool, and lost the review records and Merge-after lines the lane lint reads. Two rules judge an UPDATE
+# that carries a body, by the MCP update tool or by `gh pr edit`. A create is no update and is not judged.
+# The cuts rest on a sample of 100 recent PRs of this repo (body length min 212, p10 694, median 1243).
+PR_PLACEHOLDER_MAX = 40   # a stripped body of one word this short, or none, is a placeholder
+PR_SHRINK_FLOOR = 400     # a live body shorter than this is short, so a short rewrite of it loses little
+PR_SHRINK_DIVISOR = 3     # a new body under live/3 is far below a real full rewrite
+PR_EDIT_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--title", "-B", "--base",
+                       "-m", "--milestone", "--add-label", "--remove-label", "--add-assignee",
+                       "--remove-assignee", "--add-reviewer", "--remove-reviewer", "--add-project",
+                       "--remove-project"}
+
+PR_BODY_PLACEHOLDER_REASON = (
+    "Rule (Git): this update would leave the pull request body empty or as one short word, such as "
+    "PLACEHOLDER. A cloud lane sent exactly that as the whole body of its pull request (#1969, the "
+    "lane whose body was lost) and lost the review records and Merge-after lines the lane lint reads. "
+    "Remedy: send the full body text. To keep the body as it is, leave the body out of the update. "
+    "Cost: no read, no file written, no process kept. "
+    "(decision pr-body-placeholder, a pull request body is never replaced by a placeholder)"
+)
+PR_BODY_SHRINK_REASON = (
+    "Rule (Git): this update would cut the live pull request body from %d to %d characters, under "
+    "one third of it. A long body holds the review records and Merge-after lines the lane lint reads, "
+    "and a placeholder sent as a whole body once wiped them (#1969, the lane whose body was lost). "
+    "Remedy: if the short body is meant, approve this ask. Otherwise read the live body, edit it, and "
+    "send the full text. Cost: one GitHub read per body update, no file written, no process kept. "
+    "(decision pr-body-placeholder, a pull request body is never replaced by a placeholder)"
+)
+
+
+def pr_body_is_placeholder(body: str) -> bool:
+    text = body.strip()
+    return not text or (len(text) <= PR_PLACEHOLDER_MAX and not any(c.isspace() for c in text))
+
+
+def live_pr_body(selector, repo: str, where: str):
+    """The live body of a pull request, read once with the merge tool's own reader, or None when it
+    could not be read (an unloadable tool, a failed or timed-out call, an unnamed pull request)."""
+    module = merge_module()
+    if module is None:
+        return None
+    try:
+        host = module.Host(repo=repo or None, cwd=where or None)
+        return host.pr(selector)["body"]
+    except (Exception, SystemExit):
+        return None
+
+
+def pr_body_hit(body: str, selector, repo: str, where: str):
+    """Return (rule, detail) for an update that sets `body`: ("pr-body-placeholder", the body),
+    ("pr-body-shrink", (live length, new length)), ("unread", note) when the live body could not be
+    read (the update passes), else ("", ""). A placeholder reads nothing. Any other body costs one
+    live read."""
+    if pr_body_is_placeholder(body):
+        return "pr-body-placeholder", body.strip()[:PR_PLACEHOLDER_MAX]
+    if selector is None:   # an MCP update that names no pull request: nothing to read
+        return "unread", "no pull request number: live body unread"
+    live = live_pr_body(selector, repo, where)
+    if live is None:
+        return "unread", "pr %s: live body unread" % (selector or "of the branch")
+    new_len, live_len = len(body.strip()), len(live.strip())
+    if live_len >= PR_SHRINK_FLOOR and new_len * PR_SHRINK_DIVISOR < live_len:
+        return "pr-body-shrink", (live_len, new_len)
+    return "", ""
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)

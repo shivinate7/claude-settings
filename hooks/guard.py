@@ -121,6 +121,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  pr-body-placeholder  deny. A PR body update (MCP `update_pull_request` with a `body`, or `gh pr edit` with --body,
+                       -b, --body-file or a heredoc body) whose stripped body is empty or one word of at most 40
+                       characters. No live read. A body with a shell expansion, or piped with no heredoc, is unread.
+                       (pr-body-placeholder)
+  pr-body-shrink       ask. The same updates, when the live body is at least 400 characters and the new body is under
+                       one third of it. One live read through the merge tool's `Host.pr`; a read that fails passes and is
+                       noted as `subject-unread`. A title-, state- or draft-only update reads nothing, and a create is
+                       not judged. (pr-body-placeholder)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -221,8 +229,8 @@ Other tools, in `judge` order:
                        `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
                        calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
                        (machine-load-brake)
-  merge-checks, draft-pr, impeccable-review-only
-                       deny. The MCP merge, pull request and Skill forms of the rules above.
+  merge-checks, draft-pr, impeccable-review-only, pr-body-placeholder, pr-body-shrink
+                       deny (pr-body-shrink asks). The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
                        deny. A raw `simctl boot` (through `xcrun` or bare), or an open of
                        Simulator.app (`open -a Simulator`, `open -a Simulator.app`, an `open` of a
@@ -385,6 +393,7 @@ while True:
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
+            PR_BODY_PLACEHOLDER_REASON, PR_BODY_SHRINK_REASON, PR_EDIT_VALUE_FLAGS, pr_body_hit, pr_call_of,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1485,6 +1494,41 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
         if found:
             return found.group(0)
     return ""
+
+
+# ---- a pull request body update that wipes the body (decision pr-body-placeholder)
+def pr_edit_body(segment: str, raw: str, where: str, before: int):
+    """Return (selector, repo, body) for a `gh pr edit` segment that sets a body this guard can read,
+    else None. The last body text wins, as gh reads it. A body that holds a shell expansion (`$` or a
+    backtick) is not the text the call will send, an unread message file is cite-by-id's to refuse, and
+    a body piped in with no heredoc is unseen: each is no hit."""
+    call = pr_call_of(segment, "edit", PR_EDIT_VALUE_FLAGS)
+    read = message_texts(segment, raw, where, before) if call is not None else None
+    if read is None or read[2] or not read[1]:
+        return None
+    body = read[1][-1]
+    if "$" in body or "`" in body:
+        return None
+    return call[0], call[1], body
+
+
+def judge_pr_body(tool: str, body: str, selector, repo: str, where: str, shell: bool) -> None:
+    """Judge one update that sets a pull request body (rules pr-body-placeholder and pr-body-shrink).
+    `selector` is None when an MCP update names no pull request. `shell` is true for `gh pr edit`, whose
+    ask waits for the ask-alone check; an MCP update asks at once. A live body that cannot be read passes
+    and is noted as `subject-unread`."""
+    rule, detail = pr_body_hit(body, selector, repo, where)
+    if rule == "pr-body-placeholder":
+        refuse(tool, "deny", "pr-body-placeholder", PR_BODY_PLACEHOLDER_REASON, detail)
+    if rule == "pr-body-shrink":
+        reason = PR_BODY_SHRINK_REASON % detail
+        matched = "pr %s: body of %d characters over a live body of %d" % (selector or "of the branch", detail[1], detail[0])
+        if shell:
+            ask_command("pr-body-shrink", reason, matched, "gh pr edit " + str(selector))
+        else:
+            refuse(tool, "ask", "pr-body-shrink", reason, matched)
+    if rule == "unread":
+        record(tool, "noted", "subject-unread", "pr-body-shrink: " + detail)
 
 
 # ---- a message that names a lane by its session number
@@ -3398,6 +3442,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
+        edited = pr_edit_body(segment, raw, cite_where, before)
+        if edited:
+            judge_pr_body(tool, edited[2], edited[0], edited[1], cite_where, True)
 
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
@@ -4873,6 +4920,12 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # A pull request body update through the MCP tool (rules pr-body-placeholder and pr-body-shrink).
+    if tool == "mcp__github__update_pull_request" and isinstance(tool_input.get("body"), str):
+        owner, name, number = (tool_input.get(k) for k in ("owner", "repo", "pullNumber"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        judge_pr_body(tool, tool_input["body"], None if number is None else str(number), repo, cwd, False)
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
