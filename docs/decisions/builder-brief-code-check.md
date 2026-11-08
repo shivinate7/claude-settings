@@ -16,7 +16,7 @@ Rule `builder-brief-code-check` in `hooks/guard.py` refuses an Agent or Task bri
 - Unpinned edges, with no mutant: a name split inside a word across a line break, and an empty-string `cwd`. Also a `cwd` in a subfolder of the repo, and a nested `checks:` key deeper than the job indent.
 - Cost: per builder spawn with a `cwd`, one short `git rev-parse --show-toplevel` process and one read of `checks.yml`, inside the guard call already running. Other spawns cost nothing. No file written, no log line beyond the refusal's own.
 
-Protected by the 29 `builder-code-check:` cases in `hooks/test_guard.py`. The deny cases and the allow cases for new forms were red before the code that serves them. The rest are allow controls. The 23 mutants in `hooks/mutate_guard.py` labelled `builder-code-check:` each go red on one named case.
+Protected by the 33 `builder-code-check:` cases in `hooks/test_guard.py`. The deny cases and the allow cases for new forms were red before the code that serves them. The rest are allow controls. The 26 mutants in `hooks/mutate_guard.py` labelled `builder-code-check:` each go red on one named case.
 
 Kind: process
 Home: hooks/guard.py
