@@ -917,29 +917,64 @@ def _effect(at):
 
 
 def _loops_holding(node, mod):
-    """The loops whose body holds `node`, within its own def."""
+    """The loops that run `node` again: a for body, and a while test or body, within its own def."""
     loops, cur = [], node
     parent = mod.parents.get(id(cur))
     while parent is not None and not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        if isinstance(parent, (ast.For, ast.AsyncFor, ast.While)) and any(cur is s for s in parent.body):
+        if isinstance(parent, (ast.For, ast.AsyncFor, ast.While)) and (
+                any(cur is s for s in parent.body) or cur is getattr(parent, "test", None)):
             loops.append(parent)
         cur, parent = parent, mod.parents.get(id(parent))
     return loops
 
 
+def _statement(node, mod):
+    """The statement `node` sits in: the node itself when it is one, else the nearest statement above it."""
+    cur = node
+    while cur is not None and not isinstance(cur, ast.stmt):
+        cur = mod.parents.get(id(cur))
+    return cur
+
+
+def _in_lambda(node, mod):
+    """True when a lambda within `node`'s own def holds it. A lambda runs when it is called, so it may read any binding."""
+    cur = mod.parents.get(id(node))
+    while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(cur, ast.Lambda):
+            return True
+        cur = mod.parents.get(id(cur))
+    return False
+
+
+def _enclosing_defs(node, mod):
+    """The defs around `node`, nearest first. A class body is no scope for a def inside it, so it is skipped."""
+    out, cur = [], mod.parents.get(id(node))
+    while cur is not None:
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append(cur)
+        cur = mod.parents.get(id(cur))
+    return out
+
+
 def _reaching(entries, read, mod):
-    """The bindings a read sees. One reaches the read when it takes effect before the read and is not in an arm of
-    an `if` the read is not in: a binding after the read, or in a sibling arm, never ran before it. A loop body that
-    holds both pools them all, since the loop may run the binding again before the read. A run-time binding that
-    reaches the read still leaves it unresolved."""
+    """The bindings a read sees. Where a read runs in a lambda, all of them: the lambda may run after any of them. Else
+    one reaches the read when it sits in the read's own statement, or when it takes effect before the read and is not
+    in an arm of an `if` the read is not in. A binding after the read, or in a sibling arm, never ran before it. A loop
+    body that holds both pools them all, since the loop may run the binding again before the read. A run-time binding
+    that reaches the read still leaves it unresolved. When unsure, a binding stays in."""
+    if _in_lambda(read, mod):
+        return list(entries)
     loops = {id(loop) for loop in _loops_holding(read, mod)}
     chain = _branch_chain(read, mod)
     before = (read.lineno, read.col_offset)
+    statement = _statement(read, mod)
     found = []
     for entry in entries:
         at = entry[2]
         if at is None:
             found.append(entry)
+        elif _statement(at, mod) is statement:
+            found.append(entry)  # one statement runs its parts in an order the source does not show
         elif loops & {id(loop) for loop in _loops_holding(at, mod)}:
             found.append(entry)
         elif _effect(at) < before and not _sibling(_branch_chain(at, mod), chain):
@@ -1251,6 +1286,11 @@ class _Reasons:
                 return None
             return _union([self._value(v, slot, index, mod, locs, depth) if v is not None else None
                            for v, slot, _ in seen])
+        for outer in _enclosing_defs(read, mod):  # a nested def reads the enclosing def's bindings, all of them
+            outer_locs = self.locals_of(outer, mod)
+            if name in outer_locs:
+                return _union([self._value(v, slot, index, mod, outer_locs, depth) if v is not None else None
+                               for v, slot, _ in outer_locs[name]])
         home = self._home(mod, name)
         if home is None:
             return None
