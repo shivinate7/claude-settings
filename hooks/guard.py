@@ -2381,6 +2381,12 @@ def report_sha_judged(line: str, run) -> bool:
     return True
 
 
+def report_sha_token(token: str) -> bool:
+    """True when `token` is 7 to 12, or exactly 40, lowercase hex characters with a digit and a letter a-f."""
+    return (re.fullmatch(r"[0-9a-f]+", token) is not None and (7 <= len(token) <= 12 or len(token) == 40)
+            and re.search(r"[0-9]", token) is not None and re.search(r"[a-f]", token) is not None)
+
+
 def report_shas(text) -> list:
     """The sha-like tokens of a report, each once, in order of first sight."""
     if not isinstance(text, str):
@@ -2393,8 +2399,7 @@ def report_shas(text) -> list:
         line = REPORT_URL_WORD.sub(lambda m: " " * len(m.group()), line)
         for run in REPORT_HEX_RUN.finditer(line):
             token = run.group()
-            if (7 <= len(token) <= 12 or len(token) == 40) and re.search(r"[0-9]", token) \
-                    and re.search(r"[a-f]", token) and token not in found and report_sha_judged(line, run):
+            if report_sha_token(token) and token not in found and report_sha_judged(line, run):
                 found.append(token)
     return found[:REPORT_SHA_MAX]
 
@@ -2436,11 +2441,12 @@ def report_sha_missing(tool: str, payload, text, where: str) -> list:
 
 
 # Rule message-ref-missing. A send_message names only refs of this repo that exist (decision
-# send-message-refs-resolve): a commit sha (report_shas), a pull request (`PR #N`, `PRs #N and #M`, a pull URL of this
-# repo) and a PR comment link of this repo. This repo is the owner/repo of the cwd checkout's origin, read raw: `git
-# config --get remote.origin.url`, since `remote get-url` applies insteadOf. A bare #N is skipped. A sha on a line that
-# names another owner/repo is skipped. Every PR is read by one `git ls-remote origin`, every comment by one `gh api`,
-# each with a 5 s limit. Only a clear answer refuses (no refs/pull/N/head, or a 404); any other answer leaves the ref
+# send-message-refs-resolve): a commit sha (report_shas, and a commit URL of this repo), a pull request (`PR #N`,
+# `pull request #N`, `#N (PR)`, a list of them, a pull URL of this repo) and a PR comment link of this repo. This repo
+# is the owner/repo of the cwd checkout's origin, read raw: `git config --get remote.origin.url`, since `remote
+# get-url` applies insteadOf. A bare #N is skipped. A sha or PR number on a line that names another repo is skipped.
+# Every PR is read by one `git ls-remote origin`, each comment by one `gh api`, up to 5, each with a 5 s limit. Only a
+# clear answer refuses (no refs/pull/N/head, or `HTTP 404` on gh's stderr); any other answer leaves the ref
 # unchecked, and the sender is told which.
 MESSAGE_REF_TOOL = "mcp__claude-code-remote__send_message"
 MESSAGE_REF_REASON = (
@@ -2448,14 +2454,19 @@ MESSAGE_REF_REASON = (
     "name only what exists. Then send it again. (decision send-message-refs-resolve)"
 )
 MESSAGE_REF_LIMIT = 5   # seconds, for each ls-remote or gh read
-MESSAGE_REF_MAX = 20    # pull requests, and comments, read in one message
-MESSAGE_PR = re.compile(r"\bPRs?(?:\s*#|\s+)(\d+)((?:\s*(?:,|and|&)\s*#\d+)*)")
-MESSAGE_PR_MORE = re.compile(r"#(\d+)")
-MESSAGE_PULL_URL = re.compile(
-    r"https?://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues)/(\d+)(?:/[\w/.-]*)?(?:#issuecomment-(\d+))?")
+MESSAGE_REF_MAX = 20    # pull requests, and comments, named in one message
+MESSAGE_GH_READS = 5    # comment links read with gh in one message; the rest are named unchecked
+MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)(?:\s*#|\s+)(\d+)((?:\s*(?:,|and|&)\s*#?\d+)*)", re.IGNORECASE)
+MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
+MESSAGE_PR_ITEM = re.compile(r"\s*(?:,|and|&)\s*#?(\d+)")
+MESSAGE_PR_ITEM_MARKED = re.compile(r"\s*(?:,|and|&)\s*#(\d+)")
+MESSAGE_GH_URL = re.compile(
+    r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
+    r"(?:#issuecomment-(\d+))?", re.IGNORECASE)
 MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
-MESSAGE_REPO_NAME = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?![\w/-])")
+MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=[#@:])")
 MESSAGE_FILE_END = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+MESSAGE_NOT_A_REPO = ("origin", "upstream")
 
 
 def message_origin(where: str):
@@ -2470,18 +2481,37 @@ def message_origin(where: str):
 
 
 def message_names_other_repo(line: str, this) -> bool:
-    """True when `line` names an owner/repo (a github URL or a bare owner/repo word) other than `this`."""
-    names = {(o.lower(), r.lower()) for o, r, *_ in MESSAGE_PULL_URL.findall(line)}
-    bare = REPORT_URL_WORD.sub(" ", line)
-    for owner, repo in MESSAGE_REPO_NAME.findall(bare):
-        if not MESSAGE_FILE_END.search(repo):
-            names.add((owner.lower(), repo.lower()))
-    return any(name != this for name in names)
+    """True when `line` holds an owner/repo that is not `this`, followed by `#`, `@` or `:`. An owner/repo with no such
+    mark is a branch or a path. `origin/` and `upstream/` never count."""
+    bare = REPORT_URL_WORD.sub(" ", MESSAGE_GH_URL.sub(" ", line))
+    for owner, repo in MESSAGE_REPO_MARKED.findall(bare):
+        if owner.lower() in MESSAGE_NOT_A_REPO or MESSAGE_FILE_END.search(repo):
+            continue
+        if (owner.lower(), repo.lower()) != this:
+            return True
+    return False
+
+
+def message_line_prs(line: str) -> list:
+    """The PR numbers a line names in words: `PR #N`, `PRs 7 and 8`, `pull request #N`, `#N (PR)`. After a singular
+    word, a further number in a list needs its own `#`, so `PR #7, 12 files` names one PR."""
+    prs = []
+    for found in MESSAGE_PR.finditer(line):
+        prs.append(found.group(2))
+        tail, item = found.group(3), MESSAGE_PR_ITEM if found.group(1).lower().endswith("s") else MESSAGE_PR_ITEM_MARKED
+        while True:
+            more = item.match(tail)
+            if not more:
+                break
+            prs.append(more.group(1))
+            tail = tail[more.end():]
+    prs += MESSAGE_PR_NUMBERED.findall(line)
+    return prs
 
 
 def message_refs(text: str, where: str):
-    """(shas, prs, comments) a message names for this repo. Starts a process only when a PR, a link, or a sha
-    on a line that names an owner/repo needs the origin; a message with no ref starts none."""
+    """(shas, prs, comments, origin) a message names for this repo. Starts a process only when a PR, a link, or a
+    sha on a line that holds an owner/repo with a mark needs the origin; a message with no ref starts none."""
     origin = []
 
     def this():
@@ -2489,27 +2519,26 @@ def message_refs(text: str, where: str):
             origin.append(message_origin(where))
         return origin[0]
 
-    shas = []
+    shas, prs, comments = [], [], []
     for line in text.split("\n"):
-        found = report_shas(line)
-        if found and re.search(r"\w/\w", line) and this() is not None and message_names_other_repo(line, this()):
+        found, numbers = report_shas(line), message_line_prs(line)
+        if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
+                and message_names_other_repo(line, this()):
             continue
         shas += [sha for sha in found if sha not in shas]
-    prs, comments = [], []
-    if "PR" in text or "github.com" in text:
-        for found in MESSAGE_PR.finditer(text):
-            numbers = [found.group(1)] + MESSAGE_PR_MORE.findall(found.group(2))
-            prs += [n for n in numbers if n not in prs]
-        if "github.com" in text:
-            for owner, repo, kind, number, comment in MESSAGE_PULL_URL.findall(text):
-                if (owner.lower(), repo.lower()) != this():
-                    continue
-                if kind == "pull" and number not in prs:
-                    prs.append(number)
-                if comment and comment not in comments:
-                    comments.append(comment)
-        if (prs or comments) and this() is None:
-            prs, comments = [], []
+        prs += [n for n in numbers if n not in prs]
+    if re.search(r"github\.com", text, re.IGNORECASE):
+        for owner, repo, kind, ident, comment in MESSAGE_GH_URL.findall(text):
+            if (owner.lower(), repo.lower()) != this():
+                continue
+            if kind.lower() == "pull" and ident.isdigit() and ident not in prs:
+                prs.append(ident)
+            if kind.lower() == "commit" and report_sha_token(ident.lower()) and ident.lower() not in shas:
+                shas.append(ident.lower())
+            if comment and comment not in comments:
+                comments.append(comment)
+    if prs and this() is None:
+        prs = []
     return shas[:REPORT_SHA_MAX], prs[:MESSAGE_REF_MAX], comments[:MESSAGE_REF_MAX], (origin[0] if origin else None)
 
 
@@ -2524,12 +2553,13 @@ def message_pr_missing(where: str, prs: list):
         return [], prs
     if done.returncode != 0:
         return [], prs
-    held = {line.split("\t")[-1].strip() for line in done.stdout.splitlines()}
-    return [n for n in prs if "refs/pull/%s/head" % n not in held], []
+    held = set(re.findall(r"refs/pull/(\d+)/head", done.stdout))
+    return [n for n in prs if n not in held], []
 
 
 def message_comment_state(origin, comment: str) -> str:
-    """'found', 'missing' (a 404) or 'unchecked' for one comment link: one `gh api` read."""
+    """'found', 'missing' (gh exits non-zero with `HTTP 404` on stderr) or 'unchecked' for one comment link: one
+    `gh api` read."""
     try:
         done = git_reads._nowindow.run(
             ["gh", "api", "repos/%s/%s/issues/comments/%s" % (origin[0], origin[1], comment)],
@@ -2538,7 +2568,7 @@ def message_comment_state(origin, comment: str) -> str:
         return "unchecked"
     if done.returncode == 0:
         return "found"
-    return "missing" if "404" in (done.stderr or "") else "unchecked"
+    return "missing" if "HTTP 404" in (done.stderr or "") else "unchecked"
 
 
 def message_ref_check(tool: str, tool_input, cwd: str):
@@ -2552,8 +2582,8 @@ def message_ref_check(tool: str, tool_input, cwd: str):
         gone, unknown = message_pr_missing(cwd, prs)
         missing += ["PR #" + n for n in gone]
         unchecked += ["PR #" + n for n in unknown]
-    for comment in comments:
-        state = message_comment_state(origin, comment)
+    for number, comment in enumerate(comments):
+        state = message_comment_state(origin, comment) if number < MESSAGE_GH_READS else "unchecked"
         if state == "missing":
             missing.append("comment " + comment)
         elif state == "unchecked":
