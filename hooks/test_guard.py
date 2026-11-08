@@ -26376,10 +26376,29 @@ ROLE_TABLE_RULES = ROLE_TABLE_HEAD + (
 ROLE_RULES_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                    "reviewer": "haiku", "builder": "sonnet", "planner": "sonnet",
                    "general-purpose": "sonnet", "claude": "sonnet"}
+# The refuter role (owner ruling, page item 279, pick d, 2026-11-06 12:43 CST): read-only, and it runs Opus by its own
+# standing grant. Its name is guard_core's REFUTER_ROLE, the one home of the name, read here and never typed. A guard_core
+# with no such name reads as REFUTER_MISSING: a spawn of that name is then refused as a role with no grant, and
+# refuter_name_check fails on the missing name itself (the same reading as the PowerShellScript cases).
+REFUTER_MISSING = "<no REFUTER_ROLE in guard_core>"
+_load_guard_module()  # sets sys.modules["guard_core"] for the read below
+REFUTER = getattr(sys.modules["guard_core"], "REFUTER_ROLE", REFUTER_MISSING)
+
+
+def refuter_name_check():
+    """guard_core names the refuter role in REFUTER_ROLE, a non-empty string. Every refuter case reads that name
+    from guard_core, so a guard_core without it fails this check and says so."""
+    if REFUTER == REFUTER_MISSING:
+        return False, "guard_core has no REFUTER_ROLE, the one home of the refuter role's name"
+    if not isinstance(REFUTER, str) or not REFUTER.strip():
+        return False, "guard_core.REFUTER_ROLE is %r, want a non-empty name" % (REFUTER,)
+    return True, "guard_core.REFUTER_ROLE names the refuter role"
+
+
 # The owner's real decision file: each role, with the first word of its Model cell.
 ROLE_REAL_WANT = {"Explore": "haiku", "claude-code-guide": "haiku", "test-author": "haiku",
                   "reviewer": "haiku", "record-writer": "haiku", "builder": "sonnet", "Plan": "opus",
-                  "designer": "opus", "design-reviewer": "opus", "general-purpose": "sonnet",
+                  "designer": "opus", "design-reviewer": "opus", REFUTER: "opus", "general-purpose": "sonnet",
                   "claude": "sonnet"}
 # Bytes that are not text, so no reader can take the decision file as a table.
 ROLE_TABLE_UNREADABLE = b"# Agent model cap\n\xff\xfe\x80 not text\n"
@@ -26563,12 +26582,23 @@ role_opus_refuse("role-model: a role with no row on opus is denied under agent-m
                "scout", "opus", "Look around.")
 role_opus_refuse("role-model: reviewer on opus with Round 3 of 3 is denied under agent-model-cap (item 127)",
                "reviewer", "opus", "Round 3 of 3. Re-check the diff.")
-# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, and a builder's third round.
+# Standing grants stay allowed on Opus (rule 9d): Plan, the design reviewer, the refuter, and a builder's third round.
 role_model_allow("role-model: Plan on opus is allowed (standing grant)", "Plan", "opus", "Plan the change.")
 role_model_allow("role-model: design-reviewer on opus is allowed (standing grant)", "design-reviewer", "opus",
                  "Review the mockup.")
 role_model_allow("role-model: builder on opus with Round 3 of 3 is allowed (standing grant)", "builder", "opus",
                  "Round 3 of 3. Finish the fix.")
+# The refuter's grant (page item 279, pick d): an Agent or Task spawn on Opus is allowed. Failure class: a false deny,
+# the spawn refused above its row, and a false allow, a reviewer or a near-miss name given the grant (the controls below).
+for _tool, _model in (("Agent", "opus"), ("Task", "claude-opus-5-5")):
+    role_model_allow("role-model: %s refuter on %s is allowed (standing grant)" % (_tool, _model), REFUTER, _model,
+                     "Refute the plan.", tool=_tool)
+# Controls, green on the old code too: a reviewer on Opus stays refused, and a near-miss of the role name earns no grant.
+role_opus_refuse("role-model: reviewer on opus with no round line is still denied (the refuter grant is not a reviewer's)",
+                 "reviewer", "opus", "Check the diff for typos.")
+for _near in (REFUTER + "s", REFUTER.title()):
+    role_opus_refuse("role-model: a near-miss of the refuter role, %s, on opus is denied (no standing grant)" % _near,
+                     _near, "opus", "Refute the plan.")
 
 # ---- H: a Workflow agent() call faces the role row and the Opus ceiling, as an Agent spawn does (decision agent-model-cap).
 # The guard reads each agent() call in the script and judges its agentType and model as an Agent spawn is judged: the
@@ -27043,6 +27073,8 @@ for _label, _check in (
     ("role-list: test-author moved from a haiku row to sonnet drifts HAIKU_ROLES", role_list_haiku_check),
     ("role-list: a new opus row role drifts OPUS_STANDING_ROLES", role_list_opus_check),
     ("role-list: builder moved to an opus row drifts the override's OPUS_ROLES", role_list_builder_check),
+    ("refuter: guard_core names the refuter role in REFUTER_ROLE, the one home the cases read",
+     refuter_name_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)

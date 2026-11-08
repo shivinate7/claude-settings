@@ -1613,6 +1613,9 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
+# The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
+# brief hook and the tests import it, and none types it.
+REFUTER_ROLE = "refuter"
 
 
 def agent_role(payload) -> str:
