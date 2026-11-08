@@ -13459,9 +13459,9 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
     def test_a_stand_in_after_round_3_may_not_change_its_net_value_guard_or_kind(self):
-        # the final-round rule (decision hold-unsafe-after-round-3) holds for the record a --fix-base-record stands in for. The new record must reach the
-        # source's final round, or the round floor refuses it first, so the control that keeps every field must exit 0 on the old code
-        reaches_3 = ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:PASS", "3:reviewer:opus:PASS")
+        # the final-round rule (decision hold-unsafe-after-round-3) holds for the record a --fix-base-record stands in for. The new record copies every
+        # Round line of the source, so it reaches the source's final round and keeps every field, and a fix check may not drop one of those lines
+        reaches_3 = round_args(REVIEW_FAILED_THREE)
         host = self.record_host(self.source(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative"), head=REVIEW_HEAD)
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=host)  # control, green on the old code: no flag, no record here
         self.assert_refused(rc, out, err)
@@ -13615,7 +13615,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
     rule. Each refusal sits beside a control that keeps every line, which the old code already writes."""
 
     DESIGN_FAIL = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")  # a design FAIL keeps the record it sits in open
-    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # round 2 passes
+    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # a passing top line makes a copy that loses the FAIL read done
     SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and comment of the source record in the --fix-base-record cases
     SOURCE_URL = f"https://github.com/o/r/pull/{SOURCE_PR}#issuecomment-{SOURCE_ID}"
 
@@ -13651,7 +13651,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         # control, green on the old code: every line, the top round included, is written
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept)
         self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
-        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept[1:])  # the round 1 reviewer line is the only one dropped
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept[1:])  # only the lower reviewer FAIL goes, so the refusal must name that line
         self.assert_refused(rc, out, err)
         self.assert_names(err, "Round 1", "reviewer, sonnet, FAIL")
 
@@ -13662,7 +13662,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "haiku", "PASS"))
 
     def test_a_fix_check_that_adds_a_round_line_to_the_copied_lines_is_written(self):
-        # extra lines are not refused by this rule: the copied lines are all there, and a round 2 line follows them
+        # extra lines are not refused by this rule: every copied line is present, and a line added after them leaves the copy whole
         comments = self.newest(self.DESIGN_FAIL)
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=(*round_args(self.DESIGN_FAIL), "2:reviewer:sonnet:PASS"))
         self.assertEqual(rc, 0, "a fix check with an extra round line was refused:\n" + out + err)
