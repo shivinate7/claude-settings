@@ -505,21 +505,25 @@ def report_names_pid_and_asks_owner_to_stop():
 
 @posix_case
 def report_names_the_wait_helper():
-    """6b. the report names bin/wait-pid, the one allowed way to wait on the stranded job (roadmap step wait-for-pid-form)"""
+    """6b. the report names wait-pid by its bare name in backticks, the one allowed way to wait on the stranded job (roadmap step wait-for-pid-form)"""
     rc, text, secs, _cmd = run_rewritten("sleep 30")
     problems = expect(rc == 3, f"exit {rc}, want 3")
-    problems += expect("wait-pid" in text, "report does not name wait-pid, the way to wait on the job")
+    wait_lines = [line for line in text.splitlines() if "wait-pid" in line]
+    problems += expect(len(wait_lines) == 1, f"want one line that names wait-pid, got {wait_lines!r}")
+    if len(wait_lines) == 1:
+        problems += expect(re.search(r"`wait-pid \d+`", wait_lines[0]) is not None,
+                           f"the wait-pid line does not name `wait-pid PID` in backticks: {wait_lines[0]!r}")
     reap()
     return problems
 
 
 @posix_case
-def report_runs_the_wait_helper_by_its_bin_path():
-    """6c. the report's run line names the helper by its bin path: a bare wait-pid is not on PATH in an agent worktree"""
+def report_runs_the_wait_helper_by_its_bare_name():
+    """6c. the report's run line names the helper by its bare name: a path form resolves only in this repo"""
     rc, text, secs, _cmd = run_rewritten("sleep 30")
     problems = expect(rc == 3, f"exit {rc}, want 3")
-    problems += expect("run `bin/wait-pid" in text or "run `~/.claude/bin/wait-pid" in text,
-                       "the run line names bare wait-pid, which is not on PATH in an agent worktree")
+    problems += expect(re.search(r"run `wait-pid ", text) is not None,
+                       "the run line does not name the bare wait-pid helper")
     reap()
     return problems
 
