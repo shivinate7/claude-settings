@@ -684,6 +684,32 @@ test("touchWidths lists a width that is not in sizes: not a config error, and no
   assert.deepEqual(r.pngs, ["touch-390-light.png"]);
 });
 
+// A listed width under 1024 counts: the list is the touch widths, so 390 is coarse and 1440, not listed, is not.
+const TOUCH_LOW = { routes: [{ name: "touch", path: "/touch.html" }], sizes: [1440, 390], themes: ["light"], touchWidths: [390] };
+let touchLowShots;
+const shotsForTouchLow = () => (touchLowShots ??= run(TOUCH_LOW));
+
+test("touchWidths [390]: the 390 shot is coarse, so a listed width under 1024 counts", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchLow();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", "390 px is listed in touchWidths, so touch should be on (the spacer is the coarse colour)");
+});
+
+test("touchWidths [390]: the 1440 shot is not coarse, since 1440 is not listed", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchLow();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-1440-light.png"));
+  assert.equal(px.width, 1440, "scope: the shot is at 1440");
+  assert.equal(px.column, "G@0 Y@850 B@900", "1440 px is not listed in touchWidths, so touch should be off (the spacer is the fine-pointer colour)");
+});
+
 test("a page shorter than one viewport: the full-page PNG is one viewport tall, not shorter", async (t) => {
   const b = await chromium(t);
   if (!b) return;
@@ -987,6 +1013,8 @@ const TOUCH_WIDTHS_BAD = [
   ["a list holding 0", [0]],
   ["a list holding a negative width", [-390]],
   ["a good width, then 0", [1440, 0]],
+  ["false", false],
+  ["the number 0", 0],
 ];
 const REFUSED = [
   ...STEPS_BAD.map(([label, v]) => [`steps: ${label}`, /step|state|click|wait/i, route({ steps: v })]),
