@@ -8154,6 +8154,37 @@ sh("env: PowerShell: pinned deny, a smart apostrophe in text before a later .env
    "Write-Host it" + SMART_SQ_END + "s fine; Get-Content " + ENV + "; Write-Host don" + SMART_SQ_END + "t",
    "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 
+# Path pins. Each case name carries "env: path pin", so MUTATE_ONLY="env: path pin" runs this block alone.
+# A file inside an env folder reads that folder's file, with either slash. A `-Path` value is a path
+# even when it holds a space. The first plain word of `findstr` is its pattern, so the file after it
+# is a path. A read inside a `Write-Host` group is a read. A glued `--grep=` value is a pattern. A
+# `;` ends a regex call's words, so a read after it is a read. A quoted word with a space after a
+# plain path is a path too, since Get-Content reads each positional path. That last case fails on the
+# head: the guard judges only the first plain word as a path.
+sh("env: path pin: Bash cat of a file in an .envs folder, denies",
+   "cat " + ENV + "s/x", "deny", "env-file", cwd=NOGIT)
+sh("env: path pin: Bash cat of a file in a .env folder, denies",
+   "cat " + ENV + "/x/secret", "deny", "env-file", cwd=NOGIT)
+sh("env: path pin: PowerShell Get-Content of a file in an .envs folder, forward slash, denies",
+   "Get-Content " + ENV + "s/x", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell Get-Content -Path of a quoted My Dir file, denies",
+   'Get-Content -Path "My Dir\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell Get-Content -Path after a plain path, quoted My Dir file, denies",
+   'Get-Content sub.txt -Path "My Dir\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell findstr with the .env file after its pattern, denies",
+   "findstr x " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell Write-Host group reading .env, denies",
+   "Write-Host (Get-Content " + ENV + ")", "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell git log --grep= with a glued value naming .env, allowed",
+   "git log --grep=\\" + ENV, "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell regex call, then a semicolon and a Get-Content of .env, denies",
+   "[regex]::IsMatch($n,'x'); Get-Content " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: path pin: PowerShell regex call, then a concatenated group reading sub\\.env, denies",
+   "[regex]::Escape('x') + \" \" + (Get-Content sub\\" + ENV + ")", "deny", "env-file", tool="PowerShell",
+   cwd=NOGIT)
+sh("env: path pin: PowerShell Get-Content second positional quoted My Dir file, denies",
+   'Get-Content sub.txt "My Dir\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
 sh("env: a bracket existence test", "[ -f " + ENV + " ] && echo present", "allow", cwd=NOGIT)
