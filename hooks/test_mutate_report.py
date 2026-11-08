@@ -12,7 +12,8 @@ the score. The failure classes under test:
 - a suite that asserts kills a mutant;
 - a suite that CRASHES (a throw, with no FAIL line) is no kill;
 - a suite that is red on the unmutated source is UNKNOWN, never a killer;
-- a file the engine cannot run (parse error, missing suite, red baseline) reads UNKNOWN, never green.
+- a file the engine cannot run (parse error, missing suite, red baseline) reads UNKNOWN, never green;
+- a suite that stays green on a wholly broken copy of the target never loaded it, so it is listed as unloaded.
 """
 import os
 import sys
@@ -68,6 +69,11 @@ sys.path.insert(0, ".")
 import subject
 value = subject.pick({"key": "v"}).upper()
 print("PASS: " + value)
+'''
+
+# Green on any source, because it never loads the target: a wholly broken copy of the target leaves it green too.
+NEVER_LOADS_TARGET = '''\
+print("PASS: checks a fixed value, not subject")
 '''
 
 # Red on the clean source by a throw, for a reason unrelated to the subject.
@@ -139,6 +145,28 @@ class ScoreTests(unittest.TestCase):
         self.assertNotIn("test_x.py", row["killers"])
         self.assertNotIn("test_x.py", row["silent"])
 
+    def test_a_suite_green_on_a_wholly_broken_target_is_unloaded(self):
+        row = score({"subject.py": SUBJECT, "test_a.py": ASSERTING, "test_s.py": NEVER_LOADS_TARGET},
+                    ["test_a.py", "test_s.py"])
+        self.assertEqual(row["status"], "OK", row)
+        self.assertEqual(row.get("unloaded"), ["test_s.py"],
+                         "a suite that stayed green on a wholly broken copy of the target was not listed as unloaded")
+
+    def test_every_usable_suite_unloaded_reads_unknown(self):
+        row = score({"subject.py": SUBJECT, "test_s.py": NEVER_LOADS_TARGET}, ["test_s.py"])
+        self.assertEqual(row.get("unloaded"), ["test_s.py"],
+                         "the only usable suite stayed green on a wholly broken copy of the target but was not listed as unloaded")
+        self.assertEqual(row["status"], "UNKNOWN",
+                         "every usable suite is unloaded, yet the row reads OK, so a rate would score suites that never ran the file")
+        self.assertIsNone(row["rate"], "a rate was given for a file that no usable suite loads")
+        self.assertTrue(row["reason"], "an UNKNOWN row with no reason does not say why the file is unmeasured")
+
+    def test_a_suite_that_goes_red_on_a_broken_target_is_not_unloaded(self):
+        row = score({"subject.py": SUBJECT, "test_a.py": ASSERTING, "test_s.py": NEVER_LOADS_TARGET},
+                    ["test_a.py", "test_s.py"])
+        self.assertNotIn("test_a.py", row.get("unloaded", []),
+                         "a suite that goes red on a broken copy of the target was listed as unloaded")
+
     def test_every_suite_red_on_the_clean_source_reads_unknown(self):
         row = score({"subject.py": SUBJECT, "test_r.py": RED_BASELINE}, ["test_r.py"])
         self.assertEqual(row["status"], "UNKNOWN", row)
@@ -189,6 +217,13 @@ class PartsTests(unittest.TestCase):
     def test_ast_mutants_of_unparsable_source_raise(self):
         with self.assertRaises(SyntaxError):
             mutate_shared.ast_mutants("def broken(:\n", limit=5)
+
+    def test_format_report_names_an_unloaded_suite(self):
+        row = {"file": "subject.py", "status": "OK", "made": 10, "killed": 0, "crashed": 0, "survived": 10,
+               "rate": 0.0, "silent": [], "unusable": {}, "reason": "", "unloaded": ["test_s.py"]}
+        text = mutate_shared.format_report([row])
+        self.assertTrue(any("test_s.py" in line and "unloaded" in line for line in text.splitlines()),
+                        "format_report does not name the unloaded suite:\n" + text)
 
     def test_format_report_prints_unknown_never_a_rate(self):
         rows = [
