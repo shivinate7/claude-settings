@@ -126,6 +126,15 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+def lane_tips_of(root, base_ref, head):
+    """-> the lane tips of `head` over `base_ref`: the second and later parents of each merge in base..head that are themselves in that range, so a
+    merge of the base is no tip. One rev-list through subprocess, not merge.sh: a case that breaks merge's git log read for the lane tips breaks
+    only its own read, and the default records add none."""
+    out = subprocess.run(["git", "-C", root, "rev-list", "--parents", head, f"^{base_ref}"], capture_output=True, text=True, check=True).stdout
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    inside = {r[0] for r in rows}
+    return [p for r in rows for p in r[2:] if p in inside]
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
@@ -162,8 +171,21 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
-    def review_comments(self, since):  # the round-3 check's comment read: no record unless a case scripts one (LanePulls, PullsHost)
-        return {}
+    records_default = True  # owner pick a: the own head and each lane tip get a done record unless a case sets this False
+
+    def review_comments(self, since):  # the round-3 check's comment read: the defaults, and the records a case scripts (LanePulls, PullsHost)
+        return self.with_default_records({})
+
+    def with_default_records(self, found):
+        """-> `found` with a done record for the own head and each lane tip, oldest, under PR 7. Without one, a lane tip or a lone head with no
+        record is refused (owner pick a, merge-unreviewed-head). A case that tests the absence of a record sets `records_default` False. Each
+        lane tip is read with read_lanes, as the round-3 check reads it."""
+        if not self.records_default:
+            return found
+        head = self.head_override or merge.origin_head(self.root, self.branch)
+        tips = lane_tips_of(self.root, f"origin/{self.base}", head)
+        defaults = [record_text(n=7, head=h) for h in dict.fromkeys([*tips, head])]
+        return {**found, 7: [*defaults, *found.get(7, [])]}
 
     def open_heads(self):  # the round-3 check's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
         return merge.OpenHeads()
@@ -3198,6 +3220,18 @@ def ref(name):
         pass
     return ""
 def feat_head(): return ref("refs/heads/feat")
+def lane_tips():  # the lane tips of feat, as merge.read_lanes gives them: parents 2+ of each merge in main..feat that are in that range, so a merge of main is no tip
+    import subprocess
+    out = subprocess.run(["git", "--git-dir", S["bare"], "rev-list", "--parents", feat_head(), "^" + ref("refs/heads/main")], capture_output=True, text=True).stdout
+    rows = [line.split() for line in out.splitlines() if line.strip()]
+    inside = {r[0] for r in rows}
+    return [p for r in rows for p in r[2:] if p in inside]
+def default_records():  # owner pick a: the own head and each lane tip get a done record under PR 7, oldest first; a case sets records_default false for none
+    if not S.get("records_default", True):
+        return []
+    heads = list(dict.fromkeys([*lane_tips(), feat_head()]))
+    return [{"id": -1 - i, "created_at": "2026-10-02T00:00:00Z", "issue_url": "https://api.github.com/repos/o/r/issues/7",
+             "body": S["done_record"].replace("@HEAD@", h)} for i, h in enumerate(heads)]
 RUN_FIELDS = ("databaseId", "name", "workflowName", "workflowDatabaseId", "status", "conclusion", "headSha", "headBranch", "event", "url")
 def next_runs():
     """The next answer to a workflow-run read: runs_seq, one entry a read, the last one again. An entry is (name, status, conclusion[, databaseId[, workflowDatabaseId]]).
@@ -3412,8 +3446,8 @@ try:
     elif method == "GET" and rel == "issues/comments" and "issue_comments" in S:  # the repo's issue comments, seeded by a case (the review record reads them)
         answer_list(S["issue_comments"], None)
 
-    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the round-3 check reads for review records: none in this fake
-        finish(listing([], None, params, flags, jq, cap), 0, include)
+    elif method == "GET" and rel == "issues/comments":  # the repo's comments: the round-3 check's review records, the defaults of default_records
+        finish(listing(default_records(), None, params, flags, jq, cap), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
@@ -3587,7 +3621,8 @@ class GhHalf(Env):
     def set(self, **kw):
         p = os.path.join(self.state, "state.json")
         f = pathlib.Path(p)
-        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0}
+        s = json.loads(f.read_text()) if f.exists() else {"other": self.other, "bare": self.bare, "checks_calls": 0,
+                                                          "done_record": record_text(n=7, head="@HEAD@")}  # the default record the shim serves, its head filled in per read
         s.update(kw)
         f.write_text(json.dumps(s))
 
@@ -12919,7 +12954,7 @@ class LanePulls(LaneHost):
         return merge.Host.open_heads(self)
 
     def review_comments(self, since):
-        return merge.Host.review_comments(self, since)
+        return self.with_default_records(merge.Host.review_comments(self, since))
 
 def lane_pull(number, branch, sha):
     """An open pull request whose head is `branch` at `sha`, as `pages("pulls")` lists it."""
@@ -12933,9 +12968,12 @@ class ReviewRoundCheckEnv(Env):
     """The round-3 check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
     The assertions every case shares sit here too. No test lives here."""
 
+    UNREVIEWED = "its head has no done review record"  # the cause a refusal names for a lane tip or lone head with no done record (owner pick a)
+
     def batch_host(self, tips, comments=(), others=(), windowed=False):
         """Pull request 7 is feat at its live head. Each lane in `tips` ({branch: tip}) is an open pull request, numbered 8, 9, ... in the order given.
-        `others` are open pull requests that are no lane of the batch, as lane_pull rows. `windowed`: the comment list honours its `since` (LanePulls)."""
+        `others` are open pull requests that are no lane of the batch, as lane_pull rows. `windowed`: the comment list honours its `since` (LanePulls).
+        The host gives each head its default done record (FakeHost.with_default_records); a case that tests a missing record sets records_default False."""
         pulls = [lane_pull(7, "feat", self.head("feat"))]
         pulls += [lane_pull(8 + i, b, tip) for i, (b, tip) in enumerate(tips.items())]
         return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments), windowed=windowed)
@@ -13048,7 +13086,8 @@ class ReviewRoundCheckEnv(Env):
 
 class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too."""
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (merge-unreviewed-head,
+    2026-11-07 21:26 CST): a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
         # the integration pull request has no record of its own, so only the lane's record can owe the third round
@@ -13097,13 +13136,14 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
-    def test_a_lane_with_no_record_is_not_refused_by_this_check(self):
-        # decision pr-review-record, Q1: no record is no refusal here
+    def test_a_lane_with_no_record_is_refused_by_this_check(self):
+        # owner pick a: a lane tip with no done record for its head is refused, whatever its Guard or check
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [])
+        host.records_default = False  # the tip has no record at all
         self.scope(tips, host)
-        rc, out, _before = self.run_round_check(host, "--confirm")
-        self.assert_allowed(rc, out, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
     def test_a_guard_record_for_an_older_head_of_the_lane_still_refuses(self):
         # a push after review must not shed the guard owing: the newest record names an older head of the lane, an ancestor of its tip, and says guard yes,
@@ -13118,13 +13158,14 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
         self.assertIn("owed", out, "the refusal does not say round 3 is owed:\n" + out)
 
-    def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_still_passes(self):
-        # the control beside the refusal above, on the same older head: a record with guard no owes nothing, even for an old head
+    def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_is_refused(self):
+        # owner pick a, case 3: the lane's only record is done, but for an older head, so the tip has no done record for its head
         tips = lane_batch(self, "agent/lane1", older=("agent/lane1",))
         host = self.batch_host(tips, [round_check_comment(1, 8, self.older_heads["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False
         self.scope(tips, host)
-        rc, out, _before = self.run_round_check(host, "--confirm")
-        self.assert_allowed(rc, out, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
     def test_an_unrelated_pr_guard_record_for_a_head_outside_the_batch_is_not_refused(self):
         # the defect: pull request 20 is no lane of the batch and pushed a fix after its review. Its record names the reviewed head, which neither feat
@@ -13145,6 +13186,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         # replaced, which is in its history: the stale record owes the third round on the new head
         older = self.push_feat_commit()
         host = self.batch_host({}, [round_check_comment(1, 7, older, guard="yes", rounds=REVIEW_PASS)])
+        host.records_default = False  # the stale record is the only one: the new head has none, so the default would hide the stale refusal
         self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
@@ -13402,7 +13444,8 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses."""
+    batch still refuses. Owner pick a (merge-unreviewed-head, 2026-11-07 21:26 CST): a lane tip with no done record for its head is refused, so the
+    one stale-only case here expects the refusal; the other cases keep their records and their points."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
         _tips, host, _g = self.landed_guard_batch("yes", REVIEW_PASS, "not owed")
@@ -13448,17 +13491,18 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
         self.assertEqual(host.since_reads, [LANE_OLD_WINDOW],
                          "the comment read's since is not the oldest commit new to the batch less a day:\n" + out)
 
-    def test_a_guard_no_record_for_the_same_older_head_is_not_refused(self):
+    def test_a_guard_no_record_for_the_same_older_head_is_refused(self):
+        # owner pick a, case 3: the lane's only record is a done guard-no record for its older head, so the tip has no done record for its head
         _tips, host, _a = self.backdated_lane_batch("no")
-        rc, out, _before = self.run_round_check(host, "--confirm")
-        self.assert_allowed(rc, out, host)
+        host.records_default = False
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
 
 class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
     Guard or check value (owner pick a, merge-unreviewed-head, 2026-11-07 21:26 CST). An integration pull request's own head is never refused for having
     no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too."""
 
-    UNREVIEWED = "its head has no done review record"
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
 
     def lone_scope(self, host):
@@ -13471,6 +13515,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     def test_unreviewed_head_lane_tip_without_record_is_refused(self):  # case 1
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [])
+        host.records_default = False  # no record at all: the defaults would give the tip one
         self.scope(tips, host)
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
@@ -13481,6 +13526,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
                     round_check_comment(2, 8, tips["agent/lane1"], guard="no", rounds=self.ROUND_ONE_FAIL)]
         host = self.batch_host(tips, comments)
+        host.records_default = False  # only the two scripted records name the tip
         self.scope(tips, host)
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
@@ -13492,6 +13538,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assertEqual(record_state(self, record_text(n=8, head=older, guard="no", rounds=REVIEW_PASS), head=older), "done",
                          "the older head's record is not done, so a refusal would not be about the head")
         host = self.batch_host(tips, [round_check_comment(1, 8, older, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the only record names the older head, so the tip has none
         self.scope(tips, host)
         self.assertEqual(self.history_exit(older, tips["agent/lane1"]), 0, "the older head is not an ancestor of the lane tip")
         rc, out, before = self.run_round_check(host, "--confirm")
@@ -13500,6 +13547,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     def test_unreviewed_head_lane_tip_done_record_guard_no_passes(self):  # case 4, green control for cases 1 to 3
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the tip's record is the one scripted here
         self.scope(tips, host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
@@ -13509,6 +13557,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
                     round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS)]
         host = self.batch_host(tips, comments)
+        host.records_default = False  # the integration head must have no record of its own
         self.scope(tips, host)
         self.assertNotIn(self.head("feat"), "".join(c["body"] for c in comments), "a record names the integration head, so the case does not test a head with no record")
         rc, out, _before = self.run_round_check(host, "--confirm")
@@ -13516,6 +13565,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
 
     def test_unreviewed_head_lone_lane_without_record_is_refused(self):  # case 6
         host = self.batch_host({}, [])
+        host.records_default = False  # the lone head has no record at all
         self.lone_scope(host)
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
@@ -13524,6 +13574,7 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         text = record_text(n=7, head=self.head("feat"), kind="docs-only", guard="no", rounds=())
         self.assertEqual(record_state(self, text, head=self.head("feat")), "done", "a docs-only record with no round is not done")
         host = self.batch_host({}, [review_comment(1, 7, text)])
+        host.records_default = False  # only the scripted docs-only record names the head
         self.lone_scope(host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
