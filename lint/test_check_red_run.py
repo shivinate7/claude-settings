@@ -604,18 +604,22 @@ class RulingCiteCase(CheckCase):
         self.base()
         subject = "Drop the widget tests"
         sha = self.ruling_commit(subject, ruling_message(
-            subject, body="Owner ruling says drop it.", trailers=["Ruling: step:x 08:15 CST"]))
+            subject, body="Per the owner's ruling, drop it.", trailers=["Ruling: step:x 08:15 CST"]))
         self.assertRulingFlagged(sha, subject, "a body claim with only a Ruling: trailer cite is not flagged")
 
-    def test_missed_phrasings_with_no_cite_are_flagged(self):
-        claims = ("Shivam ruled that the widget tests go.", "The arbiter ruled that the widget tests go.",
-                  "The widget tests were ruled by the owner.", "The widget tests were owner-ruled.")
+    def test_listed_claim_forms_with_no_cite_are_flagged(self):
+        """Each claim form owes a cite. These are the forms the round-2 review lists as still claims."""
+        claims = ("Dropped per the owner ruling.", "Dropped per the owner's ruling.", "Dropped per ruling.",
+                  "Dropped under the owner's ruling.", "Dropped following the owner's ruling.",
+                  "Dropped because the owner ruled.", "Dropped because Shivam ruled.",
+                  "Dropped because the arbiter ruled.", "Dropped, ruled by the owner.", "Dropped, owner-ruled.",
+                  "Dropped as the owner ruled.")
         for claim in claims:
             with self.subTest(claim=claim):
                 self.base()
                 subject = "Drop the widget tests"
                 sha = self.ruling_commit(subject, ruling_message(subject, body=claim))
-                self.assertRulingFlagged(sha, subject, "a phrasing the rule misses is not flagged: " + claim)
+                self.assertRulingFlagged(sha, subject, "a claim form with no cite is not flagged: " + claim)
 
     def test_claim_quoted_in_backticks_for_a_remedy_passes(self):
         """Quoting the phrase is not claiming it. The remedy's escape stays a pass."""
@@ -665,7 +669,7 @@ class RulingCiteCase(CheckCase):
         """The FAIL line names no home, no time, or both, and never the vague 'and time' wording."""
         cases = (("Dropped per ruling at 2026-11-08 08:15 CST.", ("no home",), ("no time", "and time")),
                  ("Per the owner's ruling, item 359 b.", ("no time",), ("no home",)),
-                 ("Owner ruling says drop it.", ("no home and no time",), ()))
+                 ("Per the owner's ruling, drop it.", ("no home and no time",), ()))
         for body, must, must_not in cases:
             with self.subTest(body=body):
                 self.base()
@@ -679,6 +683,56 @@ class RulingCiteCase(CheckCase):
                     self.assertIn(phrase, lines[0], out)
                 for phrase in must_not:
                     self.assertNotIn(phrase, lines[0], out)
+
+    def test_pick_letter_is_optional_with_a_time(self):
+        """Two of main's own messages: a page item with no pick letter, and a bare number with a letter. Each passes."""
+        bodies = ("Owner ruling, page item 257 (2026-11-05 07:44 CST), lease-push-c-and-d part d: the remedy names no "
+                  "force push.",
+                  "The red-main refusal's owner-accepts wording from main is replaced per owner ruling 178 a "
+                  "(2026-11-03 22:31 CST).")
+        for body in bodies:
+            with self.subTest(body=body[:40]):
+                self.base()
+                subject = "Drop the widget tests"
+                self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertClean()
+
+    def test_repo_without_the_check_file_judges_no_ruling_claim(self):
+        """A repo whose HEAD lacks the check file, such as the installed copy run in another repo, judges no claim."""
+        self.base(check=False)
+        subject = "Drop the widget docs"
+        self.commit(subject, {"README.md": "Widget docs.\n"},
+                    message=ruling_message(subject, body="Per the owner's ruling, drop it."))
+        self.assertClean(script=MODULE, cwd=self.tree)
+
+    def test_head_without_the_check_file_after_its_removal_judges_no_claim(self):
+        """A repo that tracked the check, and whose HEAD no longer does: a claim after the removal is not judged, because
+        its parent does not hold the check."""
+        self.base()
+        removed = self.commit("remove the check", {CHECK_REL: None})
+        self.assertFalse(self.has_file("HEAD", CHECK_REL))  # scope: HEAD lacks the check
+        self.assertTrue(self.has_file(removed + "^", CHECK_REL))  # and the commit before the removal held it
+        self.base_sha = removed
+        subject = "Drop the widget docs"
+        self.commit(subject, {"README.md": "Widget docs.\n"},
+                    message=ruling_message(subject, body="Per the owner's ruling, drop it."))
+        self.assertClean(script=MODULE, cwd=self.tree)
+
+    def test_narrowed_non_claims_pass_with_no_cite(self):
+        """A phrase that names a thing, or sits under a negation, makes no ruling claim, so it owes no cite."""
+        bodies = ("The tool keeps a record that files an owner ruling.",
+                  "The arbiter ruling's overturn stays in the log.",
+                  "Add the arbiter ruling card.",
+                  "The owner ruling's cite stays in the decision record.",
+                  "The per ruling kind check runs first.",
+                  "There is no such owner ruling.",
+                  "The change does not need an owner ruling.")
+        for body in bodies:
+            with self.subTest(body=body):
+                self.base()
+                subject = "Drop the widget tests"
+                self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertClean()
 
 
 if __name__ == "__main__":
