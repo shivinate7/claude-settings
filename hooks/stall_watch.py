@@ -162,11 +162,15 @@ def _cd_target(args, cwd):
     """The directory a `cd` or `pushd` leaves the shell in: `args` are the tokens after it, cwd the
     directory before it. cwd and the result are None (unknown), "" (where the shell started) or a
     path that is relative to the start. `cd -`, `pushd +N`, a target with `$` (but `$HOME`), a
-    backtick or a glob, and any cd from an unknown directory leave the directory unknown."""
+    backtick or a glob, and any cd from an unknown directory leave the directory unknown. A quoted
+    empty word (`cd ""`) leaves the directory as it was, as in bash. A quoted operator word
+    (`cd ";"`) leaves it unknown, so the word never joins a path."""
     rest = list(args)
     while rest and rest[0].startswith("-") and rest[0] != "-":  # options such as -P; `--` ends them
         if rest.pop(0) == "--":
             break
+    if rest and rest[0].startswith(QUOTED_WORD):
+        return cwd if rest[0] == QUOTED_WORD else None
     target = expand_home(rest[0] if rest else "~")
     if cwd is None or target == "-" or target.startswith(("+", "~")) or UNREADABLE_PATH.search(target):
         return None
