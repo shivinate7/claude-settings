@@ -39,7 +39,7 @@ HEAVY_KEY = re.compile(r"heavy|shard", re.IGNORECASE)
 NEEDS_SETUP_KEY = re.compile(r"needs", re.IGNORECASE)
 WINDOWS_KEY = re.compile(r"windows", re.IGNORECASE)
 MACOS_KEY = re.compile(r"macos", re.IGNORECASE)
-NO_JOB_KEY = re.compile(r"no CI job runs it", re.IGNORECASE)
+NO_JOB_KEY = re.compile(r"\bno\b.*\bjob runs it", re.IGNORECASE)  # "no CI job runs it", or a worded "no Windows or macOS job runs it"
 # The per-OS output names: one JSON list for the Windows job and one for the macOS job.
 OS_KEYS = ("files_windows", "files_macos")
 CI_PATH = ".github/workflows/checks.yml"
@@ -93,10 +93,17 @@ def skipped_on(stdout, path, key):
                for line in stdout.splitlines())
 
 
-def with_ci(base):
-    """`base` with the fixture checks.yml added, so the selector reads it in place of the real one."""
+def ci_for(paths):
+    """A checks.yml whose windows-latest job runs each of `paths`, so the derivation selects them on Windows."""
+    steps = "".join(f"      - run: python3 {p}\n" for p in paths)
+    return "name: fixture checks\non: pull_request\njobs:\n  windows:\n    runs-on: windows-latest\n    steps:\n" + steps
+
+
+def with_ci(base, paths=None):
+    """`base` with a checks.yml in place of the real one. With `paths`, its windows job runs each of them. Without,
+    the fixture checks.yml runs test_a (Windows), test_b (Linux) and test_c (macOS)."""
     out = dict(base)
-    out[CI_PATH] = FIXTURE_CI
+    out[CI_PATH] = ci_for(paths) if paths is not None else FIXTURE_CI
     return out
 
 
@@ -238,18 +245,19 @@ class Selector(unittest.TestCase):
 
     def test_touched_skill_test_is_listed(self):
         path = "skills/alpha/tests/a.test.mjs"
-        files, stdout = self.listed({path: "old\n"}, {path: "new\n"})
+        files, stdout = self.listed(with_ci({path: "old\n"}, [path]), {path: "new\n"})
         self.assertEqual(files, [path], "a touched skill test was not listed")
         self.assertIn(path, stdout, "the log does not name the listed test")
 
     def test_each_test_file_pattern_is_listed(self):
         paths = ["skills/alpha/tests/a.test.mjs", "skills/alpha/tests/b.test.js", "lint/test_c.py",
                  "lint/test_d.sh", "lint/e.test.sh"]
-        files, _ = self.listed({p: "old\n" for p in paths}, {p: "new\n" for p in paths})
+        files, _ = self.listed(with_ci({p: "old\n" for p in paths}, paths), {p: "new\n" for p in paths})
         self.assertEqual(files, sorted(paths), "a test-file pattern is missing from the list, or a path is listed twice")
 
     def test_source_with_sibling_test_lists_that_test(self):
-        files, _ = self.listed({"lint/check_foo.py": "old\n", "lint/test_check_foo.py": "old\n"},
+        files, _ = self.listed(with_ci({"lint/check_foo.py": "old\n", "lint/test_check_foo.py": "old\n"},
+                                       ["lint/test_check_foo.py"]),
                                {"lint/check_foo.py": "new\n"})
         self.assertEqual(files, ["lint/test_check_foo.py"], "a touched source did not list its sibling test_*.py")
 
@@ -282,7 +290,8 @@ class Selector(unittest.TestCase):
         mine = ["skills/alpha/tests/a.test.mjs", "skills/alpha/tests/b.test.mjs"]
         helper = "skills/alpha/tests/helpers.mjs"
         other = "skills/beta/tests/z.test.mjs"
-        files, _ = self.listed({p: "old\n" for p in mine + [helper, other]}, {helper: "new\n"})
+        # The sibling folder's test is named by a job too, so only the folder rule keeps it out of the list.
+        files, _ = self.listed(with_ci({p: "old\n" for p in mine + [helper, other]}, mine + [other]), {helper: "new\n"})
         self.assertEqual(files, mine, "a helper did not list every test in its folder, or listed a test from another folder")
 
     def test_heavy_suite_touched_is_not_listed_and_is_named(self):
