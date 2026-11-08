@@ -1754,46 +1754,66 @@ WORKFLOW_CONFLICT_MARKERS = (re.compile(r"<{7}(?:[ \t].*)?"), re.compile(r"\|{7}
 WORKFLOW_CONFLICT_NEXT = {None: (0,), 0: (1, 2), 1: (2,), 2: (3,), 3: (0,)}
 
 
-def workflow_strip_conflicts(old_text: str) -> str:
-    """`old_text` without its git conflict marker lines, when every marker belongs to a whole block (opener, optional
-    base, divider, closer) and every side of each block is whole test-run steps. A marker line is not content, so
-    a resolution that drops one changes no step. The sides are judged here, because a kept side is unchanged once the
-    markers go and the diff never reaches it. The first line after a closer must not be a key deeper than those steps,
-    which would continue a kept step. Any other text comes back as it is, markers included, to be judged as
-    content."""
-    kept, sides, last, block, after = [], [], None, 0, None
-    for line in old_text.splitlines():
+def workflow_conflict_blocks(lines):
+    """The marker line indexes of each git conflict block in `lines` (opener, optional base, divider, closer), or
+    None when a marker line belongs to no whole block."""
+    blocks, marks, last = [], [], None
+    for index, line in enumerate(lines):
         kind = next((i for i, mark in enumerate(WORKFLOW_CONFLICT_MARKERS) if mark.fullmatch(line)), None)
         if kind is None:
-            if after is not None and line.strip():
-                # git factors a key that both sides end with out of the block, onto the kept step: refuse it.
-                if len(line) - len(line.lstrip()) > after:
-                    return old_text
-                after = None
-            kept.append(line)
-            if last not in (None, 3):
-                sides[-1].append(line)
-        elif kind in WORKFLOW_CONFLICT_NEXT[last]:
-            last = kind
-            after = None
-            if kind == 0:
-                block = len(sides)
-            if kind != 3:
-                sides.append([])
-            else:
-                firsts = [next(ln for ln in side if ln.strip()) for side in sides[block:] if any(map(str.strip, side))]
-                after = min((len(ln) - len(ln.lstrip()) for ln in firsts), default=0)
-        else:
-            return old_text
-    if last not in (None, 3) or not all(workflow_step_chunk(side) for side in sides):
+            continue
+        if kind not in WORKFLOW_CONFLICT_NEXT[last]:
+            return None
+        last = kind
+        marks.append(index)
+        if kind == 3:
+            blocks.append(marks)
+            marks = []
+    return blocks if last in (None, 3) else None
+
+
+def workflow_continues_step(lines, closer: int, sides) -> bool:
+    """True when the first line after a conflict closer that is not blank, a comment or a marker is a key deeper than
+    the first lines of the block's sides. git factors a key that both sides end with out of the block, so that key
+    lands on the kept step. A comment line does not end a mapping, so the key after it is judged."""
+    firsts = [next(ln for ln in side if ln.strip()) for side in sides if any(map(str.strip, side))]
+    depth = min((len(ln) - len(ln.lstrip()) for ln in firsts), default=0)
+    for line in lines[closer + 1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if any(mark.fullmatch(line) for mark in WORKFLOW_CONFLICT_MARKERS):
+            return False
+        return len(line) - len(line.lstrip()) > depth
+    return False
+
+
+def workflow_strip_conflicts(old_text: str, new_text: str = "") -> str:
+    """`old_text` without the marker lines of each git conflict block that `new_text` resolves, when every marker
+    belongs to a whole block, every side of each resolved block is whole test-run steps, and no key after its closer
+    continues a kept step. A marker line is not content, so a resolution that drops one changes no step. The sides are
+    judged here, because a kept side is unchanged once the markers go and the diff never reaches it. A block that
+    `new_text` still holds whole is left as content: an Edit that resolves one block of several leaves the others
+    as they are. Any other text comes back as it is, markers included, to be judged as content."""
+    lines = old_text.splitlines()
+    blocks = workflow_conflict_blocks(lines)
+    if blocks is None:
         return old_text
-    return "\n".join(kept)
+    held = "\n" + "\n".join(new_text.splitlines()) + "\n"
+    drop = set()
+    for marks in blocks:
+        if "\n" + "\n".join(lines[marks[0]:marks[-1] + 1]) + "\n" in held:
+            continue
+        sides = [lines[start + 1:end] for start, end in zip(marks, marks[1:])]
+        if not all(workflow_step_chunk(side) for side in sides) or workflow_continues_step(lines, marks[-1], sides):
+            return old_text
+        drop.update(marks)
+    return "\n".join(line for index, line in enumerate(lines) if index not in drop)
 
 
 def workflow_test_steps_only(old_text: str, new_text: str) -> bool:
     """True when every added and removed non-blank line of the change forms whole test-run steps."""
     return all(workflow_step_chunk(removed) and workflow_step_chunk(added)
-               for removed, added in workflow_changed_lines(workflow_strip_conflicts(old_text), new_text))
+               for removed, added in workflow_changed_lines(workflow_strip_conflicts(old_text, new_text), new_text))
 
 
 WORKFLOW_COMMAND_SPLIT = re.compile(r"&&|\|\||[;|]")
@@ -1916,17 +1936,44 @@ def workflow_pairs(tool_input, full: str):
     elif "old_string" in tool_input or "new_string" in tool_input:
         pairs = [(tool_input.get("old_string"), tool_input.get("new_string"))]
     elif "content" in tool_input:
-        try:
-            with open(full, encoding="utf-8", errors="replace") as handle:
-                disk = handle.read()
-        except Exception:
-            disk = ""
-        pairs = [(disk, tool_input.get("content"))]
+        disk = workflow_disk_text(full)
+        pairs = [("" if disk is None else disk, tool_input.get("content"))]
     else:
         return None
     if not pairs or any(not isinstance(o, str) or not isinstance(n, str) for o, n in pairs):
         return None
     return pairs
+
+
+def workflow_disk_text(full: str):
+    """The text of the file at `full`, or None when it cannot be read."""
+    try:
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except Exception:
+        return None
+
+
+def workflow_file_pair(tool_input, full: str):
+    """The (disk, result) texts of an Edit or MultiEdit on the file at `full`: the file as it is, and the file
+    once the edits apply as the Edit tool applies them (the first match, or every match with `replace_all`; a
+    MultiEdit's edits in order). A fragment cannot show what the file holds around it, such as a key below a
+    conflict closer. None when the call is no edit, the file cannot be read, or an old_string is empty or not
+    found: the caller then judges the fragments."""
+    if not isinstance(tool_input, dict):
+        return None
+    edits = tool_input.get("edits") if "edits" in tool_input else [tool_input] if "old_string" in tool_input else None
+    disk = workflow_disk_text(full) if isinstance(edits, list) and edits else None
+    if disk is None:
+        return None
+    disk = disk.replace("\r\n", "\n")
+    result = disk
+    for edit in edits:
+        old, new = (edit.get("old_string"), edit.get("new_string")) if isinstance(edit, dict) else (None, None)
+        if not isinstance(old, str) or not isinstance(new, str) or not old or old not in result:
+            return None
+        result = result.replace(old, new) if edit.get("replace_all") is True else result.replace(old, new, 1)
+    return disk, result
 
 
 def design_folder():
@@ -2025,7 +2072,8 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         if ok(rel) or under_session_scratchpad(full, session_id):
             return ""
         if role == AUTHOR_ROLE and is_workflow_rel(rel):
-            pairs = workflow_pairs(tool_input, full)
+            whole = workflow_file_pair(tool_input, full)
+            pairs = [whole] if whole else workflow_pairs(tool_input, full)
             if pairs and all(workflow_test_steps_only(o, n) for o, n in pairs):
                 return ""
         # `session_id` is the parent's, the same for an agent (decision
