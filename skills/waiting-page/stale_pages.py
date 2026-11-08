@@ -22,7 +22,10 @@ Verdict, one line per page, then a total line:
            read, or its page has a .notfound or .unreadable marker in <fetched-dir> (so a not-found page that is
            the claude-settings page names no target). The check never repoints a page.
 The total line reads `waiting pages: N current, N behind, N unknown, N not-found`.
-Exit 0 only when every page is current. A behind, unknown or not-found page exits 1: an unread page is never
+A read page whose roadmap block holds only white space (no build baked it) gets one more line,
+`roadmap block: empty on <owner> page (bake it: skill waiting-page, "Update the roadmap block")`, in both modes
+(page mode says `this page`), and the run exits 1; the verdict word and the total line stay. A block baked with null data is not empty.
+Exit 0 only when every page is current and holds no empty roadmap block. A behind, unknown or not-found page exits 1: an unread page is never
 counted current. A host wrapper is tolerated, in both modes: the template must appear inside the
 page. The text before it may hold only a document skeleton (doctype, html, head, meta, title and
 body tags, white space) and style elements inside the leading head, before body opens. The text
@@ -114,12 +117,27 @@ PIECE = re.compile(r'\s+|<!doctype[^<>]*>|<(?P<close>/?)(?P<tag>html|head|body)%
 TAIL = re.compile(r'(?:\s|</(?:body|html)\s*>)*', re.I)
 
 
-def empty_roadmap_block(text):
-    """`text` with the body of its roadmap block cut out, markers kept; unchanged when it has no one block."""
+def block_body(text):
+    """(start, end) of the body of the one roadmap block in `text`, markers excluded; None when it has no one block."""
     found = splice.markers(text)
     if [m[0] for m in found] != [splice.OPEN, splice.CLOSE]:
-        return text
-    return text[:found[0][2]] + text[found[1][1]:]
+        return None
+    return found[0][2], found[1][1]
+
+
+def empty_roadmap_block(text):
+    """`text` with the body of its roadmap block cut out, markers kept; unchanged when it has no one block."""
+    span = block_body(text)
+    return text if span is None else text[:span[0]] + text[span[1]:]
+
+
+def unbaked_line(text, owner):
+    """The line for a page whose roadmap block holds only white space (no build baked it), else None. A block
+    build.py baked with no record branch holds null data, so it is not empty."""
+    span = block_body(text)
+    if span is None or text[span[0]:span[1]].strip():
+        return None
+    return 'roadmap block: empty on %s page (bake it: skill waiting-page, "Update the roadmap block")' % owner
 
 
 def empty_title(text):
@@ -211,6 +229,16 @@ def refile_target(fetched):
     return "unknown" if url == "unknown" or marker(url, fetched) else url
 
 
+def fetched_text(url, fetched):
+    """The text saved for `url` in <fetched>/<artifact id>.html, or None when there is no such file."""
+    import layout  # batch mode only
+    name = os.path.join(fetched, layout.artifact_id(url)) + ".html"
+    if not os.path.isfile(name):
+        return None
+    with open(name, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 def verdict(url, fetched, template):
     """(word, why) for one page: current, behind, unknown or not-found."""
     import layout  # batch mode only
@@ -222,11 +250,9 @@ def verdict(url, fetched, template):
         return "not-found", "not found from this account (deleted, or another account's); %s" % where
     if found == "unreadable":
         return "unknown", "the read failed"
-    name = os.path.join(fetched, layout.artifact_id(url))
-    if not os.path.isfile(name + ".html"):
+    live = fetched_text(url, fetched)
+    if live is None:
         return "unknown", "no fetched file"
-    with open(name + ".html", encoding="utf-8", errors="replace") as f:
-        live = f.read()
     if not normal(live):
         return "unknown", "the fetched file is empty"
     return ("current", "") if matches(template, live) else ("behind", "differs from page.html")
@@ -554,6 +580,7 @@ def page_verdict(args):
         print("unknown: the template has no single designData block (%s)" % source)
         return 2
     current = matches(template, live)
+    unbaked = unbaked_line(live, "this")
     if args.write:
         try:
             text = splice.carry(template, live)  # the one carry home: live designData and roadmap blocks, byte for byte
@@ -567,11 +594,10 @@ def page_verdict(args):
             print("unknown: the --write file cannot be written (%s)" % (err.strerror or err))
             return 2
         print("stale_pages: wrote %s" % args.write, file=sys.stderr)
-    if current:
-        print("current: matches the template (%s)" % source)
-        return 0
-    print("behind: differs from the template (%s)" % source)
-    return 1
+    print(("current: matches the template (%s)" if current else "behind: differs from the template (%s)") % source)
+    if unbaked:
+        print(unbaked)
+    return 0 if current and not unbaked else 1
 
 
 def session_mode(argv):
@@ -664,13 +690,19 @@ def main(argv):
     except layout.LayoutError as err:
         sys.exit("stale_pages: %s" % err)
     counts = {"current": 0, "behind": 0, "unknown": 0, "not-found": 0}
+    unbaked = 0
     for owner, url in pages:
         word, why = verdict(url, fetched, template)
         counts[word] += 1
         print("%s: %s%s (%s)" % (word, owner, " - " + why if why else "", url))
+        if word in ("current", "behind"):  # the page was read, so the fetched file exists
+            line = unbaked_line(fetched_text(url, fetched), owner)
+            if line:
+                unbaked += 1
+                print(line)
     print("waiting pages: %d current, %d behind, %d unknown, %d not-found"
           % (counts["current"], counts["behind"], counts["unknown"], counts["not-found"]))
-    return 0 if counts["current"] == len(pages) else 1
+    return 0 if counts["current"] == len(pages) and not unbaked else 1
 
 
 if __name__ == "__main__":

@@ -190,13 +190,15 @@ from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.R
 )
 
 
-def git(repo, *args, stdin=None):
-    """git's stdout, or None when git cannot run or fails."""
+def git(repo, *args, stdin=None, err=None):
+    """git's stdout, or None when git cannot run or fails. A list `err` takes git's stderr when it fails."""
     try:
         done = _nowindow.run(["git", "-C", str(repo), *args], input=stdin, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
     except OSError:
         return None
+    if done.returncode != 0 and err is not None:
+        err.append(done.stderr.strip())
     return done.stdout if done.returncode == 0 else None
 
 
@@ -266,14 +268,43 @@ class Ref:
         return found
 
 
-def record_source(repo, branch):
-    """(source, why): the record branch to read, or None and the reason it cannot be read."""
+def fetch_origin_record(repo, branch):
+    """origin/<branch>, fetched by explicit refspec, or None when there is no origin or origin lacks the branch.
+
+    A single-branch clone's `git fetch origin <branch>` writes only FETCH_HEAD, so the refspec names the
+    remote-tracking ref. Origin holding the branch but not answering, or not fetching, exits non-zero: a page
+    baked from an unread branch would claim the repo has no roadmap.
+    """
+    if git(repo, "remote", "get-url", "origin") is None:
+        return None
+    err = []
+    heads = git(repo, "ls-remote", "--heads", "origin", branch, err=err)
+    if heads is None:
+        raise SystemExit("Cannot ask origin whether it has the %s branch, so nothing was written: %s"
+                         % (branch, " ".join(err) or "git ls-remote failed"))
+    want = "refs/heads/" + branch
+    if not any(line.split("\t")[-1] == want for line in heads.splitlines()):
+        return None
+    if git(repo, "fetch", "--quiet", "origin", "+%s:refs/remotes/origin/%s" % (want, branch), err=err) is None:
+        raise SystemExit("Origin has the %s branch but fetching it failed, so nothing was written: %s"
+                         % (branch, " ".join(err) or "git fetch failed"))
+    return "origin/" + branch
+
+
+def record_source(repo, branch, fetch=False):
+    """(source, why): the record branch to read, or None and the reason it cannot be read.
+
+    `fetch` (the build) asks origin for a branch no local ref holds; a read-only caller never starts network.
+    """
     here = git(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     if here is not None and here.strip() == branch and (repo / DATA).is_dir():
         return Tree(repo), None
     for ref in ("origin/" + branch, branch):
         if git(repo, "rev-parse", "--verify", "--quiet", ref + "^{commit}") is not None:
             return Ref(repo, ref), None
+    fetched = fetch_origin_record(repo, branch) if fetch else None
+    if fetched:
+        return Ref(repo, fetched), None
     return None, "no %s branch in this checkout" % branch
 
 
@@ -780,7 +811,7 @@ def main(argv=None):
     repo = pathlib.Path(args.repo).resolve()
     if args.record_branch is None:
         args.record_branch = default_record_branch(repo)
-    source, why = record_source(repo, args.record_branch)
+    source, why = record_source(repo, args.record_branch, fetch=True)
     if args.block and not args.out:
         raise SystemExit("--block writes the data block to a file, so name it with --out FILE.")
     if args.out:
