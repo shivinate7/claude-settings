@@ -6,17 +6,16 @@ How does a record's claim about what code does stay true, and how does a cite to
 
 ## The ruling
 
-Coordinator, 2026-11-07 15:06 CST, lane brief `record-claim-cites-code`. Quote:
+Owner ruling, waiting-page item 386, titled "Make merges keep pace with reviews: which parts do you want?", answered 2026-11-08T04:25:43Z, which is 2026-11-07 22:25 CST. Its choice was a, b and c. Option b, "Findings ride in their lane (recommended)", reads: "A lane's findings join its next commit, or one follow-up PR per topic, not one new lane each." Option b is why the dead-cite guard was built in this lane. The item does not rule on cite forms.
 
-> "a record sentence that says what code does or does not do cites the code symbol (`module.symbol`). The skill's check then confirms that the symbol exists. Whether the sentence is true stays with the reviewer"
+Coordinator readings:
 
-Coordinator, 2026-11-07 15:08 CST: "one grammar and report-only are fine". The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id.
+- 2026-11-07 15:06 CST, coordinator reading, process-only (lane brief `record-claim-cites-code`): "My judgement: fold it into the fresh-prose skill (skills/fresh-prose) and its existing check, not a new lint. The rule: a record sentence that says what code does or does not do cites the code symbol (`module.symbol`). The skill's check then confirms that the symbol exists. Whether the sentence is true stays with the reviewer"
+- 2026-11-07 15:08 CST, coordinator reading, process-only: "one grammar and report-only are fine."
+- 2026-11-08 04:03 CST, coordinator reading, process-only (item 386; #1539 is the PR that adds CODE_CLAIM): "Your lane owns stale_cites (CODE_CLAIM), so the guard rides with you (item 386), as a follow-up from #1539's head with `Merge after: #1539`: lane lint runs stale_cites on the PR's own tree (base plus PR), so a cite to a code name missing there is red."
+- 2026-11-08 07:43 CST, coordinator reading, process-only: "go ahead with record-cites-live-code."
 
-Coordinator, 2026-11-08 04:03 CST, item 386 (a cite that runs ahead of its code). Quote:
-
-> "lane lint runs stale_cites on the PR's own tree (base plus PR), so a cite to a code name missing there is red"
-
-Lane pick, 2026-11-08 04:16 CST, under that ruling: a dead cite has one home, STALE010. STALE009 reports only a code claim with no cite. A name the range removed stays STALE002. A deleted or renamed path stays STALE001.
+Lane pick, 2026-11-08 04:16 CST, under the 04:03 reading: a dead cite has one home, STALE010 (a cite to a Python name missing at head). STALE009 (a report that never fails) covers only a code claim with no cite. A name the range removed stays STALE002 (a cite to a name the range removed from its file). A deleted or renamed path stays STALE001 (a line naming a path the range deleted or renamed).
 
 ## The mistakes and the harm
 
@@ -27,6 +26,7 @@ Claude writes both in normal work: it states what code does from memory, and it 
 
 ## How it works
 
+- The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id.
 - STALE009 reports, never fails: a sentence on a line a range adds in a decision record that states what code does, with no code cite (lint/stale_cites.py `CodeClaimReader`).
 - STALE010 fails the PR: a line a range adds in governed Markdown cites a Python name, and the file is absent at head or the name is not bound there (lint/stale_cites.py `dead_name_cites`).
 - Whether the claim is true stays with the reviewer: `agents/reviewer.md` reads each cited name against its claim.
