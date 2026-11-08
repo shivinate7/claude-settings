@@ -388,7 +388,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            PUSH_REASON, PUSH_STRAY_REASON, PUSH_UNREAD_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_ste"
@@ -3543,6 +3543,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
+                elif kind == "unread":
+                    ask_command("push-unread-folder", PUSH_UNREAD_REASON, "git push " + " ".join(args),
+                                "push from an unread folder")
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")

@@ -281,7 +281,7 @@ def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=No
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'stray', 'unread' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
 
     'main' (rule push-main): a non-forced push whose destination is literally `main` or `master`, `--all`
     included. The remote's HEAD is never read. 'stray' (rule push-stray-branch): a push with an implied
@@ -290,9 +290,12 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     branch.<cur>.remote, and an upstream that is not main or master. A `-u` push is silent here: its
     implied destination is the local name, which becomes the new upstream. A bare push under push.default
     simple writes the current branch only when the upstream carries its name, else git refuses it. A
-    deletion, a forced push, a mirror, and a push of tags alone are never judged here. A destination that
-    cannot be read is allowed. Reads: none for a literal destination; the current branch for an implied
-    one; one `git config --get-regexp` when the upstream is needed.
+    deletion, a forced push, a mirror, and a push of tags alone are never judged here. 'unread' (rule
+    push-unread-folder, owner ruling 413 a): a bare push, `HEAD` or `@` whose folder cannot be read (`cwd` is
+    '' or no directory), so its destination is unknown, as `push_verdict` asks on the same folder. A folder
+    that exists but is no repository, a detached HEAD and a push.default that names no branch are allowed.
+    Reads: none for a literal destination; the current branch for an implied one; one `git config
+    --get-regexp` when the upstream is needed.
     """
     force, mirror, every, includes, unpinned, leased, delete, upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(spec.startswith(("+", ":")) for spec in plain):
@@ -302,6 +305,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     if not plain and _push_tags_only(args):
         return ""
     state = {}
+    unread = "unread" if not (cwd and os.path.isdir(cwd)) else ""
 
     def current():
         if "cur" not in state:
@@ -318,7 +322,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         cur = current()
         merge, mode = config()[1:] if cur else (None, None)
         if cur is None or mode is None:
-            return ""
+            return unread
         if mode in ("", "simple"):
             dest = cur if merge == cur else None
         elif mode == "current":
@@ -342,8 +346,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                 implied = True
         if implied and current() in DEFAULT_BRANCH_FALLBACK:
             return "main"
-    if not implied or current() is None:
+    if not implied:
         return ""
+    if current() is None:
+        return unread
     remote_cfg, merge, _mode = config()
     pushed = remote or remote_cfg
     if not merge or not remote_cfg or pushed != remote_cfg or merge in DEFAULT_BRANCH_FALLBACK:
@@ -839,6 +845,11 @@ PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
     "Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_UNREAD_REASON = (
+    "Rule (Git): this push takes its destination from the folder it runs in, and that folder cannot be read "
+    "(a cd through a variable or $(...), or a -C folder that is not there), so where it writes is unknown "
+    "(decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
