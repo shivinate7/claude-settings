@@ -11,11 +11,12 @@ flags or as a JSON payload on stdin and prints one line: `allow`, or `<decision>
 Run `hooks/probe.py` in a claude-settings worktree to judge that branch's guard. Run
 `~/.claude/hooks/probe.py` elsewhere to judge the installed guard.
 
-The verdict is for a call from the main session. The probe drops agent_id, agent_type and
+The verdict is for a call with no session id and no agent id. The probe drops agent_id, agent_type and
 session_id from a stdin payload, and writes one stderr note that names each field it drops. So
 no check that needs agent_id is judged. Some of them are builder-test-edit, test-author-scope,
 the commit and push diff checks, worktree-home and the red-run folder exemption. This list may
-not be complete.
+not be complete. With no session id, the guard's own-scratchpad exemption does not apply: a
+`--cwd` in a session's scratchpad reads like a folder outside any checkout.
 
 A `noted` verdict allows the call and writes a log line. The probe prints it as plain `allow`.
 
@@ -32,8 +33,9 @@ exits. The probed command is text for the guard to judge, and it never runs. The
 only its temp dir. One exception: during a merge in progress, the guard's merge-tree check
 writes git objects. Bad input exits 2 or 1, with a message on stderr and no verdict.
 
-If the guard refuses the probe call itself, that refusal is the verdict. Report it, and do not
-encode the command another way.
+If the guard refuses the probe call itself, the guard's deny line is the verdict. Report it, and
+do not encode the command another way. A harness refusal ("too complex", worktree isolation) is
+not a verdict. Report it as a need, and do not re-encode the call.
 """
 
 import argparse
