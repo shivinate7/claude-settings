@@ -140,9 +140,10 @@ merge <pr>              preview: what it would claim and merge. Presses nothing.
 merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, move the local main, clean up.
                         NAME shows in the lock to a waiting run.
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
-merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
+merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] --findings V [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
+                        --findings V: none, "<n>, this PR" or "<n>, follow-up #<pr>[, ...]". Required.
 merge --reviewed        the ledger: one line per open PR with its one next act (lane lint red: <steps>, batch, batch run, lane round n, waits on <id>,
                         blocked on #N, or NO NEXT ACT) and its age in hours, read from GitHub alone. `lane lint red` comes before `batch`: a
                         `Lint: red <live head> <steps>` comment, posted by `merge --build-batch`, names the live head. A draft with no record reads `lane round 1`; a PR

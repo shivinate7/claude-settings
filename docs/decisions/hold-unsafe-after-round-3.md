@@ -19,6 +19,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
 - Owner, 2026-11-03 22:24 CST, Cockpit item 203 a, in every repo: a small fix to a round's finding gets one short read, a fix check, and then merges. Incident: degen page item 83, where five PRs were held about 2 hours (degen D10, a record in that repo, not read here). The definition:
   - A fix check is a fresh reviewer that reads only the diff from the reviewed head to the new head (`git diff <reviewed-head>..<head>`). It confirms the diff fixes the named finding and adds nothing else.
   - PASS: the head merges on green, with no further round.
+  - A filing-only diff passes too. It adds files under `docs/debts/` or adds lines to `docs/debts/notes.md`, and nothing else. The record's Findings must be `<n>, this PR`, and a `none` record never passes it (owner item 394 a, 2026-11-08 06:08 CST; record `pr-review-record`).
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
   - FAIL also when the diff touches a guard or check path (the list below) while the review record says `Guard or check: no`. The merge tool reads no diff, so a wrong `no` would skip the net-value test (owner, 2026-11-05 07:45 CST, typed "go" in the lane).
   - A fix check is not a review round. It runs on the reviewer row of the model table (decision `agent-model-cap`), haiku. Its brief carries no `Round N of 3` marker, so no guard changes.

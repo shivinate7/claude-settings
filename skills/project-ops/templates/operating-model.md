@@ -112,7 +112,7 @@ parent, or miss a message while busy.
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
 - A lane posts its review record on its PR after each round (claude-settings record
-  `pr-review-record`), never by message only. It renders the body with `merge <pr> --review-record` and posts it as a PR comment with the GitHub MCP comment tool. The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
+  `pr-review-record`), never by message only. It renders the body with `merge <pr> --review-record` and posts it as a PR comment with the GitHub MCP comment tool. The batch runner finds it. It files its findings as its record's `Findings` line says (claude-settings record `pr-review-record`, rule `roles-findings-are-debts-or-notes`). The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
