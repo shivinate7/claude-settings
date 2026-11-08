@@ -1,6 +1,6 @@
 # A finished agent's shells keep its tree
 
-**What.** A finished agent's own shells, such as a dev server, have the live host as parent. No process can yet be shown to be the agent's own, so the agent-end reap stops nothing, and a finished tree with any process inside is kept until the host exits. The owner ruled to stop the agent's shells (2026-10-15 19:43 CDT). That half is not built. A per-agent process marker would let the reaper tell the agent's shells from the session's own.
+**What.** A finished agent's own shells, such as a dev server, have the live host as parent. No process can yet be shown to be the agent's own, so the agent-end reap stops nothing. A finished tree with any process inside is kept until the host exits. The owner ruled to stop the agent's shells (2026-10-15 19:43 CDT). That half is not built. A per-agent process marker would let the reaper tell the agent's shells from the session's own.
 
 **Where.** `janitor/agent_end_reap.py`, `reap_worktrees`; `janitor/sweep.py`, `decide_worktree` (the process-inside keep).
 
