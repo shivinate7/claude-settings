@@ -13516,6 +13516,8 @@ sh("builder-test: shell write of pytest.ini, sed -i, is refused", "sed -i s/a/b/
 sh("builder-test: shell write of pytest.ini, python heredoc open-write, is refused",
    "python3 - <<'EOF'\nopen('pytest.ini', 'w').write('[pytest]')\nEOF", "deny", rule=BT,
    carries=("test-author",), **BR)
+# A .md under docs is a document, not test config, though its name reads as one.
+sh("builder-test: shell write of docs/jest.config.md is allowed", "echo x > docs/jest.config.md", "allow", **BR)
 
 # Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
 # heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
@@ -13808,6 +13810,49 @@ _disable = diff_repo("b-disable-manifest", lambda w: None, files={
 add("builder-test: Edit of a package.json script that adds a disabling flag is refused", "deny", rule=BT,
     tool="Edit", file_path="package.json", old_string='"ci": "npm run build"',
     new_string='"ci": "npm run build && jest --testPathIgnorePatterns=e2e"', **dict(B, cwd=_disable))
+
+# ---- owned parts read from a fragment and from a header (round 3). A body-only fragment of a CRLF file is
+# not found on disk, and a header with a trailing comment is no header to the ini reader: both still name an
+# owned part. A BOM and a malformed manifest are read the same way: the BOM is no content, malformed is refused.
+def _crlf_on_disk(w):
+    """A scope check, before the guard decides: the base files hold CRLF bytes on disk. Were the bytes
+    folded to LF, the fragment would be found and the case would test an LF edit, not the CRLF one."""
+    for rel in ("pyproject.toml", "setup.cfg"):
+        with open(os.path.join(w, rel), "rb") as handle:
+            if b"\r\n" not in handle.read():
+                sys.exit("fixture setup failed in build_fixtures: %r holds no CRLF on disk in %r" % (rel, w))
+
+
+_bypass = diff_repo("b-crlf-body", _crlf_on_disk, files={
+    **BASE_FILES,
+    "pyproject.toml": "[project]\r\nname = 'x'\r\n[tool.pytest.ini_options]\r\nminversion = '7'\r\naddopts = '-q'\r\n",
+    "setup.cfg": "[tool:pytest]\r\nminversion = 7.0\r\naddopts = -q\r\n"})
+BYPASS = dict(B, cwd=_bypass)
+add("builder-test: Edit of two [tool.pytest] body lines in a CRLF pyproject.toml is refused", "deny", rule=BT,
+    tool="Edit", file_path="pyproject.toml", old_string="minversion = '7'\naddopts = '-q'",
+    new_string="minversion = '8'\naddopts = '-q'", **BYPASS)
+add("builder-test: Edit of two [tool:pytest] body lines in a CRLF setup.cfg is refused", "deny", rule=BT,
+    tool="Edit", file_path="setup.cfg", old_string="minversion = 7.0\naddopts = -q",
+    new_string="minversion = 8.0\naddopts = -q", **BYPASS)
+_ini_header = diff_repo("b-ini-header-comment", lambda w: None, files={
+    **BASE_FILES, "setup.cfg": "[tool:pytest]  # x\nminversion = 7.0\n"})
+add("builder-test: Edit of minversion under a [tool:pytest]  # x header is refused", "deny", rule=BT,
+    tool="Edit", file_path="setup.cfg", old_string="minversion = 7.0", new_string="minversion = 8.0",
+    **dict(B, cwd=_ini_header))
+_bom = diff_repo("b-bom-manifest", lambda w: None, files={**BASE_FILES, "package.json": "﻿" + OWNED_PKG})
+add("builder-test: Edit that adds a devDependency to a package.json with a UTF-8 BOM is allowed", "allow",
+    tool="Edit", file_path="package.json", old_string='  "devDependencies": {\n    "b": "1"\n  }',
+    new_string='  "devDependencies": {\n    "b": "1",\n    "eslint": "9.0.0"\n  }', **dict(B, cwd=_bom))
+_bad_json = diff_repo("b-malformed-manifest", lambda w: None, files={
+    **BASE_FILES, "package.json": '{\n  "name": "x",\n  "devDependencies": {\n    "b": "1"\n  }\n'})
+add("builder-test: Edit that adds a devDependency to a malformed package.json is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='"b": "1"', new_string='"b": "1",\n    "eslint": "9.0.0"',
+    **dict(B, cwd=_bad_json))
+# A .md under docs is a document. jest.config.ts is still whole-file test config and is refused.
+add("builder-test: Edit of docs/jest.config.md is allowed", "allow", tool="Edit",
+    file_path="docs/jest.config.md", new_string="Run jest with its config.\n", **B)
+add("builder-test: Edit of jest.config.ts is refused", "deny", rule=BT, tool="Edit",
+    file_path="jest.config.ts", new_string="export default {}\n", **B)
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))
