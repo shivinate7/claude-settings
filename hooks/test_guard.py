@@ -418,6 +418,17 @@ def chained_ask(name, command, **kw):
     sh(name, command, "deny", CHAIN_ASK, carries=carries, **kw)
 
 
+# The Monitor tool runs a shell command as a stream. Its `command` is judged by the same shell rules as a
+# Bash call, except the stream family (live-stream, waiter, narrated-tail live-stream, background-end), which
+# never refuses a Monitor call (decision agents-wait-with-monitor). One home for its payload: the fields the
+# tool sends, so a case never builds the payload by hand.
+def monitor(name, command, expected, rule=None, **kw):
+    """One case: `command` in a Monitor call, with the input fields the tool sends."""
+    kw.setdefault("cwd", NOGIT)
+    add(name, expected, rule=rule, tool="Monitor", command=command,
+        description="wait on the stream", timeout_ms=300000, **kw)
+
+
 # --------------------------------------------------------------------------- the fixtures
 #
 # Every path a case names lives under one temporary root, so no case can reach the real
@@ -2376,6 +2387,9 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
+# The Monitor tool's command gets the Bash verdict (see monitor()).
+monitor("Monitor: reset throws the tree away, as in Bash", VCS + " reset --hard origin/main",
+        "deny", "shared-tree")
 # A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
 # `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
 # `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
@@ -6315,6 +6329,28 @@ add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev,
 add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
+
+# --- the Monitor tool: the stream family never refuses it (decision agents-wait-with-monitor). Each
+# "Bash twin" pins that the same text is refused in a Bash call, so the Monitor allow beside it is a real
+# exemption. The Bash twins of the narrated merge and of the server are the cases "narrate: merge --confirm
+# piped to tail hides its heartbeat" and "background-end: a python http.server under run_in_background with
+# no note is refused", above.
+MON_STREAM = "tail -f /tmp/x.log | grep --line-buffered ERROR"
+MON_LOOP = "while true; do gh pr checks 1; sleep 30; done"
+monitor("Monitor: a followed log piped to grep is allowed", MON_STREAM, "allow", silent=True)
+sh("Bash twin of the Monitor case: the followed log is refused", MON_STREAM, "deny", "live-stream",
+   cwd=NOGIT)
+monitor("Monitor: a polling loop with a pause is allowed", MON_LOOP, "allow", silent=True)
+sh("Bash twin of the Monitor case: the polling loop is refused", MON_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+monitor("Monitor: a narrated merge piped to tail is allowed", "merge 12 --confirm 2>&1 | tail -18",
+        "allow", silent=True)
+monitor("Monitor: a server with no end note is allowed", "python3 -m http.server 3202", "allow",
+        silent=True)
+# A stream exempts only its own rules. A hard reset after it is still refused, so the exemption cannot
+# return early from the whole judge: rule shared-tree (judge_shell, before rule 3) still denies.
+monitor("Monitor: a followed log, then a hard reset, is refused as the reset",
+        MON_STREAM + "; " + VCS + " reset --hard origin/main", "deny", "shared-tree")
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
@@ -29314,6 +29350,17 @@ def register_simulator_bypass_cases():
     )
     for name, command in allowed:
         sh("control: " + name, command, "allow", cwd=NOGIT)
+    # The same texts through the Monitor tool, with the verdicts above. The sim-test hold is the route guard.
+    for name, command in denied:
+        monitor("Monitor: " + name, command, "deny", "simulator-boot-bypass", carries="sim-test")
+    for name, command in allowed:
+        monitor("Monitor: " + name, command, "allow", silent=True)
+    monitor("Monitor: sim-test hold keeps its device, allowed silently", "sim-test --hold --for 900",
+            "allow", silent=True)
+    # A stream does not hide a raw boot after it: the stream rules are exempt, the boot rule still refuses.
+    monitor("Monitor: a followed log, then a raw boot, is refused as the boot",
+            MON_STREAM + "; xcrun simctl boot 1A2B3C4D-0000-4000-8000-00000000000C",
+            "deny", "simulator-boot-bypass", carries="sim-test")
 
 
 def sim_bypass_override_check(timed):
