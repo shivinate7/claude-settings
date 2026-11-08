@@ -1043,8 +1043,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET]),
                       "'reviewer haiku' matches no reviewer spawn")
-        out = self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
+        # The window's sonnet reviewer is named too. The earlier window's haiku may be named beside it.
+        out = self.verdict(NAMED_REPORT % "reviewer haiku, reviewer sonnet", [REVIEWER_SONNET],
+                           earlier=[REVIEWER_PINNED])
         self.assertIsNone(out, (out or {}).get("reason"))
+        # Haiku alone names only the earlier window, so the window's sonnet is unnamed.
+        out = self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
+        assert_blocks(self, out, "no model named for reviewer sonnet")
 
     def test_dm_green_pair_matching_no_spawn_still_blocks(self):
         out = self.verdict(NAMED_REPORT % "reviewer opus", [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
@@ -1415,10 +1420,15 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.missing_report_block(later=[REVIEWER_SONNET])
         assert_blocks(self, self.stop(NAMED_REPORT % "reviewer haiku", True, later=[REVIEWER_SONNET]),
                       "'reviewer haiku' matches no reviewer spawn")
+        # The window's sonnet reviewer is named too. The earlier window's haiku may be named beside it.
         self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
-        out = self.stop(NAMED_REPORT % "reviewer haiku", True,
+        out = self.stop(NAMED_REPORT % "reviewer haiku, reviewer sonnet", True,
                         earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
         self.assertIsNone(out, (out or {}).get("reason"))
+        # Haiku alone names only the earlier window, so the window's sonnet is unnamed.
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        out = self.stop(NAMED_REPORT % "reviewer haiku", True, earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        assert_blocks(self, out, "no model named for reviewer sonnet")
 
     def test_rw_green_pair_matching_no_spawn_still_blocks(self):
         self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
