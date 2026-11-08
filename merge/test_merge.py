@@ -12654,12 +12654,12 @@ def no_record_numbers(out):
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
 
-# The grant: the owner's ruling for PR 1979, one round past round 3. Its Grant line is the text after "Grant: ".
+# A valid Grant text, the form a record's Grant line carries after "Grant: ". It admits one fourth round past the usual limit of three.
 REVIEW_GRANT = "item 396 a, owner, 2026-11-08 06:08 CST"
 REVIEW_FOUR_ROUNDS = ((1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "FAIL"), (4, "reviewer", "opus", "PASS"))
 
 def round_four_text(verdict="PASS"):
-    """The Round lines of a granted fourth round: rounds 1 to 3 fail, then round 4 is `verdict`."""
+    """The Round lines of a record with a fourth round: the three rounds before it fail, then the fourth is `verdict`."""
     return REVIEW_FAILED_THREE + (f"Round 4: reviewer, opus, {verdict}",)
 
 def fix_state(test, fix, **kw):
@@ -12826,7 +12826,7 @@ class ReviewRecordForm(unittest.TestCase):
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
 class ReviewGrantForm(unittest.TestCase):
-    """The grant (the owner's ruling for PR 1979): a record with a Grant line may hold round 4, the one round past round 3, and no more. The Grant
+    """A record with a Grant line may hold a fourth round, the one round past the usual limit, and no more. The Grant
     line follows Guard or check and comes before the rounds. parse_review returns its text as rec["grant"], and None without the line. Each refusal
     sits beside a well-formed sibling that must parse, so the case is red until the parser knows the line."""
 
@@ -13040,11 +13040,11 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
 class ReviewGrantRules(unittest.TestCase):
-    """review_state over a record with a Grant line (the owner's ruling for PR 1979). Round 4 is the final round and keeps round 3's rules. The why
-    names round 4, not round 3. Design-reviewer lines stay out of these cases, so the why carries no design note."""
+    """review_state over a record with a Grant line. The fourth round is the last one a grant allows, and it follows the rules of the last round with no grant. The why
+    names the fourth round, not the third. Design-reviewer lines stay out of these cases, so the why carries no design note."""
 
     def granted_state(self, verdict, **kw):
-        """-> (state, why) of a record with a Grant line whose round 4 is `verdict`; the rest of the form comes from `kw`."""
+        """-> (state, why) of a record with a Grant line whose fourth round is `verdict`; the rest of the form comes from `kw`."""
         return record_verdict(self, record_text(rounds=round_four_text(verdict), grant=(f"Grant: {REVIEW_GRANT}",), **kw))
 
     def assert_names_round_four(self, why):
@@ -13059,7 +13059,7 @@ class ReviewGrantRules(unittest.TestCase):
                 self.assert_names_round_four(why)
 
     def test_round_four_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # the round 4 verdict is FAIL: a PASS would meet the PASS rule, which says done for any net value
+        # the fourth round's verdict is FAIL: a PASS would meet the PASS rule, which says done for any net value
         for net in ("zero", "positive"):
             with self.subTest(net=net):
                 state, why = self.granted_state("FAIL", guard="yes", net=net)
@@ -13382,7 +13382,7 @@ class ReviewFixFlag(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
 class ReviewGrantFlag(ReviewEnv):
-    """`--grant TEXT` goes with --review-record and lets round 4 in: the one round past round 3 that the owner's grant allows. Every refusal sits
+    """`--grant TEXT` goes with --review-record and lets a fourth round in: the one round past the usual limit. Every refusal sits
     beside the good value, which must exit 0, so a parser that never learned the flag fails there too. A usage error prints no record."""
 
     THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:opus:FAIL")
