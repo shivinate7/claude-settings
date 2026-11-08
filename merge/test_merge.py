@@ -326,6 +326,30 @@ class Env(unittest.TestCase):
         put(os.path.join(o, "elsewhere.txt"), "main moved\n")
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
 
+    def leave_no_pending_record(self):
+        """feat's one pending record is removed and pushed, so a run on feat claims nothing."""
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
+        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+
+    def run_args(self, *argv, host=None, hosts=None):
+        """-> (rc, stdout, stderr) of merge with argv. A usage error's SystemExit is read as its code."""
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = self.run_merge(*argv, host=host, hosts=hosts, stdout=out, stderr=err)[0]
+        except SystemExit as e:
+            rc = e.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def assert_usage_error(self, *argv):
+        """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
+        rc, out, err = self.run_args(*argv)
+        self.assertEqual(rc, 2, out + err)
+        for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
+            self.assertNotIn(old, err)
+        self.assertNotIn("Traceback", err)
+        return out, err
+
     def hook(self, fn_script):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
@@ -398,9 +422,7 @@ class Flow(Env):
         self.assertEqual(self.claims(), 0)
 
     def test_nothing_to_claim_waits_once(self):
-        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        sh(self.other, "git", "rm", "-q", "docs/decisions/second.md")
-        sh(self.other, "git", "commit", "-qm", "no pending record left"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        self.leave_no_pending_record()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out)
@@ -564,6 +586,72 @@ class Flow(Env):
         filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
         self.assertEqual(len(filled), 1, out)  # one line names the filled field
 
+
+def without_usage(text):
+    """The text with argparse's usage block left out. The block lists every flag by design, so it is no remedy."""
+    kept, in_usage = [], False
+    for line in text.splitlines():
+        if line.startswith("usage:"):
+            in_usage = True
+        elif in_usage and line.startswith(" "):
+            continue
+        else:
+            in_usage = False
+            kept.append(line)
+    return "\n".join(kept)
+
+class ConfirmHead(Env):
+    """`merge <pr> --confirm --head <sha>`: a relayed yes binds to the pull request's head at relay time (decision auto-mode-owner-acts,
+    section Relayed Merge Yes). The head the relay named must be the live head. A moved head is refused before anything is claimed,
+    locked or merged. Without --head, confirm is as Flow tests it."""
+
+    def test_the_live_head_the_relay_named_merges(self):
+        rc, out, err = self.run_args("7", "--confirm", "--head", self.head())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
+
+    def test_the_merge_call_carries_the_relayed_head(self):
+        self.leave_no_pending_record()  # no claim in this run, so the sha the merge call gets is the head the relay named
+        head, sent = self.head(), []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (sent.append(sha), real(n, m, sha))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", head)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sent, [head], "the merge call did not carry the relayed head as its sha")
+
+    def test_a_moved_head_is_refused_and_says_so(self):
+        relayed = self.head()
+        self.competitor_push()  # the head moves after the relay
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertNotEqual(rc, 0, out + err)
+        self.assertIn("moved", out + err, "the refusal does not say the head moved")
+        self.assertIn("new yes", out + err, "the refusal does not say a new yes is needed")
+
+    def test_a_moved_head_names_no_retry_target(self):
+        relayed = self.head()
+        live = self.competitor_push()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        text = without_usage(out + err)
+        self.assertNotIn(relayed, text, "the refusal names the relayed head in full")
+        self.assertNotIn(live, text, "the refusal names the live head in full")
+        self.assertNotIn("--confirm", text, "the refusal names the refused command's flag --confirm")
+        self.assertNotIn("--head", text, "the refusal names the refused command's flag --head")
+        self.assertNotRegex(text, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
+
+    def test_a_moved_head_leaves_nothing_behind(self):
+        relayed = self.head()
+        self.competitor_push()
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a refused head")
+        self.assertFalse(self.lock_ref(), "the lock was left behind")
+        self.assertEqual(self.worktrees(), 1, "a worktree was left behind")
+
+    def test_a_head_that_is_not_40_hex_is_refused_as_bad_input(self):
+        out, err = self.assert_usage_error("7", "--confirm", "--head", self.head()[:7])
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
+        self.assertFalse(self.lock_ref(), "the lock was left behind")
 
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
@@ -13081,33 +13169,15 @@ class ReviewFixRules(unittest.TestCase):
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
 class ReviewEnv(Env):
-    """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
-    its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+    """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here."""
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
 
-    def run_args(self, *argv, host=None, hosts=None):
-        out, err = io.StringIO(), io.StringIO()
-        try:
-            rc = self.run_merge(*argv, host=host, hosts=hosts, stdout=out, stderr=err)[0]
-        except SystemExit as e:
-            rc = e.code
-        return rc, out.getvalue(), err.getvalue()
-
     def record_host(self, *comments, head=REVIEW_HEAD):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
         return PullsHost([batch_pull(7, head)], {}, comments=comments)
-
-    def assert_usage_error(self, *argv):
-        """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
-        rc, out, err = self.run_args(*argv)
-        self.assertEqual(rc, 2, out + err)
-        for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
-            self.assertNotIn(old, err)
-        self.assertNotIn("Traceback", err)
-        return out, err
 
 class ReviewArgs(ReviewEnv):
     """The flags, as argparse reads them. --reviewed and --role each stand alone. --review-record needs a PR number and a --head, and takes no
