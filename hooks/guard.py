@@ -184,8 +184,9 @@ Other tools, in `judge` order:
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
-                       carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
-                       spawn pass it. An unread record
+                       carries the `Audit:` marker, a reviewer on a later-round brief, a reviewer
+                       whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
+                       owner item 444 a) and every Opus spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan

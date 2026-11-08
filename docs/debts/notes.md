@@ -1527,3 +1527,6 @@
 - push-stray-default-literal: push-stray-branch stays silent only for an upstream literally named main or master, never the remote's own default branch, so a repo whose default has another name over-asks (hooks/guard_push_delete.py `push_ask_hit`). It narrows the retired debt push-head-mismatch-trap; ruling 206 a replaces it. Decision: plain-push-asks.
 - fixcheck-mutant-in-process: in-process brief-marker cases (hooks/test_guard.py) read the repo's hooks/shared_names.py, not the mutated copy, so only subprocess cases kill a mutant on a shared row. Decision: agent-model-cap.
 - mutate-anchor-files-scope: hooks/shared_names.py joined `mutate_shared.anchor_files` for one mutant, but the list applies to every guard mutant (hooks/mutate_shared.py `anchor_files`). Decision: agent-model-cap.
+- fix-check-remedy-wording: the `--fix-check` refusal in merge/merge.py says "give sonnet as MODEL"; it should say to run the fix check on sonnet, then give sonnet as MODEL. Reasoned from PR #1572 round 3, not measured.
+- fix-check-model-const-name: REVIEW_FIX_GUARD_MODEL in merge/merge.py now covers every record; REVIEW_FIX_MODEL would name it truly. Reasoned from PR #1572 round 3.
+- mutate-guard-help-runs-all: `python3 hooks/mutate_guard.py --help` ignores --help and starts every guard mutant; a session ran it by mistake (PR #2296).
