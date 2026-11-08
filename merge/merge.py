@@ -3494,9 +3494,15 @@ def carry_problem(h, a, info, src):
         return f"the source pull request #{n} is still open and this pull request's body does not say `replaces #{n}`", FIX_CARRY_OPEN_REMEDY
     if h.commit_tree(src["head"]) != h.commit_tree(a.head):
         return f"the source Head {src['head'][:9]} and --head {a.head[:9]} hold different files, so the fix check cannot be carried", FIX_CARRY_TREE_REMEDY
+    return source_chain_problem(h, source, n, "the carry adds one")
+
+def source_chain_problem(h, source, n, adds):
+    """-> (problem, remedy), or (None, None) when the chain on the source pull request `source` (number `n`) leaves room for one more fix check. A
+    `source` with no created time (a plain stand-in reads no source PR) lists the comments from the epoch. The count is fix_chain_count's,
+    so a plain copy at the end of a capped chain counts the chain it copies. `adds` says what the stand-in adds, for the line."""
     chain = fix_chain_count([r for r in map(parse_review, h.review_comments(source.get("created") or "1970-01-01T00:00:00Z").get(n, [])) if r and r["n"] == n], h)
     if chain >= FIX_CHAIN_CAP:
-        return f"the chain on the source pull request #{n} already holds {chain} fix checks, and the carry adds one", FIX_CAP_REMEDY
+        return f"the chain on the source pull request #{n} already holds {chain} fix checks, and {adds}", FIX_CAP_REMEDY
     return None, None
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
@@ -3728,6 +3734,8 @@ def main(argv, host=None, lock=None):
                 carry = bool(a.fix_base_record and last and last["fix"])  # a PASS source stands in only through carry_problem
                 if not problem and carry:
                     problem, remedy = carry_problem(h, a, info, last)
+                if not problem and a.fix_base_record and not carry:  # a plain stand-in is the end of the source chain it copies
+                    problem, remedy = source_chain_problem(h, {}, last["n"], "the fix check adds one")  # no source PR read: the list reads from the epoch
                 if not problem and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"] and not carry:  # a chained fix diff must start inside the live head's history
