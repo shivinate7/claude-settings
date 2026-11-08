@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shlex
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -981,9 +982,8 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         if merge_tool_args(segment) is None:
             continue
         try:
-            rest = _command_words(merge_tool_args(segment))
-            bare = merge_tool_args(strip_redirections(segment))
-            bare = None if bare is None else _command_words(bare)
+            rest = _merge_words(segment)
+            bare = _merge_words(strip_redirections(segment))
             if "--confirm" not in (rest if bare is None else bare):
                 continue
             if bare is None:
@@ -1030,19 +1030,44 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     return False
 
 
-def _command_words(args):
+def _command_words(args, raw=None):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
     newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
-    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    sits in, and a glued `&` sends it to the background: either ends that word and the command.
+    `raw` is each word as written, quotes kept (_raw_tail): a `)` or `&` is read only from it, so a
+    quoted one is text. Without `raw` the unquoted word is read."""
     words = []
-    for arg in args:
+    for index, arg in enumerate(args):
         word = arg.rstrip(")&")
+        if raw is not None:
+            glued = len(raw[index]) - len(raw[index].rstrip(")&"))
+            word = arg[:max(0, len(arg) - glued)]
         if word != arg:
             if word:
                 words.append(word)
             break
         words.append(arg)
     return words
+
+
+def _raw_tail(segment: str, args):
+    """The last len(args) words of `segment` as written, quotes kept, or None when they cannot be paired with
+    the unquoted tokens (a quote opened inside a word, or an unreadable segment): `_command_words` then reads
+    the unquoted words, as it did before. `args` is a tail of the segment's tokens."""
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        return None
+    tokens = segment_tokens(segment)
+    if tokens is None or len(raw) != len(tokens) or len(args) > len(raw):
+        return None
+    return raw[len(raw) - len(args):]
+
+
+def _merge_words(segment: str):
+    """The merge's arguments up to the end of its command, else None when the segment runs no merge."""
+    args = merge_tool_args(segment)
+    return None if args is None else _command_words(args, _raw_tail(segment, args))
 
 
 def _push_calls(segment: str, script: str, cwd: str):
