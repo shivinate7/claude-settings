@@ -389,7 +389,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            conflict_markers_hit, head_moved_before, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool, OWED_BRANCH_TOOL, owed_record_hit, owed_record_pr_hit, owed_record_write,
         )
@@ -3517,7 +3517,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
+    push_segments = split_segments(stripped)
+    for seg_number, segment in enumerate(push_segments):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
@@ -3531,7 +3532,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
                 if record_hit:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
-                owed = owed_record_hit(args, where, overrides, cwd)
+                owed = owed_record_hit(args, where, overrides, cwd, head_moved_before(push_segments, seg_number))
                 if owed:
                     ask_command("push-owes-review-record", owed[1], owed[0], "push past an unrecorded review")
                 kind = push_ask_hit(args, where, overrides)

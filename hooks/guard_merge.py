@@ -729,6 +729,25 @@ def _makes_conflict(call):
     return call[0] in _CONFLICT_VERBS and not {"--continue", "--abort"} & set(call[1])
 
 
+_HEAD_MOVERS = ("commit", "revert", "reset")
+
+
+def _moves_head(call):
+    """True for a git step that can move HEAD: commit, revert, reset, and the conflict verbs (merge, pull,
+    rebase, cherry-pick, am), `--continue` and `--abort` too."""
+    return call[0] in _HEAD_MOVERS or call[0] in _CONFLICT_VERBS
+
+
+def head_moved_before(segments, number):
+    """True when a segment before `segments[number]` moves HEAD, so a push there reads a head the shell
+    call has not reached yet."""
+    for segment in segments[:number]:
+        call = git_call_of(segment) if segment.strip() else None
+        if call is not None and _moves_head(call):
+            return True
+    return False
+
+
 def _unresolved(specs):
     """True when an add pathspec holds a substitution, which the guard cannot read."""
     return any(set(spec) & set("$`()") for spec in specs)
@@ -1342,12 +1361,13 @@ def _owed_off_tool(where, names):
     return _owed_unread("the repo's stamp.json could not be read") if _stamp_unreadable(where) and _in_repo(where, names) else None
 
 
-def owed_record_hit(args, where, overrides=None, cwd=""):
+def owed_record_hit(args, where, overrides=None, cwd="", moved=False):
     """(matched, reason) when this `git push` moves a branch past a head a reviewer read and nobody recorded, else
     None. The record is satisfied when any comment merge's parse_review accepts holds Head == the reviewed head. An
     entry, a destination, a directory or a config that cannot be read asks owed-record-unread when an entry is this
     repo's, and so does a failed read: the guard-wide crash path fails open, so nothing here passes on an error. A
-    push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read."""
+    push that names no refspec range (`--all`, `--mirror`, a deletion, tags only) is not read. `moved` is True when an earlier step of the same shell call moves HEAD: the source is then
+    new, whatever HEAD reads now."""
     try:
         names = _owed_entries()
     except OSError as e:
@@ -1364,7 +1384,7 @@ def owed_record_hit(args, where, overrides=None, cwd=""):
         if None in dests:
             return _owed_unread("the push's destination could not be read") if _in_repo(where, names) else None
         remote = named[0] or "origin"
-        pairs = [(_plain_source(spec.lstrip("+").partition(":")[0]), dest, remote)
+        pairs = [(None if moved else _plain_source(spec.lstrip("+").partition(":")[0]), dest, remote)
                  for spec, dest in zip(named[1] or [""], dests)]
         return _owed_scan(where, names, pairs, _owed_pr_of_branch)
     except (Exception, SystemExit) as e:

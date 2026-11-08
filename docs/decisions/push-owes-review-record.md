@@ -13,6 +13,7 @@ Coordinator brief, 2026-11-08 09:45 CST. Fix checks count, coordinator 09:54 CST
 - Per destination, only the newest matching entry (by its written time) governs; on a tie, each tied entry does. An older entry's remedy cannot run: `merge --review-record` needs the live head.
 - A state read or a gh read that fails asks too, with the note `owed-record-unread`. So does an entry that is this repo's (its head is a commit here) when the push's directory or destination cannot be read, or when `.github/stamp.json` exists and is not a JSON object. A missing `stamp.json` skips the check.
 - A bare push under `push.default=matching` reads as the current branch.
+- A push chained after a step of the same shell call that moves HEAD (commit, merge, pull, rebase, cherry-pick, revert, am, reset) reads its source as new: the guard judges the call before that step runs, so HEAD still equals the tracking tip. `head_moved_before` reads the earlier segments. A chain that holds an ask is refused by `ask-alone` (decision `ask-commands-run-alone`), so the agent runs the commit and the push in separate calls.
 - The ask names the rule and the remedy: render the record with `merge <pr> --review-record --head <H>`, post it, then push. It names no branch (rule `git-remedy-never-names-target`, a refusal names no target).
 - The owner's typed override lifts the ask.
 - Why: a push past an unrecorded head leaves the record unable to name that head. Fact: `merge <pr> --review-record --head <H>` stops with exit 1 when the live head is another sha (decision `pr-review-record`, the review record form).
@@ -71,6 +72,12 @@ The cases are in `hooks/test_guard.py`, section 5f-3 (family `push-owes-review-r
 | G1, reviewed head on main | The lane's first commit H is merged to origin's default branch. The reviewer stops at H. A fix is pushed | allow, no entry written |
 | G2, older entry unrecorded | An entry at H0 with no record. The reviewer stops again at H1 on the same branch, and a record at H1 is posted. A fix is pushed | allow |
 | G2c, newest entry unrecorded | As G2, with no record at H1 | ask |
+| H1, commit then push | Entry at H, no record. `commit -am fix && push origin HEAD:<lane>` in one call | deny, `ask-alone` |
+| H1c, commit then push, recorded | As H1, with a record at H | allow |
+| H2, merge then push | As H1, with `merge origin/main` before the push | deny, `ask-alone` |
+| H3, pull --rebase then push | As H1, with `pull --rebase` before the push | deny, `ask-alone` |
+| H4, commit; push | As H1, joined by a semicolon | deny, `ask-alone` |
+| H5, status then push | As H1, with `status` before the push, which moves no HEAD | allow |
 
 ## The misses
 
@@ -104,7 +111,7 @@ Found in the code:
 - No long-lived process, no timer.
 - Not proved by a test: the git spawn counts. C1 and C11 prove the no-gh-call part.
 
-Dated by: the head compare in `_records_hold`, the descent test and the newest-entry pick in `_owed_scan`, the default-branch test in `owed_record_write`, and the 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
+Dated by: the head compare in `_records_hold`, the descent test and the newest-entry pick in `_owed_scan`, the default-branch test in `owed_record_write`, the HEAD-mover list in `head_moved_before`, and the 14-day constant `OWED_KEEP_SECONDS`, all in `hooks/guard_merge.py`. A change to any of them rewrites this record.
 
 Risk: incident (PR #1869, PR #1914, PR #1958, PR #1985, PR #1699, PR #2015, PR #2025, PR #2026, PR #2042, PR #2068, PR #2088, lane `builder-report-in-head`).
 
