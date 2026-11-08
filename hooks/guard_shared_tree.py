@@ -599,6 +599,39 @@ def one_place(cmd: str) -> bool:
 RESTORE_PER_FILE_FLAGS = {"--staged", "--worktree", "-S", "-W"}
 
 
+def split_dashed(args):
+    """(dashed, head, specs): the args split at the first `--`; with none, head is empty and specs all."""
+    if "--" in args:
+        at = args.index("--")
+        return True, args[:at], args[at + 1:]
+    return False, [], list(args)
+
+
+def source_pathspecs(subcommand: str, args) -> list:
+    """The pathspecs a `git checkout <rev> -- <paths>` or `git restore --source <rev> <paths>` copies from an
+    older revision, else []. A plain `checkout <branch>` and a source-less `restore` are not read."""
+    dashed, head, specs = split_dashed(args)
+    if subcommand == "checkout":
+        if dashed:   # `checkout -- <path>` names no revision: it restores from the index
+            return specs if any(not a.startswith("-") for a in head) else []
+        if any(a in ("-b", "-B", "--orphan") for a in specs):   # `checkout -b <new> <start>` names no path
+            return []
+        return [a for a in specs if not a.startswith("-")][1:]   # a branch switch has one operand
+    if subcommand != "restore":
+        return []
+    operands, sourced, skip = [], False, False
+    for arg in head if dashed else specs:
+        if skip:
+            skip = False
+        elif arg in ("-s", "--source"):
+            sourced = skip = True
+        elif arg.startswith("-s") or long_flag_abbrev(arg, "--source", "--so"):
+            sourced = True
+        elif not arg.startswith("-"):
+            operands.append(arg)
+    return operands + (specs if dashed else []) if sourced else []
+
+
 def names_only_files(subcommand: str, args, root: str, segment: str = "") -> bool:
     """True when a `git checkout` or `git restore` is one of the per-file forms: `restore` with
     only the flags in RESTORE_PER_FILE_FLAGS, `checkout` with `--` before the paths or, without
@@ -609,8 +642,7 @@ def names_only_files(subcommand: str, args, root: str, segment: str = "") -> boo
         return False
     if segment and segment_tokens(REDIRECTION.sub(" ", segment)) is None:
         return False
-    dashed = "--" in args
-    head, specs = (args[:args.index("--")], args[args.index("--") + 1:]) if dashed else ([], list(args))
+    dashed, head, specs = split_dashed(args)
     flags = [a for a in head + ([] if dashed else specs) if a.startswith("-")]
     if subcommand == "restore":
         if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):

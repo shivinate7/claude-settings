@@ -244,7 +244,9 @@ Other tools, in `judge` order:
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
-                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       deny. A role's write outside its scope, a builder's `git checkout <rev> -- <test>`
+                       or `git restore --source <rev> <test>` too, a folder or `.` by the test files
+                       under it. Cost: one git ls-files, only on that form. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -366,7 +368,7 @@ while True:
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
-            SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            source_pathspecs, SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -1966,7 +1968,32 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+            or interpreter_write_hit(raw, cwd, builder_test_path)
+            or git_source_test_hit(stripped, cwd))
+
+
+def git_source_test_hit(stripped: str, cwd: str) -> str:
+    """The test pathspec a `git checkout <rev> -- <path>` or `git restore --source <rev> <path>` copies from an
+    older revision, else ''. Paths are read from the folder a leading `cd` or `git -C` moves to. A pathspec
+    that is no existing file (a folder, `.`, a glob) is expanded with one `git ls-files` of the index, run
+    only on this form; an unreadable list allows."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
+        words = segment_tokens(segment)
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        if words and _segment_git_c_target(words) is not None:
+            at = _absolute(_segment_git_c_target(words), at)
+        for subcommand, args in git_calls(segment):
+            for spec in source_pathspecs(subcommand, args):
+                if builder_test_path(spec, at):
+                    return spec
+                if os.path.isfile(os.path.join(at, spec)):
+                    continue
+                for name in git_names(at, "ls-files", "-z", "--", spec) or ():
+                    if builder_test_path(name, at):
+                        return name
+    return ""
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:

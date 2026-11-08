@@ -2372,6 +2372,17 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # source_pathspecs (hooks/guard_shared_tree.py) names the pathspecs a checkout or restore copies from a revision.
+    # Read as none, a builder's `git checkout <rev> -- <test>` and `restore --source` are never judged.
+    ("builder-checkout: source_pathspecs reads no pathspec, so a git checkout from a revision is never judged",
+     "def source_pathspecs(subcommand: str, args) -> list:",
+     "def source_pathspecs(subcommand: str, args) -> list:\n    return []",
+     "guard", "builder-checkout: a builder's git checkout of an older test file by sha and path is refused as"),
+    # The source gate of a restore: without it, a plain `restore <test>` names a source it does not have.
+    ("builder-checkout: git restore loses its source gate, so a plain restore of a test file is refused",
+     "    return operands + (specs if dashed else []) if sourced else []",
+     "    return operands + (specs if dashed else [])",
+     "guard", "builder-checkout: control, a builder's git restore of a test file with no source is allowed"),
 ]
 
 
