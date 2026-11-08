@@ -22039,6 +22039,11 @@ _relesc_add("worktree-home relative escape: cd <scratch> && cd <home, relative f
 _relesc_add("worktree-home relative escape: cd <scratch> && cd lnk && mkdir ../x, a cd through a link to the home, "
             "then a climb out, is refused", "deny", "cd %(abs_scratch)s && cd lnk && mkdir ../x", "home",
             rule="worktree-home", needs=("lnk",))
+# Deny, from the recorded home. A `cd -` goes back to the folder before the last cd, and resets the skip: the
+# write after it runs in the scratch folder, outside the home, and is judged.
+_relesc_add("worktree-home relative escape: cd <scratch> && cd <nogit> && cd - && mkdir ../x, a cd back with cd - "
+            "after a cd to a folder in no checkout, then a climb out of the home, is refused", "deny",
+            "cd %(abs_scratch)s && cd %(nogit)s && cd - && mkdir ../x", "home", rule="worktree-home")
 # Allow, from the recorded home: the last absolute or `~` cd lands outside the home, so the write is not judged.
 _relesc_add("worktree-home relative escape: cd <scratch> && mkdir ../x, an absolute cd outside the home, is allowed",
             "allow", "cd %(abs_scratch)s && mkdir ../x", "home")
