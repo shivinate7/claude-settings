@@ -10431,19 +10431,20 @@ MTC_NOT_STEP = os.path.join(NOGIT, "docs", "silent-undo-edit-pass.json")  # a pa
 MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\n'  # 16 minutes ahead
 
 
-def mtc_write(name, expected, tool, **tool_input):
-    """One case of the written-value rule: `tool_input`, run as `tool`, against the clock MTC_WRITE_CLOCK."""
+def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, **tool_input):
+    """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK)."""
     if expected == "deny":
         add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
-            env=mtc_env(MTC_WRITE_CLOCK), carries=MTC_WRITE_CARRIES, **tool_input)
+            env=mtc_env(clock), carries=MTC_WRITE_CARRIES, **tool_input)
     else:
         add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
-            env=mtc_env(MTC_WRITE_CLOCK), **tool_input)
+            env=mtc_env(clock), **tool_input)
 
 
-def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass"):
-    """An ArtifactData write of one document: `data` to `collection`, on the page the cases name."""
-    mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action=action, collection=collection,
+def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass",
+            clock=MTC_WRITE_CLOCK):
+    """An ArtifactData write of one document: `data` to `collection`, on the page the cases name, at `clock`."""
+    mtc_write(name, expected, "ArtifactData", clock=clock, url=MTC_ITEM_URL, action=action, collection=collection,
               doc_id=doc_id, data=data)
 
 
@@ -10521,6 +10522,11 @@ mtc_set("an added 20:16Z, 2 minutes ahead, in items is refused: the incident val
 # Passes: 20:15Z is 1 minute ahead, inside the limit. The limit is inclusive.
 mtc_set("an added 20:15Z, 1 minute ahead, in items is allowed: the limit is inclusive", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:15:00Z"})
+# Refused: the clock is 20:14:59Z, whose minute is 20:14, so 20:16Z is 2 minutes ahead. Kept to the second, the gap
+# is 61 seconds, one whole minute, so the value would pass. The clock's seconds are cut to the minute first.
+mtc_set("an added 20:16Z in items is refused at a clock of 20:14:59: the clock's seconds are cut to the minute",
+        "deny", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"},
+        clock="2026-11-07T14:14:59-06:00")
 # Passes: 14:14 CST exact, in each form. The Z form first.
 mtc_set("an added exactly 20:14Z in items is allowed", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"})
@@ -10578,7 +10584,7 @@ mtc_bash("a Bash updatedAt=$T from a shell variable is allowed: a variable is no
          'T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo updatedAt=$T')
 
 
-# Passes: the round-1 false alarms. A value kept from before the change is behind the clock, so it passes.
+# Passes: an old updatedAt or added that a write keeps, resends or quotes is behind the clock, so it passes.
 mtc_write("a roadmap step Write that changes note and keeps an old updatedAt 2026-11-06T18:00Z is allowed", "allow",
           "Write", file_path=MTC_STEP,
           content='{"id": "silent-undo-edit-pass", "note": "Changed the note.", "updatedAt": "2026-11-06T18:00:00Z"}\n')
