@@ -50,7 +50,7 @@ TYPES = ["builder", "test-author", "reviewer", "Explore", "record-writer", "desi
 
 # Full scope line per type, pinned verbatim. Edit here only when the hook's text changes on purpose.
 SCOPE_LINE = {
-    "builder": "- Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
+    "builder": "- Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need.",
     "test-author": "- Scope: test-author. Edit tests and test config only. Never edit product code.",
     "reviewer": "- Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "- Scope: Explore. Never edit. Read and search only.",
@@ -193,8 +193,8 @@ def scope_check(expected):
     return check
 
 
-def builder_scope_check(*parts):
-    """Build a check: exactly one scope line, and it holds every part, case-insensitively."""
+def builder_scope_check(*parts, lacks=()):
+    """Build a check: exactly one scope line, and it holds every part and none of `lacks`, case-insensitively."""
     def check(text):
         scopes = scope_lines(text)
         if len(scopes) != 1:
@@ -203,6 +203,9 @@ def builder_scope_check(*parts):
         for part in parts:
             if part not in low:
                 return "scope line lacks %r: %r" % (part, scopes[0][:120])
+        for part in lacks:
+            if part in low:
+                return "scope line holds %r: %r" % (part, scopes[0][:120])
         return None
     return check
 
@@ -389,12 +392,14 @@ for _t in ["reviewer", "Explore"]:
     add("brief lines: %s gets none of the push, trailer and record-path lines" % _t, "context",
         payload(_t), brief_lines_check(False))
 
-# The builder never edits tests, and may add mutants to hooks/mutate_guard.py only when the brief asks.
+# The builder never edits tests. A mutant is test content (owner ruling 2026-11-08 17:19 CST, page item 447 a),
+# so a builder never adds one, even when its brief asks: the scope line sends a mutant to a test-author.
 add("builder scope: says never edit tests", "context", payload("builder"),
     builder_scope_check("never edit tests"))
-add("builder scope: allows adding mutants to hooks/mutate_guard.py when the brief asks",
-    "context", payload("builder"),
-    builder_scope_check("mutant", "hooks/mutate_guard.py", "brief asks"))
+add("builder scope: a mutant goes to a test-author", "context", payload("builder"),
+    builder_scope_check("mutant", "test-author"))
+add("builder scope: does not invite adding mutants when the brief asks", "context", payload("builder"),
+    builder_scope_check("never edit tests", lacks=("add mutants", "brief asks")))
 
 # PLUGIN NAMESPACE: `plugin:type` takes the scope of its bare type name.
 add("namespace: my-plugin:builder gets the builder scope line", "context",
