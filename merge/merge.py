@@ -3496,8 +3496,11 @@ def main(argv, host=None, lock=None):
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
+                if earlier and last is None:  # the newest record cannot name a head, so name it, not the base head
+                    print("merge: --fix-check: the newest earlier review record on this pull request does not parse, so it names no head to start from. Post the record again with only the record lines and its footer, and put any other text in a separate comment. " + REVIEW_CITE, file=sys.stderr)
+                    return 2
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. Post the reviewed head's record before the fix is pushed, so the fix check has a base to start from. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
