@@ -9,8 +9,8 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, dir_before_segment, inline_script, inner_commands, is_powershell,
-    resolve_command, git_calls, segment_tokens, split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, is_powershell,
+    resolve_command, git_calls, segment_dirs, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
 from merge_options import MERGE_OPTIONS
@@ -383,7 +383,7 @@ SUBSTITUTION_SLOT = re.compile(r"(?<![\w.-])x(?![\w.-])|`x`")
 
 
 def _flat(pipelines):
-    """The segments of `pipelines` in order, and the `ends` that dir_before_segment reads. Only a pipe
+    """The segments of `pipelines` in order, and the `ends` that segment_dirs reads. Only a pipe
     end matters to it here (a pipe part's `cd` moves nothing), so each pipeline ends in `;`."""
     segments, ends = [], []
     for stages in pipelines:
@@ -401,9 +401,9 @@ def _inherited_in_lint(pipelines, cwd: str = ""):
     counts for all (the reading that refuses more)."""
     segments, ends = _flat(pipelines)
     in_lint = False
-    for number, segment in enumerate(segments):
+    for segment, folder in zip(segments, segment_dirs(segments, cwd, ends)):
         if in_lint and SUBSTITUTION_SLOT.search(segment):
-            return True, dir_before_segment(segments, number, cwd, ends)
+            return True, folder
         in_lint = _enters_lint_dir(segment, in_lint)
     return False, None
 
@@ -479,10 +479,10 @@ def check_tail_hit(stripped: str, background: bool, cwd: str = "") -> str:
         inner = number < len(texts) - 1
         in_lint = inherited and inner
         segments, ends = _flat(pipelines)
-        start = slot_folder if inner else cwd
+        folders = list(segment_dirs(segments, slot_folder if inner else cwd, ends))
         first = 0
         for at, stages in enumerate(pipelines):
-            folder = dir_before_segment(segments, first, start, ends) if stages else None
+            folder = folders[first] if stages else None
             first += len(stages)
             hit = _pipeline_hit(stages, background,
                                 lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)
