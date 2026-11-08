@@ -108,6 +108,12 @@ ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
 # value is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
 ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
 ENV_TYPE_SHORT_BY_COMMAND = {"rg": "tT"}
+# With a hidden flag, ag searches dotfiles, so it reads each env file whose name its file regex
+# (`-G`, `--file-search-regex`) matches. `-u` and `--unrestricted` search hidden files too. The
+# regex is tried on a sample of env file names, bare and with the `./` that ag prefixes.
+ENV_AG_HIDDEN_LONG = ("--hidden", "--unrestricted")
+ENV_AG_REGEX_LONG = "--file-search-regex"
+ENV_SAMPLE_NAMES = tuple(ENV_PREFIX + suffix for suffix in ("", "rc", ".local"))
 # `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
 # Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
 # `-f` / `--from-file` names a file of the program.
@@ -513,6 +519,59 @@ def _pattern_words(words, position: int, command: str):
     return skip, glued
 
 
+def _ag_hidden_regex_refusal(words, position: int) -> str:
+    """Return a description of what an `ag` file regex picks while a hidden flag is set, else ''.
+
+    The regex is tried on sample env file names. One that will not compile as Python is refused:
+    the guard cannot tell what it matches. Only `-G` and `--file-search-regex` take a file regex;
+    `-p` names a file of ignore patterns.
+    """
+    hidden, regexes, i = False, [], position + 1
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if word == "--":
+            break
+        if word.startswith("--"):
+            name, attached, value = word.partition("=")
+            hidden = hidden or name in ENV_AG_HIDDEN_LONG
+            if name == ENV_AG_REGEX_LONG:
+                if attached:
+                    regexes.append(value)
+                elif i < len(words):
+                    regexes.append(words[i])
+                    i += 1
+            continue
+        if not word.startswith("-") or word == "-":
+            continue
+        for k, letter in enumerate(word[1:], 1):
+            if letter == "u":
+                hidden = True
+            elif letter == "G":
+                rest = word[k + 1:]
+                if rest:
+                    regexes.append(rest)
+                elif i < len(words):
+                    regexes.append(words[i])
+                    i += 1
+                break
+            elif letter in ENV_VALUE_SHORT + "p":
+                i += 0 if word[k + 1:] else 1
+                break
+    if not hidden:
+        return ""
+    for regex in regexes:
+        regex = regex.strip("\"'")
+        try:
+            compiled = re.compile(regex)
+        except re.error:
+            return "a file regex the guard cannot compile"
+        for name in ENV_SAMPLE_NAMES:
+            if names_env_file(name) and (compiled.search(name) or compiled.search("./" + name)):
+                return "the file regex matches the name '%s'" % name
+    return ""
+
+
 def _assignment_end(words, position: int) -> int:
     """Return the index after the `VAR=value` assignment that starts at `position`. A quoted value
     with a space (`ADMINS='Shivam Semwal'`) spans several words, and its tail must not read as the
@@ -684,6 +743,11 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
+            if command == "ag":
+                hit = _ag_hidden_regex_refusal(words, position)
+                if hit:
+                    return (ENV_CONTENTS_REASON,
+                            "'ag' with a hidden flag would read an environment file: %s" % hit)
             patterns, glued = (_pattern_words(words, position, command)
                                if command in (ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
                                               + ENV_PROGRAM_COMMANDS)
