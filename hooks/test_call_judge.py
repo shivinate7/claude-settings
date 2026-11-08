@@ -2390,8 +2390,8 @@ def case_would_claim_is_refused():
 #
 # Each group below pins one rule of the verdict claim check: an unchecked forecast is refused, a checked one is not.
 # A forecast needs a check subject (a check, guard, hook, test, rule, CI, or a PR number) and a future or modal
-# verdict verb whose object is it, this, that, them, the send, the change or a PR, or else the verb is passive. A run
-# before the newest peer message (a cross-session message record) does not clear a claim after it. A test cite clears
+# verdict verb: its object is it, this, that, them, the send, the change or a PR, or it has none ("The test will
+# fail."), or the verb is passive. A run before the newest peer message (a cross-session message record) does not clear a claim after it. A test cite clears
 # only when its name is defined in its file. A read cite clears only when its path is a file the claim names, or one
 # that defines the named rule. A send that fails both the verdict claim and the owner question gets one refusal that
 # names both rules.
@@ -2548,9 +2548,11 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
 #
 # Allowed: each sentence is a false alarm if refused, because its verb acts on a pronoun or is passive, or its subject
 # is a CI or a test name. Refused: each sentence is a miss if it passes, because its modal and verb are split by an
-# adverb, the verb is missing from the list, the apostrophe is curly, or the subject is a file path. The remedy of a
-# refusal that names the read form also says what a read cite may name.
+# adverb, the verb is missing from the list, the apostrophe is curly, the verb has no object, or the subject is a file
+# path. The remedy of a refusal that names the read form also says what a read cite may name.
 # Each allowed sentence carries its own turn: the guard sentence names hooks/guard.py, and its turn ran that file.
+# The no-object controls name their file and run it. On the old code they pass because it reads them as no claim, so
+# they guard the build against over-refusing, not the run path.
 ROUND3_ALLOWED = (
     ("a passive verb, CI as the subject", "The merge will be blocked until CI is green.", ()),
     ("a passive verb, a guard as the subject", "The lane will be blocked on the guard.", ()),
@@ -2561,6 +2563,12 @@ ROUND3_ALLOWED = (
     ("should block it, the check named in a clause", "You should block it until the check is green.", ()),
     ("a file in a cite, the turn ran that file", "The guard (hooks/guard.py) will refuse it.",
      ("python3 hooks/guard.py --check",)),
+    ("the test, no object, its file named and run", "The test hooks/test_call_judge.py will fail.",
+     ("python3 hooks/test_call_judge.py",)),
+    ("the CI, no object, its file in parens and run", "The CI (lint/stale_cites.py) will fail.",
+     ("python3 lint/stale_cites.py",)),
+    ("the guard, no object, its file in parens and run", "The guard (hooks/guard.py) will refuse.",
+     ("python3 hooks/guard.py --check",)),
 )
 ROUND3_REFUSED = (
     ("an adverb between will and the verb", "the check will probably refuse it."),
@@ -2570,6 +2578,9 @@ ROUND3_REFUSED = (
     ("a file path as the subject", "lint/stale_cites.py will refuse it."),
     ("the verb flag", "the guard will flag it."),
     ("the verb fail", "the check will fail it."),
+    ("the test, a verb with no object", "The test will fail."),
+    ("the CI, a verb with no object", "The CI will fail."),
+    ("the guard, a verb with no object", "The guard will refuse."),
 )
 
 
@@ -2654,6 +2665,31 @@ def case_round4_refusal_remedy_names_the_file_outside_the_cite():
               "named in the sentence" in reason and "outside the cite" in reason, reason[:240])
 
 
+# ------------------------------------------------------------------ verdict claim: the remedy route for a run with no file
+#
+# "The guard will refuse it." is refused even when the turn ran hooks/guard.py, because the sentence names no file, and
+# a run clears only a claim that names the file it ran. The remedy's first route, "Run the check first", therefore does
+# not clear it. The remedy must say the file has to be named in the sentence. The subject word is "name the": the old
+# remedy says "names the file", which lacks it. Only that phrase is pinned, not the rest of the wording.
+from call_judge import named_files  # noqa: E402
+REMEDY_SENTENCE = "The guard will refuse it."  # names no file
+REMEDY_RUN = ("python3 hooks/guard.py --check",)  # the turn runs the file the claim means, and the sentence does not name it
+
+
+def case_remedy_for_a_run_with_no_named_file_says_to_name_the_file():
+    transcript = write_transcript("remedy-run-no-file", commands=REMEDY_RUN)
+    check("remedy run scope: the turn's Bash call ran hooks/guard.py",
+          any("hooks/guard.py" in command for command in turn_commands(transcript)), turn_commands(transcript))
+    check("remedy sentence scope: the sentence names no file", named_files(REMEDY_SENTENCE) == [],
+          named_files(REMEDY_SENTENCE))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, REMEDY_SENTENCE, transcript=transcript), answer=ALLOW)
+        check("remedy scope (%s): the send is refused although the turn ran the guard" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("remedy (%s): the refusal tells the writer to name the file" % tool,
+              "name the" in r.reason().lower(), r.reason()[:240])
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2711,7 +2747,8 @@ def main():
                  case_round3_allowed_claims_pass, case_round3_refused_claims_are_refused,
                  case_round3_refusal_remedy_says_what_a_read_may_name,
                  case_round4_quoted_and_asked_forecasts_pass, case_round4_plain_claim_without_run_is_refused,
-                 case_round4_refusal_remedy_names_the_file_outside_the_cite):
+                 case_round4_refusal_remedy_names_the_file_outside_the_cite,
+                 case_remedy_for_a_run_with_no_named_file_says_to_name_the_file):
         try:
             case()
         except Exception as exc:
