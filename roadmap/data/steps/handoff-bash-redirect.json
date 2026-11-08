@@ -1,11 +1,11 @@
 {
   "title": "An agent's shell write into its session's handoff is refused",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKz785dJ3UKyxpvQuZu",
   "why": "Guard rule agent-handoff-write (#1679) refuses an agent's Write, Edit, MultiEdit or NotebookEdit of ~/.claude/handoffs/<session_id>.md, but a Bash heredoc or redirect into that file still passes, and Claude could write that by mistake.",
-  "note": "Cited as `Fix: step:handoff-bash-redirect` in decision precompact-handoff, item 14. Done check: a red guard test where an agent's Bash redirect into the handoff is allowed, then refused. Filed from lane handoff-per-agent (session_013NEJKz785dJ3UKyxpvQuZu, PR #1679) at the coordinator's ask, 18:35 CST Nov 7.",
+  "note": "Cited as `Fix: step:handoff-bash-redirect` in decision precompact-handoff, item 14. Done check: a red guard test where an agent's Bash redirect into the handoff is allowed, then refused. Filed from lane handoff-per-agent (session_013NEJKz785dJ3UKyxpvQuZu, PR #1679) at the coordinator's ask, 18:35 CST Nov 7. Stacked on #1679 (coordinator 18:35 CST).",
   "updatedAt": "2026-11-07T18:35:00-06:00"
 }
