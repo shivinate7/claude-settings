@@ -512,6 +512,32 @@ ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft b
 ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # The branch read (lane-closes-after-records). The incident: a lane tagged for claude-settings and q_max, its branch pushed
 # to q_max alone. Its fakes name both repos (make_fake_gh's `repos`), and each repo answers for itself.
+# THE MEASURED SCOPE REPLY: the bytes gh printed for `gh api -i repos/shivinate7/q_max/pulls?per_page=100&page=1`
+# (exit 1, measured 02:04 CST Nov 8). The status block (CRLF), the JSON body, then gh's tail line that ends the output.
+# Copied byte for byte from the measurement, never built from a code constant; see the scope cases below.
+SCOPE_403_REPLY = (
+    b'HTTP/1.1 403 Forbidden\nContent-Length: 378\r\nContent-Type: application/js'
+    b'on; charset=utf-8\r\n\r\n{"message":"GitHub access to this repository is not'
+    b' enabled for this session. Use add_repo to request access. If add_repo a'
+    b'nswers that read access is already available and you need GitHub API or '
+    b'write access, call add_repo again with access:\\"push\\" to attach the rep'
+    b'ository with credentials.","documentation_url":"https://docs.anthropic.c'
+    b'om/en/docs/claude-code/github-actions"}gh: GitHub access to this reposit'
+    b'ory is not enabled for this session. Use add_repo to request access. If '
+    b'add_repo answers that read access is already available and you need GitH'
+    b'ub API or write access, call add_repo again with access:"push" to attach'
+    b' the repository with credentials. (HTTP 403)\n'
+)
+# The rate-limit 403 in gh's form, as merge.py's _RATE_API_TAIL names gh's last line. Not measured on this run. Only
+# the message differs from the scope reply, so the two can be told apart by their reasons alone.
+RATE_403_REPLY = (
+    b'HTTP/1.1 403 Forbidden\r\nContent-Length: 155\r\nContent-Type: application/j'
+    b'son; charset=utf-8\r\n\r\n{"message":"API rate limit exceeded for user ID 21'
+    b'01.","documentation_url":"https://docs.github.com/rest/overview/resource'
+    b's-in-the-rest-api#rate-limiting"}gh: API rate limit exceeded for user ID'
+    b' 2101. (HTTP 403)\n'
+)
+
 ARCH_REPO_SETTINGS = "shivinate7/claude-settings"
 ARCH_REPO_QMAX = "shivinate7/q_max"
 ARCH_BRANCH = "claude/qmax-hosted-db-gate-notes"  # ahead of main in q_max, on no pull request
@@ -533,6 +559,12 @@ ARCHINC_PULLSJUNK = os.path.join(ROOT, "archinc-pulls-junk")   # the pull reques
 ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own read, its default branch, is a server error
 ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
 ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
+
+
+ARCHSCOPE_OPEN = os.path.join(ROOT, "archscope-open")        # q_max's open pull request list is refused on scope
+ARCHSCOPE_REPO = os.path.join(ROOT, "archscope-repo")        # q_max's own read, its default branch, is refused on scope
+ARCHSCOPE_COMPARE = os.path.join(ROOT, "archscope-compare")  # the branch's compare in q_max is refused on scope
+ARCHRATE_OPEN = os.path.join(ROOT, "archrate-open")          # q_max's open pull request list is a rate-limit 403
 
 
 def arch_pair(qmax=None, settings=None):
@@ -1006,6 +1038,18 @@ def api_error(code, message):
     sys.exit(1)
 
 
+def verbatim_reply(kind, flags):
+    """Print the measured reply of one kind (reply-<kind>.bin beside this script), then exit 1. gh api -i prints the
+    status block too. Without -i gh prints the body and its tail line only, so a call without -i gets just those."""
+    data = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reply-%s.bin" % kind), "rb").read()
+    if "-i" not in flags:
+        data = data.split(b"\r\n\r\n", 1)[1]
+    sys.stdout.flush()
+    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.flush()
+    sys.exit(1)
+
+
 def listing(items, key, fields, flags, top=None, rel=""):
     """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
     With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
@@ -1074,6 +1118,8 @@ else:
     if state.get("repo_mode") and re.fullmatch(r"repos/[^/{}]+/[^/{}]+", path):  # the repo's own read: its default branch
         if state["repo_error"] == "server":
             api_error(500, "repo read broke")
+        if state["repo_error"] in ("scope", "rate"):
+            verbatim_reply(state["repo_error"], flags)
         print(json.dumps({"full_name": path[len("repos/"):], "default_branch": state["default_branch"]}))
     elif re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
@@ -1081,6 +1127,8 @@ else:
         if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
             if state["pulls_error"][1] == "server":
                 api_error(500, "pulls read broke")
+            if state["pulls_error"][1] in ("scope", "rate"):
+                verbatim_reply(state["pulls_error"][1], flags)
             print("<html>a page that is not JSON</html>")
             sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
@@ -1119,6 +1167,8 @@ else:
         status = state.get("compares", {}).get(rel[len("compare/"):], "diverged")
         if status == "server":  # the read fails, as a server error: the guard cannot tell whether the commits landed
             api_error(500, "compare read broke")
+        if status in ("scope", "rate"):  # the call fails with that kind's measured reply (see verbatim_reply)
+            verbatim_reply(status, flags)
         if status == "missing":  # the branch is not in this repo: GitHub answers 404
             api_error(404, "Not Found")
         if status == "network":  # no HTTP status at all: a refused connection
@@ -1132,7 +1182,7 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, repos=None):
+                 count_file=None, compares=None, repos=None, replies=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
@@ -1142,7 +1192,10 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
     connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
     own read names; main when unset), `repo_error` ("server": its own read fails) and `pulls_error`
-    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
+    ([state, "server", "junk", "scope" or "rate"]: a list read of that state fails; "scope" and "rate" answer that
+    kind's measured reply), `repo_error` also takes "scope" or "rate", and a `compares` status takes "scope" or "rate".
+    `replies` maps a kind ("scope", "rate") to the bytes gh printed for it: each is written beside the fake as
+    reply-<kind>.bin, and a call answered with that kind prints it (the status block too, with -i) and exits 1. A repo's answers replace the
     top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -1184,6 +1237,9 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     fixture, not a fact to route around.
     """
     os.makedirs(folder, exist_ok=True)
+    for kind, data in (replies or {}).items():  # the measured bytes a call of that kind prints: see verbatim_reply
+        with open(os.path.join(folder, "reply-%s.bin" % kind), "wb") as handle:
+            handle.write(data)
     # The answers live in a state file, and `ghfake.py` serves them the way the real tool does: `pulls/<n>`
     # the pull request, `pulls` the open ones, `commits/<sha>/check-runs` and `commits/<sha>/status` the
     # checks of its head, `run list` the workflow runs. No argument at all answers the base alone, which is
@@ -1270,6 +1326,23 @@ def _verify_fake_gh_delay(ghdir, delay):
             "in %.3fs, under its %ds delay (PATH=%r) -- the delay tool resolved to nothing "
             "real on this PATH" % (ghdir, elapsed, delay, env["PATH"])
         )
+
+
+def _verify_reply_fake(folder, argv, expected):
+    """Fail fixture setup unless the fake in `folder` answers `argv` with exactly `expected` bytes, and exits 1.
+
+    A fake that answered "boom" by mistake would still deny the archive, with the read reason, so a reply case
+    could go red for a reason that proves nothing. This runs the fake with the argv the guard sends, under the PATH the
+    guard gets (`folder`, then only the Python interpreter's folder: see PY_PATH), and compares the bytes."""
+    env = dict(os.environ)
+    env["PATH"] = folder + os.pathsep + os.path.dirname(sys.executable)
+    program = shutil.which("gh", path=env["PATH"])
+    if not program:
+        sys.exit("fixture check failed in _verify_reply_fake: no 'gh' fake resolvable in %r" % folder)
+    result = subprocess.run([program, *argv], capture_output=True, env=env, timeout=60)
+    if result.stdout != expected or result.returncode != 1:
+        sys.exit("fixture check failed in _verify_reply_fake: the fake in %r answered %r with exit %d and %r, "
+                 "not the measured reply" % (folder, argv, result.returncode, result.stdout[:80]))
 
 
 UNDERTESTS = os.path.join(ROOT, "tests", "clone")   # a repo whose own folder sits under `tests`
@@ -1466,6 +1539,24 @@ def build_fixtures():
                                                              "compares": {"main..." + ARCH_BRANCH: "behind",
                                                                           "trunk..." + ARCH_BRANCH: "ahead"}}))
     make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
+    # The scope and rate-limit replies, on q_max's own reads (arch_pair: claude-settings stays clean). Each fake answers
+    # the reads of one kind with that kind's measured reply; see SCOPE_403_REPLY and RATE_403_REPLY.
+    make_fake_gh(ARCHSCOPE_OPEN, "main", repos=arch_pair(qmax={"pulls_error": ["open", "scope"]}),
+                 replies={"scope": SCOPE_403_REPLY})
+    make_fake_gh(ARCHSCOPE_REPO, "main", repos=arch_pair(qmax={"repo_error": "scope"}), replies={"scope": SCOPE_403_REPLY})
+    make_fake_gh(ARCHSCOPE_COMPARE, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "scope"}}),
+                 replies={"scope": SCOPE_403_REPLY})
+    make_fake_gh(ARCHRATE_OPEN, "main", repos=arch_pair(qmax={"pulls_error": ["open", "rate"]}), replies={"rate": RATE_403_REPLY})
+    # Each fake's answer is checked once, with the argv the guard sends: the -i list read, a bare repo read, a compare read.
+    # The bare and compare reads send no -i, so gh prints no status block for them: their bytes are the body and tail.
+    _verify_reply_fake(ARCHSCOPE_OPEN, ["api", "repos/" + ARCH_REPO_QMAX + "/pulls", "-X", "GET", "-f", "state=open",
+                                        "-f", "per_page=100", "-f", "page=1", "-i"], SCOPE_403_REPLY)
+    _verify_reply_fake(ARCHSCOPE_REPO, ["api", "repos/" + ARCH_REPO_QMAX, "-X", "GET"],
+                       SCOPE_403_REPLY.split(b"\r\n\r\n", 1)[1])
+    _verify_reply_fake(ARCHSCOPE_COMPARE, ["api", "repos/" + ARCH_REPO_QMAX + "/compare/main..." + ARCH_BRANCH, "-X", "GET"],
+                       SCOPE_403_REPLY.split(b"\r\n\r\n", 1)[1])
+    _verify_reply_fake(ARCHRATE_OPEN, ["api", "repos/" + ARCH_REPO_QMAX + "/pulls", "-X", "GET", "-f", "state=open",
+                                       "-f", "per_page=100", "-f", "page=1", "-i"], RATE_403_REPLY)
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -10185,6 +10276,27 @@ archive_refuse("a lane whose branch lives only in a repo its record names throug
 # A compare that reads diverged is a branch off main that is not in it: ahead of main for the rule, so no pull request refuses.
 archive_refuse("a branch whose compare in q_max is diverged, on no pull request: refused",
                role_path("archive-inc"), fake_gh_path(ARCHINC_DIVERGED), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+
+# The scope read. A 403 that says the repo is not in this session's GitHub scope is not a transient failure: a retry
+# can never pass it. The refusal names that cause and routes the archive to the batch runner whose session holds the
+# repo. It never says retry, and it never names the tool. Every case in this block is a deny.
+ARCHIVE_SCOPE_PIN = "not in this session's GitHub scope"  # the cause the scope refusal names
+ARCHIVE_BATCH_PIN = "batch runner"  # the route: the batch runner whose session holds the repo
+ARCHIVE_SCOPE_LACKS = ("retry", "Retry", "could not be read")  # a scope refusal has no retry and no read-failure wording
+archive_refuse("a lane whose q_max open pull request list is refused on scope: refused, the reason names the scope and routes to the batch runner",
+               role_path("archive-inc"), fake_gh_path(ARCHSCOPE_OPEN), carries=(ARCHIVE_SCOPE_PIN, ARCHIVE_BATCH_PIN),
+               lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose q_max repo read is refused on scope: refused, with the same scope reason as the open list",
+               role_path("archive-inc"), fake_gh_path(ARCHSCOPE_REPO), carries=(ARCHIVE_SCOPE_PIN, ARCHIVE_BATCH_PIN),
+               lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose branch compare in q_max is refused on scope: refused with the same scope reason, not a skipped 404",
+               role_path("archive-inc"), fake_gh_path(ARCHSCOPE_COMPARE), carries=(ARCHIVE_SCOPE_PIN, ARCHIVE_BATCH_PIN),
+               lacks=ARCHIVE_SCOPE_LACKS)
+# Controls: the transient failure and gh's rate-limit 403 keep the read reason and its retry. Neither names the scope.
+archive_refuse("a lane whose open pull requests cannot be read (a transient failure) keeps the read reason and its retry",
+               role_path("archive-lane"), fake_gh_path(GHBROKEN), carries=(ARCHIVE_READ_PIN, "Retry"), lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose q_max open pull request list is rate-limited (gh's 403 rate-limit form) keeps the read reason and its retry",
+               role_path("archive-inc"), fake_gh_path(ARCHRATE_OPEN), carries=(ARCHIVE_READ_PIN, "Retry"), lacks=ARCHIVE_SCOPE_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
