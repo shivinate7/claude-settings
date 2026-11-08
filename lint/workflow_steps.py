@@ -121,7 +121,7 @@ def run_body(step):
         m = re.match(rf"^(?:{re.escape(head)}| {{{keys}}})run:[ \t]*(.*?)[ \t]*$", line)
         if not m:
             continue
-        text = block_scalar(drop_comment(m.group(1)), lines[i + 1:], keys + 2)   # a comment after the header is no script
+        text = block_scalar(drop_comment(m.group(1)), lines[i + 1:], keys + 2)   # a comment after the header is no script; the floor follows the step indent
         return m.group(1) if text is None else text
     return None
 
