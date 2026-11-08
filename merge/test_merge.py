@@ -14145,6 +14145,56 @@ class ReviewStampSince(unittest.TestCase):
             else:
                 self.fail(f"review_stamp_since read a shallow clone as full history and returned {got!r} instead of stopping")
 
+    def shallow_origin(self, src, depth):
+        """-> a clone of `src` at `depth`, made from a local bare origin that holds the fixture branch, pushed by path. The clone's origin/fixture is the shallow one."""
+        parent = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, parent, True)
+        bare = os.path.join(parent, "origin.git")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        subprocess.run(["git", "-C", bare, "symbolic-ref", "HEAD", "refs/heads/fixture"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", src, "push", "-q", bare, "fixture"], check=True, capture_output=True)
+        clone = os.path.join(parent, "clone")
+        subprocess.run(["git", "clone", "-q", "--depth", str(depth), "file://" + bare, clone], check=True, capture_output=True)
+        return clone
+
+    def test_a_shallow_clone_whose_window_holds_the_parent_of_the_salt_commit_returns_the_cutover(self):
+        # The salt commit is the last commit. A depth-2 clone keeps it and its parent and cuts the parent's parents, so the boundary is the
+        # parent, not the salt commit. The first salt commit is known and is not the boundary, so the read returns its time and does not stop.
+        clone = self.shallow_origin(self.repo(salt_at=3, branch="fixture"), depth=2)
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD:merge/merge.py"), "the salt commit is not HEAD")
+        self.assertNotIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the parent of the salt commit already holds the salt")
+        self.assertEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~1^{commit}"], capture_output=True).returncode, 0,
+                         "the clone lacks the parent of the salt commit")
+        self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
+                            "the clone holds the grandparent, so the boundary is not the parent of the salt commit")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            try:
+                got = review_fn(self, "review_stamp_since")(clone, "fixture")
+            except merge.Stop as stop:
+                self.fail("review_stamp_since stopped on a shallow clone whose boundary is not the salt commit:\n" + str(stop))
+        self.assertEqual(got, "2026-10-22T09:00:00Z",
+                         "the window holds the salt commit and its parent, and the cutover is not the salt commit's committer time")
+
+    def test_a_linked_worktree_of_a_shallow_clone_whose_salt_commit_is_the_boundary_stops_naming_the_shallow_history(self):
+        # A linked worktree's `.git` is a file that names the clone's git dir, and the shallow file lives in that dir's common dir. The read
+        # must find that file and stop, as the clone does.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
+        worktree = clone + "-worktree"
+        sh(clone, "git", "worktree", "add", "-q", "--detach", worktree, "origin/fixture")
+        self.assertTrue(os.path.isfile(os.path.join(worktree, ".git")), "the linked worktree's .git is not a file")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            with self.assertRaises(merge.Stop):  # the baseline: the clone itself stops on its boundary
+                review_fn(self, "review_stamp_since")(clone, "fixture")
+            try:
+                got = review_fn(self, "review_stamp_since")(worktree, "fixture")
+            except merge.Stop as stop:
+                self.assertIn("shallow", str(stop), "the linked worktree stops, but the Stop does not name the shallow history:\n" + str(stop))
+            else:
+                self.fail("review_stamp_since read a linked worktree of a shallow clone as full history and returned %r instead of stopping" % (got,))
+
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
         env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
