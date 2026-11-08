@@ -103,6 +103,7 @@ FAMILIES = {
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "merge": "merge into main, draft pull requests and the merge guard",
+    "review-record": "a comment post whose body holds the review-record marker: refused unless it parses as a record for the pull request's live head",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -1121,11 +1122,13 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, head_sha=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `head_sha`, when given, is the sha the pull request's head reports. Without it the head reports the fixed placeholder sha that the state's `pr` record starts with.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1189,6 +1192,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
     }
+    if head_sha:
+        state["pr"]["head"]["sha"] = head_sha
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")
@@ -10949,6 +10954,289 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
             role_path("lane"))
 
 
+# =========================================================================== 5f. a review record posted as a comment
+FAMILY = "review-record"
+#
+# Decision pr-review-record. A comment whose body holds the review-record marker is refused unless the body parses as a
+# record (merge/merge.py parse_review), its PR number is the target, and its Head is the PR's live head. The live head is
+# one gh read per marked post. A post with no marker makes no read. The bodies come from the form's one home
+# (merge/merge.py review_body), so a case cannot drift from the form the merge tool parses.
+REVIEW_RULE = "pr-review-record"
+MCP_COMMENT = "mcp__github__add_issue_comment"
+REVIEW_PR = 12
+REVIEW_LIVE = "3a7c9e21" * 5                  # the PR's live head, in every fake below
+REVIEW_TAIL = REVIEW_LIVE[:32] + "0badbeef"   # the live head with a wrong tail, the way a hand-typed sha goes wrong
+REVIEW_OLD = "5e0f1a2b" * 5                   # the head before a push
+REVIEW_FIX_FROM = "9c4d7e10" * 5              # the reviewed head a fix check starts from; it differs from the record's Head
+REVIEW_RENDER = "merge %d --review-record --head %s" % (REVIEW_PR, REVIEW_LIVE)  # the render command a head refusal prints
+REVIEW_CALLS = "review-calls.log"             # the counted tool's log, read through gh_calls_taken
+GHRECORD = os.path.join(ROOT, "ghrecord")                # the live head, for pull request 12 of any repo
+GHRECORDREPO = os.path.join(ROOT, "ghrecordrepo")        # the same, and a read of any repo but y/x breaks
+GHRECORDBROKEN = os.path.join(ROOT, "ghrecordbroken")    # every call fails, so the live head cannot be read
+GHRECORDCOUNT = os.path.join(ROOT, "ghrecordcount")      # the same as GHRECORD, and every call is logged
+GHRECORDDIR = os.path.join(ROOT, "record-bodies")        # the body files the Bash forms name
+GHRECORDBRANCH = os.path.join(ROOT, "ghrecordbranch")    # a checkout on `feat`, the head branch of the fake's pull request 12
+PR_CMD = "gh pr comment %d" % REVIEW_PR
+API_CMD = "gh api repos/y/x/issues/%d/comments" % REVIEW_PR
+
+_REVIEW_FORM = []
+
+
+def review_form():
+    """merge/merge.py, loaded by path: the one home of the record's form (REVIEW_MARKER, review_body, parse_review)."""
+    if not _REVIEW_FORM:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("merge_under_test", os.path.join(HERE, "..", "merge", "merge.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _REVIEW_FORM.append(module)
+    return _REVIEW_FORM[0]
+
+
+def review_record(n=REVIEW_PR, head=REVIEW_LIVE, rounds=None, fix=None, net="not owed", guard="yes", footer=False):
+    """A record body, rendered by review_body. `footer` adds the attribution footer a posted comment carries, after a `---` line."""
+    rounds = rounds or [(1, "reviewer", "claude-sonnet-5-5", "PASS")]
+    text = review_form().review_body(n, head, "normal", guard, rounds, net, fix=fix)
+    return text + "---\nGenerated with Claude Code\n" if footer else text
+
+
+REVIEW_MARKER_TEXT = review_form().REVIEW_MARKER
+# A comment that names the marker in prose, below its first line. The marker is a record only as the exact first line.
+REVIEW_PROSE = "Lane note.\nThe record starts with %s on its first line, see the decision." % REVIEW_MARKER_TEXT
+# The full size of the form: three rounds and a Fix check, with the footer a posted comment carries.
+REVIEW_FULL = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5", "FAIL"), (1, "design-reviewer", "claude-opus-5-5", "PASS"),
+                                    (2, "reviewer", "claude-sonnet-5-5", "PASS"), (3, "reviewer", "claude-sonnet-5-5", "PASS")],
+                            fix=(REVIEW_FIX_FROM, "reviewer", "claude-sonnet-5-5", "PASS"), net="positive", footer=True)
+REVIEW_NO_HEAD = "\n".join(line for line in review_record().splitlines() if not line.startswith("Head:")) + "\n"
+REVIEW_SHORT_HEAD = review_record().replace("Head: " + REVIEW_LIVE, "Head: " + REVIEW_LIVE[:39])
+REVIEW_SKIPPED_ROUND = review_record(rounds=[(1, "reviewer", "claude-sonnet-5-5", "PASS"), (3, "reviewer", "claude-sonnet-5-5", "PASS")])
+
+
+def build_record_fixtures():
+    """The pull request tools the record cases name, and the body files the Bash forms read. One folder each."""
+    make_fake_gh(GHRECORD, "main", need=["12"], head_sha=REVIEW_LIVE)
+    make_fake_gh(GHRECORDREPO, "main", need=["y/x", "12"], head_sha=REVIEW_LIVE)
+    make_fake_gh(GHRECORDBROKEN, "main", broken=True, head_sha=REVIEW_LIVE)
+    write(os.path.join(GHRECORDDIR, "ok.md"), review_record())
+    write(os.path.join(GHRECORDDIR, "wrong_tail.md"), review_record(head=REVIEW_TAIL))
+    write(os.path.join(GHRECORDDIR, "stale.md"), review_record(head=REVIEW_OLD))
+    make_repo(GHRECORDBRANCH, {"lane.txt": "lane\n"})
+    switched = run_vcs(GHRECORDBRANCH, "checkout", "-q", "-b", "feat")
+    if switched.returncode != 0:
+        sys.exit("fixture setup failed in build_record_fixtures: checking out feat in %r failed. stderr: %s"
+                 % (GHRECORDBRANCH, switched.stderr.strip()))
+
+
+lazy_fixture([GHRECORD, GHRECORDREPO, GHRECORDBROKEN, GHRECORDDIR, GHRECORDBRANCH], build_record_fixtures)
+
+
+def mcp_input(body, number=REVIEW_PR):
+    """The input of one call of the comment tool on pull request `number` of y/x."""
+    return {"owner": "y", "repo": "x", "issue_number": number, "body": body}
+
+
+def mcp_post(name, body, expected, rule=None, carries=(), number=REVIEW_PR):
+    """A case for one call of the comment tool. It reads the live head from the repo the input names (GHRECORDREPO)."""
+    add(name, expected, rule=rule, tool=MCP_COMMENT, cwd=NOGIT, env_path=GHRECORDREPO + os.pathsep + PY_PATH,
+        carries=carries, **mcp_input(body, number))
+
+
+def bash_post(name, command, expected, rule=None, carries=()):
+    """A case for one Bash command that posts a comment on pull request 12. Its live head is read from the cwd's repo."""
+    sh(name, command, expected, rule=rule, cwd=NOGIT, env_path=GHRECORD + os.pathsep + PY_PATH, carries=carries)
+
+
+def inline_forms(body):
+    """The Bash forms that post `body` as text, one command each. The body is single-quoted, so its # and <!-- are text."""
+    quoted = "'%s'" % body
+    return [("gh pr comment --body", "%s --body %s" % (PR_CMD, quoted)),
+            ("gh pr comment -b", "%s -b %s" % (PR_CMD, quoted)),
+            ("gh api -f body=", "%s -f 'body=%s'" % (API_CMD, body)),
+            ("gh api --field body=", "%s --field 'body=%s'" % (API_CMD, body)),
+            ("gh api --raw-field body=", "%s --raw-field 'body=%s'" % (API_CMD, body))]
+
+
+def file_forms(path):
+    """The Bash forms that post the body in the file at `path`."""
+    return [("gh pr comment --body-file", "%s --body-file %s" % (PR_CMD, path)),
+            ("gh pr comment -F", "%s -F %s" % (PR_CMD, path)),
+            ("gh api -F body=@", "%s -F body=@%s" % (API_CMD, path))]
+
+
+def all_forms(body, path):
+    """Every Bash form that posts a body: the text forms carry `body`, and the file forms read `path`, which holds the same body."""
+    return inline_forms(body) + file_forms(path)
+
+
+# A record for the live head is allowed, whatever its shape, in the MCP form and in every Bash form.
+mcp_post("review-record: a record at the live head is allowed, MCP add_issue_comment", review_record(), "allow")
+mcp_post("review-record: a full-size record with its footer is allowed, MCP add_issue_comment", REVIEW_FULL, "allow")
+for _label, _command in all_forms(review_record(), os.path.join(GHRECORDDIR, "ok.md")):
+    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+
+# A comment with no marker is not judged, so it is allowed, and it makes no gh read (checked below).
+mcp_post("review-record: a comment with no marker is allowed, MCP add_issue_comment", "Round 1 ran. No review record yet.", "allow")
+mcp_post("review-record: a comment that names the record without its marker is allowed",
+         "review-record is the form, see the decision.", "allow")
+mcp_post("review-record: an empty comment is allowed, MCP add_issue_comment", "", "allow")
+bash_post("review-record: a lone quote in a comment with no marker is allowed", PR_CMD + " --body \"Don't merge yet\"", "allow")
+
+# A record for a head other than the live one is refused. The refusal prints the render command for the live head.
+mcp_post("review-record: a wrong head tail is refused, MCP add_issue_comment", review_record(head=REVIEW_TAIL), "deny",
+         rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+for _label, _command in all_forms(review_record(head=REVIEW_TAIL), os.path.join(GHRECORDDIR, "wrong_tail.md")):
+    bash_post("review-record: a wrong head tail is refused, %s" % _label, _command, "deny",
+              rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+mcp_post("review-record: a stale record is refused, MCP add_issue_comment", review_record(head=REVIEW_OLD), "deny",
+         rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+bash_post("review-record: a stale record is refused, gh pr comment --body-file",
+          "%s --body-file %s" % (PR_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+# A body the shell builds from a file is judged by that file: a command substitution reads it, and so does a piped cat.
+bash_post("review-record: a stale record read by a command substitution is refused, gh pr comment --body $(cat)",
+          "%s --body \"$(cat %s)\"" % (PR_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+bash_post("review-record: a stale record piped in is refused, cat | gh pr comment -F -",
+          "cat %s | %s -F -" % (os.path.join(GHRECORDDIR, "stale.md"), PR_CMD), "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,))
+# A piped body the guard cannot read at all is allowed, with a note (checked below). Its command names no file.
+bash_post("review-record: a plain stdin body the guard cannot read is allowed, some_cmd | gh pr comment -F -",
+          "some_cmd | %s -F -" % PR_CMD, "allow")
+
+# A record for another pull request is refused.
+mcp_post("review-record: a record for another pull request is refused, MCP add_issue_comment", review_record(n=REVIEW_PR + 1),
+         "deny", rule=REVIEW_RULE, number=REVIEW_PR)
+bash_post("review-record: a record for another pull request is refused, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, review_record(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
+bash_post("review-record: a record for another pull request is refused, gh api -f body=",
+          "%s -f 'body=%s'" % (API_CMD, review_record(n=REVIEW_PR + 1)), "deny", rule=REVIEW_RULE)
+
+# A body that holds the marker but does not parse is refused, from its empty state to its near misses.
+mcp_post("review-record: a marker with no record is refused, MCP add_issue_comment", REVIEW_MARKER_TEXT, "deny", rule=REVIEW_RULE)
+# A body is a record only when its first line is the marker (merge/merge.py parse_review). Prose that names it lower down is a comment.
+mcp_post("review-record: a marker in prose below the first line is allowed, MCP add_issue_comment", REVIEW_PROSE, "allow")
+bash_post("review-record: a marker in prose below the first line is allowed, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, REVIEW_PROSE), "allow")
+mcp_post("review-record: a record with a round skipped is refused, MCP add_issue_comment", REVIEW_SKIPPED_ROUND,
+         "deny", rule=REVIEW_RULE)
+bash_post("review-record: a record with no Head line is refused, gh pr comment -b", "%s -b '%s'" % (PR_CMD, REVIEW_NO_HEAD),
+          "deny", rule=REVIEW_RULE)
+bash_post("review-record: a record with a 39-digit Head is refused, gh api -f body=",
+          "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE)
+
+
+def review_counted_fake():
+    """The counted pull request tool, with its log emptied. Each call it answers is logged."""
+    make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE,
+                 count_file=os.path.join(GHRECORDCOUNT, REVIEW_CALLS))
+    gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
+
+
+def review_case(tool, tool_input, env_path, cwd=NOGIT):
+    """The case dict decide() reads, for one post judged with the PATH `env_path`, from the folder `cwd` (no repo by default)."""
+    return {"raw": None, "tool": tool, "cwd": cwd, "session": None, "env_path": env_path, "config": None,
+            "agent_id": None, "agent_type": None, "temp": None, "load": None, "env": None, "transcript": None,
+            "tool_input": tool_input}
+
+
+def review_counter_works():
+    """-> (ok, note). The counted tool logs one call made to it directly. Without this, an empty log proves no zero reads."""
+    review_counted_fake()
+    env = dict(os.environ, PATH=fake_gh_path(GHRECORDCOUNT))
+    program = shutil.which("gh", path=env["PATH"])
+    if not program:
+        return False, "the counted pull request tool is not on PATH, so no call can be counted"
+    subprocess.run([program, "api", "repos/y/x/pulls/%d" % REVIEW_PR], capture_output=True, text=True, env=env, timeout=60)
+    logged = gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
+    if len(logged) != 1:
+        return False, "the counter logged %d call(s) for one direct call, so an empty log proves no zero reads" % len(logged)
+    return True, "the counter logs a direct call"
+
+
+def review_reads(tool, tool_input, want, reads, cwd=NOGIT, path_dirs=()):
+    """A checker for one post: the guard says `want`, and the post makes `reads` gh calls, the one live-head read. `cwd` is the
+    folder the post runs in. `path_dirs` are folders the guard's PATH adds after the fake gh's, such as git's for a post with no number."""
+    def check():
+        if reads == 0:
+            ok, note = review_counter_works()
+            if not ok:
+                return False, note
+        review_counted_fake()
+        env_path = os.pathsep.join((GHRECORDCOUNT,) + tuple(path_dirs) + (PY_PATH,))
+        decision, reason = decide(review_case(tool, tool_input, env_path, cwd))
+        calls = gh_calls_taken(GHRECORDCOUNT, REVIEW_CALLS)
+        if decision != want:
+            return False, "want %s, got %s: %s" % (want, decision, reason[:90])
+        if len(calls) != reads:
+            return False, "%d gh call(s) wanted for the live head, %d seen: %r" % (reads, len(calls), calls)
+        return True, "%s, with %d gh call(s)" % (want, reads)
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+def review_note(tool, tool_input, env_path):
+    """A checker for one post the guard must allow, with a note on stderr that names the review record."""
+    def check():
+        decision, reason = decide(review_case(tool, tool_input, env_path))
+        note = LAST_RUN.get("stderr", "").strip()
+        if decision != "allow":
+            return False, "want allow, got %s: %s" % (decision, reason[:90])
+        if "review" not in note.lower():
+            return False, "allowed, but no note on stderr names the review record: %r" % note[:120]
+        return True, "allowed, with a note on stderr"
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+def review_fixtures_check():
+    """The bodies the cases post parse as their names say, so each refusal above turns on its head, its PR number or its shape."""
+    form = review_form()
+    good = form.parse_review(review_record())
+    if not good or good["head"] != REVIEW_LIVE or good["n"] != REVIEW_PR:
+        return False, "the ok record does not parse for pull request %d at the live head: %r" % (REVIEW_PR, good)
+    if (form.parse_review(review_record(head=REVIEW_TAIL)) or {}).get("head") != REVIEW_TAIL:
+        return False, "the wrong-tail record does not parse with its wrong head"
+    if (form.parse_review(review_record(n=REVIEW_PR + 1)) or {}).get("n") != REVIEW_PR + 1:
+        return False, "the record for another pull request does not parse as pull request %d" % (REVIEW_PR + 1)
+    if form.parse_review(REVIEW_MARKER_TEXT) is not None:
+        return False, "a marker-only body parses as a record"
+    if form.parse_review(REVIEW_SKIPPED_ROUND) is not None:
+        return False, "a record with a skipped round parses as a record"
+    full = form.parse_review(REVIEW_FULL)
+    if not full or full["fix"] is None or len(full["rounds"]) != 4:
+        return False, "the full-size record does not parse with its rounds and its Fix check"
+    return True, "the bodies parse as their names say"
+
+
+FIXTURELESS_CHECKS.add(review_fixtures_check)
+REVIEW_LOG_CHECKS = []  # (label, check) pairs, appended to LOG_CHECKS_EXTRA where that list is defined (below the archive section)
+REVIEW_LOG_CHECKS.append(("review-record:the bodies the cases post parse as their names say", review_fixtures_check))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, MCP add_issue_comment",
+                         review_reads(MCP_COMMENT, mcp_input(review_record()), "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh pr comment --body",
+                         review_reads("Bash", {"command": "%s --body '%s'" % (PR_CMD, review_record())}, "allow", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, MCP add_issue_comment",
+                         review_reads(MCP_COMMENT, mcp_input(REVIEW_PROSE), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line makes no gh read, gh pr comment --body",
+                         review_reads("Bash", {"command": "%s --body '%s'" % (PR_CMD, REVIEW_PROSE)}, "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a post with no pull request number makes two gh reads, gh pr comment --body",
+                         review_reads("Bash", {"command": "gh pr comment --body '%s'" % review_record()}, "allow", 2,
+                                      cwd=GHRECORDBRANCH, path_dirs=(GIT_PATH,))))
+REVIEW_LOG_CHECKS.append(("review-record:a post that names a branch makes two gh reads, gh pr comment --body",
+                         review_reads("Bash", {"command": "gh pr comment feat --body '%s'" % review_record()}, "allow", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked post with a wrong head tail makes one gh read, and is refused",
+                         review_reads(MCP_COMMENT, mcp_input(review_record(head=REVIEW_TAIL)), "deny", 1)))
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker makes no gh read",
+                         review_reads(MCP_COMMENT, mcp_input("Round 1 ran. No review record yet."), "allow", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a live-head read that fails allows the post and notes it on stderr",
+                         review_note(MCP_COMMENT, mcp_input(review_record()), GHRECORDBROKEN + os.pathsep + PY_PATH)))
+REVIEW_LOG_CHECKS.append(("review-record:an unreadable body file allows the post and notes it on stderr",
+                         review_note("Bash", {"command": "%s --body-file %s" % (PR_CMD, os.path.join(GHRECORDDIR, "missing.md"))},
+                                     GHRECORD + os.pathsep + PY_PATH)))
+REVIEW_LOG_CHECKS.append(("review-record:a plain stdin body the guard cannot read is allowed and noted on stderr, gh pr comment -F -",
+                         review_note("Bash", {"command": "some_cmd | %s -F -" % PR_CMD}, GHRECORD + os.pathsep + PY_PATH)))
+# The update tool's input names a comment, not a pull request. Finding the pull request is a second read, and the rule allows one.
+skip_case("review-record: mcp__github__update_issue_comment is not judged",
+          "its input names a comment, not a pull request, and finding the pull request costs a second read per marked update")
+
+
 # =========================================================================== 5g. archive of a lane
 FAMILY = "lane-closes-after-records"
 #
@@ -15346,6 +15634,11 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The review-record log checks (section 5f) are appended here, where LOG_CHECKS_EXTRA exists. Their family is set by hand,
+# so the shared FAMILY that the sections below read is left as it was.
+for _label, _check in REVIEW_LOG_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "review-record"
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
 # registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
 for _constant in REMEDY_CONSTANTS:
@@ -15537,9 +15830,10 @@ def archive_counted_gh():
     return folder
 
 
-def gh_calls_taken(folder):
-    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
-    path = os.path.join(folder, ARCHIVE_CALLS)
+def gh_calls_taken(folder, log=ARCHIVE_CALLS):
+    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it.
+    `log` names the file when the fake was given another count_file."""
+    path = os.path.join(folder, log)
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as handle:
@@ -19373,6 +19667,10 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # --------------------------------------------------------------------------- the runner
 
 
+# The stderr of the last guard run decide() made. A case that asserts a note on stderr reads it here.
+LAST_RUN = {}
+
+
 def decide(case):
     """Return (decision, reason) for one case."""
     materialize_for(case)
@@ -19451,6 +19749,7 @@ def decide(case):
         if not limit:
             raise
         return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
+    LAST_RUN["stderr"] = result.stderr
     elapsed = time.monotonic() - started
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])

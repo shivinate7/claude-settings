@@ -885,7 +885,7 @@ class Host:
         found = {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            if m and body.splitlines()[:1] == [REVIEW_MARKER]:
+            if m and review_marked(body):
                 found.setdefault(int(m.group(1)), []).append(body)
         return found
 
@@ -3221,6 +3221,11 @@ def review_body(n, head, kind, guard, rounds, net, fix=None):
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+
+def review_marked(text):
+    """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
+    return text.splitlines()[:1] == [REVIEW_MARKER]
+
 
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is

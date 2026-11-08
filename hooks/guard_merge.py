@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -109,6 +110,29 @@ MERGE_READ_TIMEOUT = 25
 MERGE_TOOL_REL = os.path.join("merge", "merge.py")
 
 
+def pr_call_target(args, value_flags):
+    """Return (selector, repo) from the arguments of a `gh pr <verb>` call: the first positional word ('' for the
+    current branch's pull request) and the repo flag. `value_flags` are the flags of that verb that take a value."""
+    selector, repo, index = "", "", 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        if arg in ("-R", "--repo"):
+            repo = args[index] if index < len(args) else ""
+            index += 1
+        elif arg.startswith("--repo="):
+            repo = arg[len("--repo="):]
+        elif arg.startswith("-R") and not arg.startswith("--"):
+            repo = arg[2:].lstrip("=")
+        elif arg in value_flags:
+            index += 1
+        elif arg.startswith("-"):
+            continue
+        elif not selector:
+            selector = arg
+    return selector, repo
+
+
 def merge_call_of(segment: str):
     """Return (selector, repo) for a `gh pr merge` segment, else None.
 
@@ -119,26 +143,10 @@ def merge_call_of(segment: str):
     rest = gh_call_of(segment)
     if rest is None or rest[:2] != ["pr", "merge"]:
         return None
-    selector, repo = "", ""
     args = rest[2:]
     if "-h" in args or "--help" in args:
         return None   # help merges nothing
-    index = 0
-    while index < len(args):
-        arg = args[index]
-        index += 1
-        if arg in ("-R", "--repo"):
-            repo = args[index] if index < len(args) else ""
-            index += 1
-        elif arg.startswith("--repo="):
-            repo = arg[len("--repo="):]
-        elif arg in MERGE_VALUE_FLAGS:
-            index += 1
-        elif arg.startswith("-"):
-            continue
-        elif not selector:
-            selector = arg
-    return selector, repo
+    return pr_call_target(args, MERGE_VALUE_FLAGS)
 
 
 _MERGE_MODULE = []
@@ -315,6 +323,72 @@ def undrafted_pr_create(segment: str) -> bool:
         elif arg.startswith(("--draft=", "-d=")):
             draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
     return not draft
+
+
+# ---- a review record posted as a comment (rule pr-review-record)
+#
+# A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form), name
+# the pull request it is posted on, and name that pull request's live head. A hand-typed head is how a record goes stale the
+# moment it is posted. The remedy is the render, which fills the live head itself.
+# Cost: one pull request read per marked post (`Host.pr`), none for a post with no marker. A read that fails allows the post
+# with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
+REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
+REVIEW_RENDER = "merge %s --review-record --head %s --kind <%s> --guard <%s> --round <N:ROLE:MODEL:VERDICT>"
+REVIEW_REASON = (
+    "Rule (pr-review-record): %s. A review record is rendered by the merge tool for the live head, never typed by hand. "
+    "Remedy: run `%s` and post its output unchanged. "
+    "(decision pr-review-record, a review record names the head it reviewed)"
+)
+
+
+def review_note(why: str) -> None:
+    """The one-line stderr note for a marked post the guard could not judge. The post is allowed."""
+    sys.stderr.write("review-record: not checked, " + why + "\n")
+
+
+def review_record_hit(bodies, repo: str, selector, where: str):
+    """Return (matched, reason) when a comment post must be refused, else None.
+
+    `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read."""
+    texts = [b for b in bodies if isinstance(b, str) and b]
+    if not any("review-record" in b for b in texts):
+        return None   # the cheap test: no marker is possible, so the merge tool is not even loaded
+    module = merge_module()
+    if module is None:
+        review_note("the merge tool could not be loaded")
+        return None
+    marked = [b for b in texts if module.review_marked(b)]   # a record only when its first line is the marker
+    if not marked:
+        return None
+
+    def render_for(number, head):
+        return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
+
+    named = str(selector).strip()
+    for body in marked:
+        if module.parse_review(body) is None:
+            render = render_for(named if named.isdigit() else "<pr>", "<live head>")
+            return "review record that does not parse", REVIEW_REASON % (
+                "this body holds the review-record marker but is not a well-formed record", render)
+    try:
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            host = module.Host(repo=repo or None, cwd=where or None)
+            number = host.pr_number(selector)
+            live = str(host.pr(number)["head"])
+    except (Exception, SystemExit) as e:
+        review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")
+        return None
+    render = render_for(number, live)
+    for body in marked:
+        record = module.parse_review(body)
+        if record["n"] != number:
+            return ("review record for pull request %d posted on %d" % (record["n"], number),
+                    REVIEW_REASON % ("this record names pull request #%d and the comment goes to #%d" % (record["n"], number), render))
+        if record["head"] != live:
+            return ("review record for head %s, live head %s" % (record["head"][:12], live[:12]),
+                    REVIEW_REASON % ("this record names head %s and the live head is %s" % (record["head"][:12], live[:12]), render))
+    return None
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
