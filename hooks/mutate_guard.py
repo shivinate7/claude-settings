@@ -2448,8 +2448,8 @@ def report_main(argv) -> int:
 # print FAIL on red.
 # joyous: no-public-price, redirects, phone-first and tour-pages need dist/ or a browser, so they read unusable.
 # degen: py only. The app/ Playwright specs need a browser, so they are left out. test_ig_spike*.py is red on a
-# clean checkout. A module that imports dev-only pins (PyYAML, openapi_core, jsonschema; requirements-dev.txt) reads
-# unusable: the install folder holds one lockfile.
+# clean checkout. The install reads requirements-all.txt (runtime and dev pins, one flat file), so a module that
+# imports dev-only pins (PyYAML, openapi_core, jsonschema) installs. A commit before that file landed reads "no lockfile".
 BANCHI_MODULE_RUNNER = """\
 import importlib, os, sys
 sys.path.insert(0, os.getcwd())
@@ -2566,8 +2566,8 @@ REPLAY_PROFILES = {
         "classify": "fail_line",
         "install": [[sys.executable, "-m", "venv", "{deps}/venv"],
                     ["{deps}/venv/bin/pip", "install", "--quiet", "--disable-pip-version-check", "-r",
-                     "requirements.txt"]],
-        "lockfile": "requirements.txt", "link": None, "sparse_skip": [],
+                     "requirements-all.txt"]],
+        "lockfile": "requirements-all.txt", "link": None, "sparse_skip": [],
         "select": ["python3", "scripts/tests-for.py", "{path}"],
     },
 }
