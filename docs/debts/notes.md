@@ -8,9 +8,6 @@
 - agent-plan-scope-line-general: Plan and claude-code-guide get the general scope line, which names only reviewer and Explore as never-edit (hooks/agent_brief.py)
 - alias-skip-misses-case-forms: python wrapper alias skip misses mixed-case and backslash WindowsApps paths; Git Bash prints canonical form, so theoretical (python wrappers)
 - ansi-c-escape-not-decoded: escapes inside $'...' such as \x2f stay text, so a protected path spelled with escapes passes frozen and cap checks (hooks/guard_frozen.py)
-- ask-alone-echo-amp-overdeny: a quoted & in a harmless echo tail counts as a command, so a chain with an ask command over-refuses (hooks/guard.py UNSAFE_TEXT)
-- ask-alone-empty-segment-refuses: a trailing newline or ; after a harmless tail stops the tail count, so a chain with an ask command over-refuses (hooks/guard.py harmless_commands)
-- ask-alone-ps-backslash-refuses: UNSAFE_TEXT reads \" as an escape in PowerShell, so a quoted path ending in a backslash counts as a step and over-refuses (hooks/guard.py)
 - ask-alone-sl-chdir-refuses: sl, chdir and Push-Location are not harmless leads, so a chain starting with them over-refuses; owner ruling names only Set-Location (hooks/guard.py harmless_lead)
 - ask-alone-tail-args-unchecked: echo and Write-Host tail arguments are not checked, so a PowerShell (...) subexpression tail counts harmless and asks alone (hooks/guard.py)
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
@@ -23,7 +20,6 @@
 - builder-fstring-path-unread: an f-string path, such as `open(f'tests/x_{n}.py','w')` in a python body, is not read (hooks/guard_frozen.py _py_hit)
 - builder-patch-format-unread: `patch tests/x.py < d.diff`, `git checkout --theirs tests/x`, `ruff format tests/` and `black .` are not refused for a builder (hooks/guard.py builder_shell_test_hit)
 - builder-path-forms-unread: `Path('tests').joinpath(...)`, string `+` paths, `dd of=`, `sort -o` and `touch` of a test path are not read (hooks/guard_frozen.py _py_paths, _shell_write_hit)
-- cap-basename-false-alarm: a heredoc writing a fixture named settings.json with the cap key asks, because is_settings_file tests the basename only (hooks/guard.py)
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
 - cap-write-by-python-unseen: a cap write made by a Python script, or text piped or written to a script and run later, is not asked (hooks/guard_frozen.py)
 - cap-write-glued-ampersand: `(W)&` and `W&` (a cap write backgrounded with a glued `&`) allow, while the spaced form denies as a detached launch (hooks/guard_frozen.py _shell_write_hit). Fix: none — Claude rarely backgrounds a cap write, and the spaced form denies. Until: 2026-11-21
@@ -149,7 +145,6 @@
 - lane-slug-header-count-shift: an unquoted <<word in an interpreter heredoc body or a case ) inside $( shifts the heredoc header count (guard_core heredoc_heads)
 - lane-slug-heredoc-untested: no test pins # in a string, a lone apostrophe in a comment or multi-line quoted text before a header; no mutant covers heredoc_heads (test_guard.py)
 - lane-slug-lowercase-n-passes: lowercase n20 and four-digit lane numbers pass (hooks/guard.py LANE_NUMBER)
-- lane-slug-part-code-refused: any N plus one to three digits, such as the part code N12, is refused as a lane number (hooks/guard.py LANE_NUMBER)
 - lane-slug-piped-body-unread: a piped body such as echo ... | gh pr create -F - is not read (hooks/guard.py)
 - lane-slug-tag-messages-unchecked: the lane-slug rule does not read tag messages (lane-slug message readers)
 - late-workflow-reads-green: a workflow GitHub creates after the settle read is missed, so the head reads green without it (merge/merge.py wait_checks)
@@ -926,7 +921,6 @@
 - repeat-mark-append-race: the inbox rewrite on a hit can lose a capture append that lands in the same instant; there is no lock (hooks/feedback_guard.py mark_items). Decision: owner-feedback-inbox
 - marker-flags-unmutated: the `(?im)` flags on the BRIEF_MARKERS rows in hooks/shared_names.py have no mutant, because mutate_guard TARGETS has no shared_names entry. Dropping the round row's flag would miss a Round on line two. Decision: agent-model-cap
 - lifted-row-refusal-skips-load-brake: in hooks/guard.py, a lifted above-row refusal (step 9b3, the role model row) exits refuse() at once, so the load brake (9c) is skipped. Only under an owner override. The 9c comment names this hazard for the Opus refusal only (found in lane model-above-row-refused). Decision: agent-model-cap (agent model cap)
-- role-key-not-sole-normaliser: role_key's docstring in hooks/guard.py calls it the one normaliser in this file, but role_has_model_pin folds role case on its own (found in lane model-above-row-refused). Decision: agent-model-cap (agent model cap)
 - opus-override-confirm-says-ask: hooks/local_time.py (~line 101) says the Opus override lets spawns "go through without the ask". The override now lifts a refusal (owner item 127 pick a, Nov 1 17:25 CST) (found in lane model-above-row-refused). Decision: agent-model-cap (agent model cap)
 - model-cap-mutants-missing: hooks/mutate_guard.py has no mutant for the never_lifted no-model split, the Explore Audit: Opus grant, Explore leaving OPUS_STANDING_ROLES, or the literal-brief remedy lines (`BRIEF_LITERAL_REMEDY`, hooks/guard.py ~2206 role row and ~3416 Opus refusal). The tests in hooks/test_guard.py cover them. The mutant label at line ~862 says "denial" (glossary term: refuse) (found in lane model-above-row-refused). Decision: agent-model-cap (agent model cap)
 - explore-no-model-env-default: an Explore spawn with no model is not judged by `role_model_check` in hooks/guard.py (~line 2162) when `CLAUDE_CODE_SUBAGENT_MODEL` is set. Per the Claude Code docs ("Choose a model", checked on 2.1.316, 2026-11-02), the agent file's `model` frontmatter beats `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/explore.md` pins haiku, so the spawn runs haiku. Only `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` lifts the pin; the settings-write check asks before that is set. No guard change. Owner waiting-page item 137, pick a (Nov 1 18:38 CST), covers the case. Decision: agent-model-cap (agent model cap)
@@ -940,7 +934,6 @@
 - builders-amend-ff-pull-refused: amending a fast-forward-pulled commit is refused (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-untracked-test-folder-refused: an untracked file under a test folder is refused; other repos are unmeasured (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-cost-line-untested: no test proves the Cost paragraph (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
-- builders-cherry-pick-unlogged: ENTRY_RESOLVED does not match the subject `commit (cherry-pick):`, because `\b` after `)` never matches before `:`. So a cherry-pick the builder resolved by hand leaves no log line, though the decision says such picks are logged only. Fix idea: `(?::|\b)` (hooks/guard.py ENTRY_RESOLVED). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-rebase-start-unread: ENTRY_REBASE does not read a `pull -r ... (start)` subject as a rebase start, so no KEPT log line is written for that rebase. The write-back refusal does not depend on it (hooks/guard.py ENTRY_REBASE). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - builders-amend-replayed-test: amending a product edit into a replayed test-author commit is refused, because the amended commit's diff holds the test path (hooks/guard.py own_changes). Decision: builders-cannot-edit-tests (builders cannot edit tests)
 - lease-fails-open: simulator-boot-lease allows an MCP `launch` when `simctl list` cannot be read, as the cap and reuse rules do on main. Decision: sim-test-is-the-one-boot-path.
