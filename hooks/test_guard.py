@@ -13295,6 +13295,23 @@ add("test-author: a six-character conflict opener is content, not a marker, and 
     tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE, opener="<" * 6 + " HEAD\n"),
     new_string=WORD_RUNS + "\n" + ROUTE_JUDGE, carries=("builder", "Report"), **A)
 
+# A line after the closer is shared by both sides: git factors a key that both sides end with out of the block. Judged
+# as kept text, it hides a change to a step, so a shared key that lands on a kept step is refused.
+SHARED_COE = "        continue-on-error: true\n"
+SHARED_IF = "        if: false\n"
+add("test-author: a shared continue-on-error after a conflict closer, landing on the first kept step, is refused",
+    "deny", rule=TA, tool="Edit", file_path=WF,
+    old_string=conflict(WORD_RUNS + TEST_LINUX, ROUTE_JUDGE) + SHARED_COE, new_string=WORD_RUNS + SHARED_COE,
+    carries=("builder", "Report"), **A)
+add("test-author: a shared if: false after a conflict closer, with both sides kept, is refused", "deny", rule=TA,
+    tool="Edit", file_path=WF, old_string=conflict(WORD_RUNS + TEST_LINUX, ROUTE_JUDGE) + SHARED_IF,
+    new_string=WORD_RUNS + TEST_LINUX + ROUTE_JUDGE + SHARED_IF, carries=("builder", "Report"), **A)
+
+# Control: a closer, a blank line, then a new whole test step at the side's step indent stays allowed.
+add("test-author: a new whole test step after a conflict closer and a blank line is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=conflict(WORD_RUNS, ROUTE_JUDGE) + "\n",
+    new_string=WORD_RUNS + ROUTE_JUDGE + "\n" + TEST_LINUX, **A)
+
 # Builder: an edit to a workflow stays allowed unless its added lines disable tests in a test-runner line.
 for _name, _old, _new in (
     ("a lint step's run is changed", LINT, LINT_RUN_CHANGED),
