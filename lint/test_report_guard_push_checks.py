@@ -74,9 +74,10 @@ REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it nam
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
 FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
-def checks_workflow(push_block):
-    """A `checks` workflow whose `push:` event holds `push_block`, the lines under `push:` as written (indented 4)."""
-    return ("name: checks\non:\n  push:\n" + push_block + "jobs:\n  unit:\n"
+def checks_workflow(push_block, prefix=""):
+    """A `checks` workflow whose `push:` event holds `push_block`, the lines under `push:` as written (indented 4).
+    `prefix` holds top-level lines written before `on:`, such as a YAML anchor."""
+    return ("name: checks\n" + prefix + "on:\n  push:\n" + push_block + "jobs:\n  unit:\n"
             "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
 
 
@@ -549,6 +550,153 @@ class PushCheckTests(unittest.TestCase):
         self.assertFalse(ci_wake.workflow_runs_for(QUESTION_MARK_WORKFLOW, ["fileA.txt"]),
                          "file?.txt read its ? as any one character, so fileA.txt, which it does not match, "
                          "kept a run due")
+
+    # Path-filter forms the reader does not parse yet. Each red case keeps a run due (True) for a push GitHub would run,
+    # and checks its scope first, so a reader that drops the filter cannot pass it.
+
+    def test_block_list_item_on_the_next_line_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n      -\n        'src/**'\n")
+        self.assertIn((6, "-"), ci_wake._workflow_lines(text), "scope: the on: block holds no bare `-` item line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a block list item whose value is on the next line was read as no pattern, "
+                        "so no run is due for src/a.py")
+
+    def test_paths_alias_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: *p\n", prefix="x-filters: &p ['src/**']\n")
+        self.assertIn((4, "paths: *p"), ci_wake._workflow_lines(text), "scope: the on: block holds no `paths: *p` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths alias was read as the literal pattern *p, so no run is due for src/a.py")
+
+    def test_paths_block_scalar_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: |\n      src/**\n")
+        self.assertIn((4, "paths: |"), ci_wake._workflow_lines(text), "scope: the on: block holds no `paths: |` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths block scalar was read as the literal pattern |, so no run is due for src/a.py")
+
+    def test_flow_list_quoted_comma_keeps_a_run_due_for_its_file(self):
+        text = checks_workflow("    paths: ['a,b', 'src/**']\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "scope: the flow list does not keep a run due for src/a.py")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["a,b"]),
+                        "a flow list split at the comma inside 'a,b' kept no run due for the file a,b")
+
+    def test_paths_ignore_mid_token_double_star_keeps_a_run_due_for_ab(self):
+        # Scope: a/b is dropped by a**/b under either reading of ** here, so the filter is read.
+        text = checks_workflow("    paths-ignore: ['a**/b']\n")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["a/b"]),
+                         "scope: paths-ignore a**/b did not drop a/b, so the filter is not read")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["ab"]),
+                        "paths-ignore a**/b dropped ab, though ** is not at a token start, so no run is due for ab")
+
+    def test_paths_with_only_commented_items_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    # - 'docs/**'\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (0, "jobs:"),
+                         "scope: a line sits under `paths:` after its comment is dropped")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths key whose only items are commented out was read as a filter that matches nothing, "
+                        "so no run is due for src/a.py")
+
+    def test_paths_followed_by_branches_key_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    branches: [main]\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (4, "branches: [main]"),
+                         "scope: the line after `paths:` is not `branches: [main]`")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths key with no value, followed by branches, was read as a filter that matches nothing, "
+                        "so no run is due for src/a.py")
+
+    # Sibling spellings of an empty `paths:`. Each reads as a filter whose pattern matches src/a.py not at all. A value
+    # the reader cannot read keeps a run due (see ci_wake.workflow_runs_for), so each case here keeps one due.
+
+    def test_sibling_paths_spelling_null_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: null\n")
+        self.assertIn((4, "paths: null"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `paths: null` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "paths: null was read as the pattern null, so no run is due for src/a.py")
+
+    def test_sibling_paths_spelling_tilde_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: ~\n")
+        self.assertIn((4, "paths: ~"), ci_wake._workflow_lines(text), "scope: the on: block holds no `paths: ~` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "paths: ~ was read as the pattern ~, so no run is due for src/a.py")
+
+    def test_sibling_paths_spelling_empty_quotes_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: ''\n")
+        self.assertIn((4, "paths: ''"), ci_wake._workflow_lines(text), "scope: the on: block holds no `paths: ''` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "paths: '' was read as the empty pattern, which matches no file, so no run is due for src/a.py")
+
+    def test_sibling_paths_spelling_empty_flow_list_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: []\n")
+        self.assertIn((4, "paths: []"), ci_wake._workflow_lines(text), "scope: the on: block holds no `paths: []` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "paths: [] was read as a filter with no pattern, which matches no file, so no run is due "
+                        "for src/a.py")
+
+    def test_sibling_paths_spelling_block_item_empty_quotes_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n      - ''\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (6, "- ''"),
+                         "scope: the line under `paths:` is not the item `- ''`")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a block list whose only item is '' was read as the empty pattern, which matches no file, "
+                        "so no run is due for src/a.py")
+
+    def test_sibling_paths_spelling_block_item_yaml_tag_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n      - !docs/**\n")
+        lines = ci_wake._workflow_lines(text)
+        self.assertEqual(lines[lines.index((4, "paths:")) + 1], (6, "- !docs/**"),
+                         "scope: the line under `paths:` is not the item `- !docs/**`")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a block item tagged !docs/** was read as the negation of docs/**, so no run is due for "
+                        "src/a.py")
+
+    def test_block_item_with_a_tab_after_its_dash_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths:\n    -\t'src/**'\n")
+        self.assertIn((4, "-\t'src/**'"), ci_wake._workflow_lines(text),
+                      "scope: the push block holds no item line with a tab after its dash")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a block item with a tab after its dash, at the key's own indent, was read as no item, "
+                        "so no run is due for src/a.py")
+
+    def test_block_item_with_a_tab_after_its_dash_reads_its_pattern_exactly(self):
+        # The tab item reads as the plain `- 'docs/**'` item: docs/a.md owes a run, src/a.py owes none. A reader that
+        # gives up on the item (the _Unparsed fallback) keeps a run due for every file, so the src/a.py control fails.
+        text = checks_workflow("    paths:\n    -\t'docs/**'\n")
+        self.assertIn((4, "-\t'docs/**'"), ci_wake._workflow_lines(text),
+                      "scope: the push block holds no item line with a tab after its dash")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                        "a block item with a tab after its dash, at the key's own indent, was read as no item, "
+                        "so no run is due for docs/a.md")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "a block item with a tab after its dash was read as an unreadable key, not the pattern "
+                         "docs/**, so a run is due for src/a.py")
+
+    def test_paths_alias_with_a_dot_in_its_name_keeps_a_run_due_for_a_matching_file(self):
+        text = checks_workflow("    paths: *p.x\n", prefix="x-filters: &p.x ['src/**']\n")
+        self.assertIn((4, "paths: *p.x"), ci_wake._workflow_lines(text),
+                      "scope: the on: block holds no `paths: *p.x` line")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                        "a paths alias with a dot in its name was read as the literal pattern *p.x, "
+                        "so no run is due for src/a.py")
+
+    # Green pins: these read correctly today and stay green. A `**/` at the start matches a root file.
+
+    def test_double_star_slash_under_paths_matches_a_root_file(self):
+        text = checks_workflow("    paths:\n      - '**/*.py'\n")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["a.txt"]),
+                         "scope: the filter **/*.py kept a run due for a.txt")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["a.py"]),
+                        "**/*.py under paths did not match the root file a.py")
+
+    def test_double_star_slash_under_paths_ignore_drops_a_root_readme_push(self):
+        text = checks_workflow("    paths-ignore:\n      - '**/README.md'\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                        "scope: paths-ignore **/README.md dropped docs/a.md")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["README.md"]),
+                         "paths-ignore **/README.md kept a run due for a root README.md push")
 
     def test_rewrite_that_still_lacks_the_ci_line_is_blocked(self):
         # The first reply holds a report but no CI line, so the Stop blocks for the CI line alone. Its rewrite, the

@@ -22,7 +22,9 @@ The cancelled-twin rule is merge.py's `Host.judge_runs`, loaded through guard_me
 The Stop-side read (`head_state`, for lint/report_guard.py after a push): one read of a pushed head's CI state,
 in a Stop hook that is already running. It starts no watch, timer or process of its own. Cost per head: at most 2
 gh processes (the open PR of the branch, then the head's runs), plus 1 more when the run list is empty (the
-workflow list), plus 1 local process to name a short head on main.
+workflow list), plus 1 local process to name a short head on main. The path-filter read, paid only when the run list
+is empty, adds 2 git processes plus 1 per workflow file read, and stops at the first workflow that runs. A PR read that
+lags the push adds 1 git process, to read the pushed head direct.
 Budget: HEAD_READ seconds for each read, HEAD_TOTAL for all of a Stop's reads, under the Stop hook timeout in
 settings.json. The seam is `Budget(total, per_read, clock)`: a test passes a clock it controls, so the budget is
 proved without real time.
@@ -392,14 +394,14 @@ NO_PUSH_EVENTS = ("workflow_dispatch", "schedule")   # events that start no run 
 
 def _glob_regex(pattern):
     """A workflow path-filter pattern as a regex, per GitHub's filter pattern cheat sheet: `*` is zero or more
-    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder), `?` and `+` are zero or
-    one and one or more of the character before them, `[...]` is one listed letter, digit or range, and `\\` escapes
-    the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
+    characters but `/`, `**` is zero or more of any character (`**/` also matches no folder, but only at the pattern
+    start or after a `/`), `?` and `+` are zero or one and one or more of the character before them, `[...]` is one
+    listed letter, digit or range, and `\\` escapes the next character. Raises _Unparsed for a form whose meaning is unsure (a `?` or `+` after no plain character, an
     open or odd bracket, a trailing `\\`), so the run stays due rather than a guessed reading dropping it."""
     parts, quantifiable, i = [], False, 0
     while i < len(pattern):
         c = pattern[i]
-        if pattern.startswith("**/", i):
+        if pattern.startswith("**/", i) and (i == 0 or pattern[i - 1] == "/"):
             parts.append("(?:.*/)?")
             quantifiable, i = False, i + 3
         elif pattern.startswith("**", i):
@@ -448,11 +450,11 @@ def _unquote(word):
     return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"" else word
 
 
-def _strip_comment(raw):
-    """A workflow line without its comment: a `#` at a line start or after a space ends the line, unless a quoted
-    string holds it. A quote opens only where a value starts (after a space, `[`, `{`, `,` or the line start), so a lone
-    apostrophe inside a word is text. Not actions/ci-alarm/clear_rule.py's `strip_comment`: that one reads a lone
-    apostrophe as a quote, and hooks/ stays stdlib-only and loads in the Stop hook."""
+def _outside_quotes(raw):
+    """-> (index, char) of each character of a workflow line that no quoted string holds. A quote opens only where a
+    value starts (after a space, `[`, `{`, `,` or the line start), so a lone apostrophe inside a word is text. Not
+    actions/ci-alarm/clear_rule.py's `strip_comment`: that one reads a lone apostrophe as a quote, and hooks/ stays
+    stdlib-only and loads in the Stop hook. The quote characters themselves are not yielded."""
     quote = None
     for i, ch in enumerate(raw):
         before = raw[i - 1] if i else " "
@@ -461,9 +463,46 @@ def _strip_comment(raw):
                 quote = None
         elif ch in "'\"" and before in " \t[{,":
             quote = ch
-        elif ch == "#" and before in " \t":
+        else:
+            yield i, ch
+
+
+def _strip_comment(raw):
+    """A workflow line without its comment: a `#` at a line start or after a space ends the line, unless a quoted
+    string holds it (see `_outside_quotes`)."""
+    for i, ch in _outside_quotes(raw):
+        if ch == "#" and (i == 0 or raw[i - 1] in " \t"):
             return raw[:i].rstrip()
     return raw.rstrip()
+
+
+def _split_flow(text):
+    """The items of a flow list's inner text, split at each comma no quoted string holds."""
+    items, start = [], 0
+    for i, ch in _outside_quotes(text):
+        if ch == ",":
+            items.append(text[start:i])
+            start = i + 1
+    items.append(text[start:])
+    return [w for w in items if w.strip()]
+
+
+def _scalar(word):
+    """One filter pattern as written, quoted or plain. Raises _Unparsed for a plain scalar this reader cannot read
+    exactly: a block scalar (`|`, `>`), an anchor (`&a`) or an alias (`*a`), which YAML resolves elsewhere, a tag
+    (`!x`), and a null spelling (`null`, `Null`, `NULL`, `~`). A plain scalar cannot start with `*` in YAML, so any such
+    start is read as an alias. A quoted empty string raises too: an empty pattern matches no file, so a filter of it
+    would read as "no run" where GitHub reads no filter or an unsure one. A quoted tag-like or null-like word is a
+    string, so it is read as written."""
+    word = word.strip()
+    if word[:1] in ("'", '"'):
+        text = _unquote(word)
+        if not text:
+            raise _Unparsed(word)
+        return text
+    if word[:1] in ("|", ">", "&", "*", "!") or word in ("null", "Null", "NULL", "~"):
+        raise _Unparsed(word)
+    return word
 
 
 def _workflow_lines(text):
@@ -483,7 +522,9 @@ class _Unparsed(Exception):
 def _filter_list(block, key):
     """The patterns of `key:` in a push block's lines ([(indent, content)]), or None when the key is absent. Reads a
     flow list (`[a, b]`, on one line or spread over lines), a lone scalar and a block list (`- a`). Raises _Unparsed
-    for a flow list that never closes."""
+    for a flow list that never closes, a block list item with its value on the next line, a line under the key that
+    is no list item, a key that yields no item (its items all commented out, an empty flow list, or the next key follows it),
+    and a scalar `_scalar` does not read. A list item is `-` then a space or a tab."""
     for n, (indent, content) in enumerate(block):
         head, colon, rest = content.partition(":")
         if head.strip() != key or not colon:
@@ -496,15 +537,23 @@ def _filter_list(block, key):
                 if nxt is None:
                     raise _Unparsed(key)
                 text += " " + nxt[1]
-            return [_unquote(w) for w in text[1:-1].split(",") if w.strip()]
+            flow = [_scalar(w) for w in _split_flow(text[1:-1])]
+            if not flow:
+                raise _Unparsed(key)
+            return flow
         if rest:
-            return [_unquote(rest)]
+            return [_scalar(rest)]
         items = []
         for deeper, line in block[n + 1:]:
-            if deeper < indent or (deeper == indent and not line.startswith("- ")):
+            is_item = line[0] == "-" and line[1:2] in ("", " ", "\t")
+            if deeper < indent or (deeper == indent and not is_item):
                 break
-            if line.startswith("- "):
-                items.append(_unquote(line[2:]))
+            if line == "-" or deeper > indent and not is_item:
+                raise _Unparsed(key)
+            if is_item:
+                items.append(_scalar(line[1:]))
+        if not items:
+            raise _Unparsed(key)
         return items
     return None
 
@@ -574,7 +623,7 @@ def push_may_start_run(full, old, cwd, budget):
     """False only when the workflow files at the pushed head all read cleanly and none can start a run for the files
     the push changed (`old..full`): a push no path filter matches starts no run, so none is due. Any read that fails,
     no workflow file, or a push with no `old` head (a new branch) reads True, so a run stays due. Cost: 2 git
-    processes plus 1 per workflow file."""
+    processes plus 1 per workflow file read; the reads stop at the first workflow that runs."""
     if not old:
         return True
     try:
