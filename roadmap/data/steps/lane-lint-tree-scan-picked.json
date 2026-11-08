@@ -1,0 +1,11 @@
+{
+  "title": "Lane lint always runs the suites that scan the whole tracked tree",
+  "why": "Four tree-scan suites are never picked for an ordinary diff, so a raw subprocess.run or a retired name in a doc passes lane lint and goes red in batch CI.",
+  "note": "Filed 09:40 CST Nov 8 from lane lane-lint-cloud-time-limit (session_013NEJL1PUcS4Dxhd9Rr1sk2), found by round 3 of #2017 (net value positive). Suites: lint/test_no_window_spawn.py, test_retired_names.py, test_retired_repos.py, test_check_glossary.py. Debt record docs/debts/lane-lint-tree-scan-suites-unpicked.md on #2017. Fix: an always-pick list in suites_for_paths in hooks/mutate_guard.py; red case first on a diff that picks none of them. Separate from step lane-lint-hook-suites (#1916, ready), which picks suites by the files they load; the building lane branches after #1916 if both touch suites_for_paths.",
+  "phase": "next",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 706,
+  "updatedAt": "2026-11-08T09:40:00-06:00"
+}
