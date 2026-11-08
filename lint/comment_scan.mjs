@@ -4,7 +4,7 @@
 // Used by lint/check_comment_narration.py (rule building-comments-say-why).
 //
 // TypeScript is the one on PATH as `tsc` (a symlink or shim is followed to its package). The caller puts
-// the version pinned in actions/code-check/standard.json there, so this file names no version.
+// the version pinned in lint/code_check_standard.json there, so this file names no version.
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
