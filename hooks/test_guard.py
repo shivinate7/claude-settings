@@ -10262,6 +10262,29 @@ record_allow("a commit message that names a push to roadmap is text",
              VCS + ' commit -m "' + VCS + ' push origin roadmap"', LANE_TRANSCRIPT)
 
 
+def cost_case_of(command, cwd, transcript, path):
+    """The case dict for one Bash call, run with the stand-in git first on PATH at `path`."""
+    return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
+            "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+
+
+def cost_spawn_kinds(log, path, command, cwd, transcript):
+    """Run the guard on one Bash call, and read the stand-in git's `log`: ({subcommand: count}, the log's lines,
+    the decision). The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair."""
+    if os.path.exists(log):
+        os.remove(log)
+    got, _reason = decide(cost_case_of(command, cwd, transcript, path))
+    lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    kinds = {}
+    for line in lines:
+        words = line.split()
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        word = words[0] if words else ""
+        kinds[word] = kinds.get(word, 0) + 1
+    return kinds, lines, got
+
+
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
@@ -10287,22 +10310,10 @@ def record_push_cost_case():
     problems = []
 
     def case_of(command, cwd, transcript):
-        return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
-                "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
+        return cost_case_of(command, cwd, transcript, path)
 
     def spawn_kinds(command, cwd):
-        if os.path.exists(log):
-            os.remove(log)
-        decide(case_of(command, cwd, LANE_TRANSCRIPT))
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        kinds = {}
-        for line in lines:
-            words = line.split()
-            # The guard runs git as `git -C <dir> <subcommand>`, so the subcommand follows the -C pair.
-            while len(words) >= 2 and words[0] in ("-C", "-c"):
-                words = words[2:]
-            word = words[0] if words else ""
-            kinds[word] = kinds.get(word, 0) + 1
+        kinds, lines, _got = cost_spawn_kinds(log, path, command, cwd, LANE_TRANSCRIPT)
         return kinds, lines
 
     for label, tail, want in (
@@ -11995,6 +12006,11 @@ RR_RAWOK = os.path.join(RRROOT, "rr-rawok")            # the same commit with a 
 RR_CHAIN = os.path.join(RRROOT, "rr-chain")            # a fresh branch, no upstream, with an untracked test file
 RR_CHAINDOCS = os.path.join(RRROOT, "rr-chaindocs")    # the same branch, with an untracked docs file
 RR_CHAIN_CARRY = "call of its own"                     # the chain reason's remedy: push in a call of its own
+RR_NEW = os.path.join(RRROOT, "rr-new")                # a fresh branch, with an untracked, non-empty test file
+RR_COST = os.path.join(RRROOT, "rr-cost")              # a fresh branch, with a staged test addition, no push
+RR_TRACKED = os.path.join(RRROOT, "rr-tracked")        # a pushed topic with a tracked test file, edited, unstaged
+RR_MCONT = os.path.join(RRROOT, "rr-mcont")            # a merge stopped on a.txt, the lane's test addition staged
+RR_NEWTEST = "hooks/test_new.py"
 RR_EDIT_V2 = "def test_x():\n    assert 9 == 9\n"
 RR_FULL = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 3\n"
 RR_TRIM1 = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n"
@@ -12319,11 +12335,47 @@ def _build_red_run():
     _rr_fresh(RR_CHAIN, {RR_TEST: RR_TEST_TEXT})
     _rr_fresh(RR_CHAINDOCS, {"docs/x.md": "# X\n"})
 
+    # A fresh branch with an untracked, non-empty test file, and one with the same file staged, no push.
+    _rr_fresh(RR_NEW, {RR_NEWTEST: RR_TEST_TEXT})
+    _rr_fresh(RR_COST, {RR_TEST: RR_TEST_TEXT})
+    run(RR_COST, "add", RR_TEST)
+    must(RR_COST, "A  " + RR_TEST in _rr_read(RR_COST, "status", "--porcelain").stdout.splitlines(),
+         "the test addition is staged")
+
+    # A pushed topic holds a tracked test file, edited and not staged. Nothing on topic is unpushed.
+    _cmk_pushed(RR_TRACKED, {"a.txt": "base\n", RR_TEST: RR_TEST_TEXT})
+    write(os.path.join(RR_TRACKED, RR_TEST), RR_EDIT_V2)
+    must(RR_TRACKED, " M " + RR_TEST in _rr_read(RR_TRACKED, "status", "--porcelain").stdout.splitlines(),
+         "the tracked test file is edited and unstaged")
+    must(RR_TRACKED, _rr_subjects(RR_TRACKED, "origin/topic..HEAD") == [], "topic holds nothing unpushed")
+
+    # A merge of feat stops on a.txt. Then a.txt is resolved, and the lane's test addition is staged.
+    _cmk_pushed(RR_MCONT, {"a.txt": "base\n"})
+    run(RR_MCONT, "checkout", "-q", "-b", "feat", "main")
+    commit(RR_MCONT, {"a.txt": "feat\n"}, "feat change")
+    run(RR_MCONT, "checkout", "-q", "topic")
+    commit(RR_MCONT, {"a.txt": "topic\n"}, "topic change")
+    must(RR_MCONT, _rr_read(RR_MCONT, *IDENT, "merge", "-q", "--no-edit", "feat").returncode != 0, "the merge conflicts")
+    write(os.path.join(RR_MCONT, "a.txt"), "resolved\n")
+    run(RR_MCONT, "add", "a.txt")
+    write(os.path.join(RR_MCONT, RR_TEST), RR_TEST_TEXT)
+    run(RR_MCONT, "add", RR_TEST)
+    mcont_status = _rr_read(RR_MCONT, "status", "--porcelain").stdout.splitlines()
+    must(RR_MCONT, _rr_read(RR_MCONT, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0, "MERGE_HEAD resolves")
+    must(RR_MCONT, not any(line[:2] in ("UU", "AA", "DD", "AU", "UA", "DU", "UD") for line in mcont_status),
+         "no unmerged path is left")
+    must(RR_MCONT, _rr_read(RR_MCONT, "ls-tree", "--name-only", "HEAD", "--", RR_TEST).stdout.strip() == "",
+         "the test file is absent from HEAD")
+    must(RR_MCONT, _rr_read(RR_MCONT, "ls-tree", "--name-only", "MERGE_HEAD", "--", RR_TEST).stdout.strip() == "",
+         "the test file is absent from MERGE_HEAD")
+    must(RR_MCONT, "A\t" + RR_TEST in _rr_read(RR_MCONT, "diff", "--cached", "--name-status").stdout.splitlines(),
+         "the test addition is staged")
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
               RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING,
-              RR_RAWREF, RR_RAWOK, RR_CHAIN, RR_CHAINDOCS],
+              RR_RAWREF, RR_RAWOK, RR_CHAIN, RR_CHAINDOCS, RR_NEW, RR_COST, RR_TRACKED, RR_MCONT],
              _build_red_run)
 
 
@@ -12448,6 +12500,57 @@ rr_allow("a docs commit in this call, then a push of a fresh branch, none of its
          VCS + " add docs/x.md && " + VCS + " commit -m m && " + VCS + " push origin fresh", RR_CHAINDOCS)
 rr_allow("an amend with a Red-run line and no push in the call",
          VCS + ' commit --amend -m s -m "Red-run: none: x"', RR_PLAIN)
+
+# The chain forms. Each call makes a commit that adds a test line, then pushes in the same call. The range the
+# guard reads is taken before that commit lands, so the chain must be refused, whatever the commit's spelling.
+rr_refuse("git add hooks/test_new.py, commit -am m, then a push of a fresh branch, with an untracked test file",
+          VCS + " add " + RR_NEWTEST + " && " + VCS + " commit -am m && " + VCS + " push origin fresh",
+          RR_NEW, carries=RR_CHAIN_CARRY)
+rr_refuse("git add hooks/test_new.py, commit -a -m m, then a push of a fresh branch, with an untracked test file",
+          VCS + " add " + RR_NEWTEST + " && " + VCS + " commit -a -m m && " + VCS + " push origin fresh",
+          RR_NEW, carries=RR_CHAIN_CARRY)
+rr_refuse("commit -a -m m, then a bare push, with a tracked test file edited and unstaged",
+          VCS + " commit -a -m m && " + VCS + " push", RR_TRACKED, carries=RR_CHAIN_CARRY)
+rr_refuse("add -A, commit -m m, then a bare push, with a tracked test file edited and unstaged",
+          VCS + " add -A && " + VCS + " commit -m m && " + VCS + " push", RR_TRACKED, carries=RR_CHAIN_CARRY)
+rr_refuse("commit -m m with a pathspec, then a bare push, with that tracked test file edited and unstaged",
+          VCS + " commit -m m " + RR_TEST + " && " + VCS + " push", RR_TRACKED, carries=RR_CHAIN_CARRY)
+rr_refuse("merge --continue, then a bare push, with the lane's test addition staged in a stopped merge",
+          VCS + " merge --continue && " + VCS + " push", RR_MCONT, carries=RR_CHAIN_CARRY)
+# Control: the same staged test addition, a commit, and no push in the call. The commit is allowed.
+rr_allow("commit -m m, then cd /tmp and echo, with no push in the call, and a staged test addition",
+         VCS + " commit -m m && cd /tmp && echo x", RR_COST)
+
+
+# The commit cost. The red-run push check runs on a push only, so a lone commit makes the git spawns it made
+# before red-run: the pinned set below, and no `git diff --cached --numstat`. Pinned from the head before the
+# chain feature (8735fea), read through the stand-in git's log (see record_push_cost_case).
+RR_COST_LABEL = ("red-run: a lone commit with no push in its call makes the git spawns pinned before red-run, "
+                 "and no git diff --cached --numstat")
+RR_COST_SPAWNS = {"diff": 1, "ls-tree": 3, "rev-parse": 4, "symbolic-ref": 1}
+
+
+def rr_commit_cost_case():
+    """A lone commit of a staged test addition, with no push in its call, makes the pinned git spawns and no
+    `git diff --cached --numstat`, and the guard allows it."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    materialize(RR_COST)
+    log, path = _stand_in_git("rrcost")
+    if path is None:
+        return False, "no git on PATH"
+    kinds, lines, got = cost_spawn_kinds(log, path, VCS + " commit -m m", RR_COST, LANE_TRANSCRIPT)
+    problems = []
+    if got != "allow":
+        problems.append("a lone commit: %s, want allow" % got)
+    if kinds != RR_COST_SPAWNS:
+        problems.append("a lone commit: git spawns %s, want %s"
+                        % (sorted(kinds.items()), sorted(RR_COST_SPAWNS.items())))
+    if any("numstat" in line for line in lines):
+        problems.append("a lone commit runs a git diff --numstat, which a commit with no push needs no red-run read for")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a lone commit makes the pinned git spawns, and no numstat read"
 
 
 def rr_nolint_probe_case():
@@ -14925,6 +15028,8 @@ RR_NOLINT_LABEL = ("red-run: a hooks copy with no lint folder beside it: the pus
                    "nothing")
 LOG_CHECKS_EXTRA.append((RR_NOLINT_LABEL, rr_nolint_probe_case))
 LOG_FAMILY[RR_NOLINT_LABEL] = "red-run"
+LOG_CHECKS_EXTRA.append((RR_COST_LABEL, rr_commit_cost_case))
+LOG_FAMILY[RR_COST_LABEL] = "red-run"
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
 # registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
