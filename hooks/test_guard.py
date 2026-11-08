@@ -4597,13 +4597,18 @@ _ul_allow("a read that fails passes: a commit aimed at a folder that is no git t
 
 
 # THE CHAINS. An earlier `git rm` or `git add` of a named path puts that path in the commit, and the check
-# still runs on what stays out. A chained ask runs alone, so a chain that holds that ask is denied (ask-alone,
-# decision ask-commands-run-alone), the same as a per-file ask in a chain. An earlier `git add` that names a
-# path with nothing left out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed.
-chained_ask("a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, is denied as a chained ask",
-            VCS + " rm docs/a.md && " + VCS + " commit -m x", cwd=UL_RMCHAIN)
-chained_ask("a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, is denied as a chained ask",
-            VCS + " add docs/a.md && " + VCS + " commit -m x", cwd=UL_ADDCHAIN)
+# still runs on what stays out, so the chain asks. The rule raises its ask on the commit segment itself,
+# outside ask-alone, so the chain keeps the ask. An earlier `git add` that names a path with nothing left
+# out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed. A plain commit with nothing
+# staged has nothing in it to share a folder with, so it is allowed beside the same unstaged edit.
+_ul_ask("a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, asks",
+        VCS + " rm docs/a.md && " + VCS + " commit -m x", UL_RMCHAIN)
+_ul_ask("a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, asks",
+        VCS + " add docs/a.md && " + VCS + " commit -m x", UL_ADDCHAIN)
+_ul_allow("a plain commit with nothing staged and docs/b.md unstaged is allowed",
+          VCS + " commit -m x", UL_RMCHAIN)
+_ul_allow("a plain commit with nothing staged and docs/a.md and docs/b.md unstaged is allowed",
+          VCS + " commit -m x", UL_ADDCHAIN)
 _ul_allow("a chained git add of docs/b.md, then a commit, with docs/b.md the only unstaged edit is allowed",
           VCS + " add docs/b.md && " + VCS + " commit -m x", UL_EDIT)
 _ul_allow("a chained git add -A, then a commit, with docs/b.md unstaged is allowed",
