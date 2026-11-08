@@ -16,7 +16,8 @@ CLAUDE.md names, reads the pin check from it, and with no checkout prints one li
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
 Also asserts the step's exit codes when a helper misbehaves (`run.sh exit codes:` cases): with fail=false, an UNKNOWN or a
 crash from lint/stale_cites.py stays red and only a FAIL verdict is zeroed; a linter that exits non-zero or prints non-JSON
-fails the job in both scopes; a failing git range fails it; and the fail input says it opts out of findings only."""
+fails the job in both scopes; a git range with no history behind it reads as UNKNOWN and exits 0, while any other failing
+range exits 1; and the fail input says it opts out of findings only."""
 import ast, atexit, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -998,21 +999,34 @@ for scope in ("changed", "all"):
             check("run.sh exit codes: linter %s, scope %s, fail=%s → step exits non-zero" % (label, scope, fail),
                   "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
 
-# A failing git range (base...HEAD with no merge base) must fail the job. Stub helpers keep the stale checks out of
-# it, so the only range read is the step's own diff; the git error on stderr is the proof it ran.
+# A git range with no merge base is a history gap: the step names it on a line of its own and goes on as "no
+# markdown changed", so it exits 0 for fail true and false. Stub helpers, so the only range read is the step's diff.
 for fail in ("true", "false"):
-    rc, out = run("changed", fail, change=unrelated_change, stubs={})  # stub helpers: only the step's own diff is read
-    check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → step exits non-zero"
-          % fail, rc != 0 and "no merge base" in out, out)
+    rc, out = run("changed", fail, change=unrelated_change, stubs={})
+    check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → UNKNOWN line, exits 0"
+          % fail, rc == 0 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines()), out)
 
-# A base with no merge base: the step's git diff fails. The step names it on a line of its own, with the fix, and
-# exits non-zero for fail true and false. Stub helpers, so the only range read is the step's own diff.
 for fail in ("true", "false"):
     rc, out = run("changed", fail, change=unrelated_change, stubs={})
     check("run.sh exit codes: git diff fails, scope changed, fail=%s → 'ste-lint: UNKNOWN, git diff' line, "
-          "fetch-depth 0, non-zero" % fail,
+          "fetch-depth 0, exits 0" % fail,
           any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines())
-          and "fetch-depth 0" in out and rc != 0, out)
+          and "fetch-depth 0" in out and rc == 0, out)
+
+
+# A RANGE that names a blob, not a commit: git fails with no history gap behind it. The step names it and exits 1
+# for fail true and false. The base is a remote ref, so the step finds it and does not fetch.
+def blob_ref_change(work):
+    default_change(work)
+    git(work, "update-ref", "refs/remotes/origin/garbage", "HEAD:a.md")
+
+
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=blob_ref_change, BASE_REF="garbage", stubs={})
+    check("run.sh exit codes: git diff of a non-commit range fails with no history gap, scope changed, fail=%s → "
+          "'ste-lint: UNKNOWN, git diff' line, exits 1" % fail,
+          rc == 1 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines())
+          and "no base history" not in out, out)
 
 
 # action.yml: 'false' opts out of findings only, and a check that crashed still fails. The description must say so,
