@@ -13622,7 +13622,7 @@ for _name, _command in (
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
 # A brace sequence, and a double backslash that the shell reads as one, name test_a.py once the shell has read
-# the command, so each walk of hooks is refused. Each is red on 5b8aa7a0b, which reads the value as typed.
+# the command, so each walk of hooks is refused. The guard reads the name the shell would pass on.
 for _name, _command in (
     ("grep -rl over hooks, --include=test_{a..a}.py unquoted, sed -i", "grep -rl old hooks --include=test_{a..a}.py | xargs sed -i s/a/b/"),
     ("find hooks -name with a double escape, unquoted, sed -i", r"find hooks -name test\\_a.py | xargs sed -i s/a/b/"),
@@ -13630,8 +13630,8 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each refused on 5b8aa7a0b. A backslash escape reads as its literal character, so `test\_a.py` in single
-# quotes names test_a.py, and a brace list of _BRACE_LIMIT words or more reads no filter, so a walk counts test_a.py.
+# Pins, each refused. A backslash escape reads as its literal character, so `test\_a.py` in single quotes names
+# test_a.py, and a brace list of _BRACE_LIMIT words or more reads no filter, so a walk counts test_a.py.
 # The first goes red when the backslash pass in `_name_filters` goes, the second when its _BRACE_LIMIT check goes.
 for _name, _command in (
     ("find hooks -name escaped in single quotes, sed -i", r"find hooks -name 'test\_a.py' | xargs sed -i s/a/b/"),
@@ -13639,15 +13639,15 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each passing on 1d95bc71b. A `!` or `-not` inverts `-name`, so a find of hooks that holds one
-# reads test_a.py. Each pin is refused, and each mutant that drops the inverter goes red on it.
+# A `!` or `-not` inverts `-name`, so a find of hooks that holds one reads test_a.py. Each pin is refused,
+# and each mutant that drops the inverter goes red on it.
 for _name, _command in (
     ("find hooks ! -name 'guard*.py', sed -i", "find hooks ! -name 'guard*.py' | xargs sed -i s/a/b/"),
     ("find hooks -not -name 'guard*.py', sed -i", "find hooks -not -name 'guard*.py' | xargs sed -i s/a/b/"),
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each passing on 1d95bc71b. docs holds gen.py and no test, so each walk of it reads product code only.
+# Pins, each allowed. docs holds gen.py and no test, so each walk of it reads product code only.
 DOCS_ABS = slash(os.path.join(DOTROOT, "docs"))
 for _name, _command in (
     ("grep -rl over a brace list of docs twice, sed -i", "grep -rl old {docs,docs} | xargs sed -i s/a/b/"),
