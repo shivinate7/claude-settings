@@ -270,6 +270,11 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
+# `NAME=value` words that lead a command (at the start, or behind `(`, `$(` or a backtick) set its
+# environment. Their value is data: a write word in it (`INSTALL_SH=/x/cp/install.sh`) is no command.
+_LEADING_ENV = re.compile(r"(^|[(`]|\$\()\s*(?:[A-Za-z_]\w*\+?=\S*\s+)+")
+
+
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -288,6 +293,7 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+    cmd = _LEADING_ENV.sub(r"\1 ", cmd)
     if command == "touch":
         return bool(re.search(r"\btouch\b[^\n;|&]*" + target, cmd))
     if command == "dd":
