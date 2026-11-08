@@ -2046,7 +2046,7 @@ MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisf
 # The head noun of an edit verb's object, read before the first preposition. A note governs no path
 # (`make a note of ... in X`). A test noun makes the path a spec for a test-author (`add cases for ... in X`).
 MESSAGE_NOTE_NOUNS = {"note", "notes", "report", "summary"}
-MESSAGE_TEST_NOUNS = {"case", "cases", "test", "tests", "assert", "asserts"}
+MESSAGE_TEST_NOUNS = {"case", "cases", "test", "assert"}
 # A path that does not follow its verb is its object only after one of the LOCATIONS (`the failing case in X`, `add
 # a case to X`). After another preposition it is a spec (`fix the bug for X`, `agree with X`).
 MESSAGE_LOCATIONS = {"in", "at", "of", "to", "into"}
