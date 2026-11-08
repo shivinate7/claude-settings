@@ -15,7 +15,7 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
   literal, `main` and `master`. The remote's HEAD is not read. The MCP forms come from the
   coordinator's relay of form parity, lane mcp-tools-in-guard-matcher, and read their `branch`
-  the same way.
+  the same way (hooks/guard.py).
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
@@ -54,4 +54,4 @@ A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. `record_p
 Risk: incident (banchi, 2026-09-12).
 
 Kind: process
-Home: hooks/guard_push_delete.py (`names_default_branch`); hooks/guard.py for the MCP file writes.
+Home: hooks/guard_push_delete.py
