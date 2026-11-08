@@ -894,33 +894,92 @@ def _env_relay(texts):
 
 
 # A search that reads dotfiles and walks a folder reaches each env file in it, whatever its name.
-# ENV_WALK_COMMANDS read a folder when no path is named. The walk stops at ENV_WALK_LIMIT entries
-# and the search is then refused: a folder that large cannot be shown clean.
+# ENV_WALK_COMMANDS read a folder when no path is named, and need a hidden flag to reach dotfiles.
+# ENV_GREP_COMMANDS reach them with a recursive flag, and `rgrep` is always recursive. The walk
+# stops at ENV_WALK_LIMIT entries and the search is then refused: a folder that large cannot be
+# shown clean.
 ENV_WALK_COMMANDS = ("rg", "ag")
+ENV_GREP_COMMANDS = ("grep", "egrep", "fgrep")
+ENV_GREP_RECURSIVE_COMMAND = "rgrep"
+ENV_GREP_RECURSIVE_LONG = ("--recursive", "--dereference-recursive")
+# Letters of a grep flag cluster that take a value, and so end the cluster: `-A 3`, `-e pat`, `-f file`.
+ENV_GREP_VALUE_SHORT = ENV_VALUE_SHORT + "ef"
 ENV_WALK_LIMIT = 50000
 ENV_WALK_REASON = ("this command would search a folder that holds an environment file, and a "
                    "hidden flag makes it read dotfiles")
+ENV_GREP_WALK_REASON = (
+    "this command would search a folder that holds an environment file, and a recursive grep "
+    "reads dotfiles. Remedy: add --exclude with a glob that covers the environment file names, "
+    "or --exclude-dir for the folder that holds it")
 
 
-def _env_file_in(folder: str) -> str:
+def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=()) -> str:
     """The first env file under `folder`, or `<too large>` past ENV_WALK_LIMIT entries, else ''.
-    A symlink is not followed, as rg and ag do not. `.git` holds no env file and is skipped."""
+    A symlink is not followed, as rg and ag do not. `.git` holds no env file and is skipped.
+    The grep globs narrow it: a file is read only when it matches an `include` glob (when any is
+    given) and no `exclude` glob, and a folder that matches an `exclude_dir` glob is not entered."""
     seen = 0
     for top, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d != ".git"]
+        dirs[:] = [d for d in dirs if d != ".git"
+                   and not any(fnmatch.fnmatchcase(d, g) for g in exclude_dir)]
         seen += len(dirs) + len(files)
         for name in files:
-            if names_env_file(name):
+            if (names_env_file(name)
+                    and (not include or any(fnmatch.fnmatchcase(name, g) for g in include))
+                    and not any(fnmatch.fnmatchcase(name, g) for g in exclude)):
                 return os.path.join(top, name)
         if seen > ENV_WALK_LIMIT:
             return "<too large>"
     return ""
 
 
+def _grep_recursive(words, position: int) -> bool:
+    """True when a grep command line asks for a recursive search: `-r`, `-R` (alone or in a
+    cluster such as `-rn`), `-d recurse`, or a long form. A cluster ends at a letter that takes a
+    value, as in `_pattern_words`."""
+    i = position + 1
+    while i < len(words):
+        word = words[i]
+        i += 1
+        if word == "--":
+            return False
+        if word.startswith("--"):
+            name, _, value = word.partition("=")
+            if name in ENV_GREP_RECURSIVE_LONG or (name == "--directories" and value == "recurse"):
+                return True
+            continue
+        if not word.startswith("-") or word == "-":
+            continue
+        for k, letter in enumerate(word[1:], 1):
+            rest = word[k + 1:]
+            if letter in "rR":
+                return True
+            if letter == "d" and (rest or (words[i] if i < len(words) else "")) == "recurse":
+                return True
+            if letter in ENV_GREP_VALUE_SHORT:
+                i += 0 if rest else 1
+                break
+    return False
+
+
+def _grep_globs(words, position: int):
+    """The (include, exclude, exclude-dir) globs of a grep command line, as the shell passes them."""
+    found = {"--include": [], "--exclude": [], "--exclude-dir": []}
+    for i in range(position + 1, len(words)):
+        name, attached, value = words[i].partition("=")
+        if name in found:
+            if not attached and i + 1 < len(words):
+                value = words[i + 1]
+            found[name].append(re.sub(r"[\"']", "", value))
+    return found["--include"], found["--exclude"], found["--exclude-dir"]
+
+
 def _env_walk(texts, cwd: str):
-    """Return (reason, log) when `rg` or `ag` with a hidden flag walks a folder that holds an env
-    file on disk. The folder is each path word that is a folder, or `cwd` when no path is named
-    and no pipe or `<` feeds the search. `rg --files` lists names and reads no contents.
+    """Return (reason, log) when `rg` or `ag` with a hidden flag, or a recursive grep, walks a
+    folder that holds an env file on disk. The folder is each path word that is a folder, or `cwd`
+    when no path is named. For rg and ag no pipe or `<` may feed the search either; a recursive
+    grep walks `cwd` whatever feeds it. `rg --files` lists names and reads no contents. A grep
+    `--include`, `--exclude` or `--exclude-dir` glob that skips the env file clears it.
 
     ACCEPTED LIMITS: a word that holds a variable, a glob or a substitution is not resolved, a
     `cd` earlier in the command is not followed (a path reads against `cwd`), a search in the body
@@ -933,23 +992,30 @@ def _env_walk(texts, cwd: str):
             fed = number > 0 and ends[number - 1] == "|"
             for part, segment in enumerate(_env_parts(piece)):
                 words, position, command = _env_words(segment)
-                if command not in ENV_WALK_COMMANDS or "--files" in words:
+                grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
+                if not (command in ENV_WALK_COMMANDS or grep) or "--files" in words:
                     continue
-                skip, _, hidden, plain = _pattern_words(words, position, command)
-                if not hidden:
+                skip, _, hidden, plain = _pattern_words(
+                    words, position, "grep" if grep else command)
+                if grep:
+                    if command != ENV_GREP_RECURSIVE_COMMAND and not _grep_recursive(words, position):
+                        continue
+                elif not hidden:
                     continue
                 paths = [re.sub(r"[\\\"']", "", words[i]) for i in plain if i not in skip]
                 folders = [os.path.join(cwd, os.path.expanduser(w)) for w in paths
                            if not re.search(r"[$`*?\[]", w)]
                 folders = [f for f in folders if os.path.isdir(f)]
-                if not paths and not ((fed and part == 0) or "<" in words):
+                if not paths and (grep or not ((fed and part == 0) or "<" in words)):
                     folders = [cwd]
+                globs = _grep_globs(words, position) if grep else ((), (), ())
                 for folder in folders:
-                    found = _env_file_in(folder)
+                    found = _env_file_in(folder, *globs)
                     if found:
-                        return (ENV_WALK_REASON,
-                                "'%s' with a hidden flag walks '%s', which holds '%s'"
-                                % (command, folder, found))
+                        return (ENV_GREP_WALK_REASON if grep else ENV_WALK_REASON,
+                                "'%s' %s walks '%s', which holds '%s'"
+                                % (command, "recursive" if grep else "with a hidden flag", folder,
+                                   found))
     return "", ""
 
 
