@@ -45,9 +45,12 @@ A letter also means the same option in the chat and on the page. Guard rule `opt
   - The reason says: the chat and the page carry the same option text in the same order. It names no target.
   - Cost: no new process. It reads the transcript's tail once per call, only for a write that carries `options`, and writes nothing unless it refuses. An unreadable transcript allows and logs one `noted` line.
   - Known limit: only an assistant text block counts. A question asked in the chat box (`AskUserQuestion`) is not read.
-  - Known limit: a chat label that is a prefix of the page's label passes, so a chat "Allow" matches a page "Allow merge --role".
   - Known limit: a chat question that cites no item is not compared, and a write with no later chat to compare passes. The rule judges two copies only when the chat names the item.
   - Known limit: a chat question written after the page item is not checked until the item is written again.
+  - Known limit: new options written after a `none` answer need the chat question asked again with the new options. The old question still cites the id, so the write is compared to it.
+  - Known limit: an unreadable or missing transcript allows the write and logs one `noted` line.
+  - Known limit: the prefix match works both ways, so a chat "Allow" matches a page "Allow merge --role", and the reverse passes too.
+  - Known limit: the widening guard (`uniform-pick`) still reads `pick` beside `recommended`. Reading `recommended` alone needs an owner ruling.
 
 Incident:
 
