@@ -18,6 +18,10 @@ No snapshot, an unreadable snapshot or an unreadable list records nothing.
 Record mode: `sim_boot_record.py --record <UDID>`, which bin/sim-test calls after its own boot, appends
 one record line for that device, read with the same devices() and launchd(). It prints nothing and
 exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
+
+Fields of each line, in both modes: udid, name, deviceTypeIdentifier, runtime, at, launchd_pid,
+launchd_start, and load1, load5, load15 (the Mac's 1-, 5- and 15-minute loads at the record, from
+`sysctl -n vm.loadavg`; null when that read fails). Cost: one more `sysctl` start per record line.
 """
 import json
 import os
@@ -143,6 +147,19 @@ def retry(udid):
     return sim_ok(udid)
 
 
+def loads():
+    """(load1, load5, load15) as floats from `sysctl -n vm.loadavg`, or three Nones when it cannot be read.
+    Same parse as read_load() in bin/sim-lease, copied: this hook runs inside the guard and must not import a bin script."""
+    try:
+        answer = _nowindow.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True, timeout=10)
+        parts = answer.stdout.replace("{", " ").replace("}", " ").split()
+        if answer.returncode == 0 and len(parts) >= 3:
+            return tuple(float(p) for p in parts[:3])
+    except Exception:
+        pass
+    return None, None, None
+
+
 def state_dir():
     return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "state")
 
@@ -154,7 +171,9 @@ def write_record(state, udid, rec, at):
     if pid is None or start is None:
         return
     with open(os.path.join(state, "sim-boots.jsonl"), "a", encoding="utf-8") as f:
-        f.write(json.dumps({**rec, "at": at, "launchd_pid": pid, "launchd_start": start}) + "\n")
+        load1, load5, load15 = loads()
+        f.write(json.dumps({**rec, "at": at, "launchd_pid": pid, "launchd_start": start,
+                            "load1": load1, "load5": load5, "load15": load15}) + "\n")
 
 
 def record_one(udid):

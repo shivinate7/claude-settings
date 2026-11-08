@@ -9,6 +9,7 @@ Temp files follow decisions/test-temp-standard.md: one run folder from lint/_tes
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -120,7 +121,8 @@ class LeaseCase(unittest.TestCase):
 
     def env(self, **extra):
         env = {k: v for k, v in os.environ.items() if k not in (
-            "CI", "GITHUB_ACTIONS", "CLAUDE_CONFIG_DIR", "SIM_LEASE_WAIT", "SIM_LEASE_POLL", "SIM_LEASE_TEST_UNAME")}
+            "CI", "GITHUB_ACTIONS", "CLAUDE_CONFIG_DIR", "SIM_LEASE_WAIT", "SIM_LEASE_POLL", "SIM_LEASE_TEST_UNAME",
+            "SIM_LEASE_NOW", "SIM_LEASE_SKIP", "SIM_LEASE_MAX")}
         env.update(HOME=self.home, CLAUDE_CONFIG_DIR=self.cfg,
                    PATH=self.shims + os.pathsep + os.environ.get("PATH", ""), SIM_LEASE_POLL="1",
                    SIM_LEASE_TEST_LOAD=self.load_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
@@ -149,10 +151,10 @@ class LeaseCase(unittest.TestCase):
         self.addCleanup(stop, p)
         return p
 
-    def queue_waiter(self, device, pid):
+    def queue_waiter(self, device, pid, env=None):
         """Starts a take that waits in the background. Returns once status lists its pid: a condition, not a delay."""
         p = subprocess.Popen([sys.executable, SIM_LEASE, "take", "--device", device, "--pid", str(pid), "--wait", "30"],
-                             env=self.env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             env=self.env(**(env or {})), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         self.addCleanup(stop, p)
         for _ in range(100):
@@ -318,6 +320,207 @@ class Queue(LeaseCase):
                          "a holder recorded under TZ=UTC0 is reaped under TZ=IST-5:30")
 
 
+class StaleWaiter(LeaseCase):
+    """A waiting take stamps its queue entry with `seen`, the epoch seconds of its last poll (SIM_LEASE_NOW is the clock
+    here). A waiter whose stamp is older than SIM_LEASE_SKIP is passed over and keeps its place; its next poll makes it
+    fresh again."""
+
+    def skipping_env(self, now):
+        return {"SIM_LEASE_NOW": str(now), "SIM_LEASE_SKIP": "30"}
+
+    def queue_entry(self, pid):
+        """pid's entry in the queue of leases.json, or None."""
+        try:
+            with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json")) as f:
+                queue = json.load(f).get("queue", [])
+        except FileNotFoundError:
+            return None
+        return next((e for e in queue if isinstance(e, dict) and e.get("pid") == pid), None)
+
+    def leased(self, pid):
+        """True when status lists a lease for pid."""
+        return any(line.startswith("lease ") and mentions(line, pid) for line in self.status().stdout.splitlines())
+
+    def wait_for(self, condition, failure):
+        """Polls condition every 50 ms, up to 5 s, and fails with `failure` when it never holds."""
+        for _ in range(100):
+            if condition():
+                return
+            time.sleep(0.05)
+        self.fail(failure)
+
+    def test_a_stale_head_is_passed_over_and_the_next_fresh_waiter_is_granted(self):
+        self.set_load("0.50", "60.00", "0.50")  # slot 2 is refused, so the holder's slot 1 is the only grant
+        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        stop(self.queue_waiter("duo", head.pid, env=self.skipping_env(1000)))  # SIGKILL: no cleanup, the entry stays
+        self.assertIsNotNone(self.queue_entry(head.pid), "the killed head's entry is not on the queue")
+        self.assertEqual(self.give(holder.pid).returncode, 0, "give of the holder's pid exits non-zero")
+        r = self.take("duo", later.pid, env=self.skipping_env(1100))
+        self.assertEqual(grant(r), (0, "1"), "a stale head blocks the queue: the next fresh waiter is not granted slot 1")
+        self.assertIsNotNone(self.queue_entry(head.pid), "the stale head lost its place on the queue")
+
+    def test_a_fresh_head_is_never_passed_over_so_fifo_holds(self):
+        """A control: main is strict FIFO, so it holds already. The fresh head is a pro, blocked by the duo holder."""
+        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.queue_waiter("pro", head.pid, env=self.skipping_env(1000))
+        r = self.take("duo", later.pid, env=self.skipping_env(1010))
+        self.assertEqual(r.returncode, 1, "a duo take is granted ahead of a fresh pro head")
+
+    def test_a_poll_stamps_its_queue_entry_with_sim_lease_now(self):
+        holder, head = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.queue_waiter("pro", head.pid, env=self.skipping_env(1234))
+        entry = self.queue_entry(head.pid)
+        self.assertIsNotNone(entry, "the waiter's entry is not in leases.json")
+        self.assertEqual(entry.get("seen"), 1234, "a poll does not stamp the queue entry's seen with SIM_LEASE_NOW")
+
+    def test_a_stale_head_that_polls_again_gets_the_next_free_slot_ahead_of_later_waiters(self):
+        self.set_load("0.50", "60.00", "0.50")
+        holder, head, first_later, second_later = self.spawn(), self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        stop(self.queue_waiter("duo", head.pid, env=self.skipping_env(1000)))  # the head is stale from 1100 on
+        self.queue_waiter("duo", first_later.pid, env=self.skipping_env(1100))
+        self.assertEqual(self.give(holder.pid).returncode, 0, "give of the holder's pid exits non-zero")
+        self.wait_for(lambda: self.leased(first_later.pid),
+                      "the first later waiter is not granted slot 1 past the stale head")
+        self.queue_waiter("duo", head.pid, env=self.skipping_env(1100))  # the head polls again: fresh, and keeps its place
+        self.wait_for(lambda: (self.queue_entry(head.pid) or {}).get("seen") == 1100,
+                      "the stale head's poll does not re-stamp its queue entry")
+        self.queue_waiter("duo", second_later.pid, env=self.skipping_env(1100))
+        self.assertEqual(self.give(first_later.pid).returncode, 0, "give of the first later waiter exits non-zero")
+        self.wait_for(lambda: self.leased(head.pid),
+                      "the stale head that polled again is not granted the next free slot")
+        self.assertFalse(self.leased(second_later.pid), "a later waiter is granted ahead of the head that polled again")
+
+
+class LeaseExpiry(LeaseCase):
+    """A lease older than SIM_LEASE_MAX seconds since its grant is dropped on the next take, so the next waiter gets its
+    slot. SIM_LEASE_NOW is the clock: the grant is stamped with it, as `seen` is, and a later take reads it. The default
+    is 1800 s (unmeasured)."""
+
+    def clock(self, now, max_s=None):
+        extra = {"SIM_LEASE_NOW": str(now)}
+        if max_s is not None:
+            extra["SIM_LEASE_MAX"] = str(max_s)
+        return extra
+
+    def test_a_lease_older_than_sim_lease_max_is_dropped_for_the_next_waiter(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 60))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1050, 60))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=2, env=self.clock(1061, 60))
+        self.assertEqual(grant(r), (0, "1"),
+                         "a lease granted at 1000 is older than SIM_LEASE_MAX=60 at 1061, so the next waiter takes slot 1")
+
+    def test_a_lease_younger_than_sim_lease_max_still_blocks_the_next_waiter(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 60))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1000, 60))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=1, env=self.clock(1059, 60))
+        self.assertEqual(r.returncode, 1, "a lease 59 s old is under SIM_LEASE_MAX=60, so the waiter is not granted")
+        lines = self.run_tool("status", env=self.clock(1059, 60)).stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "the holder keeps slot 1")
+
+    def test_without_sim_lease_max_a_lease_older_than_1800_s_is_dropped(self):
+        holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000))), (0, "1"))
+        self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1000))), (0, "2"))
+        r = self.take("duo", waiter.pid, wait=2, env=self.clock(2801))
+        self.assertEqual(grant(r), (0, "1"), "a lease granted at 1000 is 1801 s old at 2801, over the default 1800 s")
+
+
+class Renew(LeaseCase):
+    """A live holder renews its lease: `renew` stamps the grant time with now, so SIM_LEASE_MAX counts the silence since
+    the last renew (owner, 2026-11-07 13:00: a holder that stops answering loses its turn)."""
+
+    def clock(self, now, max_s=None):
+        extra = {"SIM_LEASE_NOW": str(now)}
+        if max_s is not None:
+            extra["SIM_LEASE_MAX"] = str(max_s)
+        return extra
+
+    def test_renew_keeps_a_lease_past_sim_lease_max(self):
+        holder, waiter = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 100))), (0, "1"))
+        self.run_tool("renew", "--pid", str(holder.pid), env=self.clock(1080, 100))
+        r = self.take("duo", waiter.pid, wait=1, env=self.clock(1150, 100))
+        self.assertNotEqual(grant(r), (0, "1"),
+                            "the holder renewed at 1080, so at 1150 it is 70 s silent, under SIM_LEASE_MAX=100: "
+                            "slot 1 is not free")
+
+    def test_renew_of_a_pid_with_no_lease_exits_1(self):
+        holder, stranger = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 100))), (0, "1"))
+        r = self.run_tool("renew", "--pid", str(stranger.pid), env=self.clock(1050, 100))
+        self.assertEqual(r.returncode, 1, "renew of a pid that holds no lease exits %d, not 1" % r.returncode)
+        lines = self.run_tool("status", env=self.clock(1050, 100)).stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "renew of a pid with no lease changed the holder's lease")
+
+
+class LiveLeases(LeaseCase):
+    """live_leases(), the guard's reader, treats a lease past SIM_LEASE_MAX as not live, on the same clock as the take."""
+
+    def live_leases(self, env):
+        code = ("import importlib.machinery, importlib.util, json, sys\n"
+                "loader = importlib.machinery.SourceFileLoader('sim_lease_under_test', sys.argv[1])\n"
+                "module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))\n"
+                "loader.exec_module(module)\n"
+                "print(json.dumps(sorted(e['pid'] for e in module.live_leases())))\n")
+        r = subprocess.run([sys.executable, "-c", code, SIM_LEASE], env=self.env(**env), capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, "live_leases raised: %s" % r.stderr.strip())
+        return json.loads(r.stdout)
+
+    def test_live_leases_drops_a_lease_past_sim_lease_max(self):
+        holder = self.spawn()
+        clock = {"SIM_LEASE_NOW": "1000", "SIM_LEASE_MAX": "100"}
+        self.assertEqual(grant(self.take("duo", holder.pid, env=clock)), (0, "1"))
+        self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1050")), [holder.pid],
+                         "a lease 50 s old is not live under SIM_LEASE_MAX=100")
+        self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1150")), [],
+                         "live_leases reports a lease 150 s old under SIM_LEASE_MAX=100")
+
+
+class PsError(LeaseCase):
+    """A `ps` that fails with an error (exit 2) is not a dead pid: it keeps the entry. Exit 1 is no such process."""
+
+    def use_ps_exiting(self, code):
+        path = os.path.join(self.shims, "ps")
+        with open(path, "w") as f:
+            f.write('#!/bin/sh\necho "ps: simulated failure" >&2\nexit %d\n' % code)
+        os.chmod(path, 0o755)
+
+    def test_a_ps_that_exits_2_does_not_reap_a_live_holder(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the holder is not granted slot 1")
+        self.use_ps_exiting(2)
+        lines = self.status().stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "a ps that exits 2 reaped a live holder: status no longer lists it")
+
+    def test_a_ps_that_exits_1_for_a_dead_holder_still_reaps_it(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the holder is not granted slot 1")
+        holder.kill()
+        holder.wait()
+        self.use_ps_exiting(1)
+        lines = self.status().stdout.splitlines()
+        self.assertFalse(any(mentions(line, holder.pid) for line in lines), "a dead holder is still listed")
+
+    def test_a_take_whose_ps_exits_2_exits_2_and_says_cannot_read_pid(self):
+        pid = self.spawn().pid
+        self.use_ps_exiting(2)
+        r = self.take("duo", pid)
+        self.assertEqual(r.returncode, 2, "a take whose ps exits 2 exits %d, not 2" % r.returncode)
+        self.assertEqual(r.stdout.strip(), "", "a take whose ps exits 2 prints a slot")
+        self.assertIn("cannot read pid", r.stderr, "a take whose ps exits 2 does not say it cannot read the pid")
+        self.assertNotIn("not alive", r.stderr, "a take whose ps exits 2 says the live pid is not alive")
+
+
 class Give(LeaseCase):
     def test_give_frees_the_lease_and_is_idempotent(self):
         holder, never, later = self.spawn(), self.spawn(), self.spawn()
@@ -358,6 +561,52 @@ class UdidTake(LeaseCase):
         self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
 
 
+UNKNOWN_DUO_UDID = "AAAAAAAA-0000-4000-8000-000000000001"  # a Duo UDID that SLOT_UDID does not name
+
+
+class ReuseTake(LeaseCase):
+    """take --reuse UDID takes the lease of the slot that boots UDID: the lease a reuse of a booted Duo holds."""
+
+    def reuse(self, udid, pid, wait=1, env=None):
+        return self.run_tool("take", "--device", "duo", "--reuse", udid, "--pid", str(pid), "--wait", str(wait),
+                             env=env)
+
+    def lease_line(self, pid):
+        """The status line of pid's lease, or '' when status lists none."""
+        return next((line for line in self.status().stdout.splitlines()
+                     if line.startswith("lease ") and mentions(line, pid)), "")
+
+    def test_reuse_of_slot_1s_udid_takes_slot_1(self):
+        pid = self.spawn().pid
+        r = self.reuse(SLOT_UDID["1"], pid)
+        self.assertEqual(r.returncode, 0, "take --reuse of slot 1's UDID is not granted: exit %d" % r.returncode)
+        self.assertIn(" slot 1 ", self.lease_line(pid), "status does not show slot 1 held by the reuse's pid")
+
+    def test_reuse_at_a_1_minute_load_of_60_is_granted(self):
+        self.set_load("60.00", "0.50", "0.50")
+        pid = self.spawn().pid
+        r = self.reuse(SLOT_UDID["1"], pid)
+        self.assertEqual(r.returncode, 0, "take --reuse at a 1-minute load of 60 is refused: a reuse skips the load bars")
+
+    def test_reuse_waits_behind_a_live_slot_1_holder_then_exits_1(self):
+        holder, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        r = self.reuse(SLOT_UDID["1"], second.pid)
+        self.assertEqual(r.returncode, 1, "take --reuse of slot 1's UDID is not refused while slot 1 is held: exit %d"
+                         % r.returncode)
+        self.assertTrue(mentions(r.stderr, holder.pid), "the refusal does not name the slot 1 holder")
+
+    def test_reuse_of_a_duo_udid_outside_slot_udid_takes_slot_other_with_its_udid_in_status(self):
+        self.assertNotIn(UNKNOWN_DUO_UDID, SLOT_UDID.values(), "the unknown UDID is one of SLOT_UDID's")
+        pid = self.spawn().pid
+        r = self.reuse(UNKNOWN_DUO_UDID, pid)
+        self.assertEqual(r.returncode, 0, "take --reuse of a Duo UDID outside SLOT_UDID is refused: exit %d"
+                         % r.returncode)
+        line = self.lease_line(pid)
+        self.assertIn(" slot other ", line, "status does not show the lease as slot other")
+        self.assertIn("udid %s" % UNKNOWN_DUO_UDID, line, "status does not show the UDID of the slot other lease")
+
+
 class Usage(LeaseCase):
     def test_a_usage_error_exits_2(self):
         for label, args in (("a take with no device", ["take"]), ("a take with an unknown device",
@@ -392,6 +641,14 @@ class Status(LeaseCase):
         self.assertEqual(sum(mentions(line, head.pid) for line in lines), 1,
                          "the waiter is not on exactly one status line")
         self.assertIn("4.56", r.stdout, "status does not show the 5-minute load")
+
+    def test_status_lease_line_names_the_udid_of_the_slot(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, udid=True)), (0, SLOT_UDID["1"]),
+                         "take --udid is not granted slot 1's UDID")
+        line = next((ln for ln in self.status().stdout.splitlines() if ln.startswith("lease ") and mentions(ln, pid)),
+                    "")
+        self.assertIn("udid %s" % SLOT_UDID["1"], line, "status does not name the UDID of the lease")
 
 
 class NoOp(LeaseCase):
