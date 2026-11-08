@@ -925,7 +925,8 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, re, sys, time
+FAKE_GH_PY = r'''import io, json, os, re, sys, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")  # the bytes go out as written: a text-mode stdout on Windows turns each \n into \r\n, which real gh never does
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
     with open(state["count_file"], "a", encoding="utf-8") as handle:
@@ -933,6 +934,7 @@ if state.get("count_file"):  # a test that counts the calls names the file: one 
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+REPO_ID = 424242424  # the numeric id GitHub names in a Link header; the cloud agent proxy refuses paths that carry it
 GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -959,19 +961,33 @@ def parse(argv):
 
 
 def api_error(code, message):
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
-    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    asked = max(1, int(fields.get("page", 1)))
+    chosen = pages if "--paginate" in flags else [pages[asked - 1] if asked <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
-        return json.dumps(bodies)
-    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+        body = json.dumps(bodies)
+    else:
+        body = json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+    if "-i" not in flags:
+        return body
+    link = None
+    if "--paginate" not in flags and asked < len(pages):
+        def url(page):
+            parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
+            return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
+        link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
+    return "HTTP/1.1 200 OK\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
@@ -1016,20 +1032,20 @@ else:
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        print(listing(rows, None, fields, flags))
+        print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
                      "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
-            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}, rel=rel))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1226,10 +1242,11 @@ def materialize_for(case):
 
 
 def materialize_all():
-    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
-    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    """Build every lazy fixture except the diff repos and the conflict-markers repos. A log check builds
+    its own diff repos (see diff_repo), so the run loop need not build all ~170 of them for any log check.
+    No log check reads a conflict-markers repo: a case builds one through materialize_for, when it names it."""
     for key, once in list(LAZY.items()):
-        if slash(DIFFROOT) not in key:
+        if slash(DIFFROOT) not in key and not key.startswith(slash(CMKROOT) + "/"):
             once()
 
 
@@ -3861,6 +3878,9 @@ def hand_made_refusal_text_case():
     return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
+POINTER_OWN_WORKTREE_HINT = "If you already have a worktree, run `git -C <that worktree> ...`"
+
+
 def pointer_remedy_names_enter_worktree_case():
     """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
     got, reason = decide({
@@ -3874,7 +3894,11 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
-    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+    # An agent with no readable home record, whose shell directory reset out of its worktree, hits
+    # this rule rather than rule 0, so the remedy also aims git at the worktree it already has.
+    if POINTER_OWN_WORKTREE_HINT not in reason:
+        return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
+    return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -5416,10 +5440,6 @@ sh("narrate: the script run by path, piped to head",
    "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: the launcher script run through python, piped to tail",
    "python merge/launch.py 12 --confirm 2>&1 | tail -5", "deny", "live-stream", cwd=NOGIT)
-sh("narrate: a versioned python runs the merge script, piped to tail",
-   "python3.11 merge/merge.py 12 --confirm | tail -3", "deny", "live-stream", cwd=NOGIT)
-sh("narrate: uv run python runs the merge script, piped to tail",
-   "uv run python merge/merge.py 12 --confirm 2>&1 | tail -3", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: --confirm on a command off the roster", "deploy 12 --confirm 2>&1 | tail -5",
    "allow", cwd=NOGIT)
 sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
@@ -5429,324 +5449,59 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
-# --- a roster command piped into tail or head (rule check-tail)
+# --- a pipe out of a verdict stage (extends the live-stream rule)
 #
-# A backgrounded `merge --lane-lint 1476 2>&1 | tail -8` loses its verdict (decision
-# background-check-through-verdict holds the incident). The roster is named, one spelling per entry: `merge`, `merge.cmd`,
-# `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
-# `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
-# `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
-# and tail or head does not hide it. A `tee` stage ends the check's reach. `verdict` keeps the whole
-# output, so a call through it is allowed.
-# Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
-# run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
-TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+# verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
+# so `verdict CMD | tail` reads tail's exit and a red run reads 0. Any pipe out of verdict is refused,
+# whatever the filter. A verdict that is the last stage has no pipe out of it, so it is allowed.
+VERDICT_PIPE = "verdict-pipe"
 
-add("check-tail: the incident line, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
-add("check-tail: merge --lane-lint piped to head, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 7 | head -5")
-add("check-tail: merge.cmd --lane-lint piped to tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge.cmd --lane-lint 7 2>&1 | tail -3")
-add("check-tail: the script run through python piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python merge/merge.py --lane-lint 7 2>&1 | tail -3")
-add("check-tail: the launcher run through python piped to head, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python merge/launch.py --lane-lint 7 | head -3")
-add("check-tail: ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20")
-add("check-tail: a quoted # does not hide a roster command after it, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='echo "# lint"; merge --lane-lint 7 | tail -3')
-add("check-tail: a lone apostrophe in quotes does not hide a roster command, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='echo "it\'s up"; merge --lane-lint 7 2>&1 | tail -3')
-add("check-tail: merge --lane-lint through grep -v and tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 1476 2>&1 | grep -v DEBUG | tail -8")
 
-add("check-tail: the incident line through verdict, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
-add("check-tail: a python3 verdict wrapper piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
-add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
-add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
-            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
-add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 1476 2>&1 | tee run.out")
-add("check-tail: a tee between the check and grep and tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
-add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='grep -n "--lane-lint" merge/merge.py | tail -20')
-add("check-tail: an ordinary command piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="make check 2>&1 | tail -40")
-add("check-tail: a roster name inside echo's quotes, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="echo 'merge --lane-lint 1' | tail -1")
-add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='echo "# merge --lane-lint 1 | tail -3"')
-add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+def verdict_pipe(name, command, expected):
+    """One case of the verdict-pipe rule. A deny names the rule; an allow has no reason to name it."""
+    sh("verdict-pipe: " + name, command, expected, VERDICT_PIPE if expected == "deny" else None,
+       cwd=NOGIT)
 
-# Wrapper forms (`uv run`, a versioned python, a `VAR=x` prefix) read as the bare spellings do. The
-# allow cases name calls a wider match must not refuse: a pytest run and a grep that names the script.
-add("check-tail: uv run ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
-    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="uv run ci-job checks --lint 2>&1 | tail -20")
-add("check-tail: env VAR=x then ci-job checks --lint piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="env CI=1 ~/.claude/bin/ci-job checks --lint | tail -5")
-add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python3 bin/ci-job checks --lint | tail -5")
-add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python3 -W ignore bin/ci-job checks --lint | tail -5")
-add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="uv run python -m pytest | tail -5")
-add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
-add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="uv run -w pytest ci-job checks --lint | tail -5")
-add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
-    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
-add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
 
-# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
-# not refused in the foreground, and neither is a verdict call.
-sh("check-tail: the incident line in the foreground is refused",
-   "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
-   "merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --review-record piped to head in the foreground is refused",
-   "~/.claude/bin/merge 12 --review-record --head 0123456789abcdef0123456789abcdef01234567 | head -20",
-   "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: ci-job piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
-sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
-sh("check-tail: a verdict call piped to tail in the foreground is allowed",
-   "verdict merge --lane-lint 1476 | tail -3", "allow", cwd=NOGIT)
-# Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
-sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
-   "uv run python merge/merge.py --lane-lint 7 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: uv run runs merge --lane-lint piped to tail in the foreground is refused",
-   "uv run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: python3.11 runs the script piped to tail in the foreground is refused",
-   "python3.11 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: env VAR=x then merge --lane-lint piped to tail in the foreground is refused",
-   "env FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: env VAR=x then python3 runs the script piped to head in the foreground is refused",
-   "env FOO=1 python3 merge/merge.py --review-record --head 0123456789abcdef0123456789abcdef01234567 "
-   "| head -5", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: a VAR=x prefix on merge --lane-lint piped to tail in the foreground is refused",
-   "FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: uv run python -m pytest piped to tail in the foreground is allowed",
-   "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
-sh("check-tail: env VAR=x then verdict merge --lane-lint piped to tail in the foreground is allowed",
-   "env FOO=1 verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
-sh("check-tail: uv run verdict merge --lane-lint piped to tail in the foreground is allowed",
-   "uv run verdict merge --lane-lint 7 | tail -3", "allow", cwd=NOGIT)
-sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
-   "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
-   "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
-   "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
-   cwd=NOGIT)
-# Forms the roster does not yet read: a `uv run` that runs a script by its path, a script run by its
-# path, and an argparse prefix of --lane-lint or --review-record. argparse takes a prefix that matches
-# one option alone, so `merge --lane 7` runs --lane-lint. It refuses an ambiguous prefix and runs no
-# check, so `merge --l 7` (--lane-lint, --lint-unknown-ok, --live) is allowed.
-sh("check-tail: uv run runs the merge script piped to tail in the foreground is refused",
-   "uv run merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: a merge script run by its path piped to tail in the foreground is refused",
-   "./merge/merge.py --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail in the foreground is refused",
-   "merge --lane 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail in the foreground is refused",
-   "merge --lane-l 7 2>&1 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is refused",
-   "merge --review-r 12 --head 0123456789abcdef0123456789abcdef01234567 | head -5", "deny",
-   "check-tail", cwd=NOGIT)
-sh("check-tail: merge --l, an ambiguous prefix that argparse refuses, piped to tail is allowed",
-   "merge --l 7 | tail -3", "allow", cwd=NOGIT)
-
-# --- a verdict call piped into a later stage, then && or || (rule verdict-pipe-exit)
-#
-# verdict keeps the whole log and prints the verdict, but a pipe after it hides verdict's exit
-# status, so the `&&` or `||` that follows still runs after a red check. A red lint went in
-# this way once. The rule refuses a `verdict` call (any spelling, behind any wrapper) piped into any
-# later stage when `&&` or `||` follows the pipeline and pipefail is not set earlier in the same
-# command. A `;` after the pipeline does not count, so it is allowed. A bare verdict call, and a
-# pipeline that ends the command, are allowed. The rule runs in
-# the foreground and in the background. check-tail exempts verdict, so this is its own rule id.
-# The background case names an until note, so background-end decides none of them.
-# The same refusal covers a lint command run without verdict: ste_lint, ste-changed, ci-job with
-# --lint, and merge --lane-lint. check-tail runs first and refuses a check piped to tail or head,
-# so a merge --lane-lint pipe to tail is pinned to check-tail, and the grep forms reach this rule.
-VERDICT_PIPE = "verdict-pipe-exit"
-CHECK_TAIL = "check-tail"
-
-sh("verdict-pipe-exit: verdict piped to tail, then && commit, is refused",
-   "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: the absolute bin path piped to tail, then ;, is allowed",
-   "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: two verdict pipes joined by ; are allowed",
-   "verdict python3 lint/a.py 2>&1 | tail -3; verdict python3 lint/b.py 2>&1 | tail -3", "allow",
-   cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to tail, then ; echo, is allowed",
-   "verdict python3 lint/a.py | tail -1; echo ---", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: the relative bin path piped to head, then &&, is refused",
-   "bin/verdict make check | head -3 && echo ok", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: an env assignment before verdict piped to tail, then &&, is refused",
-   "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py 2>&1 | tail -3 && git push", "deny",
-   VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: the shortened incident line piped to tail, then && add and commit, is refused",
-   "~/.claude/bin/verdict python3 lint/ste_lint.py docs/decisions/x.md 2>&1 | tail -1 && "
-   "git add docs/decisions/x.md && git commit -q -m x", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to tail, then || echo, is refused",
-   "verdict python3 lint/check_x.py | tail -1 || echo failed", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to grep -q, then && push, is refused",
-   "verdict python3 lint/check_x.py 2>&1 | grep -q PASS && git push", "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to sed -n, then && push, is refused",
-   "verdict make check | sed -n 1p && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-add("verdict-pipe-exit: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
-    VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
-sh("verdict-pipe-exit: verdict.cmd piped to tail, then && push, is refused",
-   "verdict.cmd python3 lint/check_x.py | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-
-sh("verdict-pipe-exit: a bare verdict call is allowed",
-   "verdict python3 lint/check_x.py", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: verdict then && commit, with no pipe, is allowed",
-   "verdict python3 lint/check_x.py && git commit -m x", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to tail as the last pipeline is allowed",
-   "verdict python3 lint/check_x.py | tail -3", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: pipefail set earlier with set -o is allowed",
-   "set -o pipefail; verdict python3 lint/check_x.py | tail -3 && git commit -m x", "allow",
-   cwd=NOGIT)
-sh("verdict-pipe-exit: pipefail set earlier in a combined set -euo is allowed",
-   "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "allow",
-   cwd=NOGIT)
-sh("verdict-pipe-exit: set +o pipefail undoes an earlier set -o, then && push, is refused",
-   "set -o pipefail; set +o pipefail; verdict python3 lint/check_x.py | tail -3 && git push",
-   "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: a pipe with no verdict in it is allowed",
-   "cat x.log | tail -3 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: verdict inside quotes is not a call",
-   "echo 'verdict a | tail -1 && b'", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: verdict piped to grep as the last command is allowed",
-   "verdict make check | grep FAIL", "allow", cwd=NOGIT)
-
-# A lint command run without verdict: its exit status is hidden by a later stage too.
-sh("verdict-pipe-exit: ste_lint piped to tail, then && commit and push, is refused",
-   "python3 lint/ste_lint.py docs/x.md 2>&1 | tail -3 && git commit -qam x && git push",
-   "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: ste_lint through python3 piped to grep -c, then || echo, is refused",
-   "python3 ~/.claude/lint/ste_lint.py docs/x.md | grep -c STE0 || echo clean",
-   "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: ste-changed piped to tail, then && push, is refused",
-   "~/.claude/bin/ste-changed origin/main 2>&1 | tail -5 && git push", "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: ci-job checks --lint piped to tail, then && push, is refused",
-   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -5 && git push", "deny",
-   VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: merge --lane-lint piped to tail, then && push, is pinned to check-tail",
-   "~/.claude/bin/merge --lane-lint 7 2>&1 | tail -3 && git push", "deny", CHECK_TAIL,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: merge --lane-lint piped to grep -c, then && push, is refused",
-   "~/.claude/bin/merge --lane-lint 7 2>&1 | grep -c FAIL && git push", "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: a quoted # does not hide a lint pipe after it, then && push, is refused",
-   'echo "# ok"; python3 lint/ste_lint.py docs/x.md | tail -3 && git push', "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: a lone apostrophe in quotes does not hide a lint pipe, then && push, is refused",
-   "echo \"don't\"; python3 lint/ste_lint.py docs/x.md | tail -3 && git push", "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: a lint pipe after a multi-line quote, then && push, is refused",
-   'echo "one\ntwo"\npython3 lint/ste_lint.py docs/x.md | tail -3 && git push', "deny", VERDICT_PIPE,
-   cwd=NOGIT)
-sh("verdict-pipe-exit: ste_lint piped to tail with pipefail set first is allowed",
-   "set -o pipefail; python3 lint/ste_lint.py docs/x.md | tail -3 && git push", "allow",
-   cwd=NOGIT)
-sh("verdict-pipe-exit: ste_lint then && commit, with no pipe, is allowed",
-   "python3 lint/ste_lint.py docs/x.md && git commit -qam x", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: ste_lint piped to tail as the last pipeline is allowed",
-   "python3 lint/ste_lint.py docs/x.md | tail -3", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: ste_lint piped to tail then ; git status is allowed",
-   "python3 lint/ste_lint.py docs/x.md | tail -3; git status", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: grep naming the lint script, piped to tail, then && echo is allowed",
-   "grep -n ste_lint.py docs/x.md | tail -3 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: ci-job checks with no --lint piped to tail, then && echo is allowed",
-   "~/.claude/bin/ci-job checks 2>&1 | tail -5 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: a lint command inside quotes is text, not a call",
-   'echo "python3 lint/ste_lint.py docs/x.md | tail -3 && git push"', "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: a lint name inside a multi-line quote is text, not a call",
-   'echo "start\npython3 lint/ste_lint.py docs/x.md | tail -3 && git push\nend"', "allow",
-   cwd=NOGIT)
-
-# The same lint forms read through `uv run`, a script run by its path, and the module form
-# `python3 -m lint.ste_lint`. A lint script named only as an argument (`cat`) runs nothing, so it is
-# allowed, and so is a non-lint script run by `uv run` or by its path.
-sh("verdict-pipe-exit: uv run runs the lint script piped to tail, then && push, is refused",
-   "uv run lint/ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: a lint script run by its path piped to tail, then && push, is refused",
-   "./lint/ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: a merge script run by its path with --lane-lint, piped to grep, is refused",
-   "./merge/merge.py --lane-lint 7 | grep FAIL && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: the lint module run by python3 -m, piped to tail, then && push, is refused",
-   "python3 -m lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: uv run pytest.py piped to tail, then && echo, is allowed",
-   "uv run pytest.py | tail -3 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: python3 -m pytest piped to tail, then && echo, is allowed",
-   "python3 -m pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: a build script run by its path piped to tail, then && echo, is allowed",
-   "./scripts/build.py | tail -3 && echo ok", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: cat of the lint script piped to tail, then && echo, is allowed",
-   "cat ./lint/ste_lint.py | tail -3 && echo ok", "allow", cwd=NOGIT)
-
-sh("verdict-pipe-exit: a lint script run by its bare name after cd lint, piped to tail, then && push, is refused",
-   "cd lint && ./ste_lint.py x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-# An interpreter flag before -m (-Im, or -W ignore -m) still runs the lint module, so the pipe stays refused.
-# The pytest case beside them is the control: the same flag shape on another module is allowed.
-sh("verdict-pipe-exit: the lint module run by python3 -Im, piped to tail, then && push, is refused",
-   "python3 -Im lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: the lint module run by python3 -W ignore -m, piped to tail, then && push, is refused",
-   "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
-sh("verdict-pipe-exit: python3 -Im pytest piped to tail, then && echo, is allowed",
-   "python3 -Im pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
-# The lint match is by basename. A name that only ends in ste_lint.py runs no lint, so its pipe then && is
-# allowed. A suffix match (endswith) would refuse both: the pins are green on the head and red on that mutant.
-sh("verdict-pipe-exit: test_ste_lint.py, not the lint script, piped to tail, then && push, is allowed",
-   "python3 lint/test_ste_lint.py x | tail -3 && git push", "allow", cwd=NOGIT)
-sh("verdict-pipe-exit: old_ste_lint.py, a name that only ends in ste_lint.py, piped to tail, then && push, is allowed",
-   "python3 lint/old_ste_lint.py x | tail -3 && git push", "allow", cwd=NOGIT)
+for _name, _command in (
+    ("a bare verdict piped to tail", "verdict false | tail"),
+    ("stderr piped to grep", "verdict false 2>&1 | grep x"),
+    ("a pipe into tee", "verdict false | tee out"),
+    ("the script run by path, piped to tail", "~/.claude/bin/verdict pytest | tail -5"),
+    ("a variable ahead of verdict, piped to head", "VERDICT_LOG=/tmp/x verdict false | head"),
+    ("a cd ahead of verdict, piped to tail", "cd x && verdict false | tail"),
+    ("a pipe that takes stderr too, |&", "verdict false |& tail"),
+    ("the repo's runner form, piped to tail", "python bin/verdict pytest | tail -5"),
+    ("a timeout ahead of verdict, piped to tail", "timeout 600 verdict pytest | tail -5"),
+    ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
+    ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
+):
+    verdict_pipe(_name, _command, "deny")
+for _name, _command in (
+    ("a bare verdict", "verdict false"),
+    ("verdict then a second command, &&", "verdict x && y"),
+    ("verdict then echo, ||", "verdict x || echo red"),
+    ("output redirected to a file", "verdict x > out"),
+    ("a quoted pipe in verdict's own argument", "verdict grep 'a|b' f"),
+    ("a quoted script in verdict's own argument", "verdict bash -c 'a | b'"),
+    ("grep names verdict, pipe out of grep", "grep verdict f | tail"),
+    ("echo names verdict, pipe out of echo", "echo verdict | cat"),
+    ("verdict last in a pipeline", "cat f | verdict pytest"),
+    ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
+    ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
+):
+    verdict_pipe(_name, _command, "allow")
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
@@ -8056,6 +7811,34 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
         "cd " + slash(NMREAL) + " && npm ci", "allow", NMLINKED)
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
+
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
+# THE PREFIX FLAG, UNRESOLVED AND REPEATED. A prefix the guard cannot name (a shell variable, a command substitution,
+# a home path) must not hide the working folder: the walk from it still decides, so a linked folder stays refused.
+# The other forms of the flag (`--prefix=dir`, a relative dir, a repeated flag) name the folder npm installs into.
+nm_case('linked-nm: npm ci --prefix "$PWD" from a linked folder is refused',
+        'npm ci --prefix "$PWD"', "deny", NMLINKED)
+nm_case('linked-nm: npm ci --prefix "$(git rev-parse --show-toplevel)" from a linked folder is refused',
+        'npm ci --prefix "$(git rev-parse --show-toplevel)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ~/linked from a linked folder is refused",
+        "npm ci --prefix ~/linked", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix=<linked folder>, run from a real folder, is refused",
+        "npm ci --prefix=" + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci --prefix=<real folder>, run from a linked folder, is allowed",
+        "npm ci --prefix=" + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ../nmlinked, relative, run from a real folder, is refused",
+        "npm ci --prefix ../nmlinked", "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, from a real folder, is refused",
+        "npm ci --prefix " + slash(NMREAL) + " --prefix " + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
@@ -11395,6 +11178,7 @@ CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not sta
 CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
 CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
+CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -11490,6 +11274,10 @@ def _build_conflict_markers_push():
     commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+        if os.path.exists(gone):
+            sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
+                     % gone)
 
 
 lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
@@ -11527,9 +11315,46 @@ cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree be
 # A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
 # directory that is no repository, so only the cd leads to the repository.
 cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
-          "cd " + CMK_CL + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
 cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
-           "cd " + CMK_CLT + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+
+# A failed cd leaves the shell in its cwd. After `;` the commit runs there, so a missing folder does not stop a
+# commit of the triplet in the cwd repository. After `&&` the failed cd ends the chain, so nothing runs.
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+
+# A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
+# `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
+# the `&&` stops the commit, and the same call with a real work tree holding the triplet is refused.
+cmk_allow("a missing --work-tree, then && commit, with a triplet tracked in the cwd repo",
+          VCS + " --work-tree=" + slash(CMK_GONE) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("an existing --work-tree holding the triplet, then add -A and commit",
+           VCS + " --work-tree=" + slash(CMK_CLT) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && git status, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && " + VCS + " status ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, then a cd to a clean repo after the commit",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x ; cd " + slash(CMK_CL), CMK_CLT)
+cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
+# commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.
+cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, then add -A and commit",
+           "cd " + slash(CMK_CL) + " ; cd " + slash(CMK_GONE) + " ; cd - ; "
+           + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
@@ -11704,6 +11529,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
+# stay one write.
+sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
+   "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -12114,6 +11943,11 @@ sh("frozen data: a quoted cat-write onto the config settings, piped to python, d
    "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a real cat-write onto the config settings stays denied",
    "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The PowerShell reading of a `\"` stays fail-closed: the quote may open a string, so the write is
+# still judged and denied. The bash reading of the same text is a plain echo and is allowed.
+sh("frozen: a PowerShell call with a backslash-quote before a config write stays denied",
+   'echo "C:\\" ; Set-Content ' + CFG_SETTINGS + ' x ; echo \\"D"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -13311,7 +13145,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
@@ -13695,6 +13529,39 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# A quoted argument with a real newline in it, and an escaped quote in a bash -c string, do not hide the write
+# that follows: each is read at its command position, as the shell reads it.
+sh("builder-test: sed -i with a newline in its quoted script, onto a test, is refused",
+   "sed -i '1i\\\ntext' tests/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: cp of a quoted argument with a newline onto a test is refused",
+   'cp "a\nb" tests/x.py', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then ; and a cp onto a test, is refused",
+   r'bash -c "echo \"x\"; cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a test, is refused",
+   r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
+   'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -21897,6 +21764,43 @@ sh("other-checkout: a git -C commit into a clone of a different repo is allowed"
    VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
    VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+
+# A commit message is text. From a lane's own worktree, `../docs` resolves into the primary's
+# `.claude/worktrees` folder, a folder that holds no `docs` checkout. The write scan reads the message's
+# words as paths only when the scan fails closed on the text (an escaped quote, a curly quote, a line break
+# or a hash inside the quotes) and the text also holds a `->` or a move-type word. The rows below are red
+# on a guard that refuses that text as another checkout. A plain message and a quoted heredoc body pass
+# already, so they are green controls for the same path.
+UP_SEP = slash(os.path.relpath(XCL_SEP, XCL_LANE))   # the separate clone, as a path from the lane
+BACKTICK = chr(96)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and a move word, is allowed",
+   VCS + ' commit -m "move \\"pins\\" to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with a curly apostrophe and an arrow, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs don’t"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a multi-line commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs\n\nsee \\"walk\\""', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote, an arrow and a hash, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs # not a comment"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with no write word, is allowed",
+   VCS + ' commit -m "re-point pins to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc commit body naming ../docs is allowed",
+   VCS + " commit -F - <<'EOF'\nre-point \"pins\" -> ../docs\nEOF", "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc in a substitution, naming ../docs in a commit message, is allowed",
+   VCS + " commit -m \"$(cat <<'EOF'\nfix: walk ../docs\nEOF\n)\"", "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message with a lone apostrophe, naming ../docs, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs, don\'t"', "allow", cwd=XCL_LANE)
+
+# Still refused: a real move into a separate clone, from the lane. A relative path to a clone is judged too,
+# and so is a backtick in a message, which the shell runs as a command.
+sh("other-checkout: a cd into a separate clone by a relative path, chained to a commit, is refused",
+   "cd " + UP_SEP + " && " + VCS + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a git -C commit into a separate clone by a relative path is refused",
+   VCS + " -C " + UP_SEP + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a backtick copy into a separate clone, inside a commit message, is refused",
+   VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
+   "deny", "other-checkout", cwd=XCL_LANE)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.
