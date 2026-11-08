@@ -350,6 +350,56 @@ class IdleLanesFromRawFiles(unittest.TestCase):
         self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
                          "a lane on a later page of --sessions is not listed (exit %d): stderr %r" % (code, err))
 
+    def test_a_last_page_that_says_has_more_reads_unknown_and_lists_nothing(self):
+        # Lane ruling 2 (11:25 CST, process-only): a sessions file whose last page says more pages follow is a partial read.
+        # The list reads unknown: no entry on stdout, the unknown reason on stderr, exit 1. session_a is on the last page.
+        first, later = self.rows[1:], self.rows[:1]
+        self.write_sessions([raw_page(first, more=True), raw_page(later, more=True)])
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(code, 1, "a partial read exited %d, so a caller reads the list as whole: out %r" % (code, out))
+        self.assertEqual(out, "", "a partial read printed entries: %r" % (out,))
+        self.assertIn("unknown (", err, "a partial read gave no unknown reason: %r" % (err,))
+
+    def test_a_last_page_with_a_next_cursor_reads_unknown_even_when_has_more_is_false(self):
+        # Lane ruling 2 (11:25 CST, process-only): next_cursor is a continuation key too. A last page that holds one is a
+        # partial read, whatever its has_more says.
+        page = raw_page(self.rows, more=False)
+        page["ccr"]["next_cursor"] = "cursor_2"
+        self.write_sessions(page)
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(code, 1, "a last page with a next_cursor exited %d, so a caller reads the list as whole: out %r" % (code, out))
+        self.assertEqual(out, "", "a last page with a next_cursor printed entries: %r" % (out,))
+        self.assertIn("unknown (", err, "a last page with a next_cursor gave no unknown reason: %r" % (err,))
+
+    def test_a_page_list_whose_last_page_says_has_more_false_reads_fine(self):
+        # Lane ruling 2 (11:25 CST, process-only): the control for the two partial reads above. The same pages, with the last
+        # page saying no more follow, list session_a from that last page.
+        first, later = self.rows[1:], self.rows[:1]
+        self.write_sessions([raw_page(first, more=True), raw_page(later, more=False)])
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a complete page list is not read as whole (exit %d): stderr %r" % (code, err))
+
+    def test_a_sessions_and_items_pair_last_written_over_an_hour_ago_reads_unknown(self):
+        # Lane ruling 4 (11:25 CST, process-only): readAt is the older file's mtime, so a pair last written long ago is stale.
+        # It reads unknown: exit 1 and no lane line. The fixed old time is far past the 60-minute bound at any run date.
+        # Restoring the mtimes to now lists session_a again, so the staleness is the only thing that changed.
+        old = 1700000000  # 2023-11-14 UTC
+        self.write_sessions(raw_page(self.rows, more=False))
+        for path in (self.sessions, self.items):
+            os.utime(path, (old, old))
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        lines = out.splitlines()
+        self.assertEqual(code, 1, "a stale pair exited %d, so a caller reads the list as read: out %r" % (code, out))
+        self.assertTrue(lines and all(line.startswith("unknown (") for line in lines),
+                        "a stale pair did not read unknown: out %r, err %r" % (out, err))
+        self.assertNotRegex(out, SUMMARY_LINE)
+        for path in (self.sessions, self.items):
+            os.utime(path, None)
+        code, out, err = self.run_merge("--idle-lanes", "--sessions", self.sessions, "--items", self.items)
+        self.assertEqual(out.splitlines(), ["session_a (c3; topic -)", SUMMARY_ONE],
+                         "a fresh pair did not list session_a (exit %d): stderr %r" % (code, err))
+
 
 if __name__ == "__main__":
     unittest.main()
