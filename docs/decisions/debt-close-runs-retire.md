@@ -12,7 +12,7 @@ A PR closes a debt when it deletes the debt file, or renames it out of `docs/deb
 
 Why: a docs-only PR skips review (decision `docs-only-prs-skip-review`, a docs-only PR gets no full review). So a debt can read as closed while its Retire check never ran. Audit 2026-11-06: 35 debt-delete commits since 2026-10-23, 9 of them markdown-only.
 
-Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close). Coordinator ruling 2026-11-07 20:03 CST (the deferred cite).
+Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close). Coordinator ruling 2026-11-07 20:03 CST (the deferred cite). Coordinator ruling 2026-11-07 20:34 CST (only base..head defers).
 
 Kind: process
 Home: lint/check_debt_retire.py
