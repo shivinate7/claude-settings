@@ -1648,8 +1648,8 @@ def case_item_8_refusal_naming_a_listed_id_is_past_ruling_whatever_the_items_say
 
 
 def case_item_8_naming_an_unshown_id_takes_the_unvetted_path():
-    # Expected (coordinator, round 2): an item 8 refusal that cites a record the judge was not shown has no usable
-    # verdict, so it takes the Unvetted path, not a plain refusal. Scope first: the listed record is shown.
+    # Expected: an item 8 refusal that cites a record the judge was not shown has no usable verdict, so it takes
+    # the Unvetted path, not a plain refusal. Scope first: the listed record is shown.
     box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     for label, reason in (
         ("decisions/", "Item 8: decisions/no-such-record (2026-10-28) already decides this."),
