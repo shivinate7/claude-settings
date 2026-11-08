@@ -356,7 +356,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
-            _compound_delta, _exits_on_failure,
+            _compound_delta, _exits_on_failure, subshell_depth,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -4800,12 +4800,18 @@ GIT_PUSH_LEADING_WORDS = GIT_PUSH_BODY_WORDS + ("if", "while", "until", "!", "ti
 # `true` and `:`. A cd is inert too: `git_after_cd_hit` has already refused each cd that strands the shell.
 GIT_PUSH_INERT_WORDS = ("for", "select", "case", "in", "esac", "fi", "done", "{", "}", "(", ")",
                         "exit", "set", "true", ":")
+# Commands that only print or set a variable: inert when no word of theirs runs a substitution.
+GIT_PUSH_PLAIN_WORDS = ("export", "echo")
+# An if test that is no check: a `[`, `[[` or `test` reads a value and runs nothing the push needs to see.
+GIT_PUSH_TEST_WORDS = ("[", "[[", "test")
 
 
-def _push_segment_inert(segment: str):
+def _push_segment_inert(segment: str, test: bool = False):
     """True when SEGMENT holds no command that can fail a check: empty, a compound word, a cd, `exit`,
-    `set`, `true`, `:`. None when a quote is cut in it (unknown). A group opener at the head is walked
-    into, so `{ pytest -q`, `( pytest -q` and `(pytest -q)` are commands and `(cd X; true)` is not."""
+    `set`, `true`, `:`, or an `export` or `echo` whose words run no substitution. With TEST, a `[`,
+    `[[` or `test` is inert too (an if test that is no check). None when a quote is cut in it
+    (unknown). A group opener at the head is walked into, so `{ pytest -q`, `( pytest -q` and
+    `(pytest -q)` are commands and `(cd X; true)` is not."""
     tokens = segment_tokens(segment)
     if tokens is None:
         return None
@@ -4815,7 +4821,9 @@ def _push_segment_inert(segment: str):
     if not words or words[0].startswith("}"):
         return True
     head = re.split(r"[<>&]", words[0].lstrip("({"))[0].rstrip(")}")   # `done>>/dev/null` closes a loop
-    return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS
+    if head in GIT_PUSH_PLAIN_WORDS:
+        return not any("`" in word or "$(" in word or "<(" in word or ">(" in word for word in words)
+    return not head or head in CD_WORDS or head in GIT_PUSH_INERT_WORDS or (test and head in GIT_PUSH_TEST_WORDS)
 
 
 def git_push_after_check_hit(command: str) -> str:
@@ -4828,7 +4836,9 @@ def git_push_after_check_hit(command: str) -> str:
     So is a lone command whose failure ends the shell under `set -e` (`_push_stops_under_errexit`). A group
     opener is walked into, so a check inside `{ }` or `( )` refuses. The walk ends and passes at a `|| exit`,
     at the tail of `|| { ...; exit N; }` or `if ! X; then exit N; fi` (`_push_exit_tails`), and at the
-    compound body that holds the push (`_opens_push_body`). Any other command refuses, a subshell included.
+    compound body that holds the push when its test is a check (`_push_body_head`); a `for` body, or an `if`
+    on a `[` test, is walked past. An `exit` inside a `( )` group leaves only that group, so it is no stop.
+    Any other command refuses, a subshell included.
     A `||` or `|` before the start of the push's chain is no `;` join and passes. A dry run
     (`git_write_verb`) and an unreadable segment pass."""
     ends = []
@@ -4853,7 +4863,11 @@ def git_push_after_check_hit(command: str) -> str:
                 if start < position or not _push_stops_under_errexit(segments, ends, start):
                     return "push"
             if _opens_push_body(segments, start, number):
-                break
+                head = _push_body_head(segments, ends, start)
+                if head is None:
+                    break
+                position, first = head, True
+                continue
             if start == 0:
                 break
             if ends[start - 1] not in (";", "\n"):
@@ -4861,7 +4875,8 @@ def git_push_after_check_hit(command: str) -> str:
                     break
                 return "push"
             before = segment_tokens(segments[start - 1])
-            if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"):
+            if before is None or (before[:1] == ["exit"] and start > 1 and ends[start - 2] == "||"
+                                  and not subshell_depth(segments, start - 1)):
                 break
             if start - 1 in tails:
                 break
@@ -4897,6 +4912,31 @@ def _opens_push_body(segments, start: int, number: int) -> bool:
     if not tokens or tokens[0] not in GIT_PUSH_BODY_WORDS:
         return False
     return sum(_compound_delta(part, wide=True) for part in segments[start:number]) >= 0
+
+
+def _push_body_head(segments, ends, start: int):
+    """For the `then` or `do` opener at `segments[start]`: the index of the head of its compound when the
+    walk must go on past the compound, else None. The body's own test guards the push when the head is an
+    `if`, `while` or `until` on a command, so None. A `for` head, or an `if`, `while` or `until` whose test
+    is no check (`[ -n "$X" ]`), guards nothing: the push runs whatever a check before the compound did.
+    An unreadable head, `else` and `elif` end the walk as before."""
+    opener = segment_tokens(segments[start])
+    if start == 0 or not opener or opener[0] not in ("then", "do"):
+        return None
+    head = start - 1
+    while head > 0 and ends[head - 1] in ("&&", "||", "|"):
+        head -= 1
+    words = list(segment_tokens(segments[head]) or [])
+    while words and words[0] in GIT_PUSH_BODY_WORDS:
+        words.pop(0)
+    if not words:
+        return None
+    if words[0] == "for":
+        return head
+    if words[0] in ("if", "while", "until") and all(
+            _push_segment_inert(part, test=True) for part in segments[head:start]):
+        return head
+    return None
 
 
 def _push_stops_under_errexit(segments, ends, at: int) -> bool:

@@ -1059,6 +1059,21 @@ def shell_abs(path: str, base):
 CdWalk = collections.namedtuple("CdWalk", "where stranded skipped errexit_stops", defaults=(False,))
 
 
+def segment_parens(segment: str) -> list:
+    """The `(` and `)` characters of SEGMENT that stand outside quotes, in order."""
+    return [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+
+
+def subshell_depth(segments, at: int) -> int:
+    """How many `(` groups or substitutions stand open before `segments[at]`: above 0, a command there
+    runs in a subshell, and an `exit` there leaves only that subshell (the cd walk reads them the same way)."""
+    depth = 0
+    for segment in segments[:at]:
+        marks = segment_parens(segment)
+        depth = max(0, depth + marks.count("(") - marks.count(")"))
+    return depth
+
+
 def _head_word(segment: str) -> str:
     """The first word of a segment, past a leading `then` or `do`, with a closing `)` cut off (`fi)`),
     or '' when it cannot be read."""
@@ -1069,7 +1084,8 @@ def _head_word(segment: str) -> str:
 
 
 def _exits_on_failure(segments, ends, at: int) -> bool:
-    """True when the `||` after `segments[at]` runs a bare `exit` as its first command, or as a
+    """True when the `||` after `segments[at]` runs a bare `exit` as its first command (past a `then` line
+    when `segments[at]` is an `if` test), or as a
     `;`-joined step of a `{ ... }` group that is not piped: the shell stops there when the command
     before the `||` fails, so nothing later runs in the folder it stayed in. Not read: a top-level
     `return`, which does not stop bash; `(exit 1)` or `( exit 1 )`, which ends only a subshell; an
@@ -1083,6 +1099,8 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
         tokens = segment_tokens(segments[number]) or []
         if number == at + 1:
             grouped = tokens[:1] == ["{"]
+            if tokens == ["then"] and end_of(at) in (";", "\n"):
+                continue   # `if ! X; then` with its body on the next lines
         if grouped and tokens[:1] == ["}"]:
             return found and end_of(number) != "|"
         if found:
@@ -1236,7 +1254,7 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
     group_depth = 0     # the `{`, `if`, loop, `case` and function compounds the walk is inside
     skip_if = None      # a failed cd was an `if` test: the `if`s nested in the skipped `then` body
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        marks = segment_parens(segment)
         stack.extend([(where, prev, stranded)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
         in_then = False
