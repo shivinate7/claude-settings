@@ -10919,6 +10919,19 @@ for _name, _command in (
     ("a commit with no number", VCS + ' commit -m "fix guard parsing"'),
 ):
     sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+# A PART CODE IS NO LANE NUMBER (lane-slug-part-code-refused). `part N12` names a part of a split, in a title or a
+# body, so it is allowed. A lane named in a sentence beside the word part is still a session number, and denies.
+for _name, _command in (
+    ("a part code in a body", VCS + ' commit -m "title\n\nthis is part N12 of the split"'),
+    ("a part code in a title", VCS + ' commit -m "Split part N12 out of the guard"'),
+):
+    sh("lane-by-slug: %s is allowed" % _name, _command, "allow", cwd=NOGIT, config=MERGECFG)
+sh("lane-by-slug: a lane named in a sentence with the word part still denies",
+   VCS + ' commit -m "title\n\nLane N12 is part of the split"', "deny", "lane-by-slug", cwd=NOGIT,
+   config=MERGECFG)
+sh("lane-by-slug: a part code followed by a lane number still denies",
+   VCS + ' commit -m "title\n\nthis is part N12, and N20 lands"', "deny", "lane-by-slug", cwd=NOGIT,
+   config=MERGECFG)
 # The same lane-by-slug rule, its title and merge half. A title names a lane on create and edit, and
 # a squash subject or body on merge, so each is read. The merge cases run on a green head, so merge-checks
 # passes and only the lane rule can decide. A create without --draft is refused by draft-pr, so the
@@ -12866,11 +12879,85 @@ add("cap: MultiEdit reaching an opus model asks", "ask", "agent-model-cap", tool
     carries=(OPUS,))
 add("cap: a managed settings file is a settings file", "ask", "agent-model-cap", tool="Write",
     cwd=NOGIT, file_path=MANAGED_SETTINGS, content=cap_settings(), carries=(OPUS,))
+# A FIXTURE NAMED settings.json IS NO SETTINGS FILE (cap-basename-false-alarm). Claude Code reads a settings file
+# from the config directory, a project's .claude folder, or the managed location. A test that writes a file of
+# that name into a scratch folder names none of them, so it is allowed: the basename alone asked, and refused
+# the fixture. The places Claude does read are still asked, as the cases after this block pin.
+CAP_FIXTURE = slash(os.path.join(ROOT, "fixture", "settings.json"))
+add("cap: Write of a fixture named settings.json in a scratch folder, setting an opus model, is allowed",
+    "allow", tool="Write", cwd=NOGIT, file_path=CAP_FIXTURE, content=cap_settings())
+sh("cap: a shell heredoc writing a fixture named settings.json in a scratch folder, setting an opus model, is allowed",
+   "cat > " + CAP_FIXTURE + " <<'EOF'\n" + cap_settings(compact=True) + "\nEOF", "allow", cwd=NOGIT)
+add("cap: Write of a settings file under a .claude folder in a scratch folder, setting an opus model, still asks",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT,
+    file_path=slash(os.path.join(ROOT, "fixture", ".claude", "settings.json")), content=cap_settings(),
+    carries=(OPUS, "settings.json"))
+sh("cap: a shell heredoc writing a project settings file, setting an opus model, still asks",
+   "cat > " + PROJ_SETTINGS + " <<'EOF'\n" + cap_settings(compact=True) + "\nEOF", "ask",
+   "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+
+# A SHELL SPELLING OF THE SETTINGS PLACE. The shell expands `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`,
+# `${X:-.claude}` and a glob such as `~/.clau*` when the write runs, so the folder a write reaches is
+# known only at run time. The guard read the folder as written, no spelling of it names a settings
+# place, and the write was allowed. A folder that holds `$`, `{`, `*`, `?` or `[` is a possible
+# settings place, so the write asks. A relative `../settings.json` beside a scratch folder names none,
+# so it stays allowed.
+CAP_SHELL_PLACES = (
+    '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"',
+    '"${CLAUDE_CONFIG_DIR:=$HOME/.claude}/settings.json"',
+    '"${CLAUDE_CONFIG_DIR-$HOME/.claude}/settings.json"',
+    '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json',
+    '"${CLAUDE_CONFIG_DIR:-.claude}/settings.json"',
+    '~/.clau*/settings.json',
+    '~/.claud[e]/settings.json',
+)
+for _place in CAP_SHELL_PLACES:
+    sh("cap: a shell write of an opus model to " + _place + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _place,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+add("cap: Write of an opus model to a settings file under a shell-spelled config folder asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT,
+    file_path="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json", content=cap_settings(), carries=(OPUS,))
+add("cap: Write of an opus model to a settings file under a question-mark folder asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path="fixture?/settings.json",
+    content=cap_settings(), carries=(OPUS,))
+add("cap: Write of an opus model to ../settings.json beside a scratch folder is allowed", "allow",
+    tool="Write", cwd=NOGIT, file_path="../settings.json", content=cap_settings())
 # The workflow agent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
 for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
     add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
         "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
         content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
+
+# A FOLDER THE SHELL NAMES WHEN IT RUNS THE WRITE. A command substitution (`cat f`, `dirname $x`) and the
+# directory-stack shorthands (`~+`, `~-`) name the folder only at run time, so such a folder is a possible
+# settings place and the write asks. The controls pin that a non-settings name in the same folder stays allowed.
+CAP_SHELL_FOLDERS = (
+    '"`cat f`/settings.json"',
+    '"`dirname $x`/settings.json"',
+    "~+/settings.json",
+    "~-/settings.json",
+)
+for _folder in CAP_SHELL_FOLDERS:
+    sh("cap: a shell write of an opus model to " + _folder + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+for _folder in ('"`cat f`/fixture.json"', "~+/fixture.json"):
+    sh("cap: a shell write of an opus model to " + _folder + " beside a non-settings name is allowed",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "allow", cwd=NOGIT)
+
+# A `~N` FOLDER IS A DIRECTORY-STACK ENTRY (cap-dirstack-entry). `~1` names the entry at index 1 of the shell's
+# directory stack, and `~+1` names the same kind of entry counted from the top. The shell reads either when the write
+# runs, so the folder is a possible settings place and the write asks. The control pins that a non-settings name in
+# the `~1` folder stays allowed.
+CAP_DIRSTACK_FOLDERS = ("~1/settings.json", "~+1/settings.json")
+for _folder in CAP_DIRSTACK_FOLDERS:
+    sh("cap: a shell write of an opus model to " + _folder + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+sh("cap: a shell write of an opus model to ~1/fixture.json beside a non-settings name is allowed",
+   "printf '%s' '" + cap_settings(compact=True) + "' > ~1/fixture.json", "allow", cwd=NOGIT)
 
 # THE EDIT LIST IS READ WHOLE, not the first 200 edits: the lift after 200 no-op edits still asks. This
 # case pins that boundary, so a count bound cannot come back unseen.
@@ -12983,6 +13070,22 @@ add("cap: control characters in the path never reach the reason", "ask", "agent-
 # cap change there reaches the owner's own settings at the next install. Editable (rule 7), asked.
 add("cap: the clone's own settings file is asked, not denied", "ask", "agent-model-cap",
     tool="Edit", cwd=CLONE, file_path=CLONE_SETTINGS,
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
+    carries=(OPUS,))
+# THE CLONE'S SETTINGS, WRITTEN FROM ITS HOOKS FOLDER. A write to `../settings.json` from the clone's `hooks`
+# folder reaches the clone's own settings file, the SOURCE the install script copies into the config
+# directory, so a cap change there reaches the owner's settings at the next install. The folder such a write
+# names is the clone or its parent, never a `.claude` folder, the config directory or the working folder. So
+# the file's name alone must ask, from here as from the clone itself.
+CLONE_HOOKS = slash(os.path.join(CLONE, "hooks"))
+sh("cap: a sed -i of an opus model onto ../settings.json from the clone's hooks folder asks",
+   "sed -i 's/" + CAP_KEY + "=sonnet/" + CAP_KEY + "=" + OPUS + "/' ../settings.json",
+   "ask", "agent-model-cap", cwd=CLONE_HOOKS, carries=(CAP_KEY + " = " + OPUS,))
+sh("cap: an echo of an opus model onto ../settings.json from the clone's hooks folder asks",
+   "echo " + CAP_KEY + "=opus > ../settings.json",
+   "ask", "agent-model-cap", cwd=CLONE_HOOKS, carries=(CAP_KEY + " = opus",))
+add("cap: an Edit of the clone's settings file by absolute path, from its hooks folder, asks",
+    "ask", "agent-model-cap", tool="Edit", cwd=CLONE_HOOKS, file_path=CLONE_SETTINGS,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
     carries=(OPUS,))
 
@@ -13496,6 +13599,36 @@ chained_prune("ask-alone: an escaped quote in an echo tail does not hide a remov
               ASK_PRUNE + ' && echo "a \\" b" ; rm -rf y')
 chained_prune("ask-alone: a cd - to the previous folder before the prune is no named lead, so it denies",
               "cd - && " + ASK_PRUNE)
+
+# (k) QUOTED TEXT AND TRAILING SEPARATORS IN A HARMLESS TAIL. A `&`, or an apostrophe, inside the quotes of an
+# output tail is text the shell never runs, and a `;` or a newline after the tail adds no command, so each
+# form below asks once. A PowerShell tail with a quoted path that ends in a backslash is text too: in
+# PowerShell `\"` closes the quote. The nearest real commands beside them still deny: a command substitution
+# inside the quotes, a removal after the tail, and a second echo.
+asks_alone("ask-alone: a quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + ' && echo "a & b"', "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a single-quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + " && echo 'a & b'", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: an apostrophe beside a quoted & in an echo tail after an ask command asks once",
+           ASK_CAP + ' && echo "don\'t & stop"', "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a trailing semicolon after an echo tail, after an ask command, asks once",
+           ASK_CAP + " && echo x;", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a trailing newline after an echo tail, after an ask command, asks once",
+           ASK_CAP + " && echo x\n", "agent-model-cap", cwd=PROJ)
+asks_alone("ask-alone: a PowerShell echo tail holding a quoted path that ends in a backslash asks once",
+           ASK_CAP + r' && echo "C:\x\"', "agent-model-cap", tool="PowerShell", cwd=PROJ)
+asks_alone("ask-alone: a PowerShell Write-Host tail holding a quoted path that ends in a backslash asks once",
+           ASK_CAP + r'; Write-Host "C:\x\"', "agent-model-cap", tool="PowerShell", cwd=PROJ)
+chained_ask("ask-alone: a quoted & in an echo tail, then a removal of y, still denies",
+            ASK_CAP + ' && echo "a & b"; rm -rf y', cwd=PROJ)
+chained_ask("ask-alone: a command substitution inside the quotes of an echo tail still denies",
+            ASK_CAP + ' && echo "$(rm -rf y)"', cwd=PROJ)
+chained_ask("ask-alone: a trailing semicolon after a removal of y, after an ask command, still denies",
+            ASK_CAP + " && rm -rf y;", cwd=PROJ)
+chained_ask("ask-alone: a second echo with a semicolon, after an ask command, still denies",
+            ASK_CAP + "; echo x;", cwd=PROJ)
+chained_ask("ask-alone: a PowerShell quoted path ending in a backslash, then a removal of y, still denies",
+            ASK_CAP + r'; Write-Host "C:\x\"; Remove-Item y', tool="PowerShell", cwd=PROJ)
 
 
 # =========================================================================== 6d. an interpreter heredoc is one command
@@ -15704,6 +15837,34 @@ def _j1_squash(w):
     _must(w, *IDENT, "commit", "-q", "-m", "squashed test-author case")
 
 
+def _cherry_resolved(w):
+    """Cut at main. The test-author's lane changes a line of a test file. Main changes the same line, and the
+    builder fast-forwards onto main. Its cherry-pick of the lane conflicts in the test file, and the builder
+    resolves the file by hand and commits. Git writes that commit's reflog subject as `commit (cherry-pick): ...`:
+    a replay the agent resolved, which the guard logs and never refuses."""
+    main = w + "-main"
+    _test_author_lane(w, TEST_A, "def test_a():\n    assert 1\n")
+    write(os.path.join(main, TEST_A), "def test_a():\n    assert 2\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main changes the case")
+    _must(w, *IDENT, "merge", "-q", "--ff-only", "main")
+    pick = run_vcs(main, "rev-parse", "lane").stdout.strip()
+    stopped = run_vcs(w, *IDENT, "cherry-pick", pick)
+    if stopped.returncode == 0:
+        sys.exit("fixture setup failed: the cherry-pick in %r did not conflict" % w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 3\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "resolved by hand")
+
+
+def _cherry_then_own(w):
+    """As _cherry_resolved, then the builder changes the same test file again and commits it: its own commit."""
+    _cherry_resolved(w)
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 4\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test change")
+
+
 def _i1_rebase_ours(w):
     """A test-author's lane changes a line of the test file, and main changes the same line. The builder rebases
     its product commit onto main. The rebase stops in the test file, and the builder keeps the upstream side
@@ -15987,6 +16148,30 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's cherry-pick of a test-auth
 diff_repo("bd-j1-squash", _j1_squash)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's squash merge of a test-author's lane is denied at push and at "
                          "the first stop", refused_push_and_stop_case("bd-j1-squash")))
+
+
+def cherry_resolved_logged_case(label):
+    """A builder's hand-resolved cherry-pick commit that changes a test file: commit, push and stop print nothing,
+    and guard.log holds a noted builder-diff line that names the test file. The reflog subject is
+    `commit (cherry-pick): ...`, which ENTRY_RESOLVED must read as a replay the agent resolved."""
+    def case():
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), os.path.join(DIFFROOT, label),
+                                  "builder", "bld1")
+        if out:
+            return False, "expected silent allows at commit, push and stop, got %r" % out[:60]
+        noted = [r for r in rows if len(r) > 4 and r[2] == "noted" and r[3] == BDIFF and TEST_A in r[4]]
+        if not noted:
+            return False, "no noted builder-diff line names %s in %d line(s)" % (TEST_A, len(rows))
+        return True, "allowed at commit, push and stop; %d noted builder-diff line(s) name %s" % (len(noted), TEST_A)
+    return case
+
+
+diff_repo("bd-cherry-resolved", _cherry_resolved)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's hand-resolved cherry-pick of a test-author's commit is allowed "
+                         "and logs a noted builder-diff line", cherry_resolved_logged_case("bd-cherry-resolved")))
+_bd_cown = diff_repo("bd-cherry-own", _cherry_then_own)
+sh("builder-refuse: a builder's own test change after a hand-resolved cherry-pick is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_cown, agent_id="bld1", agent_type="builder")
 
 # A write after a rebase is the builder's own. Main's bytes written back over a test file the rebase replayed
 # drop the test-author's case, so the write is refused at commit, push and stop.
@@ -25247,6 +25432,187 @@ def ov_fail_closed_says_no_override():
 
 LOG_CHECKS_EXTRA.append(("override: a missing-module deny says that no override lifts it",
                          ov_fail_closed_says_no_override))
+
+
+# THE VETO SETTER, WHEN GUARD_CORE LACKS IT (override-veto-core-unwrapped). judge() registers the veto with
+# guard_core.set_override_veto, unwrapped, where set_override_context is wrapped. A guard_core that predates
+# the setter raised inside judge(), main() failed open, and the call was allowed. With the setter gone the
+# guard must still judge each call as it does with the setter present. A builder's commit is the other call
+# that registers a veto (guard.py diff_refusal), so it must still be refused.
+
+
+def _veto_setter_runs(label, command, cwd, extra):
+    """The guard's run for one Bash call, with guard_core's veto setter present (the control), then with the
+    setter deleted from the loaded guard_core, as session_log_stale_core_case deletes its two names."""
+    payload = json.dumps(dict({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}, **extra))
+    runs = []
+    for tag, drop in (("present", ()), ("gone", ("set_override_veto",))):
+        folder = os.path.join(ROOT, "vetoset-%s-%s" % (label, tag))
+        os.makedirs(folder, exist_ok=True)
+        code = ("import io, sys, importlib.util as u\n"
+                "spec = u.spec_from_file_location('g', %r)\n"
+                "g = u.module_from_spec(spec)\n"
+                "spec.loader.exec_module(g)\n" % GUARD
+                + "".join("del sys.modules['guard_core'].%s\n" % name for name in drop)
+                + "sys.stdin = io.StringIO(%r)\n"
+                  "g.main()\n" % payload)
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = folder
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+        runs.append(subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                   env=env, timeout=60))
+    return runs
+
+
+def ov_veto_setter_gone_case(label, command, cwd, rule, extra=None):
+    """One call that the guard must deny by `rule` with guard_core's veto setter gone, as it does with the setter."""
+    def case():
+        materialize(cwd)  # a diff repo is built by its own case, not by materialize_all
+        present, gone = _veto_setter_runs(label, command, cwd, extra or {})
+        decision, reason = _decision(present)
+        if decision != "deny" or rule not in reason:
+            return False, "the control with the setter present is %r, want deny by %s: %r" % (
+                decision, rule, reason[:90])
+        if "Traceback" in gone.stderr:
+            return False, "a traceback with the setter gone: %r" % gone.stderr.strip()[-160:]
+        decision, reason = _decision(gone)
+        if decision != "deny" or rule not in reason:
+            return False, "the call with the setter gone is %r, want deny by %s" % (decision, rule)
+        return True, "denied by %s with the setter gone, as with it present" % rule
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto setter gone, as it does with the setter",
+                         ov_veto_setter_gone_case("kill", "pkill -f node", NOGIT, "machine-wide-kill")))
+LOG_CHECKS_EXTRA.append(("override: a builder's test change still denies at commit with guard_core's veto setter gone",
+                         ov_veto_setter_gone_case("builder", COMMIT, _bd_inc, BDIFF,
+                                                  extra={"agent_id": "bld1", "agent_type": "builder"})))
+
+# A VETO SETTER THAT RAISES A RUNTIME ERROR (override-veto-setter-raises). veto_override catches every Exception from
+# the setter, so the error must still leave a guard-crash line for the call in guard.log. The refusal case pins that
+# a refused call stays refused when the setter raises: main()'s crash path fails open, so a catch narrowed to
+# AttributeError would allow the kill. Two cases, so each failure names one cause.
+VETO_RAISED = "veto setter raised for the test"
+
+
+def _veto_setter_raising_run(label, command, cwd, extra):
+    """The guard's run for one Bash call, with guard_core's veto setter replaced by one that raises a RuntimeError."""
+    folder = os.path.join(ROOT, "vetoraise-%s" % label)
+    os.makedirs(folder, exist_ok=True)
+    payload = json.dumps(dict({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}, **extra))
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec)\n"
+            "spec.loader.exec_module(g)\n"
+            "def _raises(veto):\n"
+            "    raise RuntimeError(%r)\n"
+            "sys.modules['guard_core'].set_override_veto = _raises\n"
+            "sys.stdin = io.StringIO(%r)\n"
+            "g.main()\n") % (GUARD, VETO_RAISED, payload)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    return folder, subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                  env=env, timeout=60)
+
+
+def ov_veto_setter_raises_case(label, command, cwd, rule, extra=None):
+    """One call that the guard must still deny by `rule` with guard_core's veto setter raising."""
+    def case():
+        materialize(cwd)
+        _folder, run = _veto_setter_raising_run(label, command, cwd, extra or {})
+        if "Traceback" in run.stderr:
+            return False, "a traceback with the setter raising: %r" % run.stderr.strip()[-160:]
+        decision, reason = _decision(run)
+        if decision != "deny" or rule not in reason:
+            return False, "the call with the setter raising is %r, want deny by %s" % (decision, rule)
+        return True, "denied by %s with the setter raising" % rule
+    return case
+
+
+def _veto_log_bash_rows(folder):
+    """The guard.log lines of the Bash calls in one run folder, split on tabs, or None when guard.log is not written."""
+    try:
+        with open(os.path.join(folder, "guard.log"), encoding="utf-8") as handle:
+            rows = [line.split("\t") for line in handle.read().splitlines()]
+    except OSError:
+        return None
+    return [row for row in rows if len(row) > 3 and row[1] == "Bash"]
+
+
+def ov_veto_setter_error_logged_case(label, command, cwd, extra=None):
+    """One call judged with guard_core's veto setter raising: guard.log holds a guard-crash line for this call
+    that names the setter's error. The scope is read first, then the subject."""
+    def case():
+        materialize(cwd)
+        folder, _run = _veto_setter_raising_run(label, command, cwd, extra or {})
+        own = _veto_log_bash_rows(folder)
+        if own is None:
+            return False, "guard.log is not written with the setter raising"
+        if not own:
+            return False, "guard.log holds no line for this call with the setter raising"
+        crashes = [row for row in own if row[3] == "guard-crash" and any(VETO_RAISED in cell for cell in row)]
+        if not crashes:
+            return False, "no guard-crash line for this call names the setter's error: the failure passed silently"
+        return True, "guard.log holds a guard-crash line for this call that names the setter's error"
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto setter raising a RuntimeError",
+                         ov_veto_setter_raises_case("kill-raise", "pkill -f node", NOGIT, "machine-wide-kill")))
+LOG_CHECKS_EXTRA.append(("override: guard.log names a RuntimeError from guard_core's veto setter, not passed silently",
+                         ov_veto_setter_error_logged_case("kill-log", "pkill -f node", NOGIT)))
+
+# A MISSING VETO SETTER LEAVES ONE LINE (override-veto-setter-missing-logged). veto_override passes on AttributeError, so
+# a guard_core that predates the setter writes nothing to guard.log. The kill is still denied, but the log does not say the
+# guard judged without its override check. The missing-setter run must log one guard-crash line for the call, and the line
+# must name the missing setter. The control pins that a guard_core with the setter writes no guard-crash line for the call.
+
+
+def ov_veto_setter_missing_logged_case(label, command, cwd, extra=None):
+    """One call judged with guard_core's veto setter gone: guard.log holds one guard-crash line for this call, and the
+    line names the missing setter. The scope is read first (this call's lines), then the subject (the crash line)."""
+    def case():
+        materialize(cwd)
+        _veto_setter_runs(label, command, cwd, extra or {})
+        own = _veto_log_bash_rows(os.path.join(ROOT, "vetoset-%s-gone" % label))
+        if own is None:
+            return False, "guard.log is not written with the setter gone"
+        if not own:
+            return False, "guard.log holds no line for this call with the setter gone"
+        crashes = [row for row in own if row[3] == "guard-crash"]
+        if len(crashes) != 1:
+            return False, "want one guard-crash line for this call with the setter gone, found %d" % len(crashes)
+        if "set_override_veto" not in "\t".join(crashes[0]):
+            return False, "the guard-crash line does not name the missing setter: %r" % "\t".join(crashes[0])[-120:]
+        return True, "guard.log holds one guard-crash line for this call that names the missing setter"
+    return case
+
+
+def ov_veto_setter_present_no_crash_case(label, command, cwd, extra=None):
+    """The control: with guard_core's veto setter present, guard.log holds a line for this call and no guard-crash line."""
+    def case():
+        materialize(cwd)
+        _veto_setter_runs(label, command, cwd, extra or {})
+        own = _veto_log_bash_rows(os.path.join(ROOT, "vetoset-%s-present" % label))
+        if own is None:
+            return False, "guard.log is not written with the setter present"
+        if not own:
+            return False, "guard.log holds no line for this call with the setter present"
+        if any(row[3] == "guard-crash" for row in own):
+            return False, "a guard-crash line for this call with the setter present"
+        return True, "guard.log holds no guard-crash line for this call with the setter present"
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a missing guard_core veto setter logs one guard-crash line that names set_override_veto",
+                         ov_veto_setter_missing_logged_case("kill-missing", "pkill -f node", NOGIT)))
+LOG_CHECKS_EXTRA.append(("override: with guard_core's veto setter present, guard.log holds no guard-crash line for the kill",
+                         ov_veto_setter_present_no_crash_case("kill-missing", "pkill -f node", NOGIT)))
 
 
 # pkill and killall are refused by guard_kill through refuse(), which an override lifts. The settings.json
