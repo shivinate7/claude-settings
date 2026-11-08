@@ -29149,7 +29149,8 @@ CTM_REPO_PUSHED = ctm_repo("pushed", [ctm_value("Claude Haiku 5.5")],
                            pushed=[ctm_message(ctm_trailer("Claude Opus 5.5"))],
                            local=[ctm_message(ctm_trailer("Claude Haiku 5.5"))])
 CTM_REPO_NOTHING = ctm_repo("nothing", [], pushed=[ctm_message(ctm_trailer("Claude Opus 5.5"))])
-# Round 2: the same model named in other forms. The trailer parse reads each value as written.
+# The same model in other spellings: the model id form, hyphens, spaces and lowercase. The trailer value is
+# read as written, so each spelling is its own repository.
 CTM_REPO_IDOPUS = ctm_repo("idopus", [ctm_value("claude-opus-5-5")],
                            local=[ctm_message(ctm_trailer("claude-opus-5-5"))])
 CTM_REPO_HYPHEN = ctm_repo("hyphen", [ctm_value("Claude-Opus-5.5")],
@@ -29172,7 +29173,7 @@ CTM_REPO_UNDERSCORE = ctm_repo("underscore", [ctm_value("Claude_Opus_5.5")],
 CTM_REPO_OPUS4 = ctm_repo("opus4", [ctm_value("Claude Opus4.5")], local=[ctm_message(ctm_trailer("Claude Opus4.5"))])
 CTM_REPO_HAIKU1M = ctm_repo("haiku1m", [ctm_value("claude-haiku-5-5[1m]")],
                             local=[ctm_message(ctm_trailer("claude-haiku-5-5[1m]"))])
-# Round 4: a family word after a version, or no version at all. The family word may sit anywhere in the value.
+# A family word after a version, or no version at all. The family word may sit anywhere in the value.
 CTM_REPO_CLAUDE3OPUS = ctm_repo("claude3opus", [ctm_value("Claude 3 Opus")],
                                 local=[ctm_message(ctm_trailer("Claude 3 Opus"))])
 CTM_REPO_CLAUDE35SONNET = ctm_repo("claude35sonnet", [ctm_value("Claude 3.5 Sonnet")],
@@ -29180,6 +29181,22 @@ CTM_REPO_CLAUDE35SONNET = ctm_repo("claude35sonnet", [ctm_value("Claude 3.5 Sonn
 CTM_REPO_CLAUDESONNET = ctm_repo("claudesonnet", [ctm_value("Claude Sonnet")],
                                  local=[ctm_message(ctm_trailer("Claude Sonnet"))])
 CTM_REPO_CLAUDE21 = ctm_repo("claude21", [ctm_value("Claude 2.1")], local=[ctm_message(ctm_trailer("Claude 2.1"))])
+# A version that differs from the agent's is a different model in every spelling: the model id form, hyphens, an
+# underscore, a space. The name is read as written, so each spelling is its own repository.
+CTM_REPO_HAIKU45ID = ctm_repo("haiku45id", [ctm_value("claude-haiku-4-5")],
+                              local=[ctm_message(ctm_trailer("claude-haiku-4-5"))])
+CTM_REPO_HAIKU45HYPHEN = ctm_repo("haiku45hyphen", [ctm_value("Claude-Haiku-4.5")],
+                                  local=[ctm_message(ctm_trailer("Claude-Haiku-4.5"))])
+CTM_REPO_HAIKU45UNDER = ctm_repo("haiku45under", [ctm_value("Claude_Haiku_4.5")],
+                                 local=[ctm_message(ctm_trailer("Claude_Haiku_4.5"))])
+CTM_REPO_HAIKU54 = ctm_repo("haiku54", [ctm_value("Claude Haiku 5.4")],
+                            local=[ctm_message(ctm_trailer("Claude Haiku 5.4"))])
+# A name with a family word in it, or in an address, is a person's or a product's name and not a model. The trailer
+# is written as given: the address is part of the value, so no noreply address is added.
+CTM_REPO_JANE = ctm_repo("jane", ["Jane <opus@example.com>"],
+                         local=[ctm_message("Co-Authored-By: Jane <opus@example.com>")])
+CTM_REPO_OPUSCULUM = ctm_repo("opusculum", ["Opusculum Jones"],
+                              local=[ctm_message("Co-Authored-By: Opusculum Jones")])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -29225,8 +29242,9 @@ ctm_case("an agent whose transcript is empty passes", CTM_REPO_INCIDENT, "allow"
 ctm_case("an agent whose transcript holds no assistant record passes", CTM_REPO_INCIDENT, "allow", CTM_NOASSIST)
 ctm_case("an agent whose model id maps to no name passes", CTM_REPO_INCIDENT, "allow", CTM_UNMAPPED)
 
-# Round 2. A trailer names a model in the model id form, or with other casing and separators: each is judged
-# as the model it names. A fallback that served Sonnet for an agent that asked for Opus passes on either name.
+# The model id form, hyphens, spaces and lowercase each name a model, and each is judged as the model it names.
+# A fallback serves Sonnet when the agent asked for Opus, so an Opus or a Sonnet trailer passes there and a
+# Haiku one does not.
 ctm_case("a model id trailer, claude-opus-5-5, from a Haiku agent is refused", CTM_REPO_IDOPUS, "deny", CTM_HAIKU)
 ctm_case("a hyphenated Claude-Opus-5.5 trailer from a Haiku agent is refused", CTM_REPO_HYPHEN, "deny", CTM_HAIKU)
 ctm_case("a spaced lowercase claude opus 5.5 trailer from a Haiku agent is refused", CTM_REPO_SPACED, "deny",
@@ -29239,14 +29257,14 @@ ctm_case("a Sonnet trailer passes when a fallback served Sonnet and the agent re
 ctm_case("a Haiku trailer is refused when a fallback served Sonnet and the agent requested Opus",
          CTM_REPO_HAIKU, "deny", CTM_FALLBACK)
 
-# Note trailer-check-top-level-push-only: a push wrapped in a shell is judged as the push it runs.
+# A push inside a shell wrapper is judged as the push it runs, so a wrapper cannot hide a push from the check.
 ctm_case("a bash -c wrapped push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
          "deny", CTM_HAIKU, command="bash -c 'git push origin HEAD:x'")
 ctm_case("a sh -lc wrapped push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
          "deny", CTM_HAIKU, command='sh -lc "git push origin HEAD:x"')
 
-# Note trailer-check-push-forms-untested: the push forms that name a branch, or none. Pinned at the current
-# behaviour, which refuses each of them.
+# Each push form that names a branch, or names none, is refused today. Pinned so that a parser change cannot let
+# one of them pass by accident.
 ctm_case("a push -u origin x of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_XBRANCH,
          "deny", CTM_HAIKU, command=VCS + " push -u origin x")
 ctm_case("a push origin x of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_XBRANCH,
@@ -29256,24 +29274,36 @@ ctm_case("a bare git push of an Opus-trailer commit from a Haiku agent is refuse
 ctm_case("a git push origin with no refspec of an Opus-trailer commit from a Haiku agent is refused",
          CTM_REPO_XBRANCH, "deny", CTM_HAIKU, command=VCS + " push origin")
 
-# Note trailer-check-unknown-family-refused: a name that is no model family the rule knows passes.
+# A name that is no model family the rule knows is not a model, so it passes. Otherwise a product or a tool named
+# in a trailer would block every push that carries it.
 ctm_case("a Claude 5.5 trailer from a Haiku agent passes", CTM_REPO_CLAUDE55, "allow", CTM_HAIKU)
 ctm_case("a Claude Code 2.1 trailer from a Haiku agent passes", CTM_REPO_CLAUDECODE, "allow", CTM_HAIKU)
 ctm_case("a GPT-4 trailer from a Haiku agent passes", CTM_REPO_GPT4, "allow", CTM_HAIKU)
 
-# Note trailer-check-suffix-passes: an Opus name with a suffix, a separator or no space is still Opus.
+# A [1m] suffix, a separator or a missing space does not hide the family or the version. Each name is judged as
+# the model it names, so an Opus name in any of these spellings is refused from a Haiku agent.
 ctm_case("a claude-opus-5-5[1m] trailer from a Haiku agent is refused", CTM_REPO_OPUS1M, "deny", CTM_HAIKU)
 ctm_case("a Claude_Opus_5.5 trailer from a Haiku agent is refused", CTM_REPO_UNDERSCORE, "deny", CTM_HAIKU)
 ctm_case("a Claude Opus4.5 trailer from a Haiku agent is refused", CTM_REPO_OPUS4, "deny", CTM_HAIKU)
 ctm_case("a claude-haiku-5-5[1m] trailer from a Haiku agent passes", CTM_REPO_HAIKU1M, "allow", CTM_HAIKU)
 
-# Round 4. A family word counts wherever it sits in the value: before the version, or after it.
+# A family word after the version still names the model. Read only before the version, "Claude 3.5 Sonnet" would
+# pass as no model at all, and an agent could commit under that name.
 ctm_case("a Claude 3 Opus trailer from a Haiku agent is refused", CTM_REPO_CLAUDE3OPUS, "deny", CTM_HAIKU)
 ctm_case("a Claude 3.5 Sonnet trailer from a Haiku agent is refused", CTM_REPO_CLAUDE35SONNET, "deny", CTM_HAIKU)
 ctm_case("a Claude 3.5 Sonnet trailer from a Sonnet 5.5 agent is refused (same family, other version)",
          CTM_REPO_CLAUDE35SONNET, "deny", CTM_SONNET)
 ctm_case("a Claude Sonnet trailer from a Sonnet 5.5 agent passes", CTM_REPO_CLAUDESONNET, "allow", CTM_SONNET)
 ctm_case("a Claude 2.1 trailer from a Haiku agent passes (no family word)", CTM_REPO_CLAUDE21, "allow", CTM_HAIKU)
+
+# A version that differs from the agent's is refused in every spelling, and a name that only carries a family word
+# passes.
+ctm_case("a claude-haiku-4-5 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU45ID, "deny", CTM_HAIKU)
+ctm_case("a Claude-Haiku-4.5 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU45HYPHEN, "deny", CTM_HAIKU)
+ctm_case("a Claude_Haiku_4.5 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU45UNDER, "deny", CTM_HAIKU)
+ctm_case("a Claude Haiku 5.4 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU54, "deny", CTM_HAIKU)
+ctm_case("a Jane <opus@example.com> trailer from a Haiku agent passes", CTM_REPO_JANE, "allow", CTM_HAIKU)
+ctm_case("an Opusculum Jones trailer from a Haiku agent passes", CTM_REPO_OPUSCULUM, "allow", CTM_HAIKU)
 ctm_case("a Claude Code 2.1 trailer from a Haiku agent passes (no family word)", CTM_REPO_CLAUDECODE, "allow",
          CTM_HAIKU)
 ctm_case("a GPT-4 trailer from a Haiku agent passes (no family word)", CTM_REPO_GPT4, "allow", CTM_HAIKU)
