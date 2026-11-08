@@ -10142,6 +10142,16 @@ PFR_LINES = {
     "fail-gh-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD),
     "fail-gh-api-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                            + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, form="api"),
+    # A Done label line that holds the verdict itself, in a word order the ruled form does not use.
+    "label-haiku": pfr_pr() + pfr_call("toolu_rev1", "Done: round 1 reviewer haiku FAIL\n" + PFR_FINDING),
+    "label-claude-haiku": pfr_pr() + pfr_call("toolu_rev1",
+                                              "Done: round 1 reviewer claude-haiku-5-5 PARTIAL\n" + PFR_FINDING),
+    "label-design": pfr_pr() + pfr_call("toolu_rev1", "Done: round 2 design-reviewer sonnet PASS\n" + PFR_FINDING,
+                                        role="design-reviewer"),
+    "label-haiku-record": pfr_pr() + pfr_call("toolu_rev1", "Done: round 1 reviewer haiku FAIL\n" + PFR_FINDING)
+                          + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+    # A Done label line with no verdict word, then the ruled form on the next line.
+    "see-below-ruled": pfr_pr() + pfr_call("toolu_rev1", "Done: see below\n" + pfr_verdict("FAIL", 1) + "\n" + PFR_FINDING),
     "empty": [],
 }
 # An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
@@ -10263,6 +10273,20 @@ pfr_allow("a git commit whose message says push, beside a FAIL", VCS + ' commit 
           pfr_path("incident"))
 pfr_allow("a builder push: the parent holds no report, the agent's own file holds a FAIL", PFR_PUSH,
           pfr_path("builder-clean"), agent_id=PFR_AGENT_ID)
+
+
+# A verdict on the Done label line is read. Each shape below is refused with no record, and the record of the
+# FAIL shape clears it. A label line with no verdict word reads its verdict from the ruled line below it.
+pfr_refuse("a reviewer FAIL round 1 on the Done label line, no record, then the push", PFR_PUSH,
+           pfr_path("label-haiku"))
+pfr_refuse("a reviewer PARTIAL round 1 on the Done label line, no record, then the push", PFR_PUSH,
+           pfr_path("label-claude-haiku"))
+pfr_refuse("a design-reviewer PASS round 2 on the Done label line, no record, then the push", PFR_PUSH,
+           pfr_path("label-design"))
+pfr_allow("a reviewer FAIL round 1 on the Done label line, its FAIL record posted, then the push", PFR_PUSH,
+          pfr_path("label-haiku-record"))
+pfr_refuse("a Done label line reading see below, then a ruled FAIL round 1 line, no record, then the push", PFR_PUSH,
+           pfr_path("see-below-ruled"))
 
 
 def pfr_fix_refuse(name, command, transcript):
