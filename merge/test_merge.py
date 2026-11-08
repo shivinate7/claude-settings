@@ -157,6 +157,11 @@ class FakeHost:
     def issue_comments(self, since):  # the repo's comments: none here; a case that needs some uses CommentHost
         return []
 
+    def pages(self, rel, key=None, fields=None):  # the open pull list is empty here; a case with pulls uses CommentHost
+        if rel == "pulls":
+            return []
+        raise AssertionError(f"unexpected read: {rel}")
+
     def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
         if self.batch_error:
@@ -1600,11 +1605,14 @@ def lane_batch(env, *names):
     env.tips = tips
     return tips
 
-def unreadable_lane_log_patch():
-    """A context manager: the one git log that reads a branch's merge commits (read_lanes) fails, and every other git call runs."""
+def unreadable_lane_log_patch(exc=None):
+    """A context manager: the one git log that reads a branch's merge commits (read_lanes) fails, and every other git call runs. `exc`: that log
+    raises this exception (an OSError, a TimeoutExpired) instead of exiting non-zero."""
     real = merge.sh
     def broken(args, *a, **k):
         if "log" in args and any("%x01" in a for a in args):
+            if exc is not None:
+                raise exc
             return 128, "fatal: bad revision"
         return real(args, *a, **k)
     return unittest.mock.patch.object(merge, "sh", broken)
@@ -14245,6 +14253,8 @@ class LintCheck:
         return ("pass", [], [], False)
 
 
+REAL_HIT_SUITES = merge.hit_suites  # captured at import, before BuildEnv patches merge.hit_suites: a case that reads the checks workflow calls it
+
 class BuildEnv(ReviewEnv):
     """A local origin with PR branches (`lane`, `commit`) and a PullsHost for the GitHub reads. Each lint run is `lint_run`, which replaces
     merge.ci_job_run; lint_steps and hit_suites are replaced too, so no ci-job runs. The cpu count is 4, so the lint cap is 2 (cpu_count - 2)
@@ -14257,6 +14267,7 @@ class BuildEnv(ReviewEnv):
     def setUp(self):
         super().setUp()
         self.lint_calls, self.verdicts, self.check, self.script = [], {}, None, {}  # lint_calls: the branch files each lint tree held, in call order
+        self.real_hits = False  # a case that reads the checks workflow sets this: suites_hit then runs the real hit_suites on the tree
         for p in (unittest.mock.patch.object(merge, "ci_job_run", self.lint_run),
                   unittest.mock.patch.object(merge, "lint_steps", lambda *a, **k: set(BUILD_STEPS)),
                   unittest.mock.patch.object(merge, "hit_suites", self.suites_hit),
@@ -14274,8 +14285,11 @@ class BuildEnv(ReviewEnv):
                 return results.pop(0) if len(results) > 1 else results[0]
         return next((verdict for branch, verdict in self.verdicts.items() if branch in present), ("pass", [], [], False))
 
-    def suites_hit(self, root, paths, skip):
-        """The fake lint-step path set: only BUILD_LINT_FILE is read by a lint step, so a suite is hit by it and by no other path."""
+    def suites_hit(self, root, paths, skip, jobs=None):
+        """The fake lint-step path set: only BUILD_LINT_FILE is read by a lint step, so a suite is hit by it and by no other path. With `real_hits`
+        the real hit_suites reads the suites of `root`; `jobs` is passed on only when a caller gives it."""
+        if self.real_hits:
+            return REAL_HIT_SUITES(root, paths, skip, **({} if jobs is None else {"jobs": jobs}))
         return [("lint/suite.py", "python3 lint/suite.py")] if BUILD_LINT_FILE in set(paths) else []
 
     def linted(self):
@@ -14915,18 +14929,22 @@ class CommentHost(FakeHost):
     issue_comments = merge.Host.issue_comments
     review_comments = merge.Host.review_comments
 
-    def __init__(self, root, other, comments=(), branch="feat", created=None, pulls=()):
+    def __init__(self, root, other, comments=(), branch="feat", created=None, pulls=(), pulls_error=None):
         super().__init__(root, other, branch)
         self.comments, self.created, self.pulls = list(comments), created, list(pulls)
+        self.pulls_error, self.reads = pulls_error, []  # pulls_error: the open pull list read fails with this text; reads: each path read, in order
 
     def pr(self, n):
         return {**super().pr(n), "created": self.created}
 
     def pages(self, rel, key=None, fields=None):
+        self.reads.append(rel)
         if re.fullmatch(r"issues/(\d+/)?comments", rel):
             since = (fields or {}).get("since", "")
             return [c for c in self.comments if (c.get("updated_at") or c["created_at"]) >= since]
         if rel == "pulls":
+            if self.pulls_error:
+                raise merge.Stop(self.pulls_error)
             return list(self.pulls)
         raise AssertionError(f"unexpected read: {rel}")
 
