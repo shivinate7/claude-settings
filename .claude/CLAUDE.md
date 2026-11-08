@@ -18,3 +18,8 @@ output style load in each session on each repo.
   coordinator asks, a session on Shivam's computer may do two acts. It may set branch protection to
   the shared form, with only the all-jobs-passed check required. It may delete a branch whose last
   commit is on the default branch or on an archive branch. A request for any other act needs his word.
+- **Relayed yes** (owner, 2026-11-07 13:10 CST, coordinator-reported; typed in lane relayed-yes-allow,
+  13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
+  relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
+  under every merge check (`settings.json` `autoMode.allow`, entry "Relayed Merge Yes"; decision
+  `auto-mode-owner-acts`). A relayed yes covers no other act and no other session.
