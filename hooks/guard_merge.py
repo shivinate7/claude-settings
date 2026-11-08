@@ -845,7 +845,7 @@ def _own_session_read(transcript: str, own_id: str, created: bool = False):
 
 def _own_get_session_tags(transcript: str, session_id: str):
     """The tags of the newest get_session result in this session's own transcript whose ccr.id is
-    session_id (the session's own id, or a target's id for lane-closes-after-records), else None."""
+    session_id, else None. The merge-role proof reads the session's own id with it."""
     return _own_session_read(transcript, session_id)[0]
 
 
