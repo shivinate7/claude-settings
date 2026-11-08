@@ -5141,6 +5141,18 @@ sh("git-after-cd: a failed cd, then a true || if ! cd to a missing folder then e
    "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
+# THE FALSE ALARM OF THE SKIPPED CD. A cd after && that its test never lets run is no stranding: the shell stays in
+# the folder the landed cd named, so the push after ; runs there. Each form is checked under bash with a stub git.
+sh("git-after-cd: a cd that lands, then a && test that fails, then a && cd to a missing folder, then ; a git push, passes, the skipped cd leaves the shell in the landed folder",
+   "cd %s && [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, a cd that lands, then a && test that fails, then a && cd to a missing folder, then ; a git push, passes, errexit ignores the && list",
+   "set -e; cd %s && [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a cd that lands, then ; a && test that fails before a && cd to a missing folder, then ; a git push, passes, the skipped cd leaves the shell in the landed folder",
+   "cd %s; [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, a cd that lands, then ; a && test that fails before a && cd to a missing folder, then ; a git push, passes, errexit ignores the && list",
+   "set -e; cd %s; [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+
+
 # THE WIDE READ. case, select and a function definition open a compound that errexit must see, so the cd in
 # their body is not bare. Each body is on the left of ||, so errexit is ignored there and the push runs. A select
 # body runs once its menu gets an answer, so it is judged as a body that may run.

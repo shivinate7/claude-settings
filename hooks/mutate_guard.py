@@ -2093,6 +2093,10 @@ MUTATIONS = [
      r'&?[<>]',
      r'[<>]',
      "guard", "git-after-cd: set -e, then a brace group closed by an attached &> redirect, then a failed cd, then ; a git push, passes, the shell exits first"),
+    ("git-after-cd: the closer reads a digit before a redirect, so }2> closes its group",
+     r'(?:&?[<>].*)?"',
+     r'(?:(?:\d*|&)[<>].*)?"',
+     "guard", "a brace group closed by a }2>x word that is no closer"),
     ("git-after-cd: fi is no closer, so an if stays open",
      r'(?:\}|fi|done%s)',
      r'(?:\}|done%s)',
@@ -3335,6 +3339,12 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # --only=<text> runs the mutants whose label holds the text. The preflight above has already checked every anchor.
+    only = [arg[len("--only="):] for arg in sys.argv[1:] if arg.startswith("--only=")]
+    selected = [entry for entry in MUTATIONS if not only or any(text in mutation_parts(entry)[0] for text in only)]
+    if not selected:
+        print("ERROR --only matched no mutation: %r" % only)
+        return 1
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -3354,7 +3364,7 @@ def main() -> int:
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            selected, lambda entry: run_mutant(sources, work, entry))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
