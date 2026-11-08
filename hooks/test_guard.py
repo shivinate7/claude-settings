@@ -5578,13 +5578,14 @@ sh("check-tail: uv run --with-editable then python runs the script piped to tail
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
 
-# --- a verdict call piped into a later stage, then && || or ; (rule verdict-pipe-exit)
+# --- a verdict call piped into a later stage, then && or || (rule verdict-pipe-exit)
 #
 # verdict keeps the whole log and prints the verdict, but a pipe after it hides verdict's exit
-# status, so the `&&`, `||` or `;` that follows still runs after a red check. A red lint went in
+# status, so the `&&` or `||` that follows still runs after a red check. A red lint went in
 # this way once. The rule refuses a `verdict` call (any spelling, behind any wrapper) piped into any
-# later stage when `&&`, `||` or `;` follows the pipeline and pipefail is not set earlier in the same
-# command. A bare verdict call, and a pipeline that ends the command, are allowed. The rule runs in
+# later stage when `&&` or `||` follows the pipeline and pipefail is not set earlier in the same
+# command. A `;` after the pipeline does not count, so it is allowed. A bare verdict call, and a
+# pipeline that ends the command, are allowed. The rule runs in
 # the foreground and in the background. check-tail exempts verdict, so this is its own rule id.
 # The background case names an until note, so background-end decides none of them.
 VERDICT_PIPE = "verdict-pipe-exit"
@@ -5592,9 +5593,13 @@ VERDICT_PIPE = "verdict-pipe-exit"
 sh("verdict-pipe-exit: verdict piped to tail, then && commit, is refused",
    "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny", VERDICT_PIPE,
    cwd=NOGIT)
-sh("verdict-pipe-exit: the absolute bin path piped to tail, then ;, is refused",
-   "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "deny", VERDICT_PIPE,
+sh("verdict-pipe-exit: the absolute bin path piped to tail, then ;, is allowed",
+   "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: two verdict pipes joined by ; are allowed",
+   "verdict python3 lint/a.py 2>&1 | tail -3; verdict python3 lint/b.py 2>&1 | tail -3", "allow",
    cwd=NOGIT)
+sh("verdict-pipe-exit: verdict piped to tail, then ; echo, is allowed",
+   "verdict python3 lint/a.py | tail -1; echo ---", "allow", cwd=NOGIT)
 sh("verdict-pipe-exit: the relative bin path piped to head, then &&, is refused",
    "bin/verdict make check | head -3 && echo ok", "deny", VERDICT_PIPE, cwd=NOGIT)
 sh("verdict-pipe-exit: an env assignment before verdict piped to tail, then &&, is refused",
