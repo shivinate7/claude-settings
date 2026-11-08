@@ -13,6 +13,8 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
+# The <status> values of a task notice that close the task. Any other value (such as running) leaves it open.
+TASK_TERMINAL_STATUSES = ("completed", "failed", "killed", "stopped")
 # An agent hand-back (CLI 2.1.316 text), bare or after a frame line: the plain one or the
 # mid-turn one. The tag name ends at `>` or whitespace.
 _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")

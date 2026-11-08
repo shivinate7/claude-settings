@@ -633,21 +633,33 @@ def spawn_models(records):
 
 
 def _finish_notice(rec, use_id):
-    """True when `rec` holds a task notice for `use_id` that carries a <status>. The notice arrives as a
-    queue-operation or attachment record, so its JSON text is searched, never its type."""
+    """True when `rec` holds a task notice for `use_id` whose <status> is terminal
+    (shared_names.TASK_TERMINAL_STATUSES). The notice arrives as a queue-operation or attachment record,
+    so its JSON text is searched, never its type. Fails open: with shared_names unreadable no notice
+    finishes a spawn, so a Next mention waives and nothing blocks."""
     tag = "<tool-use-id>%s</tool-use-id>" % use_id
     text = json.dumps(rec, ensure_ascii=False)
     if tag not in text:
         return False
-    return any(tag in part and "<status>" in part for part in text.split("<task-notification>"))
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+    except ImportError:
+        return False
+    for part in text.split(shared_names.TASK_NOTIFICATION_TAG):
+        status = re.search(r"<status>(.*?)</status>", part)
+        if tag in part and status and status.group(1).strip().lower() in shared_names.TASK_TERMINAL_STATUSES:
+            return True
+    return False
 
 
 def running_spawns(records):
     """Map each named role to the set of model families of its spawns still running in `records`.
 
-    A spawn is running when its call has no tool_result yet, or its tool_result record reports
-    `toolUseResult.status == "async_launched"` and no later record holds a finish notice for its id
-    (_finish_notice). Any other result, a foreground spawn's included, is finished."""
+    A spawn is running only when its tool_result record reports `toolUseResult.status == "async_launched"`
+    and no later record holds a finish notice for its id (_finish_notice). Any other result, a foreground
+    spawn's included, is finished, and so is a call with no tool_result: at Stop a live foreground spawn
+    has its result already."""
     results = {}
     for i, rec in enumerate(records):
         for b in tool_results(rec):
@@ -655,12 +667,13 @@ def running_spawns(records):
     found = {}
     for _, use_id, role, model in _spawn_calls(records):
         done_at = results.get(use_id)
-        if done_at is not None:
-            idx, rec = done_at
-            info = rec.get("toolUseResult")
-            launched = isinstance(info, dict) and info.get("status") == "async_launched"
-            if not launched or any(_finish_notice(r, use_id) for r in records[idx + 1:]):
-                continue
+        if done_at is None:
+            continue
+        idx, rec = done_at
+        info = rec.get("toolUseResult")
+        launched = isinstance(info, dict) and info.get("status") == "async_launched"
+        if not launched or any(_finish_notice(r, use_id) for r in records[idx + 1:]):
+            continue
         found.setdefault(role, set()).add(model)
     return found
 

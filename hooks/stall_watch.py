@@ -56,8 +56,8 @@ Stop: stall_watch.py --stop
   and prints one {"systemMessage": ...} line that lists each open job whose output file, and each
   log its command names, has not changed for the quiet age, and whose stall crossed after the previous
   Stop (the newest stop_hook_summary record, skipping the run after a blocked Stop). A job with no
-  output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> with status completed, failed,
-  killed or stopped (a user message, or a queued_command attachment record), or on the result of
+  output file is listed once, at the first Stop after its call. With no summary, all are listed. A job closes on a <task-notification> whose status is in
+  shared_names.TASK_TERMINAL_STATUSES (a user message, or a queued_command attachment record), or on the result of
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
@@ -95,9 +95,11 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
     def strip_heredoc_bodies(cmd, shells_only=False) -> str:
         return cmd
 try:
-    from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
+    # the one home of the notice tag and the statuses that close a task
+    from shared_names import TASK_NOTIFICATION_TAG, TASK_TERMINAL_STATUSES
 except ImportError:  # without the tag no notice can close a job, so Stop prints nothing
     TASK_NOTIFICATION_TAG = None
+    TASK_TERMINAL_STATUSES = ()
 # The pre-filter's bytes key: the tag's bare name, so a line with the name in any form passes.
 NOTICE_KEY = (TASK_NOTIFICATION_TAG.strip("<>").encode(),) if TASK_NOTIFICATION_TAG else ()
 
@@ -375,7 +377,6 @@ TASK_ID = re.compile(r"<task-id>(.*?)</task-id>", re.S)
 TASK_STATUS = re.compile(r"<status>(.*?)</status>", re.S)
 RESULT_PATH = re.compile(r"Output is being written to: (.*?\.output)", re.S)
 STOPPED = re.compile(r"\s*Successfully stopped task: (\S+)")
-TERMINAL = ("completed", "failed", "killed", "stopped")
 
 
 def text_of(content):
@@ -475,7 +476,7 @@ def closed_by_notice(text):
         return ids
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st = TASK_ID.search(note), TASK_STATUS.search(note)
-        if tid and st and st.group(1).strip().lower() in TERMINAL:
+        if tid and st and st.group(1).strip().lower() in TASK_TERMINAL_STATUSES:
             ids.append(tid.group(1).strip())
     return ids
 
