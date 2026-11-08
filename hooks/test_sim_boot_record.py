@@ -41,6 +41,10 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
   - record mode: `--record <UDID>` appends one record line for that device, from the same device list
     and launchd_sim read as the hook mode. bin/sim-test calls it after its own boot. It prints nothing
     and exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
+  - check mode: `--check <UDID>` runs sim_ok(UDID) once, the first-frame check bin/sim-test runs after its own
+    boot (owner ruling, 2026-11-08 12:00 CST). A pass prints nothing and exits 0. A fail prints one stderr line
+    naming the UDID and exits 1. It retries, shuts down and boots nothing. With no UDID it exits non-zero and
+    calls no simctl.
 
 Each case runs the hook as Claude Code does: one JSON object on stdin. A fake `xcrun` stands first on
 PATH and answers `simctl list devices` from a file the case rewrites between the two events. A fake
@@ -207,6 +211,7 @@ def integration_frames():
         "black": make_png(rows_of(32, 64, BLACK_RGBA), 32, colour_type=6, filters=[0, 1, 2, 3, 4]),
         "blank": make_png(rows_of(32, 64, WHITE_RGB), 32, colour_type=2, filters=[0, 1, 2, 3, 4]),
         "undecodable": make_png(rows_of(32, 64, b"\x00" * 6), 32, colour_type=2, depth=16),
+        "empty": b"",
     }
 
 
@@ -848,13 +853,17 @@ class SimBootRecordTests(unittest.TestCase):
     # appends one record line for that device, read with the same devices() and launchd() as the hook
     # mode. It prints nothing and exits 0 in every case.
 
-    def run_record(self, udid):
-        """The hook in record mode for UDID, with an empty stdin, as bin/sim-test runs it."""
+    def run_mode(self, *args):
+        """The hook run with ARGS (`--record UDID` or `--check UDID`), with an empty stdin, as bin/sim-test runs it."""
         env = dict(os.environ)
         env["CLAUDE_CONFIG_DIR"] = self.cfg
         env["PATH"] = self.bin + os.pathsep + os.path.dirname(sys.executable)
-        return subprocess.run([sys.executable, HOOK, "--record", udid], input="",
+        return subprocess.run([sys.executable, HOOK] + list(args), input="",
                               capture_output=True, text=True, env=env, timeout=60)
+
+    def run_record(self, udid):
+        """The hook in record mode for UDID, with an empty stdin, as bin/sim-test runs it."""
+        return self.run_mode("--record", udid)
 
     def test_record_mode_appends_one_line_for_the_named_device(self):
         self.set_devices([(U1, "Idle Pro", "Booted", TYPE_PRO)])
@@ -904,6 +913,86 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, "--record exited non-zero on an unreadable list")
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.read_records(), [], "a device was recorded from an unreadable list")
+
+    # ------------------------------------------------------------------ check mode (`--check <UDID>`)
+    # bin/sim-test runs the hook as `sim_boot_record.py --check <UDID>` after its own boot (owner ruling,
+    # 2026-11-08 12:00 CST). The mode runs sim_ok(UDID) once: a pass prints nothing and exits 0; a fail prints one
+    # stderr line naming the UDID and exits 1. It never retries, shuts down or boots the device. The fake xcrun logs
+    # each bootstatus and screenshot call in order, and copies the scripted frame to the screenshot path.
+
+    def add_frame(self, name, data):
+        """Write the screenshot fixture NAME.png, holding DATA, to the frame folder the fake xcrun copies from."""
+        with open(os.path.join(self.frame_dir, name + ".png"), "wb") as handle:
+            handle.write(data)
+
+    def test_check_on_a_live_frame_passes_with_no_output(self):
+        self.set_devices(self.ON)
+        self.script_frames("live")
+        result = self.run_mode("--check", U1)
+        self.assertEqual(self.frames_written(), ["live"],
+                         "the live frame did not reach the screenshot path: --check made no screenshot")
+        self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                         "--check did not run bootstatus then io screenshot, or ran more")
+        self.assertEqual(result.returncode, 0, "--check exited %d on a live frame, want 0" % result.returncode)
+        self.assertEqual(result.stdout, "", "--check wrote to stdout on a pass")
+        self.assertEqual(result.stderr, "", "--check wrote to stderr on a pass")
+
+    def test_check_on_a_one_colour_frame_fails_once_and_names_the_udid(self):
+        self.add_frame("black_full", make_png(rows_of(390, 844, BLACK_RGBA), 390, colour_type=6))
+        for name in ("black", "blank", "black_full"):
+            with self.subTest(frame=name):
+                self.tearDown_state()
+                self.set_devices(self.ON)
+                self.script_frames(name)
+                result = self.run_mode("--check", U1)
+                self.assertEqual(self.frames_written(), [name],
+                                 "the %s frame did not reach the screenshot path" % name)
+                self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                                 "--check did not run the check once on the %s frame" % name)
+                self.assertEqual(result.returncode, 1,
+                                 "--check exited %d on a one-colour %s frame, want 1" % (result.returncode, name))
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1,
+                                 "--check's failure is not one stderr line: %r" % result.stderr[:200])
+                self.assertIn(U1, result.stderr, "--check's stderr line does not name the UDID")
+                self.assertEqual(result.stdout, "", "--check wrote to stdout on a failure")
+
+    def test_check_with_a_failed_bootstatus_fails_once_and_names_the_udid(self):
+        self.set_devices(self.ON)
+        self.plan("bootstatus", 1)
+        self.script_frames("live")
+        result = self.run_mode("--check", U1)
+        self.assertEqual(self.check_calls()[:1], ["bootstatus " + U1], "--check did not run bootstatus first")
+        self.assertEqual(result.returncode, 1,
+                         "--check exited %d after a failed bootstatus, want 1" % result.returncode)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1,
+                         "--check's failure is not one stderr line: %r" % result.stderr[:200])
+        self.assertIn(U1, result.stderr, "--check's stderr line does not name the UDID")
+        self.assertEqual(result.stdout, "", "--check wrote to stdout on a failure")
+        self.assertEqual([c for c in self.check_calls() if c.split()[0] in ("shutdown", "boot")], [],
+                         "--check shut down or booted the device: it only checks")
+
+    def test_check_on_a_frame_that_cannot_be_judged_passes_with_no_output(self):
+        for name in ("undecodable", "empty"):
+            with self.subTest(frame=name):
+                self.tearDown_state()
+                self.set_devices(self.ON)
+                self.script_frames(name)
+                result = self.run_mode("--check", U1)
+                self.assertEqual(self.frames_written(), [name],
+                                 "the %s frame did not reach the screenshot path" % name)
+                self.assertEqual(self.check_calls(), ["bootstatus " + U1, "screenshot " + U1],
+                                 "--check did not run the check once on the %s frame" % name)
+                self.assertEqual(result.returncode, 0,
+                                 "--check exited %d on an unjudgeable %s frame, want 0" % (result.returncode, name))
+                self.assertEqual(result.stdout + result.stderr, "",
+                                 "--check printed on an unjudgeable %s frame" % name)
+
+    def test_check_with_no_udid_calls_no_simctl_and_exits_nonzero(self):
+        self.set_devices(self.ON)
+        result = self.run_mode("--check")
+        self.assertEqual(self.simctl_reads() + len(self.check_calls()), 0,
+                         "--check with no UDID called simctl")
+        self.assertNotEqual(result.returncode, 0, "--check with no UDID exited 0, want non-zero")
 
     def tearDown_state(self):
         """Reset the fake's logs, plans, flag and records between sub-cases of one test."""
