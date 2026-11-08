@@ -520,6 +520,35 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "a push of tag %s with no ref line was blocked for CI, though it names no head: "
                           "%s" % (TAG, reason))
 
+    def test_branch_head_is_kept_when_a_tag_of_its_name_is_pushed_too(self):
+        # `git push origin feat --tags` prints the branch's ref line and a [new tag] line of one name. The branch is
+        # checked, and its head is the ref line's new sha. The check drops the name for the tag (`branch in new_tags`),
+        # so the turn passes with no CI line. Red on the current code.
+        output = push_out(HEAD7, old=OLD7, dst=FEAT) + " * [new tag]         %s -> %s\n" % (FEAT, FEAT)
+        steps = push(output, command="git push origin %s --tags" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less turn with a branch and a tag of one name was not blocked "
+                         "(scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push of branch %s with --tags passed with no CI line: the branch head "
+                         "was dropped for the tag of its name" % FEAT)
+        self.assertIn("CI running on " + HEAD7, reason, "the branch head of the push is not named running: " + reason)
+
+    def test_colon_form_tag_only_push_needs_no_ci_line(self):
+        # `git push origin v1.0:v1.0` names a tag in the colon form, with a [new tag] line and no ref line. The local tag
+        # exists, as git needs for a push of it, so the name reads as a tag and no CI line is due. Green on the old code.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, tag=TAG)
+        steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG),
+                     command="git push origin %s:%s" % (TAG, TAG))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less colon-form tag push was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a colon-form push of tag %s was blocked for CI, though the name is a tag: %s"
+                          % (TAG, reason))
+
     # Green controls: each passes on the old code and on the new.
 
     # Coverage of the branch read of a push with no ref line (report_guard._heads_of_git_push). Each passes on the
