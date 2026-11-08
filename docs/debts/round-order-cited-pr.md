@@ -6,4 +6,4 @@
 
 **Decision.** review-rounds-in-order (a later review round waits for the earlier round's reviewer).
 
-**Retire.** Take the PR under review from the brief's first PR number, or from a `Review PR #<n>` form, and add a case for a brief that cites a second PR.
+**Retire.** Take the PR under review from the brief's first PR number, or from a `Review PR #<n>` form. Add a case to family review-rounds in `hooks/test_guard.py` for a brief that cites a second PR.

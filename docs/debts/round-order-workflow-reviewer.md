@@ -6,4 +6,4 @@
 
 **Decision.** review-rounds-in-order (a later review round waits for the earlier round's reviewer).
 
-**Retire.** Read the agents a Workflow script spawns, as the spawn rules read them, and judge each reviewer agent. Add a case for a workflow `Round 2 of 3` reviewer beside a running first round.
+**Retire.** Read the agents a Workflow script spawns, as the spawn rules read them, and judge each reviewer agent. Add a case to family review-rounds in `hooks/test_guard.py` for a workflow `Round 2 of 3` reviewer beside a running first round.
