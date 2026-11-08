@@ -5354,11 +5354,13 @@ sh("git-after-cd: a check, then ; a make a piped to tee, protected by || exit 1,
 sh("git-after-cd: a make a || make b || exit 1 chain, then ; a git push -u, passes",
    "make a || make b || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A SUBSTITUTION'S BACKTICK OR PROCESS FORM RUNS ITS CHECK INSIDE THE SHELL. A check in backticks or in a `<( )`
-# process substitution does not stop the shell, so the push after it is refused, as a check in `$( )` is.
+# or `>( )` process substitution does not stop the shell, so the push after it is refused, as a check in `$( )` is.
 sh("git-after-cd: a check in backticks, then ; a git push -u, is refused",
    "echo `pytest -q`; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a check in a process substitution, then ; a git push -u, is refused",
    "echo <(pytest -q); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check in an output process substitution, then ; a git push -u, is refused",
+   "echo >(pytest -q); %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
