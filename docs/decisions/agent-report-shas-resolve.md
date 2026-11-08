@@ -42,3 +42,4 @@ A hand-back is judged before any other guard rule reads git, so a hand-back with
 
 - A sha that exists but that the agent did not make (an old commit) passes. This check proves the commit exists, not that the agent did the work.
 - A sha written in uppercase is not read.
+- A range with a ref on one side, a sha in quotes or JSON, `key=<sha>`, and a 13-39 hex token pass. A pasted diff header's blob ids and the right side of a compare URL can refuse. Notes: report-sha-ref-range-unjudged, report-sha-quoted-forms-pass, report-sha-diff-header-false-alarm, report-sha-compare-url-right-side.
