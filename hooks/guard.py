@@ -2041,8 +2041,8 @@ MESSAGE_VERB_LEADS = {"to", "please", "then", "now", "also", "just", "only", "si
                       "might", "let's", "and", "or", "but", "so", "still", "always", "ever", "even",
                       "not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
 # A participle right before `at` makes the path where something was seen, not what is edited
-# (`Fix the failure reported at X:120`). Before `in`, the path stays the object. Lane ruling 2026-11-08 13:03 CST,
-# process-only.
+# (`Fix the failure reported at X:120`). Before `in`, the path stays the object
+# (decision message-role-scope).
 MESSAGE_LOCATOR_PARTICIPLES = {"reported", "raised", "shown", "logged", "seen"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
@@ -2401,15 +2401,15 @@ def message_role_hit(tool: str, tool_input, transcript):
 # Markdown path counts for a test-author: a record-writer owns it. The verdict is an ask, and the remedy names the role.
 BRIEF_ROLE_BUILDER_REASON = (
     "This brief asks a builder to change a test. Send that work to a test-author. "
-    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+    "(decision message-role-scope, a brief to an agent stays inside its role)"
 )
 BRIEF_ROLE_AUTHOR_REASON = (
     "This brief asks a test-author to change product code. Send that work to a builder. "
-    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+    "(decision message-role-scope, a brief to an agent stays inside its role)"
 )
 BRIEF_ROLE_WRITER_REASON = (
     "This brief asks a test-author to change a Markdown file. Send that work to a record-writer. "
-    "(rule brief-role-scope, a brief to an agent stays inside its role)"
+    "(decision message-role-scope, a brief to an agent stays inside its role)"
 )
 
 
@@ -5330,7 +5330,7 @@ def judge(payload) -> None:
     if sent:
         refuse(tool, "deny", "message-role-scope", sent[1], sent[0])
 
-    # A spawn whose brief asks the new agent to leave its role (rule brief-role-scope). An override lifts it.
+    # A spawn whose brief asks the new agent to leave its role (decision message-role-scope). An override lifts it.
     briefed_role = brief_role_hit(tool, tool_input)
     if briefed_role:
         refuse(tool, "ask", "brief-role-scope", briefed_role[1], briefed_role[0])
