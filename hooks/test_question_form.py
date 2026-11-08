@@ -1493,6 +1493,15 @@ OWNER_RULING_MUST_MATCH = (
     "shiv approved 2026-11-02",
     "Ruling (owner, 2026-11-07 13:20)",
     "Owner, 2026-11-01 16:30 CST",
+    "Your rulings, Oct 21: no freeze",
+    "Owner answer on page item 257: keep it",
+    "Owner grant Nov 2: the lane may start",
+    "shiv's ruling on c95: drop it",
+    "shiv's grant: archive it",
+    "Ruling, Oct 28 (shiv; recorded in item 12): keep",
+    "Ruling Oct 17: no measuring step",
+    "Rulings Nov 2: both stay",
+    "Not a pin: shiv ruled out that stopgap",
 )
 OWNER_RULING_MUST_NOT = (
     "Incident (shiv, Nov 9 10:12): a lane hand-merged X",
@@ -1501,6 +1510,14 @@ OWNER_RULING_MUST_NOT = (
     "(shiv's caution, item 2)",
     "(owner note on item 398)",
     "this is not an owner ruling (P44)",
+    "Second incident (shiv, Nov 3): a lane merged by hand",
+    "Done: Gripe, Oct 26 (shiv): too slow",
+    "Defect, Oct 28 (shiv, item 4): it breaks",
+    "Risk: incident (shiv's report): x",
+    "Waits on owner item 412",
+    "There is no owner ruling on this",
+    "**Incident** (shiv, Nov 1): x",
+    "- Incident (shiv, Nov 1): x",
 )
 
 
@@ -1517,6 +1534,28 @@ def case_owner_ruling_forms_and_non_rulings():
         hit = pattern.search(sentence)
         check("owner ruling form, must not match: %r" % sentence, hit is None,
               "matched %r" % (hit.group(0) if hit else ""))
+
+
+STEP_TAIL_NOTE = "Ruling (owner, 2026-11-07 13:20): keep it. Incident (shiv, Nov 9): a lane merged by hand."
+
+
+def case_step_ruling_tail_stops_at_an_incident():
+    """A ruling unit is its marked sentence, plus the next sentence when that one is detail. An incident right after a
+    ruling is no detail of it, so it joins no unit (decision question-form)."""
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "_step_rulings", None)
+    check("step ruling tail: question_form._step_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    # Step fields are (note, why), as _read_steps gives them. The words are the question's overlap set.
+    lines = fn({"s1": (STEP_TAIL_NOTE, None)}, {"keep"})
+    check("step ruling tail: the note gives one unit, under s1", len(lines) == 1 and lines[0].startswith("s1: "),
+          repr(lines)[:200])
+    text = str(lines)
+    check("step ruling tail: the marked ruling sentence is offered",
+          "Ruling (owner, 2026-11-07 13:20): keep it." in text, text[:200])
+    check("step ruling tail: the incident sentence after it joins no unit",
+          "Incident" not in text and "merged by hand" not in text, text[:200])
 
 
 class _BrokenPipeGit:
@@ -1714,7 +1753,8 @@ def main():
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes, case_owner_ruling_forms_and_non_rulings):
+                 case_task_str_replace_prose_label_passes, case_owner_ruling_forms_and_non_rulings,
+                 case_step_ruling_tail_stops_at_an_incident):
         try:
             case()
         except Exception as exc:
