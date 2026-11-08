@@ -1624,9 +1624,8 @@ def case_step_foreach_cmdlet_is_a_shell_line():
 
 def case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line():
     # `time` is a command wrapper (guard_core's COMMAND_WRAPPERS), so the token reader takes the cmdlet path after it as
-    # the command, as it does after `sudo`. The prefix reader for a backslash path (CMDLET_PREFIX) lists `&`, `sudo` and
-    # `env` but not `time`, so `time C:\tools\Get-Thing` passes. The forward-slash form is the control: it is refused
-    # already, since the token reader reads it.
+    # the command, as it does after `sudo`. _cmdlet_prefix reads the same wrapper list, so a backslash path after `time`
+    # is refused too. The forward-slash form is the control: the token reader refuses it already.
     refused = ("command-in-item", "shell line")
     page("a step holding `time C:/tools/Get-Thing` is refused as a shell line, a control", "set",
          entry_of(task_item(["Check the output of `time C:/tools/Get-Thing`"])), refused)
@@ -1636,10 +1635,10 @@ def case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line():
 
 def case_step_prefixed_folder_path_is_text():
     # A folder path after `&` or after other text names a folder, not a cmdlet. `Read-Me` is a PowerShell verb (Read),
-    # so only the path shape keeps `Tom & C:\Docs\Read-Me` and `& docs\Read-Me` text: a prefix reader that takes any
-    # text before the path (CMDLET_PREFIX as `[^\\/]*`) refuses both as a Verb-Noun at a path. The last folder,
-    # `& ~\Documents\Claude-Settings`, has a verb (`Claude`) that is no PowerShell verb, so it passes under any prefix
-    # reader. It pins that the verb list still applies after `&`.
+    # so the path shape and the prefix decide. _cmdlet_prefix takes only `&`, `VAR=value` and command-wrapper words
+    # before a path, so the `Tom` before the `&` keeps `Tom & C:\Docs\Read-Me` text. `& docs\Read-Me` has no drive or
+    # leading separator, so it is no path. The last folder, `& ~\Documents\Claude-Settings`, has a verb (`Claude`) that
+    # is no PowerShell verb, so the path check passes it. It pins that the verb list still applies after `&`.
     for span in (r"Tom & C:\Docs\Read-Me", r"& docs\Read-Me", r"& ~\Documents\Claude-Settings"):
         page("a step holding `%s` is text and passes" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), None)
