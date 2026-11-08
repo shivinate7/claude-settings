@@ -15809,6 +15809,8 @@ def xctestplan_logs_case():
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
                               _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE), "builder",
                               "bld1")
+    # The brief-scope rows are the brief's own read (no transcript path here), not the coverage rule.
+    rows = [r for r in rows if not (len(r) > 3 and r[3].startswith("brief-scope"))]
     if out or rows:
         problems.append("coverage: expected no log, got %r %r" % (out[:60], rows))
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-author"), skip,
