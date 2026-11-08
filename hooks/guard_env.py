@@ -222,12 +222,24 @@ ENV_PRINT_PROGRAMS = ("env", "env.exe", "printenv", "printenv.exe")
 # `! env`, `if true; then env; fi`. `_shell_string_prints` reads the command past them.
 ENV_GROUP_WORDS = ("(", "{", "!", "if", "then", "else", "elif", "do", "while", "until")
 # The process environment as a file: `cat /proc/self/environ`, `/proc/<pid>/environ`, `/proc/$$/environ`.
-ENV_PROC_ENVIRON = re.compile(r"/proc/(?:self|thread-self|\d+|\$\$|\$\{?\w+\}?)/environ")
-# An inline script that names the environment: perl `%ENV`, ruby `ENV`, awk `ENVIRON`.
+# A pid may be a glob: `/proc/*/environ`, `/proc/[0-9]*/environ`.
+ENV_PROC_ENVIRON = re.compile(r"/proc/(?:self|thread-self|[\d*?\[\]!^-]+|\$\$|\$\{?\w+\}?)/environ")
+# An inline script that names the environment: perl `%ENV` and `$ENV{`, ruby `ENV[` and `ENV.`, awk
+# `ENVIRON`. A bare word ENV is text (`perl -pe 's/ENV/prod/'`), except ruby's own `p ENV`: there it
+# is the constant, when no slash, quote, bar or brace sits against it.
 ENV_SCRIPT_PROGRAM = re.compile(r"(?:perl|ruby|[gmn]?awk)[\d.]*(?:\.exe)?")
-ENV_SCRIPT_ENV_WORD = re.compile(r"\b(?:ENV|ENVIRON)\b")
+ENV_SCRIPT_ENV_WORD = re.compile(r"[%$@]ENV\b|\bENVIRON\b|\bENV(?=[\[.])")
+ENV_RUBY_ENV_WORD = re.compile(r"(?<![\w/'\"|{}])ENV(?![\w/'\"|{}])")
+# The shell strings that perl and ruby code runs: `system("env")`, `exec 'env'`, a backtick pair,
+# `qx(env)`, `%x(env)`. Each is judged by `_shell_string_prints`.
+ENV_SCRIPT_SHELL_STRING = re.compile(
+    r"""(?:system|exec|spawn|popen)\s*\(?\s*(["'])((?:(?!\1).)*)\1|`([^`]*)`"""
+    r"""|(?:qx|%x)\s*(?:\(([^)]*)\)|\{([^}]*)\}|\[([^\]]*)\]|\|([^|]*)\||/([^/]*)/)""")
 # `docker compose config` prints each service's resolved environment, the file's values among them.
+# With one of the listing flags it prints names, hashes or nothing.
 ENV_COMPOSE_PRINTERS = ("config", "convert")
+ENV_COMPOSE_LISTING_FLAGS = (
+    "--services", "--volumes", "--profiles", "--images", "--hash", "-q", "--quiet")
 # THE PRINTED REASONS, AND NONE OF THEM NAMES A FILE. Each one says which shape of access fired,
 # so the reader knows what to change, and the log carries the file name for a person to read.
 ENV_REDIRECT_REASON = "a redirect would overwrite an environment file"
@@ -495,12 +507,6 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
         if refusal[0]:
             return refusal
-    if len(texts) > 1 and not subs_only:
-        # A runner's shell string in double quotes keeps its `$( )` here, where the cut-out above
-        # hid it: `uv run --env-file F sh -c "ls $(env)"`.
-        refusal = _env_flat(cmd, True, runners_only=True)
-        if refusal[0]:
-            return refusal
     return _env_relay(texts)
 
 
@@ -654,6 +660,23 @@ def _quoted_words(segment: str, keep_newlines=False):
     return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
+def _is_redirect(word: str) -> bool:
+    """True when a word is a redirect operator (`>`, `2>>`, `<`, `<<`, `<<EOF`)."""
+    return bool(REDIRECT.fullmatch(word)) or word.lstrip("0123456789").startswith("<")
+
+
+def _operands(words):
+    """The words of a command's arguments, with each redirect and its target taken out."""
+    out, i = [], 0
+    while i < len(words):
+        if _is_redirect(words[i]):
+            i += 2 if REDIRECT.fullmatch(words[i]) or words[i].lstrip("0123456789") in ("<", "<<", "<<-", "<<<") else 1
+            continue
+        out.append(words[i])
+        i += 1
+    return out
+
+
 def _skip_wrappers(words, position: int, runner_child: bool = False) -> int:
     """Return the index of the command that the wrappers at `position` run. Looks through exactly
     these wrapper shapes, each by its exact form, so a flag value of some other wrapper
@@ -689,8 +712,8 @@ def _skip_wrappers(words, position: int, runner_child: bool = False) -> int:
                                           or words[after].startswith("-")
                                           or (word != "stdbuf" and ASSIGNMENT.match(words[after]))):
                 after += 2 if words[after] in ENV_WRAPPER_VALUE_FLAGS[word] else 1
-            if word == "env" and after >= len(words):
-                break  # `env VAR=x` alone prints the environment, so env is the command
+            if word == "env" and (after >= len(words) or _is_redirect(words[after])):
+                break  # `env VAR=x` alone, or `env > f`, prints the environment, so env is the command
             position = after
         else:
             break
@@ -840,7 +863,14 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
         return True
     text = text.strip()
     if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
+        double = text[0] == '"'
         text = text[1:-1]
+        if double:
+            # The parent shell drops the backslash of `\$`, `\``, `\"` and `\\` in double quotes, so
+            # the child runs `$(env)` for `\$(env)`. An unescaped `$( )` was expanded by the parent.
+            text = re.sub(r'\\([$`"\\])', r'\1', text)
+        else:
+            text = text.replace("'\\''", "'")  # the idiom for a quote inside single quotes
     if _env_flat(text, True)[0]:
         return True
     for piece in split_segments(text):
@@ -848,16 +878,34 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
             texts, too_deep = _substitutions(segment)
             if too_deep:
                 return True
-            for index, (body, _) in enumerate(texts):
-                # The segment itself is last, with each substitution cut to `x`: its `$` is a variable.
-                if _segments_print(body, index == len(texts) - 1, depth):
+            for body, _ in texts:
+                # Each text has its own substitutions cut to `x`, so a `$` in it is a variable.
+                if _segments_print(body, depth):
                     return True
     return False
 
 
-def _segments_print(text: str, variables: bool, depth: int) -> bool:
-    """`_shell_string_prints` for one text whose substitutions are already cut out. `variables`
-    reads a `$` after `echo` or `printf` as a printed variable."""
+def _lists_variables(name: str, args) -> bool:
+    """True when the shell builtin `name` over `args` (redirects taken out) lists the shell's
+    variables: `set`, `export`, `declare` and `typeset` with no name to set, `export -p`,
+    `declare -p`, `declare -x`, and `compgen -v` or `-e` (names only)."""
+    clusters = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
+    names = [a for a in args if not a.startswith("-")]
+    if name == "set":
+        return not args
+    if name == "export":
+        return not args or "p" in clusters
+    if name in ("declare", "typeset"):
+        return "p" in clusters or (not names and (not args or "x" in clusters))
+    if name == "compgen":
+        return "v" in clusters or "e" in clusters or any(
+            a == "-A" and b in ("variable", "export") for a, b in zip(args, args[1:]))
+    return False
+
+
+def _segments_print(text: str, depth: int) -> bool:
+    """`_shell_string_prints` for one text whose substitutions are already cut out, so a `$` in it
+    is a variable: after `echo` or `printf` it is a printed variable."""
     for piece in split_segments(text):
         for segment in _env_parts(piece):
             words, position, _ = _env_words(segment)
@@ -873,13 +921,27 @@ def _segments_print(text: str, variables: bool, depth: int) -> bool:
                 continue
             at = _skip_wrappers(words, position, True)
             if at < len(words):
-                name, rest = _base(words[at]), words[at + 1:]
-                if variables and "$" in segment and name in ENV_TEXT_COMMANDS:
+                name = _base(words[at])
+                if "$" in segment and name in ENV_TEXT_COMMANDS:
                     return True
-                if (name == "set" and not rest) or (name == "export" and (not rest or "-p" in rest)):
+                if _lists_variables(name, _operands(words[at + 1:])):
                     return True
             if _child_prints(words, position, False, depth + 1):
                 return True
+    return False
+
+
+def _script_prints(word: str, program: str, depth: int) -> bool:
+    """True when a word of a perl, ruby or awk command names the environment, or holds a shell string
+    that prints it (`system("env")`, backticks, `qx(env)`)."""
+    if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"":
+        word = word[1:-1]  # the shell's own quotes are no part of the code
+    if ENV_SCRIPT_ENV_WORD.search(word) or (program.startswith("ruby") and ENV_RUBY_ENV_WORD.search(word)):
+        return True
+    for match in ENV_SCRIPT_SHELL_STRING.finditer(word.replace("\\`", "`")):
+        body = match.group(2) if match.group(2) is not None else next(g for g in match.groups()[2:] if g is not None)
+        if _shell_string_prints(body, depth + 1):
+            return True
     return False
 
 
@@ -893,11 +955,13 @@ def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
     name = _base(words[at])
     if name in ENV_PRINT_PROGRAMS:
         return True
-    if name not in ENV_EXISTENCE_COMMANDS + ENV_TEXT_COMMANDS and any(ENV_PROC_ENVIRON.search(w) for w in words[at + 1:]):
-        return True  # `cat /proc/self/environ`
-    if ENV_SCRIPT_PROGRAM.fullmatch(name):  # perl `%ENV`, ruby `ENV`, awk `ENVIRON`
-        return any(ENV_SCRIPT_ENV_WORD.search(w) for w in words[at + 1:])
     shell = re.fullmatch(r"(ba|z|da)?sh", name)
+    # `cat /proc/self/environ`. A shell's string is judged below, command by command.
+    if not shell and name not in ENV_EXISTENCE_COMMANDS + ENV_TEXT_COMMANDS and any(
+            ENV_PROC_ENVIRON.search(w) for w in words[at + 1:]):
+        return True
+    if ENV_SCRIPT_PROGRAM.fullmatch(name):  # perl `%ENV`, ruby `ENV`, awk `ENVIRON`
+        return any(_script_prints(w, name, depth) for w in words[at + 1:])
     if shell or re.fullmatch(r"python[\d.]*(\.exe)?", name):
         hit, stdin = _runner_scan(words, at, fed, ENV_SHELL_C_FLAG.match)
         if hit < 0 or not shell or words[hit] == "-":
@@ -963,6 +1027,13 @@ def _child_starts(words, i: int, runner: str):
             if not (i and _may_own_value(words[i - 1], runner)):
                 return
             i += 1
+
+
+def _compose_prints(words, at: int) -> bool:
+    """True when words[at] is a compose `config` or `convert` that prints resolved values: none of
+    its listing flags (`--services`, `-q`) follows it."""
+    return words[at] in ENV_COMPOSE_PRINTERS and not any(
+        w in ENV_COMPOSE_LISTING_FLAGS for w in words[at + 1:])
 
 
 def _container_child_prints(words, at: int, fed: bool) -> bool:
@@ -1036,20 +1107,18 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
     if name.startswith(("docker", "podman")):
         for at in _child_starts(words, position + 1, "docker"):
             if words[at] in ("compose", "container"):  # `container run` is `run`
-                return any(words[c] in ENV_COMPOSE_PRINTERS or (
+                return any(_compose_prints(words, c) or (
                     words[c] in ("run", "exec") and _container_child_prints(words, c, fed))
                     for c in _child_starts(words, at + 1, "docker"))
-            if words[at] in ENV_COMPOSE_PRINTERS and name.startswith("docker-compose"):
+            if name.startswith("docker-compose") and _compose_prints(words, at):
                 return True
             if words[at] in ("run", "exec"):
                 return _container_child_prints(words, at, fed)
     return False
 
 
-def _env_flat(cmd: str, text_ok: bool = False, runners_only: bool = False):
-    """The segment rules over one text whose substitutions are already cut out. `runners_only` is
-    for the whole command with its substitutions still in: it judges only the child a runner
-    given the file starts, whose shell string may hold a `$( )` that the outer shell expands."""
+def _env_flat(cmd: str, text_ok: bool = False):
+    """The segment rules over one text whose substitutions are already cut out."""
     ends = []
     pieces = split_segments(cmd, ends)
     for at, (piece, end) in enumerate(zip(pieces, ends)):
@@ -1094,8 +1163,6 @@ def _env_flat(cmd: str, text_ok: bool = False, runners_only: bool = False):
                     continue
                 previous = words[index - 1] if index else ""
                 loaded = flag in ENV_LOADER_FLAGS or previous in ENV_LOADER_FLAGS
-                if runners_only and not (loaded and command.lower() in ENV_LOADER_COMMANDS):
-                    continue
                 # A redirect onto the file overwrites it, whatever the command turns out to be.
                 if REDIRECT.fullmatch(previous):
                     return (ENV_REDIRECT_REASON,
