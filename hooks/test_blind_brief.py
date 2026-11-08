@@ -436,6 +436,34 @@ class Cli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(run_cli("--run", folder).returncode, 1)
 
+    def test_long_digit_runs_finish_under_the_hang_guard(self):
+        # A hang guard, not a speed check: each folder is one run of the real check in a child process,
+        # capped by run_cli at 60 s. Measured here: this case takes 0.2 s with both folders. A pattern that
+        # backtracks on a digit run takes 45 s on 40000 digits, so it reaches the cap on the 80000-digit
+        # brief. The sizes are 20000 and 80000 digits, against a 20000-character filler with no digits.
+        briefs = [(name, brief(job=JOB + "\n" + text, header="Designer kind: blind\nDesigner: %s-blind-1" % name))
+                  for name, text in (("digits-20000", "1" * 20000), ("digits-80000", "1" * 80000),
+                                     ("filler-20000", "." * 20000))]
+        done = self.check_folder(briefs)
+        self.assertEqual(done.returncode, 0, "a long run of digits or of filler was judged a fault: "
+                         + done.stdout + done.stderr)
+        # The same run with a unit must be read to its end: the scan reaches the unit, so it is a spacing fault.
+        done = self.check_folder([("digits-20000-px", brief(
+            job=JOB + "\n" + "1" * 20000 + " px", header="Designer kind: blind\nDesigner: digits-px-blind-1"))])
+        self.assertEqual(done.returncode, 1, "a long run with a unit was not judged a fault: " + done.stdout)
+        self.assertIn("token-spacing", done.stdout)
+
+    def check_folder(self, briefs):
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)  # test-temp-standard: the folder lives in the run folder
+        for name, text in briefs:
+            with open(os.path.join(folder, name + ".md"), "w", encoding="utf-8") as handle:
+                handle.write(text)
+        try:
+            return run_cli("--run", folder)
+        except subprocess.TimeoutExpired:
+            self.fail("the check hung on %s: no verdict in 60 s (the hang guard)"
+                      % ", ".join(name for name, _ in briefs))
+
 
 class Devices(unittest.TestCase):
     """The designer agent, the brief template and the hook read one resolved device list (step c113)."""
