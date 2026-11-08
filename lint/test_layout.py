@@ -635,6 +635,15 @@ class SetWaitingPage(Tree):
         self.assertEqual(self.layout.waiting_page(self.tree), self.URL)
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
 
+    def test_cli_root_that_is_a_subfolder_exits_2_and_names_the_repo_top(self):
+        self.assertTrue(os.path.isdir(os.path.join(self.tree, ".git")), "the test tree has no .git at its top")
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".git")), "the subfolder has a .git of its own")
+        code, out = self.cli(root=self.sub)
+        self.assertEqual(code, 2, out)
+        self.assertIn("not a repo root (no .git here): pass the repo's top folder", out)
+        self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the subfolder got a .claude folder")
+        self.assertFalse(os.path.exists(self.extras), "the repo top got an extras file for a subfolder root")
+
     def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
         code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
         self.assertEqual(code, 2, out)

@@ -11868,6 +11868,14 @@ records_allow("a chain that logs the generator's history, then add -A and commit
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 
+# A backgrounding `&` ends the generator's words. The run still writes the page, so the words the shell reads
+# after the `&` (`echo $!`) must not reach the generator's parser and turn the run into no run. A bare `&` with
+# no `$!` is refused first as a detached launch, so only the form that captures the pid reaches this rule.
+records_refusal("a chain that runs the generator in the background with its pid taken, then add -A and commit",
+             GEN + " --records-only & echo $! ; " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator in the background, output to null, with its pid taken, then add -A "
+             "and commit", GEN + " --records-only >/dev/null 2>&1 & echo $! ; " + ADD_A + " && " + COMMIT_X, "product")
+
 # argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
 # --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
 # names the repo a run writes, so a run aimed at another repo writes none of this repo's page, in either form.

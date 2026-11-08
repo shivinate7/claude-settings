@@ -136,6 +136,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1581,6 +1582,42 @@ class Helpers(unittest.TestCase):
         from hook_catalog import RECORDS_INTRO
         self.assertTrue(RECORDS_HEADER.strip(), "RECORDS_HEADER is empty")
         self.assertTrue(RECORDS_INTRO.startswith(RECORDS_HEADER), (RECORDS_HEADER, RECORDS_INTRO[:40]))
+
+
+class GuardReadsGeneratorRuns(unittest.TestCase):
+    """hooks/guard_merge.py reads a generator run with the generator's own parser. When that parser cannot be
+    imported, `--check` and `--print` write no page and must still read as no run, and a plain run must still
+    read as a run, so the guard fails toward a hit."""
+
+    def setUp(self):
+        hooks = os.path.join(ROOT, "hooks")
+        sys.path.insert(0, hooks)
+        try:
+            import guard_merge
+        finally:
+            sys.path.remove(hooks)
+        self.assertTrue(os.path.realpath(guard_merge.__file__).startswith(os.path.realpath(hooks) + os.sep),
+                        guard_merge.__file__)
+        self.guard = guard_merge
+
+    def test_the_parser_reads_check_as_no_run(self):
+        self.assertIsNotNone(self.guard._generator_parser(), "the generator's parser did not import")
+        self.assertIsNone(self.guard._runs_generator("python3 lint/hook_catalog.py --check"))
+
+    def test_no_parser_check_reads_as_no_run(self):
+        with mock.patch.object(self.guard, "_generator_parser", return_value=None):
+            self.assertIsNone(self.guard._generator_parser(), "the patch did not take")
+            self.assertIsNone(self.guard._runs_generator("python3 lint/hook_catalog.py --check"))
+
+    def test_no_parser_print_reads_as_no_run(self):
+        with mock.patch.object(self.guard, "_generator_parser", return_value=None):
+            self.assertIsNone(self.guard._generator_parser(), "the patch did not take")
+            self.assertIsNone(self.guard._runs_generator("python3 lint/hook_catalog.py --print"))
+
+    def test_no_parser_plain_run_reads_as_a_run(self):
+        with mock.patch.object(self.guard, "_generator_parser", return_value=None):
+            self.assertIsNone(self.guard._generator_parser(), "the patch did not take")
+            self.assertIsNotNone(self.guard._runs_generator("python3 lint/hook_catalog.py --records-only"))
 
 
 # ---- the cell cap: a long description cell is cut and ends in an ellipsis ---------------------
