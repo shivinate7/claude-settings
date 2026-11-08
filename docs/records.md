@@ -84,6 +84,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `building-one-home-per-capability` | Give each capability one home, and call it from everywhere. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-allow-list-is-the-constant` | A guard's or check's allow list must point at the constant the code emits, never a copy of it. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-guard-needs-incident` | Build a guard or check against a mistake Claude has made or is likely to make in normal work. | [`CLAUDE.md`](../CLAUDE.md) |
+| `building-mistake-names-its-guard` | A mistake you made is a strong sign that a guard or check is missing, since the way we work should make accidents hard. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-fix-cause-not-symptom` | Fix the cause, not the symptom. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-scanner-respects-strings` | Scan source code with the language's own parser or tokenizer when the repo has one. | [`CLAUDE.md`](../CLAUDE.md) |
 | `building-land-design-or-abandon` | A capability no user can reach is not built. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -138,9 +139,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`docs/decisions/ci-unknown-is-red.md`](../docs/decisions/ci-unknown-is-red.md) |
 | `cite-by-id-refuses-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git commit -F <file>` when it cannot read the file at hook time. | [`docs/decisions/cite-by-id-refuses-unread-file.md`](../docs/decisions/cite-by-id-refuses-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`docs/decisions/claude-md-shrink.md`](../docs/decisions/claude-md-shrink.md) |
+| `commit-refuses-conflict-markers` | Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. | [`docs/decisions/commit-refuses-conflict-markers.md`](../docs/decisions/commit-refuses-conflict-markers.md) |
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
+| `debt-close-runs-retire` | A PR closes a debt when it deletes the debt file, or renames it out of `docs/debts/`. | [`docs/decisions/debt-close-runs-retire.md`](../docs/decisions/debt-close-runs-retire.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
 | `decisions-reach-a-clickable-pick` | Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner`, "Same turn to the page"). | [`docs/decisions/decisions-reach-a-clickable-pick.md`](../docs/decisions/decisions-reach-a-clickable-pick.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`docs/decisions/default-branch-read-order.md`](../docs/decisions/default-branch-read-order.md) |
@@ -186,6 +189,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `merge-deletes-batch-lanes` | Owner, 2026-10-19 12:14 CDT: each merge deletes the lane branches its batch took in. | [`docs/decisions/merge-deletes-batch-lanes.md`](../docs/decisions/merge-deletes-batch-lanes.md) |
 | `merge-lock` | One lock holds each base branch while a merge run works on it. | [`docs/decisions/merge-lock.md`](../docs/decisions/merge-lock.md) |
 | `merge-needs-current-base` | Roadmap step c97, filed 2026-10-27; step c150, 2026-10-28: a batch merges only after a green run that holds for the current main. | [`docs/decisions/merge-needs-current-base.md`](../docs/decisions/merge-needs-current-base.md) |
+| `merge-practices` | Owner, page item 150, pick a, 2026-11-06 12:58 CST ("Build the small proof"): decision `test-practices` stays the testing chapter. | [`docs/decisions/merge-practices.md`](../docs/decisions/merge-practices.md) |
+| `mistake-means-missing-guard` | Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident. | [`docs/decisions/mistake-means-missing-guard.md`](../docs/decisions/mistake-means-missing-guard.md) |
 | `mockup-home` | Git is each artifact's home (owner ruling fb-1458-1, 2026-11-02 14:58 CST, option A). | [`docs/decisions/mockup-home.md`](../docs/decisions/mockup-home.md) |
 | `mods-deferred-table` | These mods stay deferred recordings on the repo. | [`docs/decisions/mods-deferred-table.md`](../docs/decisions/mods-deferred-table.md) |
 | `mods-install-via-marketplace` | The shared `settings.json` declares one marketplace, `claude-settings`, from the GitHub repo `shivinate7/claude-settings`, with `autoUpdate` set to true. | [`docs/decisions/mods-install-via-marketplace.md`](../docs/decisions/mods-install-via-marketplace.md) |
@@ -274,6 +279,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `bare-merge-asks` | Orchestrator call (lane bare-gh-merge-ask); the owner may rule otherwise. | [`docs/decisions/bare-merge-asks.md`](../docs/decisions/bare-merge-asks.md) |
 | `catalog-cells-never-cut` | The cell cap in `docs/catalog.md` sits above the longest cell, so no cell is cut. | [`docs/decisions/catalog-cells-never-cut.md`](../docs/decisions/catalog-cells-never-cut.md) |
 | `ci-wait-reads-run-status` | Owner, 2026-10-16 01:47 CDT ("Status read only") and 03:00 CDT ("Change them too"): no program and no agent runs `gh run watch`, in the foreground or the background. | [`docs/decisions/ci-wait-reads-run-status.md`](../docs/decisions/ci-wait-reads-run-status.md) |
+| `claims-carry-backing` | Owner goal, 2026-11-06 11:36 CST: every definitive prose claim is backed and verifiable. | [`docs/decisions/claims-carry-backing.md`](../docs/decisions/claims-carry-backing.md) |
 | `claude-md-change-is-flagged` | Owner, 2026-10-16: report only, no hold. | [`docs/decisions/claude-md-change-is-flagged.md`](../docs/decisions/claude-md-change-is-flagged.md) |
 | `cloud-start-hooks-run-fresh` | In a cloud session, `install.sh --cloud` runs the repo's startup hooks itself, after it has copied them into `~/.claude`. | [`docs/decisions/cloud-start-hooks-run-fresh.md`](../docs/decisions/cloud-start-hooks-run-fresh.md) |
 | `compliance-defined` | Owner, 2026-10-31 15:04 CDT, waiting-page item 104: a claude-settings rule wins over a child repo's text on the same question, unless that text names the rule as a known exemption. | [`docs/decisions/compliance-defined.md`](../docs/decisions/compliance-defined.md) |
@@ -294,6 +300,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`docs/decisions/shell-scripts-check-out-lf.md`](../docs/decisions/shell-scripts-check-out-lf.md) |
 | `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
+| `stalled-steps` | `doing` is derived from live work, not typed. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
 
 ## Debts
 
@@ -314,6 +321,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-wake-export-gh-repo-unread` | ci_wake reads GH_REPO only as a command prefix. | [`docs/debts/ci-wake-export-gh-repo-unread.md`](../docs/debts/ci-wake-export-gh-repo-unread.md) |
 | `ci-wake-gh-host-bare-repo` | For a github.com PR, ci_wake passes a bare -R owner/repo. | [`docs/debts/ci-wake-gh-host-bare-repo.md`](../docs/debts/ci-wake-gh-host-bare-repo.md) |
 | `ci-wake-lists-runs-once` | `ci_wake.wait_for` lists the head's CI runs again until a run that ran is judged. | [`docs/debts/ci-wake-lists-runs-once.md`](../docs/debts/ci-wake-lists-runs-once.md) |
+| `ci-wake-misses-mcp-ready` | A cloud session marks a PR ready by MCP `update_pull_request`, since `gh pr ready` gets a GraphQL 403. | [`docs/debts/ci-wake-misses-mcp-ready.md`](../docs/debts/ci-wake-misses-mcp-ready.md) |
 | `code-check-pin-drift` | `bin/ste-changed` warns when CI pins the ste-lint or zizmor action at a commit whose files differ from the session's copy. | [`docs/debts/code-check-pin-drift.md`](../docs/debts/code-check-pin-drift.md) |
 | `comment-check-changed-from` | The comment check flags "changed from the previous/original/old …" as history. | [`docs/debts/comment-check-changed-from.md`](../docs/debts/comment-check-changed-from.md) |
 | `departs-word-list-limits` | `question-departs` reads a no-change word in the first clause of the change side. | [`docs/debts/departs-word-list-limits.md`](../docs/debts/departs-word-list-limits.md) |
@@ -328,6 +336,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `frozen-dup-in-subshell` | From a frozen working folder (the live pin `<clone>-live`, or `~/.claude/hooks`), the frozen-path rule still refuses `x=$(ls 2>&1)`, `(ls 2>&1)`, a backtick form, and `ls 2>&1&`. | [`docs/debts/frozen-dup-in-subshell.md`](../docs/debts/frozen-dup-in-subshell.md) |
 | `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
+| `handoff-choice-exempts-line` | "your call" exempts the whole "Why yours" line, so a false "can't" on that line passes with no cite. | [`docs/debts/handoff-choice-exempts-line.md`](../docs/debts/handoff-choice-exempts-line.md) |
+| `handoff-page-context-unread` | The "Why yours" line in a waiting-page task's `context` is not judged. | [`docs/debts/handoff-page-context-unread.md`](../docs/debts/handoff-page-context-unread.md) |
+| `handoff-verb-list-closed` | A capability line in these words passes with no cite: "do not have access", "no permission", "not able to", "could not", "only the owner can", "cant", "can not". | [`docs/debts/handoff-verb-list-closed.md`](../docs/debts/handoff-verb-list-closed.md) |
 | `heredoc-written-run-false-alarm` | The guard keeps a heredoc body in view when the file the body writes shares a pipeline with any runner word, even as a plain argument. | [`docs/debts/heredoc-written-run-false-alarm.md`](../docs/debts/heredoc-written-run-false-alarm.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
 | `inbox-saves-other-notices` | The feedback inbox saves some prompts the owner did not type. | [`docs/debts/inbox-saves-other-notices.md`](../docs/debts/inbox-saves-other-notices.md) |
@@ -339,6 +350,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `kept-mockup-never-merged` | A kept mockup reaches no main branch. | [`docs/debts/kept-mockup-never-merged.md`](../docs/debts/kept-mockup-never-merged.md) |
 | `lane-ack-skips-every-reply` | In `last_incoming_index`, a send's first reply from its target is its ack, so a new question in that reply passes with no send. | [`docs/debts/lane-ack-skips-every-reply.md`](../docs/debts/lane-ack-skips-every-reply.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`docs/debts/lane-cycle-delete-order.md`](../docs/debts/lane-cycle-delete-order.md) |
+| `lane-lint-misses-nested-landed` | A lane added a test fixture in a subfolder of a landed folder. | [`docs/debts/lane-lint-misses-nested-landed.md`](../docs/debts/lane-lint-misses-nested-landed.md) |
 | `layout-kind-repeats-extras` | When `lint/layout.json` gains a kind that a rolled-out repo already lists in its `.claude/layout-extras.json`, `layout.kinds()` refuses that repo's extras file and ste_lint exits 2 on every lane there. | [`docs/debts/layout-kind-repeats-extras.md`](../docs/debts/layout-kind-repeats-extras.md) |
 | `layout-legacy-repos` | The layout's `legacy-repos` map lets two named repos keep their `todo` kind in a place of their own: q_max at `specs/todo.md`, home at `records`. | [`docs/debts/layout-legacy-repos.md`](../docs/debts/layout-legacy-repos.md) |
 | `linked-nm-prefix-workspace` | `-w`, `--workspace` and `--prefix` change the folder npm works in. | [`docs/debts/linked-nm-prefix-workspace.md`](../docs/debts/linked-nm-prefix-workspace.md) |
@@ -349,6 +361,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
 | `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
+| `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
@@ -377,6 +390,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `push-report-before-checks` | A session can report a push as done before its checks finish. | [`docs/debts/push-report-before-checks.md`](../docs/debts/push-report-before-checks.md) |
 | `pycache-rm-false-alarm` | `rm -rf tests/__pycache__` and `rm -rf tests/.pytest_cache` are refused for a builder, because the path sits in a test folder. | [`docs/debts/pycache-rm-false-alarm.md`](../docs/debts/pycache-rm-false-alarm.md) |
 | `rail-row-touch-height` | On touch at 390px, the rail rows on the waiting page are 32px tall. | [`docs/debts/rail-row-touch-height.md`](../docs/debts/rail-row-touch-height.md) |
+| `ready-checks-skipped-by-mcp` | A session that marks a draft ready by MCP `update_pull_request draft=false` or by `gh pr ready`, without running `merge <pr> --confirm` on the draft, skips `merge.readyChecks`. | [`docs/debts/ready-checks-skipped-by-mcp.md`](../docs/debts/ready-checks-skipped-by-mcp.md) |
 | `record-code-spans-unindexed` | The restates check strips code spans from the record side too, so owner words that a record keeps in backticks are never indexed. | [`docs/debts/record-code-spans-unindexed.md`](../docs/debts/record-code-spans-unindexed.md) |
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`docs/debts/refresh-lock-untested.md`](../docs/debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
@@ -384,6 +398,8 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refusal-shapes-missed` | The PreCompact digest's refusal match misses four denial lines that Claude Code 2.1.316 writes: "Permission to read <path> has been denied.", "Permission to edit <path> has been denied.", "Permission for this tool use was denied: it requires interactive approval", and "Permission for this command was denied by a built-in Claude Code safety check". | [`docs/debts/refusal-shapes-missed.md`](../docs/debts/refusal-shapes-missed.md) |
 | `replay-big-file-unknown` | A file that does not parse is listed as skipped, and its row can still show a kill rate. | [`docs/debts/replay-big-file-unknown.md`](../docs/debts/replay-big-file-unknown.md) |
 | `report-guard-gh-api-merge` | A turn that merges with `gh api -X PUT repos/o/r/pulls/N/merge` or `gh api repos/o/r/merges` lands a commit. | [`docs/debts/report-guard-gh-api-merge.md`](../docs/debts/report-guard-gh-api-merge.md) |
+| `route-flag-stop-untested` | No test feeds a refusal row that carries `route_flag` through the Stop read, so that path has no test. | [`docs/debts/route-flag-stop-untested.md`](../docs/debts/route-flag-stop-untested.md) |
+| `route-match-limits-untested` | No test drives `MAX_TARGET_CHARS` or `MAX_PATTERN_CHARS`, so a change to either limit passes every test. | [`docs/debts/route-match-limits-untested.md`](../docs/debts/route-match-limits-untested.md) |
 | `ruling-kind-vacuous-local-pass` | `lint/check_ruling_kind.py` checks only the committed diff against `origin/main`, so a run before the commit checks zero files and prints PASS. | [`docs/debts/ruling-kind-vacuous-local-pass.md`](../docs/debts/ruling-kind-vacuous-local-pass.md) |
 | `ruling-pr-kind-unchecked` | The merge tool takes the lane's Kind claim. | [`docs/debts/ruling-pr-kind-unchecked.md`](../docs/debts/ruling-pr-kind-unchecked.md) |
 | `scan-mid-sentence-false-alarm` | The waiting-page export allows `password: optional` and `PWD=/Users/x` only when nothing follows the value on its line. | [`docs/debts/scan-mid-sentence-false-alarm.md`](../docs/debts/scan-mid-sentence-false-alarm.md) |
@@ -394,17 +410,23 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`docs/debts/squash-lane-branch-kept.md`](../docs/debts/squash-lane-branch-kept.md) |
+| `stale-draft-lane-head` | `stale_drafts` takes a draft as lane-owned only when its bare branch equals a live session step. | [`docs/debts/stale-draft-lane-head.md`](../docs/debts/stale-draft-lane-head.md) |
+| `stale005-quoted-text-alarm` | STALE005 reads a quoted old claim and a grant title as claims. | [`docs/debts/stale005-quoted-text-alarm.md`](../docs/debts/stale005-quoted-text-alarm.md) |
+| `stalled-count-reads-in-progress` | The phase's "N in progress" count and the Latest changes feed count a stalled step as in progress. | [`docs/debts/stalled-count-reads-in-progress.md`](../docs/debts/stalled-count-reads-in-progress.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `start-detached-not-main` | hooks/session_start.sh counts a detached checkout as on main only when HEAD equals local `refs/heads/main`. | [`docs/debts/start-detached-not-main.md`](../docs/debts/start-detached-not-main.md) |
 | `step-shell-programs-partial` | Guard rule `command-in-item` reads a backtick span in a step as a shell line only when its first word is in a fixed program list. | [`docs/debts/step-shell-programs-partial.md`](../docs/debts/step-shell-programs-partial.md) |
 | `test-guard-no-progress-line` | `hooks/test_guard.py` prints nothing for minutes, so the stall watch cuts off a healthy full run. | [`docs/debts/test-guard-no-progress-line.md`](../docs/debts/test-guard-no-progress-line.md) |
 | `tests-for-misses-param-loads` | `--tests-for` reads a file load only when the path argument holds a `<stem>.py` literal, inline or through a name bound to one. | [`docs/debts/tests-for-misses-param-loads.md`](../docs/debts/tests-for-misses-param-loads.md) |
+| `unstarted-guard-held` | No check refuses a coordinator report whose `Unstarted:` line omits a step that is ready and not started (rule `reports-name-unstarted-items`). | [`docs/debts/unstarted-guard-held.md`](../docs/debts/unstarted-guard-held.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`docs/debts/verdict-pipe-drops-line.md`](../docs/debts/verdict-pipe-drops-line.md) |
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
 | `verdict-skip-colon-line` | `bin/verdict` counts marker lines that start `SKIP ` or `SKIPPED`. | [`docs/debts/verdict-skip-colon-line.md`](../docs/debts/verdict-skip-colon-line.md) |
 | `windows-main-run-flakes` | Two main push runs went red on Windows only, and each blocked the next batch until a rerun went green. | [`docs/debts/windows-main-run-flakes.md`](../docs/debts/windows-main-run-flakes.md) |
+| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 3 Windows shards and the merge git-half suite in 5. | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `workflow-wrapped-test-run` | A builder who wraps a bare test run in a workflow is refused as a dropped test path. | [`docs/debts/workflow-wrapped-test-run.md`](../docs/debts/workflow-wrapped-test-run.md) |
+| `worktree-guard-loop-var` | Guard rule `hand-made-worktree` refuses `git worktree add /tmp/x <ref>`. | [`docs/debts/worktree-guard-loop-var.md`](../docs/debts/worktree-guard-loop-var.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
@@ -414,10 +436,14 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `3d-tools-survey` | Plan: 3D tools, what to think about as 3D work grows | [`docs/plans/3d-tools-survey.md`](../docs/plans/3d-tools-survey.md) |
 | `align-watchers` | Plan: one direction for watches, wakes, sweeps, reaps and logs | [`docs/plans/align-watchers.md`](../docs/plans/align-watchers.md) |
 | `child-guard-promotion` | Plan: child guards go up or out | [`docs/plans/child-guard-promotion.md`](../docs/plans/child-guard-promotion.md) |
+| `debate-model-tiers` | Plan: which refuters run Opus | [`docs/plans/debate-model-tiers.md`](../docs/plans/debate-model-tiers.md) |
+| `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |
 | `o10-session-questions-page` | Plan: a page per session for questions waiting on the owner | [`docs/plans/o10-session-questions-page.md`](../docs/plans/o10-session-questions-page.md) |
+| `plugin-assess-three` | Plan: three catalog plugins, add or skip | [`docs/plans/plugin-assess-three.md`](../docs/plans/plugin-assess-three.md) |
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
+| `stalled-steps` | Plan: stalled steps (lane doing-needs-live-lane) | [`docs/plans/stalled-steps.md`](../docs/plans/stalled-steps.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
 | `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
 | `trial-results` | Trial results: Ambition Lenses, blind grade | [`docs/plans/trial-results.md`](../docs/plans/trial-results.md) |
