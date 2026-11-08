@@ -388,7 +388,7 @@ class Ratchet(Case):
             "a.rb": "# fixed in round 2\n",
             "notes.txt": "# owner ruling 2026-10-18\n",
             "notes.md": "Fixed in round 2. Owner ruling 2026-10-18.\n",
-            "run.sh": "# fixed in round 2\n",
+            "run.zsh": "# fixed in round 2\n",
             "data.txt": "# MEASURED CORRECTED\n",
             "README": "# PR #509\n",
         })
