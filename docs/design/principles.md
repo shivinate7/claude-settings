@@ -239,7 +239,8 @@ Check: record a lab trace of the changed route on a mobile profile. Pass when LC
 Blocking Time in the lab) and CLS meet web.dev's "good" lines. Where field data at the 75th percentile
 exists, it must also pass. Field data is in CrUX through PageSpeed Insights, or the repo's own field log.
 Source: [web.dev, Web Vitals](https://web.dev/articles/vitals) (the "good" lines, and the 75th
-percentile for field data); impeccable `optimize` gives the lines as advice with no check.
+percentile for field data) and [web.dev, Total Blocking Time](https://web.dev/articles/tbt) (the lab
+TBT line); impeccable `optimize` gives the lines as advice with no check.
 
 ## ux-feature-baseline-or-fallback
 
