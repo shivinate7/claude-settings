@@ -17,7 +17,7 @@ A message passes only when it has at least one Red-run line and every Red-run li
 commit, even beside a valid one. A line counts as a Red-run line, at line start and in any case, in two ways. First, a key that reads
 `red`, then any run of spaces, underscores or hyphens (none too), then `run` or `runs`, then optional spaces and a colon
 (`Red-Run:`, `Red-run :`, `Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`). Second, the same key with no colon, only when the
-line also ends in `-> <N> failed on <sha>` (`Red-run python3 x -> 1 failed on abc1234`). A bare line-start "Red run" with no colon
+line also ends in `-> <N> failed on <sha>` (`Red-run python3 x -> 1 failed on <sha>`). A bare line-start "Red run" with no colon
 and no such tail is prose: eleven main messages carry valid trailers and begin a line that way. A key that is not exactly
 `Red-run:` is malformed. Prose that mentions red-run mid-line, and words such as `Redress:` or `Reduce:`, are not judged. The failed form judges the label word of its command in two layers, so a
 typo is not read as a failed form. `label_word(line)` is the one normaliser: it reads the text after `Red-run:`, takes the
@@ -79,8 +79,9 @@ NONE = re.compile(r"^Red-run: none: \s*\S.*$")
 # A Red-run line is a near-miss key followed by a colon (`Red-runs:`, `Red run:`, `Red_run:`, `Redrun:`, any case, spaces
 # before the colon), or a key with no colon that also carries the failed form's tail. Only `Red-run:` exactly can be valid.
 # A bare line-start "Red run" with no colon is not a key: eleven main messages carry valid trailers and begin a line so.
-RED_KEY = re.compile(r"^red[\s_-]*runs?\s*:", re.IGNORECASE)
-RED_KEY_NO_COLON = re.compile(r"^red[\s_-]*runs?\b.* -> \d+ failed on [0-9a-f]{7,64}\s*$", re.IGNORECASE)
+RED_KEY_WORD = re.compile(r"^red[\s_-]*runs?", re.IGNORECASE)
+RED_KEY = re.compile(RED_KEY_WORD.pattern + r"\s*:", re.IGNORECASE)
+RED_KEY_NO_COLON = re.compile(RED_KEY_WORD.pattern + r"\b.* -> \d+ failed on [0-9a-f]{7,64}\s*$", re.IGNORECASE)
 # First words, besides the mutant-like ones (`mutant_like`), a failed-form command may not be. Each is a typo of the none
 # keyword. The failed pattern would accept it as a command that never ran. No real command is one of these words.
 REFUSED_NONE_WORDS = frozenset(("none", "non"))
@@ -117,10 +118,16 @@ def label_word(line):
     to a fixed point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`,
     `_(none)_`). A leading underscore is stripped only when the word closes with an underscore too, or its core is bare
     letters once wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word
-    that strips to nothing (`-`, `>`, `1)`) is skipped. upper_env is True when the same stripped word, before it is
-    folded to lower case, is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True). No word: ("", False,
-    False). Pure."""
-    for token in RED_KEY.sub("", line, count=1).split():
+    that strips to nothing (`-`, `>`, `1)`) is skipped, and a colon it held (`:`, `-:`) goes on to the next word, so
+    the label still ends in a colon. upper_env is True when the same stripped word, before it is
+    folded to lower case, is an upper-case `NAME=` assignment (`- MUTATE_ONLY=x` reads True). The key is cut by its
+    own match, so a near-miss key of any width (`Red-run :`, `Red-runs:`, `Red run`) does not shift the word. No key or
+    no word: ("", False, False). Pure."""
+    key = RED_KEY.match(line) or RED_KEY_WORD.match(line)
+    if not key:
+        return "", False, False
+    skipped_colon = False
+    for token in line[key.end():].split():
         if LIST_NUMBER.match(token):
             continue
         colon = False
@@ -136,7 +143,8 @@ def label_word(line):
             if token == before:
                 break
         if token:
-            return token.casefold(), colon, bool(UPPER_ENV_WORD.match(token))
+            return token.casefold(), colon or skipped_colon, bool(UPPER_ENV_WORD.match(token))
+        skipped_colon = skipped_colon or colon
     return "", False, False
 
 
@@ -194,9 +202,14 @@ def refused_word(line):
     return colon and not ENV_WORD.match(word)
 
 
+def red_lines(message):
+    """The Red-run lines of a message: the one home of what counts as one, read by the validity check and the hint. Pure."""
+    return [line for line in message.splitlines() if RED_KEY.match(line) or RED_KEY_NO_COLON.match(line)]
+
+
 def has_valid_trailer(message):
     """True when the message has a Red-run line and every Red-run line is valid. Pure: it reads no repo."""
-    lines = [line for line in message.splitlines() if RED_KEY.match(line) or RED_KEY_NO_COLON.match(line)]
+    lines = red_lines(message)
     return bool(lines) and all(valid_line(line) for line in lines)
 
 
@@ -242,7 +255,7 @@ def gaps(root, base):
             continue
         if not has_valid_trailer(message):
             hint = ""
-            if any(mutant_like(l) and not valid_line(l) for l in message.splitlines() if RED_KEY.match(l)):
+            if any(mutant_like(l) and not valid_line(l) for l in red_lines(message)):
                 hint = "; a mutant line reads `Red-run: mutant: <mutation> -> <N> failed on <sha>`"
             shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
             lines.append("check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer%s" % (sha[:7], subject, shown, hint))

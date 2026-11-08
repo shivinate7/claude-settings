@@ -44,9 +44,9 @@ TEST_TEXT = "def test_widget():\n    assert widget() == 1\n"
 GOOD = "Red-run: python3 lint/test_widgets.py -> 2 failed on abc1234"
 # Lines carry the placeholder SHA, filled with a real fixture sha by each case (see filled).
 VALID_LINE = "Red-run: python3 lint/test_widgets.py -> 1 failed on SHA"
-# Keyword typos. Each must flag its commit, and none may pass as a failed-form command. The last six and the generic
-# one name the words a builder's rule refuses: a first word that ends in a colon (other than `mutant:` and `none:`), or
-# that starts `mutat` or `mutan`. `runner:` stands for every colon word.
+# Keyword typos. Each must flag its commit, and none may pass as a failed-form command. The last six name the words a
+# builder's rule refuses: a first word that ends in a colon (other than `mutant:` and `none:`), or that starts `mutat` or
+# `mutan`. `runner:` stands for every colon word.
 KEYWORD_TYPOS = ("Red-run: mutants: x -> 1 failed on SHA",
                  "Red-run: mutation: x -> 1 failed on SHA",
                  "Red-run: mutant x -> 1 failed on SHA",
@@ -79,14 +79,18 @@ WRAPPED_MUTANT_TYPOS = ("Red-run: (mutant A) -> 1 failed on SHA",
                         "Red-run: mutnat x -> 1 failed on SHA",
                         "Red-run: mtuant x -> 1 failed on SHA",
                         "Red-run: mutnt x -> 1 failed on SHA",
+                        "Red-run: mutamt x -> 1 failed on SHA",
                         "Red-run: mutaiton x -> 1 failed on SHA",
                         "Red-run: mutate=x -> 1 failed on SHA",
                         "Red-run: mutan=x -> 1 failed on SHA")
 WRAPPED_AND_TYPO = WRAPPED_MUTANT_TYPOS + ("Red-run: (none) -> 1 failed on SHA", "Red-run: **none** x -> 1 failed on SHA")
-# The refused keywords that start `mutant` or `mutation`, and the wrapped and typo'd mutant words. Their FAIL line holds the
-# hint that names the mutant form.
+# A mutant word under a key that is not exactly `Red-run:`. The key is malformed, and the FAIL line still holds the hint.
+NEAR_MISS_MUTANT_LINES = ("Red-run : mutant A (x) -> 1 failed on SHA",
+                          "Red-runs: mutant A (x) -> 1 failed on SHA")
+# The refused keywords that start `mutant` or `mutation`, the wrapped and typo'd mutant words, and the near-miss keys
+# with a mutant word. Their FAIL line holds the hint that names the mutant form.
 MUTANT_TYPOS = (tuple(line for line in KEYWORD_TYPOS if re.match(r"Red-run: mut(?:ant|ation)", line, re.IGNORECASE))
-                + WRAPPED_MUTANT_TYPOS)
+                + WRAPPED_MUTANT_TYPOS + NEAR_MISS_MUTANT_LINES)
 # A mutant keyword with text glued on. The failed form would read it as a command, so each must flag its commit.
 PREFIX_BYPASSES = ("Red-run: mutant(A) (x) -> 1 failed on SHA",
                    "Red-run: mutant-A (x) -> 1 failed on SHA",
@@ -110,9 +114,9 @@ NOT_KEY_LINES = ("Prose: the Red-run: none form is for re-points.",
                  "Redress: x",
                  "Reduce: y")
 # Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment. An
-# upper-case assignment (`NAME=value`, quoted or not) is never refused, even when the name starts `MUTATE` or the value
-# holds a colon: the quoted MUTATE_ONLY row below pins that. A lower-case assignment is exempt from the colon refusal
-# only, as `lint_mode=on:` is. `mutant=x` and `mutate=x` stay refused (PREFIX_BYPASSES, WRAPPED_AND_TYPO).
+# upper-case assignment (`NAME=value`, quoted or not) skips the second layer, so `MUTATE_ONLY=x` and `MUTATE_ONLY="a: b"`
+# pass. The first layer still reads it: `MUTANT_X=1` is refused, as `mutant=x` is. Any assignment is exempt from the colon
+# refusal, as `lint_mode=on:` is. `mutant=x` and `mutate=x` stay refused (PREFIX_BYPASSES, WRAPPED_AND_TYPO).
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
                  "Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA",
@@ -197,6 +201,13 @@ LABEL_FORMS = (
     ("Red-run: _+none -> 1 failed on SHA", "refused", "list marker under underscore"),
     # A fixed point, not a fixed count of passes: forty wrappers each side still read as the word.
     ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "refused", "fixed point"),
+    # A colon on a token that strips to nothing still ends the label word, so the word after it is refused. A bare list
+    # marker with no colon is skipped, so the word after it reads and the line passes.
+    ("Red-run: : runner x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
+    ("Red-run: -: x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
+    ("Red-run: - python3 t.py -> 1 failed on SHA", "valid", "control: bare list marker"),
+    # A key with no colon is a Red-run line when it ends in the failed tail. Its FAIL line holds the mutant hint.
+    ("Red run mutant A (x) python3 t.py -> 1 failed on SHA", "refused", "no-colon key with a mutant word"),
     # Real commands pass as the failed form. These are the must-pass rows.
     ("Red-run: python3 -m pytest -k mutant_case -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: lint/mutation/run.py -> 1 failed on SHA", "valid", "must-pass"),
