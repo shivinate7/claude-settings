@@ -1511,9 +1511,9 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 if glued:   # `>&FILE` splits as `>` and `&FILE`: the `&` is part of the operator, FILE is the target
                     word = word[1:]
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
-                if prints_escapes:   # printf and echo -e read `\n` as a line break, so a path ends there
-                    pieces = [part for piece in pieces for part in re.split(r"\\[nrt]", piece) if part]
-                words.extend(pieces)
+                # printf and echo -e read `\n` as a line break, so a path ends there: its parts are candidates too
+                cut = [part for piece in pieces for part in re.split(r"\\[nrt]", piece) if part] if prints_escapes else []
+                words.extend(pieces + [part for part in cut if part not in pieces])
                 shown.extend(pieces)
                 kept = scripts[number][index]
                 if glued:
