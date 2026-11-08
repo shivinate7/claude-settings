@@ -5690,7 +5690,11 @@ sh("check-tail: a verdict call of merge --lane-lint with no pipe is allowed",
    "verdict merge --lane-lint 7", "allow", cwd=NOGIT)
 sh("check-tail: grep of the saved lint log with no check in the pipe is allowed",
    "grep -m1 FAIL lint.log", "allow", cwd=NOGIT)
-sh("check-tail: a separator ends the pipeline, so tee then tail after merge --confirm is allowed",
+sh("check-tail: lane-lint to a file, then a semicolon and grep | tail of the log, is allowed",
+   "merge --lane-lint 7 > log; grep FAIL log | tail", "allow", cwd=NOGIT)
+sh("check-tail: lane-lint into tee only, then a semicolon and grep | tail of the log, is allowed",
+   "merge --lane-lint 7 | tee log; grep FAIL log | tail -3", "allow", cwd=NOGIT)
+sh("narrate: a semicolon ends the pipeline, so a tail after it reads no live stream and is allowed",
    "merge --confirm 7 | tee x; tail -3 x", "allow", cwd=NOGIT)
 sh("check-tail: merge --lane-lint piped to tail, then a background &, is refused",
    "merge --lane-lint 7 | tail & echo $!", "deny", "check-tail", cwd=NOGIT)

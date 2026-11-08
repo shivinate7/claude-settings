@@ -1883,7 +1883,7 @@ MUTATIONS = [
     ('check-tail: a separator no longer ends the pipeline',
      '        if end != "|":\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
      '        if False:\n            hit = _pipeline_hit(stages, find_stage, any_filter)',
-     "guard", 'a separator ends the pipeline, so tee then tail after merge --confirm is allowed'),
+     "guard", 'a semicolon ends the pipeline, so a tail after it reads no live stream'),
     ('check-tail: a pipeline closed by a separator is never read',
      'any_filter)\n            if hit:\n                return hit\n            stages = []',
      'any_filter)\n            if False:\n                return hit\n            stages = []',
