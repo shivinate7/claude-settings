@@ -1278,7 +1278,9 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 # ---- a resume of a finished agent (rule resume-finished-reviewer, rule roles-resume-by-name)
 RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
 RESUME_MAIN = "main"
-RESUME_ISOLATION = "worktree"  # the Agent input `isolation` whose worktree is gone once the agent finishes
+# The `isolation` values whose tree is gone once the agent finishes. "remote" runs off this machine, so no local tree survives it.
+# The Agent input's isolation wins when it is set (the binary reads input ?? the role file's pin); else the role file's pin.
+RESUME_ISOLATIONS = ("worktree", "remote")
 RESUME_REASON = (
     "resume-finished-reviewer: a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
     "runs with no tree, and it runs on the parent's model, which can give a wrong verdict. "
@@ -1308,10 +1310,24 @@ RESUME_UNPARSED_REASON = (
 )
 
 
-def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+def _resume_worktree(spawn, role, isolation_pin):
+    """True when the spawn's effective isolation (its input's, else the role file's pin) leaves no tree after it
+    finishes. A pin read that fails reads as no pin."""
+    isolation = spawn.get("isolation")
+    if isolation is None and isolation_pin:
+        try:
+            isolation = isolation_pin(role)
+        except Exception:
+            isolation = None
+    return isolation in RESUME_ISOLATIONS
+
+
+def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False, isolation_pin=None):
     """(decision, reason, matched, note): "deny" when this built-in SendMessage from the main session names a spawn
-    that has finished and ran with isolation "worktree" (any role: its worktree is gone), or is a reviewer or
-    design-reviewer (refused with no worktree too: a resume runs on the parent's model), "ask" when the spawn's state is unknown or a parsed transcript
+    that has finished and ran in a worktree (any role: its worktree is gone), or is a reviewer or
+    design-reviewer. A spawn ran in a worktree when its effective isolation is in RESUME_ISOLATIONS: the Agent input's
+    `isolation` when it is set (a value in another case reads as no worktree), else `isolation_pin(role)`, the role
+    agent file's pin (guard.role_isolation_pin; None means no pin read) (refused with no worktree too: a resume runs on the parent's model), "ask" when the spawn's state is unknown or a parsed transcript
     record has the wrong shape (a line that is not JSON is dropped by the reader, so a half-written last line passes), else ("", "", "", ...).
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
     the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
@@ -1346,7 +1362,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
             return "", "", "", ""
         spawn = named[-1]["input"]
         role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
-        if role not in RECORD_REVIEWER_ROLES and spawn.get("isolation") != RESUME_ISOLATION:
+        if role not in RECORD_REVIEWER_ROLES and not _resume_worktree(spawn, role, isolation_pin):
             return "", "", "", ""
         state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
     except Exception:
