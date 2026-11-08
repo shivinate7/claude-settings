@@ -94,7 +94,8 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 --tree and --range are exclusive.
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
-2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
+2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
+a gap in the history (a shallow clone, a base with no merge base with the head, or `HEAD~1` of a root commit): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
@@ -104,7 +105,10 @@ line starts `stale-cites: report, `. It has two halves, and STALE005 lines first
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
             code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
             changed under RULE_DIRS, or "none". It gives no verdict; the reviewer judges. A repo with no
-            lint/rule_mechanisms.json prints no anchor line and no error.
+            lint/rule_mechanisms.json prints no anchor line and no error. The same holds when a range changes only
+            RULE_FILES and the mechanisms blob is missing (a partial clone): the tree is not listed, so the file reads
+            as absent. The run prints no anchor line and no unknown, and exits 0. A changed non-Markdown file lists
+            the tree, and then a listed file with no blob prints unknown.
   Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
             names it, each mechanism row whose ref or test is it, and each decision prose line whose `(test ...)`
             or `(read ...)` backing points at it (`backed_lines`, the selector a prose judge calls).
@@ -208,6 +212,40 @@ class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
 
+def head_resolves(head):
+    """True when `head` names a commit. Run only after a read failed, to tell a missing head (a read that could
+    not run) from a missing base (a shallow clone)."""
+    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", head + "^{commit}"], capture_output=True)
+    return done.returncode == 0
+
+
+def resolves(rev):
+    """True when `rev` names a commit."""
+    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", rev + "^{commit}"], capture_output=True)
+    return done.returncode == 0
+
+
+def cut_base(base, head):
+    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
+    shallow (its base sha is cut away), or `base` is the parent of `head` (`<head>~1`, `<head>^`) and `head` is a root
+    commit, which a first push to the default branch reads by design. Run only after a read failed."""
+    if resolves(base):
+        return False
+    shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
+    if shallow.stdout.strip() == b"true":
+        return True
+    if base in (head + "~1", head + "^"):
+        parents = _nowindow.run(["git", "rev-list", "--parents", "-n", "1", head], capture_output=True)
+        return len(parents.stdout.split()) == 1
+    return False
+
+
+def history_gap(base, head):
+    """True when a failed merge-base is a gap in the history: `base` resolves (no shared history with the head) or
+    `cut_base`. False for a base that names nothing in a full clone. Run only after merge-base failed."""
+    return resolves(base) or cut_base(base, head)
+
+
 def git(*args, on_fail=Unknown):
     done = _nowindow.run(["git", *args], capture_output=True)
     if done.returncode != 0:
@@ -270,8 +308,12 @@ def exclude_patterns(root):
     try:
         with open(os.path.join(root, ".ste-lint-exclude"), encoding="utf-8") as f:
             lines += f.read().splitlines()
-    except OSError:
-        pass
+    except FileNotFoundError as exc:
+        if os.path.lexists(os.path.join(root, ".ste-lint-exclude")):  # a link whose target is gone
+            raise Unknown(".ste-lint-exclude cannot be read (%s)" % exc)
+        # no exclude file is a repo with no excludes
+    except (OSError, UnicodeDecodeError) as exc:  # present but unreadable: the check cannot tell what it should leave out
+        raise Unknown(".ste-lint-exclude cannot be read (%s)" % exc)
     lines += os.environ.get("EXCLUDE", "").replace(",", "\n").splitlines()
     cleaned = (line.strip() for line in lines)
     return [glob_regex(p) for p in cleaned if p and not p.startswith("#")]
@@ -281,7 +323,12 @@ def parse_range(text):
     """(diff arguments, base spec, head spec). A three-dot range reads base blobs at the merge base."""
     if "..." in text:
         left, right = text.split("...", 1)
-        base = git("merge-base", left, right, on_fail=BaseUnknown).decode().strip()
+        try:
+            base = git("merge-base", left, right).decode().strip()
+        except Unknown as exc:
+            if head_resolves(right) and history_gap(left, right):
+                raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone or an orphan base
+            raise
         return [text], base, right
     if ".." in text:
         left, right = text.split("..", 1)
@@ -322,12 +369,17 @@ def added_markdown_lines(patch):
     return found
 
 
-def read_diff(diff_args):
+def read_diff(diff_args, head=None, base=None):
     """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
     paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
     record, then the patch text. One start serves both, so the added lines cost no start of their own."""
-    out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-              *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace")
+    try:
+        out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                  *diff_args).decode("utf-8", "replace")
+    except Unknown as exc:
+        if head is None or (head_resolves(head) and (base is None or cut_base(base, head))):
+            raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone
+        raise
     head, _, patch = out.partition("\0\0")
     tokens = head.split("\0")
     removed, renamed, modified, added = [], {}, [], []
@@ -1472,12 +1524,14 @@ def decision_folders():
     return layout.candidates(".", "decisions")
 
 
-def mechanism_rows(rng):
+def mechanism_rows(rng, listed=False):
     """{slug: row} of lint/rule_mechanisms.json at head, or None for a repo that has none. One read. A file that
     is not JSON, or whose rules or rows are not objects with a `mechanism` object, raises Unknown naming the file:
     a row's fields are read as a dict afterwards."""
     blob = rng.batch.get("%s:%s" % (rng.head, MECHANISMS))
     if blob is None:
+        if listed:  # the tree lists the file, so a missing blob is a read that could not run
+            raise Unknown("%s is in the tree at %s but cannot be read" % (MECHANISMS, rng.head))
         return None
     try:
         rules = json.loads(blob.decode("utf-8", "replace"))
@@ -1532,6 +1586,8 @@ def home_report(rng, rules, entries, folders):
     for path in (p for p in paths if folder is not None and p.startswith(folder + "/")):
         if path.endswith(".md"):
             blob = rng.batch.get("%s:%s" % (rng.head, path))
+            if blob is None:  # listed in the tree, so a missing blob is a read that could not run
+                rng.unknowns.append("%s is in the tree at %s but cannot be read" % (path, rng.head))
             texts[path] = (blob or b"").decode("utf-8", "replace")
             for home in HOME_LINE.findall(texts[path]):
                 homes.setdefault(home, []).append(os.path.basename(path)[:-3])
@@ -1571,21 +1627,25 @@ def report(rng):
     rules = None
     if present:
         try:
-            rules = mechanism_rows(rng)
+            rules = mechanism_rows(rng, listed=entries is not None)
         except Unknown as exc:  # the Home half still prints, without rows
             rng.unknowns.append(str(exc))
     lines = anchor_report(rng, rules) if rules is not None else []
     return lines + (home_report(rng, rules, entries, folders) if code else [])
 
 
-def claim_lines(rng):
+def claim_states(rng):
+    """[(reader, state)] for each reader that reads added lines and has work. A read it cannot make (an unreadable
+    `.ste-lint-exclude`) raises Unknown: `scan` calls this outside the report's try, so the run exits 2."""
+    return [(reader, state) for reader in READERS if getattr(reader, "scope", "tree") == "added"
+            for state in [reader.prepare(rng)] if state is not None]
+
+
+def claim_lines(rng, states):
     """The report lines of each reader that reads added lines, sorted by file and line."""
     found = []
-    for reader in READERS:
-        if getattr(reader, "scope", "tree") == "added":
-            state = reader.prepare(rng)
-            if state is not None:
-                found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
+    for reader, state in states:
+        found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
     return ["%s%s:%d: %s %s" % (REPORT, path, number, code, message) for path, number, code, message in sorted(found)]
 
 
@@ -1593,14 +1653,15 @@ def scan(range_text):
     """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
     report lines. The report adds no finding, and a report read that fails is one unknown."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified, added, lines = read_diff(diff_args)
+    removed, renamed, modified, added, lines = read_diff(diff_args, head, base)
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch, added, lines)
     lines = []
     try:
         found = find_stale(rng)
+        states = claim_states(rng)
         try:
-            lines = claim_lines(rng) + report(rng)
+            lines = claim_lines(rng, states) + report(rng)
         except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read
             rng.unknowns.append("report not read, %s" % exc)
     finally:
@@ -1632,11 +1693,14 @@ def scan_tree(rev):
         by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
     mds = markdown_files(entries, exclude_patterns("."))
     batch = BlobReader()
+    regular = set(file_paths(entries))
     counts = {}  # tracked file -> its line count, read once
 
     def lines_of(path):
         if path not in counts:
             data = batch.get("%s:%s" % (rev, path))
+            if data is None and path in regular:  # listed as a file, so a missing blob is a read that could not run
+                raise Unknown("%s is in the tree at %s but cannot be read" % (path, rev))
             counts[path] = line_count(data) if data is not None else None
         return counts[path]
 
