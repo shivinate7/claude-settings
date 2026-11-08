@@ -1,11 +1,11 @@
 {
   "title": "Check whether runner 9's lease push broke a ruling, before any guard change",
   "why": "Runner 9 ran `git push --force-with-lease=<branch>:<sha>` on q_max integration branch claude/int-batch-qmax-1108c with no ask (01:16 CST Nov 8, cloud). The coordinator read it as against a no-force-push ruling: a rebuild goes to a new branch and PR (coordinator, 01:32 CST Nov 8).",
-  "note": "Premise unconfirmed (triage, 01:42 CST Nov 8): main's decision stale-safe-force-push allows `--force-with-lease=<ref>:<sha>` off the default branch, alone, with no prompt. ci-hygiene step 8 says to rebuild a red integration branch from main, and does not say to use a new branch. No record on claude-settings or q_max main says a rebuild goes to a new branch. Open PR #1429 (step lease-push-c-and-d) agrees with stale-safe-force-push; it does not go against it. Before a lane starts, the coordinator names the ruling and its time. With none, this step closes as done with no change.",
+  "note": "Premise unconfirmed (triage, 01:42 CST Nov 8): main's decision stale-safe-force-push allows `--force-with-lease=<ref>:<sha>` off the default branch, alone, with no prompt. ci-hygiene step 8 says to rebuild a red integration branch from main, and does not say to use a new branch. No record on claude-settings or q_max main says a rebuild goes to a new branch. Open PR #1429 (step lease-push-c-and-d) agrees with stale-safe-force-push; it does not go against it. Before a lane starts, the coordinator names the ruling and its time. With none, this step closes as done with no change. Done with no change: the coordinator had no owner ruling; its premise was its own reading of global rule shared-trees-no-destructive-git, and stale-safe-force-push allows the push. #1429 stands (coordinator, 01:46 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "done",
   "order": 562,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T01:22:00-06:00"
+  "updatedAt": "2026-11-08T01:24:00-06:00"
 }
