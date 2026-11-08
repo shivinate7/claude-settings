@@ -8237,6 +8237,55 @@ sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filte
 sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
    "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
 
+# Two unlisted value flags in a row. The scan takes the first flag's word as its value, then the
+# second flag ends the scan, so the image's child (env) is never read. The --label deny is no such
+# shape: --label is a listed flag, so the scan reads it, and that case pins the listed flag green.
+# Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
+sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull always --label a=b after the file, so env runs in img",
+   "docker run --env-file " + ENV + " --pull always --label a=b img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --pull always --rm before the file, so env runs in img",
+   "docker run --pull always --rm --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker with two unlisted value flags and no child, so img runs its own command",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with one unlisted value flag, so serve env is the image's own arguments",
+   "docker run --env-file " + ENV + " --cap-add X img serve env", "allow", cwd=NOGIT)
+
+# npm, npx and pnpm given the file, with a printing child and no -c. npm's `--` and its `x` alias
+# end the options, so the word after them is the child. npx reads its first word as the child.
+# pnpm's -r and -w take no value, so exec is the command word. The allows run an app's own command.
+sh("env-child: deny, npm exec -- ends npm's options, so env is the child",
+   "npm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm x -- ends npm's options, so env is the child of the exec alias x",
+   "npm --env-file=" + ENV + " x -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs env as its first word",
+   "npx --env-file=" + ENV + " env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs printenv FOO as its first word",
+   "npx --env-file=" + ENV + " printenv FOO", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -r takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -r exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -w takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -w exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs vitest, an app's own test command",
+   "npx --env-file=" + ENV + " vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs tsx app.ts, an app's own script",
+   "npx --env-file=" + ENV + " tsx app.ts", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, an app's own test command",
+   "npm --env-file=" + ENV + " exec -- jest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -r takes no value, so exec runs vitest, the control for -r",
+   "pnpm --env-file=" + ENV + " -r exec vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -w takes no value, so exec runs vitest, the control for -w",
+   "pnpm --env-file=" + ENV + " -w exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm dlx runs env as its first word, as npx does with no -c",
+   "pnpm --env-file=" + ENV + " dlx env", "deny", "env-file", cwd=NOGIT)
+# uv -v and -vv are boolean flags, so vitest is the child and env is its own test filter.
+sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -vv vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
