@@ -33,7 +33,7 @@ SYNTHETIC = "<synthetic>"
 
 TRAILER_REASON = (
     "Rule (Git, commit-trailer-model; decision commit-trailer-model): a commit this push sends names another model "
-    "in its Co-Authored-By trailer: {line}. Your transcript names {own}. "
+    "in its Co-Authored-By trailer: commit {sha}. Your transcript names {own}. "
     "A trailer misstates who wrote the code. Remedy: amend the commit so Co-Authored-By names the model your own "
     "system prompt names, then push again."
 )
@@ -108,13 +108,18 @@ def trailer_differs(value, own):
 
 
 def unpushed_trailers(where, sources):
-    """The Co-Authored-By values git's own trailer parse reads from the commits `sources` reach that no remote
-    ref holds, else None when git cannot answer."""
-    done = guard_core._git(where, "log", "--format=%(trailers:key=Co-Authored-By,valueonly)", *sources,
-                           "--not", "--remotes")
+    """(short sha, value) for each Co-Authored-By value git's own trailer parse reads from the commits `sources`
+    reach that no remote ref holds, else None when git cannot answer. A commit's values are one line, split by
+    the unit separator."""
+    done = guard_core._git(where, "log", "--format=%h%x09%(trailers:key=Co-Authored-By,valueonly,separator=%x1f)",
+                           *sources, "--not", "--remotes")
     if done is None or done.returncode != 0:
         return None
-    return [line.strip() for line in done.stdout.splitlines() if line.strip()]
+    found = []
+    for line in done.stdout.splitlines():
+        sha, _tab, values = line.partition("\t")
+        found.extend((sha, value.strip()) for value in values.split("\x1f") if value.strip())
+    return found
 
 
 def commit_trailer_hit(stripped, cwd, transcript, agent_id):
@@ -143,11 +148,10 @@ def commit_trailer_hit(stripped, cwd, transcript, agent_id):
             owns = own_models(path) if path else []
         if not owns:
             return None
-        for value in values:
+        for sha, value in values:
             if all(trailer_differs(value, own) for own in owns):   # a trailer naming either model passes
-                line = "Co-Authored-By: " + value
-                return line, TRAILER_REASON.format(
-                    line=line, own=" or ".join("%s %d.%d" % (o[0].capitalize(), o[1], o[2]) for o in owns))
+                return "Co-Authored-By: " + value, TRAILER_REASON.format(
+                    sha=sha, own=" or ".join("%s %d.%d" % (o[0].capitalize(), o[1], o[2]) for o in owns))
     return None
 
 
