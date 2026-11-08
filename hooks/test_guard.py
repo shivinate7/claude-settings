@@ -28305,7 +28305,7 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Context: line 
           "Check the floor fix.\nContext: the prior verdict is in the PR thread.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Verdict — line that asks for one word, PASS or FAIL",
           "Check the floor fix.\nVerdict — one word, PASS or FAIL.\nFiles: hooks/guard.py.")
-# A bold round label before its dash (`**Round 1** — FAIL`, `**Round 1 result** — FAIL`) and a dash with no spaces
+# A bold round label before its dash (`**Round N** — FAIL`, `**Round N result** — FAIL`) and a dash with no spaces
 # (`Prior verdict—FAIL`) are verdict lines too. The allow rows are the same labels before prose, which must pass.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Round 1** — FAIL line, em dash",
            "Check the floor fix.\n**Round 1** — FAIL\nFiles: hooks/guard.py.")
