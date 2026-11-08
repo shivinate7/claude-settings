@@ -1508,3 +1508,5 @@
 - cite-cost-unit-gaps: the cost reader misses "two-minute", "twenty seconds", "five times", "2h", "5m", and the units weeks, months, rows, files and requests (lint/check_record_slugs.py COST). Fix: none — rare and harmless. Until: 2026-11-21
 - cite-long-comma-test-not-red: the long-comma test passes on the old regex as well, because P5 forbids a clock, so the speed fix is proven only by a scratch probe (lint/test_check_record_slugs.py). Fix: none — rare and harmless. Until: 2026-11-21
 - cite-digit-only-sha-unread: the commit reader misses a sha made only of digits (lint/check_record_slugs.py COMMIT). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-days-unit-owner-wait: an honest "owner decides in 3 days" after the reason reads as a cost and is refused (lint/check_record_slugs.py COST). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-uuid-reads-as-commit: a UUID-like hex word after the reason, such as 123e4567, reads as a commit (lint/check_record_slugs.py COMMIT). Fix: none — rare and harmless. Until: 2026-11-21
