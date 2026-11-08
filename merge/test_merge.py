@@ -13009,6 +13009,34 @@ class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("unread", out, "the preview does not say the lane tips were unread:\n" + out)
 
+class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
+    """The round-three check's own read of the repo's comments. A failed read refuses before any claim or push (unknown is red). The reason
+    flag lets it on, and the lift is logged with its reason, as the dropped-lane check's lift is."""
+
+    def batch_with_unread_comments(self):
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [])
+        self.scope(tips, host)
+        def review_comments(since):  # the comment read raises, as a failed `gh api` call does; the rest of the run is the real one
+            raise merge.Stop("gh api repos/o/r/issues/comments failed: HTTP 502")
+        host.review_comments = review_comments
+        return host
+
+    def test_a_failed_comment_read_refuses_before_any_claim_or_push(self):
+        host = self.batch_with_unread_comments()
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, "a failed comment read let the batch through:\n" + out)
+        self.assertIn("HTTP 502", out, "the refusal does not name the failed comment read:\n" + out)
+        self.assertIn("--undo-check-unknown-ok", out, "the refusal does not name the reason flag:\n" + out)
+        self.assert_nothing_pushed(host, before)
+
+    def test_the_reason_flag_lets_a_failed_comment_read_on_and_logs_the_reason(self):
+        host = self.batch_with_unread_comments()
+        rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "comment list read by hand", host=host)
+        self.assert_allowed(rc, out, host)
+        self.assertIn("--undo-check-unknown-ok, reason: comment list read by hand", out, "the lift is not logged with its reason:\n" + out)
+
 class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
 
