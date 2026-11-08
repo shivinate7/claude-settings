@@ -21,7 +21,8 @@ Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-ci
 an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
 a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
 Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
-markdown file that .ste-lint-exclude matches is not named unknown."""
+markdown file that .ste-lint-exclude matches is not named unknown. A dirty tree whose snapshot fails is named unknown, never
+PASS, and a clean tree with a held index lock lints as main does, touched or not."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -560,11 +561,30 @@ check("ignored control: a markdown file .gitignore matches is not linted, plain 
 lock = {}
 
 
-def edit_data_locked(work):
-    edit_data(work)  # a non-markdown edit, not committed: the tree is dirty
+def hold_index_lock(work):
+    """Another git process holds .git/index.lock: an empty file there, as an agent's `git add` leaves it. True if it exists."""
     path = os.path.join(work, ".git", "index.lock")
     open(path, "w").close()
-    lock["held"] = os.path.exists(path)
+    return os.path.exists(path)
+
+
+def touch_same_bytes(work, name):
+    """A tracked file's mtime moves 60 seconds, its bytes stay: the index's stat data goes stale, its content does not."""
+    path = os.path.join(work, name)
+    before = os.stat(path)
+    os.utime(path, (before.st_atime, before.st_mtime + 60))
+    return before
+
+
+def content_clean(work):
+    """git's content check on the tracked files, with no optional index write: a read that refreshes the index would
+    hide the stale stat data the case needs, so the scope fact must leave the index as it found it."""
+    return subprocess.run(["git", "--no-optional-locks", "-C", work, "diff", "--quiet", "HEAD", "--"]).returncode == 0
+
+
+def edit_data_locked(work):
+    edit_data(work)  # a non-markdown edit, not committed: the tree is dirty
+    lock["held"] = hold_index_lock(work)
 
 
 at_base, status, rc, out = uncommitted_run(edit_data_locked)
@@ -680,8 +700,7 @@ stat = {}
 def stat_only(work):
     long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
     path = os.path.join(work, "data.txt")
-    before = os.stat(path)
-    os.utime(path, (before.st_atime, before.st_mtime + 60))  # touch: the mtime moves, the content does not
+    before = touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
     with open(path, encoding="utf-8") as f:
         stat["same"] = f.read() == git_read(work, "show", "HEAD:data.txt")
     stat["committed"] = "long-note.md" in git_read(work, "ls-tree", "--name-only", "HEAD").split()
@@ -698,6 +717,84 @@ check("stat-only: no ste-lint unknown line, so the stat refresh did not stop the
 rc, out = run("changed", base=STAT_BASE, change=long_sentence("long-note.md"))
 check("stat-only control: the same committed STE001 with no touch exits 1 and names long-note.md:3",
       rc == 1 and "long-note.md:3: STE001 " in out, out)
+
+
+# A dirty tree whose snapshot fails. The step reads the working tree with `git stash create`, and exit 1 with no output
+# can also be a real failure, not only "no local changes". A tracked FIFO, which git cannot read ("unsupported file type"),
+# makes the snapshot fail on a dirty tree. The step must say unknown and exit 0, and never print PASS or "stale-cites: PASS",
+# since the uncommitted STE001 in a.md is not read. A FIFO is a POSIX file type, so a platform with no os.mkfifo prints SKIP.
+# The scope facts are read in the change, before the step runs (P7).
+UNREADABLE_BASE = {"a.md": "# T\n\nShort line.\n", "data.txt": "x\n"}
+unreadable = {}
+
+
+def unreadable_dirty(work):
+    write(work, "a.md", "# T\n\n" + LONG + "\n", "w")  # a markdown edit, not committed: the tree is dirty
+    path = os.path.join(work, "data.txt")
+    os.remove(path)
+    os.mkfifo(path)  # a tracked file git cannot read: the snapshot fails
+    unreadable["dirty"] = not content_clean(work)
+    snap = subprocess.run(["git", "-c", "user.name=ste-lint", "-c", "user.email=ste-lint@localhost", "-C", work,
+                           "stash", "create"], capture_output=True, text=True)
+    unreadable["snapshot_empty"] = snap.returncode != 0 and snap.stdout == ""
+    unreadable["snapshot_cause"] = "unsupported file type" in snap.stderr
+
+
+if not hasattr(os, "mkfifo"):
+    print("SKIP ste-lint unreadable dirty tree: a FIFO is a POSIX file type, and this platform has no os.mkfifo")
+else:
+    rc, out = run("changed", base=UNREADABLE_BASE, change=unreadable_dirty)
+    check("unreadable dirty scope: git's content check reads the tree as dirty", unreadable.get("dirty") is True,
+          str(unreadable))
+    check("unreadable dirty scope: the snapshot exits non-zero with no output", unreadable.get("snapshot_empty") is True,
+          str(unreadable))
+    check("unreadable dirty scope: the snapshot names data.txt as unsupported", unreadable.get("snapshot_cause") is True,
+          str(unreadable))
+    check("unreadable dirty: exits 0, as the other unknown reads do", rc == 0, out)
+    check("unreadable dirty: one ste-lint line says unknown",
+          any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+    check("unreadable dirty: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
+    check("unreadable dirty: no stale-cites PASS line", "stale-cites: PASS" not in out, out)
+
+
+# A clean tree with .git/index.lock held. Touching a tracked file moves its mtime and keeps its bytes: git's content check
+# reads the tree as clean, but the index's stat data is stale, and the snapshot needs the lock to refresh it. With the lock
+# held, the step must still lint the committed range as main does: FAIL on the committed error, exit 1, no unknown line.
+# The untouched clean tree with the lock is the control.
+clean_lock = {}
+
+
+def touched_clean_locked(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
+    clean_lock["held"] = hold_index_lock(work)  # the lock first, so no scope read below can refresh the index
+    clean_lock["clean"] = content_clean(work)
+    clean_lock["in_range"] = "long-note.md" in git_read(work, "diff", "--name-only", "HEAD~1", "HEAD").split()
+
+
+rc, out = run("changed", base=STAT_BASE, change=touched_clean_locked)
+check("clean lock scope: git's content check reads the touched tree as clean", clean_lock.get("clean") is True,
+      str(clean_lock))
+check("clean lock scope: long-note.md is committed in the range", clean_lock.get("in_range") is True, str(clean_lock))
+check("clean lock scope: the index lock is held", clean_lock.get("held") is True, str(clean_lock))
+check("clean lock: exits 1 on the committed STE001, as main does", rc == 1, out)
+check("clean lock: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("clean lock: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
+
+
+def clean_locked(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range, and no tracked file is touched
+    clean_lock["control_held"] = hold_index_lock(work)
+    clean_lock["control_clean"] = content_clean(work)
+
+
+rc, out = run("changed", base=STAT_BASE, change=clean_locked)
+check("clean lock control scope: git's content check reads the tree as clean", clean_lock.get("control_clean") is True,
+      str(clean_lock))
+check("clean lock control scope: the index lock is held", clean_lock.get("control_held") is True, str(clean_lock))
+check("clean lock control: exits 1 on the committed STE001, as main does",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+check("clean lock control: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
 
 
 # An untracked Markdown file that .ste-lint-exclude matches is not read, so it is no unknown read. The step printed
