@@ -2,7 +2,7 @@
 
 ## The ruling
 
-A turn that pushes a head names that head's CI state in its report. This closes the gap that a report could name a push before its checks finished, under the owner's ruling of 2026-11-07 13:20 CST, a found gap gets a fix, not a note (decision `cull-rules`, the owner's cull of rules). A Stop hook cannot wait without polling, so it reads once: the report must not claim a pending head as done.
+A turn that pushes a head names that head's CI state in its report. This closes the gap that a report could name a push before its checks finished. The owner's ruling of 2026-11-07 13:20 CST says a found gap gets a fix, not a note (decision `cull-rules`, the owner's cull of rules). A Stop hook cannot wait without polling, so it reads once: the report must not claim a pending head as done.
 
 - `lint/report_guard.py` names a push after the last human message: `git push` (not a dry run, a delete or a tag push) or the GitHub MCP `push_files`, `create_or_update_file` or `delete_file`. Merges are out; the merge-checks rule covers them. Only the newest head of each branch counts.
 - `hooks/ci_wake.py` `head_state` is the one home of the read, a sibling of the CI wake in decision `ci-wait-reads-run-status`. A branch with no open PR, a draft PR, or a head the PR has moved past needs no CI ("none"). A ready PR drops skipped runs (as `wait_for` does), then `judge_runs` judges the rest. With no run listed, one workflow-list read (`no_workflows`, the home the watch uses) decides: a repo with no workflows reads none. Otherwise a ready PR with no run yet is pending. A push to main reads the head's runs direct; with no run listed and workflows present it is unknown.
