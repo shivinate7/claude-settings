@@ -9037,6 +9037,23 @@ sh("draft-pr: a python file and a perl file written in one call, the perl file's
 sh("draft-pr: a body written to f.py and run by perl, whose backtick span holds gh pr create, is refused",
    "\n".join(["cat > f.py <<'EOF'", TICK_BODY["perl"], "EOF", "perl f.py"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A python word in a write path is no runner. `cat > python/t.pl` writes a file that perl runs, so its backtick
+# span is a shell command and is judged. A python-named path that python runs keeps its span as text. `python3.pl`
+# is judged already, and stays a pin.
+sh("draft-pr: a perl file written to python/t.pl, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python/t.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl python/t.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a node file written to python/t.js, whose execSync span holds gh pr create, run by node, is refused",
+   "\n".join(["cat > python/t.js <<'EOF'", TICK_BODY["node"], "EOF", "node python/t.js"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file written to python3.pl, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python3.pl <<'EOF'", TICK_BODY["perl"], "EOF", "perl python3.pl"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file written to a bare python3 path, whose backtick span holds gh pr create, run by perl, is refused",
+   "\n".join(["cat > python3 <<'EOF'", TICK_BODY["perl"], "EOF", "perl python3"]), "deny", "draft-pr",
+   cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a python file written to python/t.py, whose backtick span holds gh pr create, run by python3, is allowed",
+   "\n".join(["cat > python/t.py <<'EOF'", PY_TICK_BODY, "EOF", "python3 python/t.py"]), "allow", cwd=NOGIT)
 # A heredoc's header judges only its own body. A python word elsewhere on the header line, or beside a second
 # heredoc, does not make a perl body read as python: the perl span is a shell command, so its gh call is refused.
 sh("draft-pr: a perl body with a backtick gh pr create span, under a python3 -V header, run from a written file, is refused",
