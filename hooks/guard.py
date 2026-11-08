@@ -3586,9 +3586,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "git-after-cd", GIT_AFTER_CD_REASON, matched)
     # A pending ask from a push inside a heredoc body settles first: its own refusal (ask-alone, else the ask)
     # is the verdict. A push that is a command of the call itself is read as ever, so a `;`-joined Set-Location,
-    # which `settle_ask` reads as a harmless lead, cannot turn that push into a lone ask.
+    # which `settle_ask` reads as a harmless lead, cannot turn that push into a lone ask. The view is cut from
+    # the raw call and drops every body, even a script that runs later: `stripped` has lost its bodies and
+    # delimiter lines already, so cutting it again reads every line after a data heredoc as an unclosed body.
     matched = "" if POWERSHELL_CALL[0] else git_push_after_check_hit(
-        "\n".join(_split_heredocs(stripped)[0]) if PENDING_ASK else stripped)
+        "\n".join(_split_heredocs(raw)[0]) if PENDING_ASK else stripped)
     if matched:
         refuse(tool, "deny", "git-after-cd", GIT_PUSH_AFTER_CHECK_REASON, matched)
 
