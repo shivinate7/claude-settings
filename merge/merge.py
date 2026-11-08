@@ -214,6 +214,10 @@ def split_headers(out):
     pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
     return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
 
+def has_next_link(link):
+    """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
+    return any(re.search(r'\brel="?(?:[^";,]*\s)?next\b', entry) for entry in re.findall(r"<[^<>]*>([^<]*)", link or ""))
+
 def _seconds(value):
     """A header value as whole seconds, or None when it is not a number."""
     try:
@@ -727,11 +731,17 @@ class Host:
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
-        of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
+        raw = []
+
+        def call():
+            c, out = sh(["gh", *args], cwd=cwd)
+            raw[:] = [out]
+            return c, out
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-        return c, out
+        return c, raw[0] if "-i" in args else out
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
@@ -759,12 +769,13 @@ class Host:
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
-        Each page is asked for by number (`page=n`) and the read ends on the first empty page, whatever page size GitHub serves. gh's own paging is not used:
-        it follows the Link header to a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
+        Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
+        so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
         A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
         items = []
         for n in range(1, PAGE_CEILING + 1):
-            c, out = self.api(rel, fields={**(fields or {}), "per_page": 100, "page": n})
+            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
+            headers, out = split_headers(out)
             try:
                 if c:
                     raise ValueError(out)
@@ -775,9 +786,9 @@ class Host:
             except (ValueError, KeyError, TypeError) as e:
                 why = f" on page {n}: {e}"
                 break
-            if not page:
-                return items
             items += page
+            if not has_next_link(headers.get("link")):
+                return items
         else:
             why = f": more than {PAGE_CEILING} pages of 100"
         raise Stop(f"reading {rel} from GitHub failed{why}")
