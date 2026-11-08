@@ -11619,6 +11619,48 @@ sh("frozen: install onto bin/verdict is a write, and is denied",
    "install -m 755 x " + CFG_VERDICT, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: cp onto bin/verdict is a write, and is denied", "cp x " + CFG_VERDICT, "deny", "frozen-path",
    cwd=NOGIT)
+# A WRITE VERB BEHIND A LEADING ENV ASSIGNMENT, A SUBSTITUTION OR A WRAPPER IS STILL A WRITE TO ITS LAST
+# PATH. A WRITE THROUGH A SCRIPT OR A FLAG THE SCAN DID NOT READ IS A WRITE TOO. Each row denies as
+# frozen-path, and the allow row reads bin/verdict's time and writes only /tmp/y.
+# The setsid row is the one exception to the rule named above: detached-launch refuses a setsid run
+# before the frozen scan is reached, on main as well.
+sh("frozen: a cp behind a quoted env assignment onto bin/verdict is denied",
+   'FOO="bar" cp a ' + CFG_VERDICT, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp behind two env assignments onto bin/verdict is denied",
+   'X=1 Y="2" cp a ' + CFG_VERDICT, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp in a $(...) assignment onto bin/verdict is denied",
+   "OUT=$(cp a " + CFG_VERDICT + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp in a backtick assignment onto bin/verdict is denied",
+   "D=`cp a " + CFG_VERDICT + "`", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a flock-wrapped cp onto bin/verdict is denied", "flock F cp a " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: an unbuffer-wrapped cp onto bin/verdict is denied", "unbuffer cp a " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a caffeinate-wrapped cp onto bin/verdict is denied", "caffeinate cp a " + CFG_VERDICT,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a cp in a process substitution onto bin/verdict is denied", "cat <(cp a " + CFG_VERDICT + ")",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a setsid-wrapped cp onto bin/verdict is denied", "setsid cp a " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: an ionice-wrapped cp onto bin/verdict is denied", "ionice cp a " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a strace-wrapped cp onto bin/verdict is denied", "strace cp a " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a runuser-wrapped cp onto bin/verdict is denied", "runuser -u root -- cp a " + CFG_VERDICT,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a perl -pi write onto bin/verdict is denied", "perl -pi -e s/a/b/ " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a sed -Ei write onto bin/verdict is denied", "sed -Ei s/a/b/ " + CFG_VERDICT, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: a sed --in-place write onto bin/verdict is denied", "sed --in-place s/a/b/ " + CFG_VERDICT,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: an unquoted dd of= write onto bin/verdict is denied",
+   "dd if=/dev/zero of=" + CFG_VERDICT + " count=1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: a node --eval writeFileSync onto bin/verdict is denied",
+   'node --eval=\'require("fs").writeFileSync("' + CFG_VERDICT + '", "x")\'', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen: touch -r of bin/verdict reads its time and writes only /tmp/y, and is allowed",
+   "touch -r " + CFG_VERDICT + " /tmp/y", "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -20467,6 +20509,7 @@ def _read_row(what, expect, template, rule=None):
     def case():
         primary, _lane_a, lane_b, _ = _cross_checkout_fixture("xcoread")
         write(os.path.join(lane_b, "install.sh"), "echo 1\n")
+        write(os.path.join(lane_b, "notes.md"), "line 1\n")   # no write word in its name, for a write row
         write(os.path.join(lane_b, "docs", "copy.md"), "line 1\n")
         write(os.path.join(lane_b, "docs", "decisions", "x.md"), "line 1\n")
         write(os.path.join(lane_b, "hooks", "guard_kill.py"), "_nowindow = 1\n")
@@ -22032,12 +22075,18 @@ LOG_CHECKS = (
     ("worktree-home: a watch-wrapped cp into another checkout is refused",
      _read_row("a watch-wrapped cp into another checkout", "deny", "watch cp src/app.py %s/src/sub.py",
                rule="other-checkout")),
-    ("worktree-home: a quoted touch of install.sh in another checkout is refused",
-     _read_row("a quoted touch of install.sh in another checkout", "deny", 'touch "%s/install.sh"',
+    ("worktree-home: a quoted touch of notes.md in another checkout is refused",
+     _read_row("a quoted touch of notes.md in another checkout", "deny", 'touch "%s/notes.md"',
                rule="other-checkout")),
-    ("worktree-home: a dd of= write to a quoted install.sh in another checkout is refused",
-     _read_row("a dd of= write to a quoted install.sh in another checkout", "deny",
-               'dd if=src/app.py of="%s/install.sh"', rule="other-checkout")),
+    ("worktree-home: a dd of= write to a quoted notes.md in another checkout is refused",
+     _read_row("a dd of= write to a quoted notes.md in another checkout", "deny",
+               'dd if=/dev/zero of="%s/notes.md" count=1', rule="other-checkout")),
+    ("worktree-home: a quoted-env cp into another checkout is refused",
+     _read_row("a quoted-env cp into another checkout", "deny",
+               'FOO="bar" cp src/app.py %s/src/b.py', rule="other-checkout")),
+    ("worktree-home: a cp in a $(...) assignment into another checkout is refused",
+     _read_row("a cp in a $(...) assignment into another checkout", "deny",
+               "OUT=$(cp src/app.py %s/src/b.py)", rule="other-checkout")),
     ("worktree-home: a grep with a write word as its search term, of a file in another checkout, passes",
      _read_row("a grep with a write word as its search term, of a file in another checkout", "allow",
                "grep -n install %s/docs/decisions/x.md")),
