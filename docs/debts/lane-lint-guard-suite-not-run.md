@@ -1,0 +1,11 @@
+# Lane lint never runs the guard suite
+
+**What.** `merge --lane-lint` never runs `hooks/test_guard.py`. The `checks-guard` job gets its NODE_PATH install only from the composite action `actions/playwright-setup` (npm ci, a browser download, optional apt). Lane lint skips a `uses:` step, so the suite reads as one `not run` line. A lane that breaks the guard suite passes lane lint and goes red in batch CI. Claude is likely to hit it, since any lane that edits `hooks/guard.py` picks that suite.
+
+**Where.** `other_job_runs` in `merge/merge.py`, `MISSING_INSTALL_LINE` in `lint/workflow_steps.py`, and `bin/ci-job` (the skipped `uses:` step).
+
+**Decision.** `lanes-run-no-full-ci-job`, the lane lint runs the picked suites and not the full CI job.
+
+**Retire.** Lane lint runs the install of `actions/playwright-setup` by that action's own home, then runs `hooks/test_guard.py`. The suite then reads `PASS` or `FAIL` in lane lint, never `not run`.
+
+Fix: queued as step lane-lint-guard-suite-install (proposed to triage). Until: 2026-11-21

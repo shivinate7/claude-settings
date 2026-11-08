@@ -25,6 +25,25 @@ def job_block(text, name):
     return m.group(1) if m else None
 
 
+def job_runs_on(block):
+    """A job's `runs-on:` as one literal label, quotes stripped and a one-item flow list unwrapped, or None. None means the
+    label is no single literal this reader can name: an expression (`${{ ... }}`), a map, a list of several, an empty or
+    absent key. The caller reads None as unknown, never as a guess."""
+    m = re.search(r"^    runs-on:[ \t]*(.*?)[ \t]*$", block or "", re.M)
+    if not m:
+        return None
+    value = drop_comment(m.group(1)).strip()
+    flow = re.fullmatch(r"\[\s*([^,\[\]{}]*?)\s*,?\s*\]", value)
+    if flow:
+        value = flow.group(1)
+    quoted = re.fullmatch(r"""(["'])(.*)\1""", value)
+    if quoted:
+        value = quoted.group(2).strip()
+    if not value or "${{" in value or re.match(r"[\[\]{}|>&*!,]", value):
+        return None
+    return value
+
+
 def step_blocks(block):
     """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
     return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]

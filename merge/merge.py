@@ -33,8 +33,9 @@
                           another Linux job (runs-on ubuntu*) whose suite the lint picked, as `bin/ci-job <job> --step NAME`, one run
                           per job; a job on another OS stays one `not run` line. Such a run that passes OTHER_JOB_SECONDS reads
                           unknown and names the suite. The fetch of a branch retries a ref-lock collision (FETCH_COLLISION_TRIES).
-                          Cost per call: one ci-job run (about 550 s, measured once on one PR head), one worktree, plus up to 1800 s
-                          (OTHER_JOB_SECONDS) and one ci-job run per other Linux job with a picked suite, none with no pick, and at
+                          Cost per call: one ci-job run (about 550 s, measured once on one PR head), one worktree, plus per other
+                          Linux job with a picked suite up to 1800 s (OTHER_JOB_SECONDS) and one ci-job run, so two such jobs
+                          (checks-merge-install, checks-guard) bound it at 3600 s; none with no pick, and at
                           most 3 extra `git fetch` and 6 s of wait per fetch, only on a collision.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
@@ -2504,7 +2505,8 @@ def other_job_runs(wt, others, base):
     """The lane lint's run of each picked suite CI step in another job (decision lanes-run-no-full-ci-job). `others` is ci_job_run's list
     of (job, suites) the checks lint picked but did not run. A Linux job (runs-on ubuntu*) runs through `ci-job <job> --step NAME ...`, the
     one runner, one run per job bounded by OTHER_JOB_SECONDS; a job on another OS prints one `not run` line and runs nowhere. A job or step
-    this cannot read from the workflow at the head reads unknown, never a pass. A run whose only unknowns are a NODE_PATH install that CI makes
+    this cannot read from the workflow at the head reads unknown, never a pass;
+    so does a runs-on that is not one literal label (an expression, a map, empty). A run whose only unknowns are a NODE_PATH install that CI makes
     and this box lacks (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result. Cost: one ci-job run (its own processes) per Linux job
     with a picked suite, none when nothing is picked; one read of the workflow. -> [(job, suites, CiRun)]."""
     if not others:
@@ -2522,9 +2524,14 @@ def other_job_runs(wt, others, base):
             out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: picked {', '.join(suites)}, but " + (why if text is None else "the workflow has no such job")],
                                            [], False, [], False)))
             continue
-        runs_on = re.search(r"^    runs-on:[ \t]*(\S+)", block, re.M)
-        if not runs_on or not runs_on.group(1).lower().startswith("ubuntu"):
-            say("%-15s job %s: picked %s; runs-on %s, so the lane lint does not run it" % ("not run", job, ", ".join(suites), runs_on.group(1) if runs_on else "unread"))
+        runs_on = workflow_steps.job_runs_on(block)
+        os_name = (runs_on or "").lower()
+        if not os_name.startswith(("ubuntu", "macos", "windows")):
+            out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: picked {', '.join(suites)}, but its runs-on "
+                                                       + (f"{runs_on!r} names no OS this lint reads" if runs_on else "is not one literal label this lint reads")], [], False, [], False)))
+            continue
+        if not os_name.startswith("ubuntu"):
+            say("%-15s job %s: picked %s; runs-on %s, so the lane lint does not run it" % ("not run", job, ", ".join(suites), runs_on))
             continue
         names = [workflow_steps.step_key(st, "name") for st in workflow_steps.step_blocks(block) if set(workflow_steps.suite_paths(st)) & set(suites)]
         if not names or not all(names):
