@@ -741,7 +741,7 @@ class LintMode(unittest.TestCase):
                     name = m.group(1)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
-                # a lint/test_ fixture suite runs under --lint only when picked, so it is no lint step here (decision lanes-run-no-full-ci-job)
+                # a lint/test_ fixture suite runs under --lint only when picked, so it is no lint step here (decision lanes-run-no-full-ci-job, triage, 07:42 CST Nov 8)
                 if m and "mutate" not in m.group(1) and not m.group(1).startswith("python3 lint/test_"):
                     want.append(name)
                 if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
