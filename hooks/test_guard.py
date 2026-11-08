@@ -8784,9 +8784,11 @@ sh("env: --input-type takes a value and app.mjs is the script, not inline code",
 # A runner handed the file may run a child command that prints the variables: a program that prints
 # its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
 # script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
-# -c) is denied when its first word is env or printenv, or when it holds a $ expansion, and is
-# allowed otherwise. Each deny form is refused with env-file. The reason is not pinned here, so the
-# builder chooses it. The allow controls are the ordinary uses of the same runners.
+# -c) is judged segment by segment with the same env reader as the parent shell form, and a $
+# expansion in it is denied too. A value flag of a runner or container (--pull, --extra) takes the
+# word after it, and an empty --entrypoint is no program, so the child is the words after the image.
+# Each deny form is refused with env-file. The reason is not pinned here, so the builder chooses it.
+# The allow controls are the ordinary uses of the same runners.
 for _child in (
     "uv run --env-file " + ENV + " env",
     "uv run --env-file=" + ENV + " printenv",
@@ -8836,6 +8838,148 @@ for _child_ok in (
 ):
     sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
        _child_ok, "allow", cwd=NOGIT)
+
+# Each deny names one cause: a later segment of a shell string that prints or reads the file, a value
+# flag the list does not hold, or an empty --entrypoint. Each allow is the same runner running an app.
+sh("env-child: deny, uv runs sh -c whose later segment cats the env file, npm start && cat " + ENV,
+   "uv run --env-file " + ENV + " sh -c \"npm start && cat " + ENV + "\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is env after cd, cd /app && env",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && env\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is printenv after a semicolon",
+   "docker run --env-file " + ENV + " alpine sh -c \"echo x; printenv\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c whose later segment is env after &&, npm test && env",
+   "npm --env-file=" + ENV + " exec -c \"npm test && env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs bash -c whose later segment is printenv after set -x",
+   "uv run --env-file " + ENV + " bash -c \"set -x; printenv FOO\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose first word is exec before env",
+   "docker run --env-file " + ENV + " alpine sh -c \"exec env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull takes a value, so the child after the image is env",
+   "docker run --pull always --env-file " + ENV + " alpine env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --extra takes a value, so the child is python printing os.environ",
+   "uv run --env-file " + ENV + " --extra dev python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --entrypoint with an empty value, so the child is env",
+   "docker run --env-file " + ENV + " --entrypoint \"\" alpine env", "deny", "env-file", cwd=NOGIT)
+# A `#` inside quotes is text, and a line break in a shell string starts a new segment. Both are
+# pinned here, so the segment scan must read the quote marks and the line breaks.
+sh("env-child: deny, a comment opener inside a quoted word does not hide a later env segment",
+   "uv run --env-file " + ENV + " sh -c \"echo '#'; env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break inside a shell string starts a segment that is env",
+   "uv run --env-file " + ENV + " sh -c \"npm start\nenv\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'",
+   "uv run --env-file " + ENV + " sh -c \"echo 'a && env'\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a lone quote in a shell string is text, echo don't",
+   "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a line break between npm ci and npm test is two app commands",
+   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
+   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --pull takes a value, so the child is myimage",
+   "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --extra takes a value, so the child is pytest",
+   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+# A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
+# the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
+# env is the image's.
+sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
+   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
+   "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
+# A value flag that the list does not hold takes the word after it, so the child after exec is env.
+sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the child",
+   "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
+# `--` ends the runner's options, so the word after it is the child. The two allows are a test
+# filter (vitest env) and jest's own option (jest -c env), and the guard must not read them as env.
+sh("env-child: deny, pnpm exec -- runs env, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec -- runs printenv, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec -- runs vitest, so env is vitest's test filter",
+   "pnpm --env-file=" + ENV + " exec -- vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, so -c env is jest's option, not npm's shell string",
+   "npm --env-file=" + ENV + " exec -- jest -c env", "allow", cwd=NOGIT)
+# A flag that takes no value (--recursive, --parallel, --silent) is skipped alone, so the word after
+# it is the child: env here.
+sh("env-child: deny, pnpm exec --recursive takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --recursive env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --parallel takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --parallel env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --silent takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --silent env", "deny", "env-file", cwd=NOGIT)
+# Controls, green on this head: with no flag before the child, pnpm exec denies env and allows vitest.
+sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
+# A glued v in a short-flag cluster takes the next word as its volume, so /a:/b is not the child.
+sh("env-child: deny, docker -itv takes /a:/b as the volume, so env runs in img",
+   "docker run -itv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker -dv takes /a:/b as the volume, so env runs in img",
+   "docker run -dv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+# A flag that takes no value (--stream) is skipped alone, so python is the child and its -c prints os.environ.
+sh("env-child: deny, pnpm exec --stream takes no value, so python -c prints os.environ",
+   "pnpm --env-file=" + ENV + " exec --stream python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+# An unlisted option ahead of -c must not hide env from the shell string.
+sh("env-child: deny, npm exec with an unlisted --foo before -c still runs env",
+   "npm --env-file=" + ENV + " exec --foo x -c \"env\"", "deny", "env-file", cwd=NOGIT)
+# uv -q and --verbose take no value, so vitest is the child and env is its test filter.
+sh("env-child: allow, uv -q takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -q vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --verbose vitest env", "allow", cwd=NOGIT)
+# npm exec --yes takes no value, so jest -c env is jest's own option, not npm's shell string.
+sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
+   "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
+
+# A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
+# A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
+# deny forms below each print a variable through echo or printf, so they stay denied.
+sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
+   "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
+   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
+   "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
+sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
+   "uv run --env-file " + ENV + " sh -c 'echo $DB_URL'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, printf prints a $ variable in a shell string, docker runs sh -c printf",
+   "docker run --env-file " + ENV + " img sh -c 'printf \"%s\" \"$KEY\"'", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
+   "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
+# is a child the scan must read. Each deny is one such child that prints the environment.
+sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, timeout 5 wraps printenv in an image, docker run runs timeout 5 printenv",
+   "docker run --env-file " + ENV + " img timeout 5 printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, nice wraps env in a shell string, uv run sh -c nice env",
+   "uv run --env-file " + ENV + " sh -c \"nice env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sudo wraps env in a shell string, uv run sh -c sudo env",
+   "uv run --env-file " + ENV + " sh -c \"sudo env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -e that prints process.env",
+   "npx --env-file=" + ENV + " node -e \"console.log(process.env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -p that prints process.env",
+   "npx --env-file=" + ENV + " node -p process.env", "deny", "env-file", cwd=NOGIT)
+
+# Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
+sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
+   "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
@@ -12434,6 +12578,14 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A line break inside a quoted operand is part of one word, so the frozen file after it is still the
+# target of the write, whichever command carries the quoted text.
+sh("frozen: sed -i whose quoted a-text script holds a line break still denies a frozen hook",
+   "sed -i '/^x/a\\\nnew line' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i -e whose quoted i-text script holds a line break still denies a frozen hook",
+   "sed -i -e '1i\\\nimport os' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp whose quoted source spans two lines still denies onto a frozen hook",
+   "cp '/tmp/a\nb.py' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
