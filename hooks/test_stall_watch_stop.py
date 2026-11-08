@@ -1992,5 +1992,30 @@ def O8_untimed_call_does_not_hide_a_readable_stuck_call():
     return problems
 
 
+@case
+def O9_stuck_row_listed_when_the_quiet_crossing_is_after_the_previous_stop():
+    """O9. a Bash call opens at t0 and hangs. A parallel call starts and ends at t0+800, so the agent transcript was
+    last written at t0+800. A Stop summary sits at t0+950, and the Stop runs at t0+1200 with quiet age 300. The
+    stuck crossing is max(call time + cap, last write + quiet) = t0+1100, after the previous Stop, so the stuck row
+    is listed once. A gate that uses only the call's own crossing (t0+900) reads the previous Stop as its listing
+    and drops the row"""
+    folder = new_dir()
+    recs = [open_tool_call("toolu_s1", 1200),              # t0 = NOW - 1200
+            at(call("toolu_s2", "ls"), 400),               # t0 + 800: a parallel call starts
+            at(bash_result("toolu_s2", "ok\n"), 400)]      # and ends
+    lo, spec = background_agent(folder, agent_id(290), recs, 400)  # last written at NOW - 400
+    path = transcript(stamped(lo, 1300) + [stop_summary(250)], agents=[spec], folder=folder)  # summary at t0 + 950
+    rc, out, err = run_stop(path)  # this Stop runs at NOW = t0 + 1200, with the default quiet age of 300
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(290), by_line=True)
+    if problems:
+        return problems
+    line = line_of(msg, agent_id(290))
+    problems += expect("stuck in one tool call" in line and "Bash" in line,
+                       f"agent {agent_id(290)} is not listed as stuck on its Bash call: {line!r}")
+    return problems
+
+
 if __name__ == "__main__":
     sys.exit(run_cases(CASES))
