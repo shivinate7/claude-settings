@@ -21,7 +21,7 @@ typo is not read as a failed form. `label_word(line)` is the one normaliser: it 
 first word, and strips from both ends to a fixed point, so the order of nesting never matters: list markers (`-`, `+`,
 `>`, `1)`, `1.`), emphasis (`*`, `~`, `_`), backticks, quotes straight and curly, brackets, `#`, and a trailing `,` or `:`.
 It reads in lower case. A leading underscore that belongs to a name stays (`_build/run_tests.sh`, `__main__.py`,
-`_mutant.sh`): it goes only when the word closes with an underscore too, or its core is bare letters (`_mutant`).
+`_mutant.sh`): it goes only when the word closes with an underscore too, or its core is bare letters once wrappers and list markers go (`_mutant`, `_-mutant`).
 `mutant_like` and `refused_word` read only that word (and whether a colon ended it). This reads the label region of the
 line, not every word: a scan of the whole line flips 15 to 26 accepted main commits, such as 457071b62 with
 `(mutant: code_check.py:266 returns [])`. A mutant mention after a real first word still passes. First, it refuses a
@@ -82,7 +82,7 @@ UPPER_ENV_WORD = re.compile(r"^[A-Z_][A-Z0-9_]*=")
 ENV_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 # What `label_word` strips from a word: brackets, quotes (straight and curly), emphasis (`*`, `~`), backticks and `#`, from
 # both ends. A list marker (`-`, `+`) goes at the start only; `,`, `:` and `_` go at the end only. A leading underscore is
-# kept when it belongs to a name (`_build/run.sh`, `__main__.py`, `_mutant.sh`): see `_label_parts`.
+# kept when it belongs to a name (`_build/run.sh`, `__main__.py`, `_mutant.sh`): see `label_word`.
 WRAPPERS = "()[]{}<>\"'`*#~\u201c\u201d\u2018\u2019"
 LIST_MARKERS = "-+"
 LIST_NUMBER = re.compile(r"^\d+[.)]$")  # `1)` and `1.` list markers, a word of their own
@@ -102,12 +102,13 @@ def git(root, *args):
     return r.stdout
 
 
-def _label_parts(line):
-    """The label of a failed-form line: the first word after `Red-run:` once wrappers are gone, as (word, ended_in_colon).
-    The word keeps its case, so the upper-case assignment test can read it. Each word is stripped to a fixed point from both
-    ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`, `_(none)_`). A leading underscore
-    is stripped only when the word closes with an underscore too, or its core is bare letters (`_mutant`); a name such as
-    `_build/run.sh` keeps it. A word that strips to nothing (`-`, `>`, `1)`) is skipped. Pure."""
+def label_word(line):
+    """The red-run label of a whole `Red-run:` line, the one normaliser the word rule reads: (word in lower case,
+    ended_in_colon). The word is the first word after `Red-run:` once wrappers are gone. Each word is stripped to a fixed
+    point from both ends, so the order of nested wrappers never matters (`_**mutant**_`, `**_mutant_**`, `_(none)_`). A
+    leading underscore is stripped only when the word closes with an underscore too, or its core is bare letters once
+    wrappers and list markers go (`_mutant`, `_-mutant`); a name such as `_build/run.sh` keeps it. A word that strips to
+    nothing (`-`, `>`, `1)`) is skipped. No word: ("", False). Pure."""
     for token in RED_KEY.sub("", line, count=1).split():
         if LIST_NUMBER.match(token):
             continue
@@ -117,19 +118,15 @@ def _label_parts(line):
             lead = token.lstrip(WRAPPERS + LIST_MARKERS)
             word = lead.rstrip(WRAPPERS + ",:_")
             colon = colon or ":" in lead[len(word):]
-            if lead.startswith("_") and ("_" in lead[len(word):] or re.fullmatch(r"[A-Za-z]+", word.strip("_" + WRAPPERS))):
+            if lead.startswith("_") and ("_" in lead[len(word):]
+                                         or re.fullmatch(r"[A-Za-z]*", word.strip("_" + WRAPPERS + LIST_MARKERS))):
                 word = word.lstrip("_")
             token = word
             if token == before:
                 break
         if token:
-            return token, colon
+            return token.casefold(), colon
     return "", False
-
-
-def label_word(line):
-    """The red-run label of a whole `Red-run:` line, in lower case: the one normaliser the word rule reads. Pure."""
-    return _label_parts(line)[0].casefold()
 
 
 def within_one_edit(a, b):
@@ -165,11 +162,13 @@ def mutant_like(line):
     upper-case environment assignment (`MUTATE_ONLY=x`): it starts with `mutat` or `mutan`, or its leading letters are
     one edit or adjacent swap from `mutant` or `mutation`. The one home of the mutant-like refusal and of the hint that
     names the mutant form. Pure."""
-    raw = _label_parts(line)[0]
-    word = label_word(line)
+    word, _ = label_word(line)
     if word.startswith(MUTANT_WORDS):
         return True
-    if UPPER_ENV_WORD.match(raw):
+    # The upper-case NAME= exemption needs the case `label_word` folds away. It reads the raw first token after
+    # `Red-run:` with an assignment test, so the label has no second parser.
+    raw = RED_KEY.sub("", line, count=1).split(None, 1)
+    if raw and UPPER_ENV_WORD.match(raw[0]):
         return False
     if word.startswith(("mutat", "mutan")):
         return True
@@ -181,10 +180,10 @@ def refused_word(line):
     """True when the failed-form label word is a none typo (`none`, `non`), or, unless it is an environment assignment,
     ends in a colon: a keyword typo such as `runner:` or `nonee:`. The valid `mutant:` and `none:` lines are routed to
     their own forms before this is read. Pure."""
-    raw, colon = _label_parts(line)
-    if label_word(line) in REFUSED_NONE_WORDS:
+    word, colon = label_word(line)
+    if word in REFUSED_NONE_WORDS:
         return True
-    return colon and not ENV_WORD.match(raw)
+    return colon and not ENV_WORD.match(word)
 
 
 def has_valid_trailer(message):
