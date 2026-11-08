@@ -2840,7 +2840,7 @@ def draft_step(root, cfg, n, host, info):
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None), info.get("body") or "")
                 if stale:  # holds_base ends with the remedy
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
                 if stands:
