@@ -1669,13 +1669,9 @@ class CiCoverage(unittest.TestCase):
             commands = run_commands(handle.read())
         collected = set(collected_files(REPO)) if runs_collector(commands) else set()
         missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
-        # A rename to _test_<name> clears the gap only when the new name leaves the scope, so a .test.* file gets
-        # the run-step remedy alone.
-        renamable = [p for p in missing if TEST_FILE.match("_" + p.split("/")[-1]) is None]
-        advice = "Add a run step in .github/workflows/checks.yml"
-        if renamable:
-            advice += ", or, for a helper that holds no tests, rename it to _test_<name>"
-        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing) + ". " + advice + ".")
+        # No rename remedy: a `_test_` name is outside the scope, so a rename would hide a real test from this check.
+        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing)
+                         + ". Add a run step in .github/workflows/checks.yml.")
 
     def test_a_comment_line_is_not_a_run(self):
         # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
