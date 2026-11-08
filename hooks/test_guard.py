@@ -25535,6 +25535,33 @@ add("agent-handoff-write: an agent's Write to another session's handoff is allow
 add("agent-handoff-write: an agent's Read of its session's handoff is allowed", "allow",
     tool="Read", cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, file_path=AH_HANDOFF)
 
+# With precompact_handoff unimportable, reread_check.ph is None, and names_handoff raises on every agent's write
+# before rule 0 runs. The write is still an agent's write outside its worktree, so worktree-home must refuse it.
+AH_BROKEN_PRIMARY = os.path.join(ROOT, "ah-broken-primary")    # a checkout with one agent's worktree in it
+AH_BROKEN_AGENT = "ahbrokenagent1"
+AH_BROKEN_WT = os.path.join(AH_BROKEN_PRIMARY, ".claude", "worktrees", "agent-" + AH_BROKEN_AGENT)
+AH_BROKEN_SID = "5e0c1a7b-0000-4000-8000-00000000c4a5"         # the parent session the agent carries
+AH_BROKEN_GUARD = os.path.join(ROOT, "ah-broken-guard", "hooks", "guard.py")   # a guard copy, precompact broken
+
+
+def _build_ah_broken():
+    """A primary checkout with the agent's worktree in it, and a copy of the guard family whose
+    precompact_handoff.py raises on import."""
+    make_repo(AH_BROKEN_PRIMARY, {"src/app.py": "print(1)\n"})
+    made = run_vcs(AH_BROKEN_PRIMARY, "worktree", "add", "-q", AH_BROKEN_WT, "-b", "worktree-agent-" + AH_BROKEN_AGENT)
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: the worktree add at %r: %s" % (AH_BROKEN_WT, made.stderr.strip()))
+    folder = os.path.dirname(AH_BROKEN_GUARD)
+    os.makedirs(folder, exist_ok=True)
+    copy_guard_family(folder)
+    write(os.path.join(folder, "precompact_handoff.py"), "raise ImportError('precompact_handoff is broken for this case')\n")
+
+
+lazy_fixture([AH_BROKEN_PRIMARY], _build_ah_broken)
+add("agent-handoff-write: with precompact_handoff unimportable, an agent's Write into the primary checkout is refused as worktree-home",
+    "deny", "worktree-home", tool="Write", cwd=AH_BROKEN_WT, session=AH_BROKEN_SID, agent_id=AH_BROKEN_AGENT,
+    file_path=os.path.join(AH_BROKEN_PRIMARY, "src", "app.py"), content="x", guard=AH_BROKEN_GUARD)
+
 
 # =========================================================================== the machine-load brake
 # The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
