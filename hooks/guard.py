@@ -169,8 +169,10 @@ Other tools, in `judge` order:
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
-                       changes files (SESSION_HOME_GIT_VERBS) is refused from that stranded cwd
-                       and as `git -C <separate clone>`, while `git log` and `git show` pass; the
+                       changes files (OTHER_CHECKOUT_GIT_VERBS: SESSION_HOME_GIT_VERBS and `add`)
+                       is refused from that stranded cwd and as `git -C <separate clone>`, and as
+                       `git -C <another checkout of this clone>` by the same exemptions as the
+                       `cd` form, while `git log`, `git show` and `git status` pass; the
                        temp folder, other repos, an unreadable origin and the home clone pass.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
@@ -1011,6 +1013,7 @@ OTHER_CHECKOUT_CD_REASON = (
 OTHER_CLONE_DETAIL = "write into another clone: "
 OTHER_CLONE_CD_DETAIL = "cd into another clone: "
 OTHER_CLONE_GIT_DETAIL = "git write into another clone: "
+OTHER_CHECKOUT_GIT_DETAIL = "git write into another checkout: "
 OTHER_CLONE_REMEDY = (
     "Remedy: change files only in your home checkout. To read another clone, use "
     "`git -C <dir> log` or `git -C <dir> show`, or a path."
@@ -4618,16 +4621,16 @@ def _same_repo(common: str, other: str) -> bool:
             and _origin_key(urls[0]) != "" and _origin_key(urls[0]) == _origin_key(urls[1]))
 
 
-def _git_verb_called(command: str) -> bool:
-    """True when COMMAND runs a git verb of SESSION_HOME_GIT_VERBS. A text with no `git` in it is
-    never scanned, so a call with no git word spends nothing."""
+def _git_verb_called(command: str, verbs) -> bool:
+    """True when COMMAND runs a git verb of VERBS. A text with no `git` in it is never scanned, so a
+    call with no git word spends nothing."""
     return "git" in command and any(
-        verb in SESSION_HOME_GIT_VERBS
+        verb in verbs
         for segment in split_segments(command, []) for verb, _args in git_calls(segment))
 
 
-def _git_verb_may_hit(command: str, where: str) -> bool:
-    """True when a git verb of SESSION_HOME_GIT_VERBS in COMMAND can change another clone's files, so
+def _git_verb_may_hit(command: str, where: str, verbs) -> bool:
+    """True when a git verb of VERBS in COMMAND can change another checkout's or clone's files, so
     it is worth the one `git worktree list`: the cwd is stranded in a separate clone of the
     `CLAUDE_PROJECT_DIR` clone, or a `-C` or `cd` folder's nearest `.git` is not the cwd's. The folder
     of each verb is read by session_home_git_hit, the one reader. Stat and small file reads; no git."""
@@ -4637,7 +4640,8 @@ def _git_verb_may_hit(command: str, where: str) -> bool:
     stranded = _clone_scope(None, own_root)[2]
     return bool(session_home_git_hit(
         command, where,
-        lambda folder, _at: stranded or _checkout_root_by_stat(os.path.realpath(folder)) != own_root))
+        lambda folder, _at: stranded or _checkout_root_by_stat(os.path.realpath(folder)) != own_root,
+        verbs))
 
 
 def _separate_clone(path: str, tops, common: str) -> bool:
@@ -4756,7 +4760,10 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
-    refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
+    refused the same way; the clone check spawns no git. A git verb that changes files
+    (OTHER_CHECKOUT_GIT_VERBS) run as `git -C <path>`, or after a `cd`, in another checkout or a
+    separate clone is refused by that same `elsewhere()` test, so each `cd` exemption holds for it;
+    `git -C <primary> status` passes and spends no git. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     moves = []
@@ -4770,7 +4777,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
-        writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+        writes = writes or (_git_verb_called(command, OTHER_CHECKOUT_GIT_VERBS)
+                            and _git_verb_may_hit(command, where, OTHER_CHECKOUT_GIT_VERBS))
     else:
         return ""
     if moves:
@@ -4820,13 +4828,23 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if targets is None:
         hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
         if not hit:
-            # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
-            # reader of such verbs is session_home_git_hit; only the folder test differs.
+            # A git verb that changes files, run in another checkout or a separate clone of this one,
+            # or from a stranded cwd. The one reader of such verbs is session_home_git_hit; only the
+            # folder test differs, and it is elsewhere(), so the `cd` form's exemptions hold here too.
+            flagged = []
+
             def in_clone(folder, _at):
-                elsewhere(folder, folder)
-                return clone_hit.get(folder, False)
-            verb = session_home_git_hit(command, where, in_clone) if "git" in command else ""
-            return OTHER_CLONE_GIT_DETAIL + verb if verb else ""
+                # As the `cd` loop above: the folder's own root counts as the red-run folder, since a
+                # git verb run there writes its files, not the folder's name.
+                if elsewhere(folder, folder) and not _own_red_run(payload, roots[0], folder):
+                    flagged.append(folder)
+                    return True
+                return False
+            verb = (session_home_git_hit(command, where, in_clone, OTHER_CHECKOUT_GIT_VERBS)
+                    if "git" in command else "")
+            if not verb:
+                return ""
+            return (OTHER_CLONE_GIT_DETAIL if clone_hit.get(flagged[-1]) else OTHER_CHECKOUT_GIT_DETAIL) + verb
         return ("shell write into another clone: " if clone_hit.get(hit) else
                 "shell write into another checkout: ") + hit
     for target in targets:
@@ -4849,6 +4867,10 @@ SESSION_HOME_DIR = "session-homes"
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
+# The verbs other-checkout refuses in another checkout or clone: the session-home verbs and `add`,
+# which stages into that checkout's index. session-home leaves `add` out, so this set extends the
+# tuple rather than copying it.
+OTHER_CHECKOUT_GIT_VERBS = SESSION_HOME_GIT_VERBS + ("add",)
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -4939,14 +4961,16 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
         pass  # an unwritable record means no refusal later, never a failed call
 
 
-def session_home_git_hit(command: str, where: str, in_primary) -> str:
-    """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
-    primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
-    that holds a variable is unknown and passes."""
+def session_home_git_hit(command: str, where: str, in_primary, git_verbs=None) -> str:
+    """The verb of a git call in COMMAND that changes files or a branch and runs in a folder that
+    IN_PRIMARY accepts, else ''. GIT_VERBS names the verbs; none means SESSION_HOME_GIT_VERBS. A
+    leading `cd` and `git -C <path>` name the folder it runs in; a folder that holds a variable is
+    unknown and passes."""
     ends = []
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
-        verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
+        verbs = [(verb, args) for verb, args in git_calls(segment)
+                 if verb in (git_verbs or SESSION_HOME_GIT_VERBS)]
         if not verbs:
             continue
         folder = dir_before_segment(segments, number, where, ends)
