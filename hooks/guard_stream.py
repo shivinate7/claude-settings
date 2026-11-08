@@ -177,7 +177,20 @@ def _ends_in_ampersand(stages, first: int) -> bool:
     return False
 
 
-def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
+def _list_ends_in_ampersand(segments, ends, after: int) -> bool:
+    """Whether the `&&` or `||` list that a pipeline closes, which goes on from segment `after`, is
+    ended by a job `&`: `ci-job x | tail && echo done & echo $!` backgrounds the whole list. The
+    list runs on through `|`, `&&` and `||` and stops at `;` or a newline, or at the first `&`."""
+    for segment, end in zip(segments[after:], ends[after:]):
+        tokens = segment_tokens(segment)
+        if tokens and backgrounding_amp(segment, tokens):
+            return True
+        if end not in ("|", "&&", "||"):
+            return False
+    return False
+
+
+def _pipeline_hit(stages, find_stage, any_filter: bool = False, list_amp: bool = False) -> str:
     """The matched text when a stage that `find_stage(segment, backgrounded)` names in one pipeline's stages is
     followed by a filter that cuts what the agent reads. The one walk for the narrated rule and the
     check rule. Without `any_filter` (the narrated rule) the filter is `tail` or `head`: a `tee` between
@@ -186,7 +199,7 @@ def _pipeline_hit(stages, find_stage, any_filter: bool = False) -> str:
     file writer (`tee`, `tee.exe`, `Tee-Object`, `Out-File`), since `sed -n`, `grep -m1` and `awk` cut
     what the agent reads as `tail` does. There a lone `tee` is no hit, and `tail` or `head` still counts."""
     for first, segment in enumerate(stages):
-        stage = find_stage(segment, _ends_in_ampersand(stages, first))
+        stage = find_stage(segment, list_amp or _ends_in_ampersand(stages, first))
         if not stage:
             continue
         for later in stages[first + 1:]:
@@ -206,10 +219,11 @@ def _walk_pipelines(stripped: str, find_stage, any_filter: bool = False) -> str:
     ends = []
     segments = split_segments(stripped, ends)
     stages = []
-    for segment, end in zip(segments, ends):
+    for number, (segment, end) in enumerate(zip(segments, ends)):
         stages.append(segment)
         if end != "|":
-            hit = _pipeline_hit(stages, find_stage, any_filter)
+            list_amp = end in ("&&", "||") and _list_ends_in_ampersand(segments, ends, number + 1)
+            hit = _pipeline_hit(stages, find_stage, any_filter, list_amp)
             if hit:
                 return hit
             stages = []

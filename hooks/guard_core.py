@@ -432,19 +432,42 @@ def _powershell_values(segment: str) -> str:
     return "".join(out)
 
 
+def _amp_cuts(segment: str):
+    """Each unquoted `&` of `segment` that is no part of `&&`, `|&`, `>&` or `<&`, as (index, kind),
+    read with `walk_quotes`, so a quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote
+    are none. `kind` is "glued" (`tail -3&`: the `&` ends the word before it), "redirect" (a glued
+    `&>`, which redirects both streams and ends no job), or "spaced" (`&` after white space, or at
+    the start). In PowerShell a spaced `&` counts only when white space or the end follows, since
+    `&$cmd` and `&"x"` are its call operator."""
+    cuts = []
+    powershell = is_powershell(segment)
+    for index, char, quote in walk_quotes(segment):
+        if char != "&" or quote:
+            continue
+        before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
+        if after == "&" or before in ">&<|":
+            continue
+        if before in " \t\r\n":
+            if after != ">" and not (powershell and after not in ("", " ", "\t", "\r", "\n")):
+                cuts.append((index, "spaced"))
+        elif after == ">":
+            cuts.append((index, "redirect"))
+        else:
+            cuts.append((index, "glued"))
+    return cuts
+
+
 def amp_pieces(segment: str):
     """`segment` cut at each unquoted `&` glued to the word before it, as [(text, cut)]: `text` has
     no `&` of its own cut off, and `cut` says a job-ending `&` followed it (`tail -3& echo $!` is
-    `tail -3` cut, then ` echo $!`). The one reader of a glued `&`, for the job readers
-    (`backgrounding_amp`) and the delete reader alike. Walks the segment with `walk_quotes`, so a
-    quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote cut nothing. No cut at the
-    `&` of `|&` (it opens a segment), `&&`, `&>`, or a redirect's `>&`, `<&`. A spaced `&` is
-    its own token, read by `backgrounding_amp`; it cuts nothing here."""
+    `tail -3` cut, then ` echo $!`). The reader of a glued `&` for the delete reader
+    (`backgrounding_amp` reads the spaced ones too). A glued `&>` cuts as well, with `cut` False: it
+    ends no job, and the word before it is the command's last, so `rm -rf ..&>f` deletes `..`.
+    `_amp_cuts` says what is no cut. A spaced `&` cuts nothing here."""
     pieces, last = [], 0
-    for index, char, quote in walk_quotes(segment):
-        if (char == "&" and not quote and index and segment[index - 1] not in " \t\r\n>&<|"
-                and segment[index + 1:index + 2] not in ("&", ">")):
-            pieces.append((segment[last:index], True))
+    for index, kind in _amp_cuts(segment):
+        if kind != "spaced":
+            pieces.append((segment[last:index], kind == "glued"))
             last = index + 1
     pieces.append((segment[last:], False))
     return [(type(segment)(text), cut) for text, cut in pieces if text.strip() or not cut]
@@ -453,21 +476,21 @@ def amp_pieces(segment: str):
 def backgrounding_amp(segment: str, tokens, start: int = 0) -> str:
     """The text a backgrounding `&` ends in one segment, else ''. The one home of "this command
     runs as a background job", read by the check-tail rule and the detached-launch rule. A `&` is a
-    job when it is a word after a command word (the one at `start` in the first piece, the first
-    word in a later one), or when it is glued to a word, which ends that job and starts a new
-    command (`amp_pieces`). `tokens` are `segment_tokens(segment)`, which keep no quote marks, so a
-    glued `&` is read from the raw text. `split_segments` leaves the `&` of `|&` at the head of the
-    next segment, so a `&` at token 0 is no job."""
-    pieces = amp_pieces(segment)
-    for number, (text, cut) in enumerate(pieces):
-        words = tokens if len(pieces) == 1 else segment_tokens(text)
-        if not words:
+    job when it ends a piece that holds a word after a command word (the one at `start` in the
+    first piece, any word in a later one), spaced or glued (`_amp_cuts`). The pieces come from the
+    raw text, never from `tokens`: they keep no quote marks, so a quoted `&` and a bare one are the
+    same token. `tokens` is `segment_tokens(segment)`; None means the segment cannot be read, which
+    is no job. A `&` at the head of a segment (`|&`, a PowerShell `& $cmd`) ends an empty piece."""
+    if not tokens:
+        return ""
+    last, floor = 0, start
+    for index, kind in _amp_cuts(segment):
+        if kind == "redirect":
             continue
-        for index in range((start if number == 0 else 0) + 1, len(words)):
-            if words[index] == "&":
-                return words[index - 1] + " &"
-        if cut:
-            return words[-1] + "&"
+        words = segment_tokens(type(segment)(segment[last:index]))
+        if words and (kind == "glued" or len(words) > floor):
+            return words[-1] + ("&" if kind == "glued" else " &")
+        last, floor = index + 1, 0
     return ""
 
 
