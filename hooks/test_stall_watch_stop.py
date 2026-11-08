@@ -1697,7 +1697,7 @@ def A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet():
 @case
 def A9_shell_job_and_agent_share_one_message():
     """A9. a quiet shell job and a quiet agent in one transcript: both are listed in one systemMessage. The
-    shell row is green on main, so it is the control for the agent row"""
+    shell row is the control for the agent row: it is listed with or without the agent fix"""
     base, folder = new_dir(), new_dir()
     output_file(base, "bmix600", 600)
     launch, spec = background_agent(folder, agent_id(19), agent_step("m1"), 600)
