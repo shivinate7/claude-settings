@@ -10587,12 +10587,13 @@ rf_refuse("a foreground reviewer whose toolUseResult carries a terminal status i
 # Owner ruling 409 a (2026-11-08 06:11 CST): a finished agent that ran in a worktree is refused a resume, for any
 # role, since its worktree is gone. A finished agent with no worktree still passes. Reviewer spawns in this repo always
 # run in a worktree, so the reviewer with no worktree below keeps its refusal.
-rf_refuse("a finished builder spawned with isolation worktree is refused, and the reason says fresh",
-          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("worktree-builder-finished"), carries=("fresh",))
-rf_refuse("a finished test-author spawned with isolation worktree is refused, and the reason says fresh",
-          {"to": RF_WT_TESTAUTHOR, "message": RF_MSG}, rf_path("worktree-test-author-finished"), carries=("fresh",))
-rf_refuse("a finished designer spawned with isolation worktree is refused, and the reason says fresh",
-          {"to": RF_WT_DESIGNER, "message": RF_MSG}, rf_path("worktree-designer-finished"), carries=("fresh",))
+rf_refuse("a finished builder spawned with isolation worktree is refused, and the reason says fresh builder",
+          {"to": RF_WT_BUILDER, "message": RF_MSG}, rf_path("worktree-builder-finished"), carries=("fresh builder",))
+rf_refuse("a finished test-author spawned with isolation worktree is refused, and the reason says fresh test-author",
+          {"to": RF_WT_TESTAUTHOR, "message": RF_MSG}, rf_path("worktree-test-author-finished"),
+          carries=("fresh test-author",))
+rf_refuse("a finished designer spawned with isolation worktree is refused, and the reason says fresh designer",
+          {"to": RF_WT_DESIGNER, "message": RF_MSG}, rf_path("worktree-designer-finished"), carries=("fresh designer",))
 rf_refuse("a finished reviewer spawned with no isolation is refused: the reviewer refusal is kept with no worktree",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
 # Allowed: the target runs, is a finished spawn with no worktree that is not a reviewer, is not in the transcript,
