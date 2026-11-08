@@ -949,23 +949,37 @@ def _folder_root(root: str, cwd: str) -> str:
 def _quoted_glob_escapes(word: str) -> str:
     """`word` with each `\\*`, `\\?` and `\\[` inside a quote made a one-character class (`[*]`, `[?]`, `[[]`).
     A quote hides the backslash from the shell, so the tool reads the escape and matches the character
-    itself; fnmatch has no escape, but a class of one character is the same match. An unquoted escape is
-    read by the shell, so the tool sees a bare glob character and the word is left as it is."""
+    itself; fnmatch has no escape, but a class of one character is the same match. Inside a bracket
+    expression the escape becomes the bare character (`[\\[]` to `[[]`), since a class in a class matches
+    nothing. An unquoted escape is read by the shell, so the tool sees a bare glob character and the word is
+    left as it is."""
     out, quote, at = [], "", 0
+    in_class, members, negated = False, 0, False
     while at < len(word):
         char = word[at]
+        pair = word[at + 1:at + 2]
         if char == quote:
             quote = ""
         elif not quote and char in "'\"":
             quote = char
-        elif quote and char == "\\" and word[at + 1:at + 2] in ("*", "?", "["):
-            out.append("[%s]" % word[at + 1])
+        elif quote and char == "\\" and pair in ("*", "?", "["):
+            out.append(pair if in_class else "[%s]" % pair)
+            members += in_class
             at += 2
             continue
-        elif char == "\\" and word[at + 1:at + 2]:
+        elif char == "\\" and pair:
             out.append(word[at:at + 2])
+            members += in_class
             at += 2
             continue
+        elif not in_class and char == "[":
+            in_class, members, negated = True, 0, False
+        elif in_class and char == "]" and members:
+            in_class = False
+        elif in_class and char in "!^" and not members and not negated:
+            negated = True
+        elif in_class:
+            members += 1
         out.append(char)
         at += 1
     return "".join(out)
