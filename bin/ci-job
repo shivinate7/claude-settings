@@ -27,7 +27,7 @@
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
-# line names each pull-request step it skips. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
+# line names each pull-request step it skips. A lane's `merge <pr> --review-record`, and `merge --lane-lint <pr>`, run this mode before the lane
 # joins a batch. Use it with a job such as checks.
 # Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell

@@ -58,9 +58,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
-   ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the join. A red lane does not join. Before it marks the integration PR
+   ready. Each lane PR stays a draft until the integration PR merges. `~/.claude/bin/merge <pr> --review-record`
+   runs the lane lint on the reviewed head and prints the record only when it passes. A lane
+   thus gets no record to post for a head that fails the lint. The tool gates printing, not posting. The run
+   took 691 s once, past a 600 s foreground call: run it as a background command (`run_in_background`)
+   and read its verdict when it ends. `--lane-lint <pr>` stays the standalone check before review. The batch runner runs `~/.claude/bin/merge --lane-lint <pr>`
+   again on each lane head before the join. A red lane does not join. Before it marks the integration PR
    ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
    head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job

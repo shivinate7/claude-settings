@@ -12422,9 +12422,97 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
-class ReviewEnv(Env):
+# The stub ci-job: one home (building-one-home-per-capability). merge/test_lane_lint.py runs it for the lane lint, and ReviewEnv runs it by
+# default, so no review-record case reaches the real bin/ci-job. Each run logs its argv, cwd, head, detached flag and the env it saw.
+PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
+FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
+UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+
+STUB = '''import json, os, subprocess, sys, time
+LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+with open(LOG, "a", encoding="utf-8") as f:
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "env": {name: os.environ.get(name) for name in ("HOOK_CATALOG_ROOT", "LINT_STUB_SENTINEL")}}), file=f)
+if "--plan" in sys.argv:
+    for state, name in STEPS:
+        print("would run " + name)
+    sys.exit(0)
+end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
+while time.time() < end and os.getppid() == PARENT:
+    time.sleep(0.05)
+lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+print("\\n".join(lines))
+if RC == 1:
+    with open(STEP_LOG, "w", encoding="utf-8") as f:
+        f.write("\\n".join(lines) + "\\n")
+    print("log=" + STEP_LOG)  # the last line: the refusal reads it as the failing run's log
+sys.exit(RC)
+'''
+
+
+class CiJobStub:
+    """The stub ci-job, for a class with self.t. Its setUp calls init_stub(). use_ci_job points merge.CI_JOB at a stub that prints
+    `steps` and exits `rc`; lint_calls reads back every run the stub logged, never a plan."""
+
+    def init_stub(self):
+        self.log = os.path.join(self.t, "ci-calls.jsonl")
+        self.stub = os.path.join(self.t, "ci-job-stub.py")
+        self.step_log = os.path.join(self.t, "ci-job-step.log")
+
+    def write_stub(self, steps, rc, sleep=0):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
+        put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        return self.stub
+
+    def use_ci_job(self, steps, rc, sleep=0):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`, after `sleep` s when it is set."""
+        self.write_stub(steps, rc, sleep)
+        patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def lint_calls(self):
+        """The stub's calls that ran the lint, not the plan."""
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            calls = [json.loads(line) for line in f if line.strip()]
+        return [c for c in calls if "--plan" not in c["argv"]]
+
+    def clear_lint_log(self):
+        """Forget the runs of an earlier call, so the next assertion counts only its own."""
+        if os.path.exists(self.log):
+            os.remove(self.log)
+
+    def assert_one_lint_run(self, base, head, text=""):
+        """The lint ran once, as `checks --lint --base origin/<base>`, in a detached tree at `head`, and that tree is gone afterwards.
+        -> the run. For a class that is an Env: it reads self.co and self.worktrees(). `text` is the run's output, for the message."""
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        run = runs[0]
+        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
+        self.assertEqual(run["head"], head)
+        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
+        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
+        self.assertFalse(tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
+        self.assertEqual(self.worktrees(), 1)
+        return run
+
+
+class ReviewEnv(CiJobStub, Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
-    its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+    its code, and the check that a usage error came from a parser that knows the flag. No test lives here. The lint that the record runs
+    is a stub that passes by default, so no case here runs the real bin/ci-job; a case that needs another result replaces it with use_ci_job."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_stub()
+        self.use_ci_job(PASSING, 0)
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
@@ -12438,9 +12526,16 @@ class ReviewEnv(Env):
             rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
-    def record_host(self, *comments, head=REVIEW_HEAD):
-        """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
-        return PullsHost([batch_pull(7, head)], {}, comments=comments)
+    def live_pull(self, head=None):
+        """Pull request 7 at `head` (default: the fixture's real feat head), on branch `feat`, the branch the fixture repo holds. batch_pull's
+        default branch, feat7, is not in the fixture, so the lint would fail to fetch it before any head check."""
+        pull = batch_pull(7, head or self.head())
+        pull["head"]["ref"] = "feat"
+        return pull
+
+    def record_host(self, *comments, head=None):
+        """A host whose pull request 7 is live_pull(head), with the repo's review record comments in the order given, oldest first."""
+        return PullsHost([self.live_pull(head)], {}, comments=comments)
 
     def assert_usage_error(self, *argv):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
@@ -12525,10 +12620,10 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(self.lock_ref(), locked, "the write took the lock")
 
     def test_the_printed_head_is_the_reviewed_head_when_the_live_head_matches(self):
-        self.host.head_override = "f" * 40
-        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
+        head = self.head()  # the live head and the reviewed head are the fixture's real feat head, which the lint can check out
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", head)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], head)
 
     def test_a_push_after_the_review_stops_with_exit_one(self):
         # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
@@ -12608,7 +12703,8 @@ class ReviewFixBase(ReviewEnv):
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
 
     def review_with_base(self, base, host):
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
+        # The reviewed head is the fixture's real feat head, so the lint can check it out. The fix-check base stays a fake head: only the record text reads it.
+        return self.run_args("7", "--review-record", "--head", self.head(), *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:haiku:PASS", host=host)
 
     def assert_refused(self, rc, out, err):
         self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
@@ -12655,7 +12751,7 @@ class ReviewFixBase(ReviewEnv):
 
     def test_a_failed_comments_read_refuses_the_fix_check_with_no_record(self):
         # without the earlier records there is no base to check the fix check against, so the read failure stops the run before any record prints
-        host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments_error="reading issue comments from GitHub failed")
+        host = PullsHost([self.live_pull()], {}, comments_error="reading issue comments from GitHub failed")
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assertEqual(rc, 1, "a failed comments read did not stop the run:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a failed comments read still printed a record")

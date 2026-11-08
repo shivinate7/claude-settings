@@ -4,13 +4,14 @@
 Run: python3 merge/test_lane_lint.py
 The lint is bin/ci-job's `checks --lint`, reached through merge.CI_JOB. Each case points CI_JOB at a stub that
 prints scripted step lines and exits with a scripted code, so no real lint runs. The stub logs each call, so a
-case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
-fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
-(class ReadyChecks) runs the same stub, through CiJobStub.
+case reads what the tool ran, in which tree, at which head, and the env it saw. The stub (CiJobStub, STUB and the
+scripts PASSING, FAILING, UNKNOWN) and the repo builder, the fakes and the cloud-session fixture come from merge/test_merge.py:
+a case extends that fixture, it does not copy it. The draft step's ready check (class ReadyChecks) runs the same stub.
+The review record's lint (class ReviewRecordLint) runs it through ReviewEnv, which passes by default.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import atexit, json, os, re, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -21,33 +22,6 @@ import merge  # noqa: E402
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
-
-PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
-FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
-UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
-
-STUB = '''import json, os, subprocess, sys, time
-LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
-def git(*args):
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
-detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
-with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
-if "--plan" in sys.argv:
-    for state, name in STEPS:
-        print("would run " + name)
-    sys.exit(0)
-end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
-while time.time() < end and os.getppid() == PARENT:
-    time.sleep(0.05)
-lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
-print("\\n".join(lines))
-if RC == 1:
-    with open(STEP_LOG, "w", encoding="utf-8") as f:
-        f.write("\\n".join(lines) + "\\n")
-    print("log=" + STEP_LOG)  # the last line: the refusal reads it as the failing run's log
-sys.exit(RC)
-'''
 
 # merge.py fixes CI_JOB at import, so a subprocess run names the stub here, before main runs. Same argv and exit code as merge.py's __main__.
 HARNESS = '''import sys
@@ -83,6 +57,9 @@ jobs:
 """
 
 
+CiJobStub = tm.CiJobStub  # the stub's one home is merge/test_merge.py
+PASSING, FAILING, UNKNOWN, STUB = tm.PASSING, tm.FAILING, tm.UNKNOWN, tm.STUB
+
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
@@ -112,37 +89,6 @@ class LintStepNames(unittest.TestCase):
         self.assertEqual(names, {"Lint one", "Lint two"}, "lint_steps read a line that is no step: %s" % sorted(names - {"Lint one", "Lint two"}))
 
 
-class CiJobStub:
-    """The stub ci-job of this suite, for a class with self.t. Its setUp calls init_stub(). use_ci_job points merge.CI_JOB at
-    a stub that prints `steps` and exits `rc`; lint_calls reads back every run the stub logged, never a plan."""
-
-    def init_stub(self):
-        self.log = os.path.join(self.t, "ci-calls.jsonl")
-        self.stub = os.path.join(self.t, "ci-job-stub.py")
-        self.step_log = os.path.join(self.t, "ci-job-step.log")
-
-    def write_stub(self, steps, rc, sleep=0):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
-        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
-        return self.stub
-
-    def use_ci_job(self, steps, rc):
-        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
-        self.write_stub(steps, rc)
-        patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
-        patch.start()
-        self.addCleanup(patch.stop)
-
-    def lint_calls(self):
-        """The stub's calls that ran the lint, not the plan."""
-        if not os.path.exists(self.log):
-            return []
-        with open(self.log, encoding="utf-8") as f:
-            calls = [json.loads(line) for line in f if line.strip()]
-        return [c for c in calls if "--plan" not in c["argv"]]
-
-
 class LaneLint(CiJobStub, tm.CloudSession):
     @classmethod
     def setUpClass(cls):
@@ -169,19 +115,9 @@ class LaneLint(CiJobStub, tm.CloudSession):
         """Run merge in the lane checkout. -> (rc, stdout and stderr together). The lint must have run once, as
         `checks --lint --base origin/<base>`, in a detached tree at the head, and that tree must be gone afterwards."""
         head = head or self.head("feat")
-        if os.path.exists(self.log):
-            os.remove(self.log)
+        self.clear_lint_log()
         rc, text = self.run_lane(*argv, cloud=cloud)
-        runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
-        run = runs[0]
-        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
-        self.assertEqual(run["head"], head)
-        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
-        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
-        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
-        self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
-        self.assertEqual(self.worktrees(), 1)
+        self.assert_one_lint_run(base, head, text)
         return rc, text
 
     def push_release_branch(self):
@@ -611,6 +547,160 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+NO_RECORD_PRINTED = re.compile(r"(?i)no (review )?record\b[^\n]*\bprinted")  # a refusal that says the record was not printed
+NO_LINT_LINE = re.compile(r"(?i)\bno lint\b|\bnot linted\b|\blint\b[^\n]{0,60}\bnot run\b")  # a stderr line that says no lint ran
+NO_JOB_REASON = re.compile(r"(?i)\bchecks\b[^\n]{0,60}\bjob\b")  # the reason, when the workflow has no checks job
+NO_FILE_REASON = re.compile(r"(?i)checks\.yml|\bworkflow\b")  # the reason, when the head tree has no workflow file
+
+
+class ReviewRecordLint(tm.ReviewEnv):
+    """`merge <pr> --review-record` runs the lane lint on the reviewed head, after the state, head and fix-check refusals, and prints the
+    record only on a PASS (decision pr-review-record). The lint is `checks --lint --base origin/<base>` in a detached tree at the head, and
+    the record flag takes no --lint-unknown-ok. Each case that expects a lint run asserts that it ran once before it asserts the result, so a
+    record that never lints fails there by name.
+
+    The feature head carries a checks workflow with a checks job (setUp), as a repo that lints on the record does. The stub ignores the tree,
+    so only a case that builds the tree shows what the record reads: (a) commits a tree with no workflow file, and (b) one with no checks job."""
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
+            super().setUp()
+        self.set_feat_workflow(tm.workflow_text("checks", "checks"))
+
+    def set_feat_workflow(self, text):
+        """Commit on feat and push it: its .github/workflows/checks.yml becomes `text`, or is removed when `text` is None. The lane checkout and
+        the pull request's live head both read origin's feat, so self.head() and self.flags() follow the new head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        path = os.path.join(o, ".github", "workflows", "checks.yml")
+        if text is None:
+            os.remove(path)
+        else:
+            tm.put(path, text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "feat: the workflow the review-record lint case sets")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+
+    def head_files(self):
+        """-> the paths in the feature head's tree."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "ls-tree", "-r", "--name-only", "origin/feat").splitlines()
+
+    def head_text(self, path):
+        """-> the text of `path` in the feature head's tree."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(self.co, "git", "show", "origin/feat:" + path)
+
+    def assert_record_on_stdout_only(self, out, head):
+        """stdout holds the record and nothing else, and the record names `head`."""
+        body = tm.posted_body(self, out)
+        self.assertEqual(out.strip().splitlines(), body.strip().splitlines(), "stdout holds lines besides the record: " + out)
+        self.assertEqual(tm.parse_text(self, body)["head"], head, "the record names another head: " + out)
+
+    def assert_one_no_lint_line(self, err, reason):
+        """stderr holds one line that says no lint ran, and that line names the reason."""
+        notes = [line for line in err.splitlines() if NO_LINT_LINE.search(line)]
+        self.assertEqual(len(notes), 1, "stderr does not say once that no lint ran: " + err)
+        self.assertRegex(notes[0], reason, "the line that says no lint ran does not name why: " + notes[0])
+
+    def test_a_failed_lint_refuses_and_prints_no_record(self):
+        self.use_ci_job(FAILING, 1)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", self.head(), out + err)
+        self.assertNotEqual(rc, 0, "a FAIL lint read as a pass: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record was printed on a FAIL lint")
+        self.assertIn("comment narration", err, "the refusal does not name the failing step: " + err)
+        self.assertRegex(err, NO_RECORD_PRINTED, "the refusal does not say that no record was printed: " + err)
+
+    def test_an_unknown_lint_refuses_and_offers_no_unknown_ok_flag(self):
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", self.head(), out + err)
+        self.assertNotEqual(rc, 0, "an unknown lint read as a pass: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record was printed on an unknown lint")
+        self.assertIn("unknown", err.lower(), "the refusal does not say the lint is unknown: " + err)
+        self.assertNotIn("--lint-unknown-ok", err, "the refusal offers --lint-unknown-ok, which --review-record does not take: " + err)
+
+    def test_a_timed_out_lint_refuses_as_unknown_and_prints_no_record(self):
+        self.use_ci_job(PASSING, 0, sleep=60)  # the stub outlasts the bound below, so the lint run is killed at the bound
+        with unittest.mock.patch.object(merge, "LINT_SECONDS", 3):
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", self.head(), out + err)
+        self.assertNotEqual(rc, 0, "a timed-out lint read as a pass: " + out + err)
+        self.assertNotIn(tm.REVIEW_MARKER, out, "the record was printed on a timed-out lint")
+        self.assertIn("unknown", err.lower(), "the refusal does not say the lint is unknown: " + err)
+
+    def test_a_docs_only_change_lints_once_at_the_reviewed_head_and_prints_the_record(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head()
+        rc, out, err = self.run_args("7", "--review-record", "--kind", "docs-only", "--guard", "no", "--head", head)
+        self.assert_one_lint_run("main", head, out + err)
+        self.assertEqual(rc, 0, out + err)
+        rec = tm.parse_text(self, tm.posted_body(self, out))
+        self.assertEqual((rec["kind"], rec["head"]), ("docs-only", head), out + err)
+
+    def test_a_passing_lint_prints_only_the_record_on_stdout(self):
+        # (c), the control for (a) and (b): the feature head holds a checks job, so the lint runs once on it and the record prints.
+        self.assertRegex(self.head_text(".github/workflows/checks.yml"), r"(?m)^  checks:", "the precondition: the head workflow has no checks job")
+        self.use_ci_job(PASSING, 0)
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", self.head(), out + err)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(pass_lines(out), [], "a PASS line went to stdout, where the record is parsed from: " + out)
+        body = tm.posted_body(self, out)
+        self.assertEqual(out.strip().splitlines(), body.strip().splitlines(), "stdout holds lines besides the record: " + out)
+
+    def test_a_head_refusal_runs_no_lint_and_a_matching_head_lints_once(self):
+        self.use_ci_job(PASSING, 0)
+        old = self.head()
+        self.host.head_override = "f" * 40  # the pull request moved on: its live head is not the reviewed one
+        rc, out, err = self.run_args("7", "--review-record", *tm.REVIEW_FLAGS, "--head", old)
+        self.assertEqual(self.lint_calls(), [], "the head refusal ran the lint: " + out + err)
+        self.assertNotEqual(rc, 0, "a head refusal printed a record: " + out + err)
+        self.assertIn(old[:9], err, "the refusal does not name the reviewed head: " + err)
+        self.assertIn("f" * 9, err, "the refusal does not name the live head: " + err)
+        # The control: the same command with the live head at the reviewed head lints once. Main runs no lint, so this half is the red there.
+        self.host.head_override = None
+        self.clear_lint_log()
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assert_one_lint_run("main", old, out + err)
+        self.assertEqual(rc, 0, out + err)
+
+    def test_the_lint_run_drops_hook_catalog_root_from_its_env(self):
+        self.use_ci_job(PASSING, 0)
+        with unittest.mock.patch.dict(os.environ, {"HOOK_CATALOG_ROOT": "/some/other/tree", "LINT_STUB_SENTINEL": "kept"}):
+            state, lines, _log, _liftable = merge.ci_job_run(self.co, "checks", "--lint", "--base", "origin/main")
+        calls = self.lint_calls()
+        self.assertEqual(len(calls), 1, "ci_job_run ran the stub %d times, want once" % len(calls))
+        seen = calls[0]["env"]
+        self.assertEqual(seen["LINT_STUB_SENTINEL"], "kept", "the stub did not see the env ci_job_run passes, so the next line proves nothing")
+        self.assertIsNone(seen["HOOK_CATALOG_ROOT"], "the lint saw HOOK_CATALOG_ROOT=%r, so it reads another tree" % seen["HOOK_CATALOG_ROOT"])
+        self.assertEqual(state, "pass", "ci_job_run read %r, want pass" % (lines,))
+
+    def test_a_head_with_no_checks_workflow_runs_no_lint_and_says_why_on_one_stderr_line(self):  # (a)
+        self.set_feat_workflow(None)
+        self.assertNotIn(".github/workflows/checks.yml", self.head_files(), "the precondition: the head tree still holds the workflow file")
+        head = self.head()
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times, want 0, for a head with no workflow file" % len(self.lint_calls()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assert_one_no_lint_line(err, NO_FILE_REASON)
+
+    def test_a_head_whose_workflow_has_no_checks_job_runs_no_lint_and_says_why_on_one_stderr_line(self):  # (b)
+        # The job names are near misses on purpose: a match on the word `checks` alone would read checks-merge-install as the checks job.
+        self.set_feat_workflow(tm.workflow_text("checks", "checks-merge-install", "lint"))
+        self.assertIn(".github/workflows/checks.yml", self.head_files(), "the precondition: the head tree lacks the workflow file")
+        self.assertIsNone(re.search(r"(?m)^  checks:", self.head_text(".github/workflows/checks.yml")), "the precondition: the head workflow has a checks job")
+        head = self.head()
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(self.lint_calls(), [], "the lint ran %d times, want 0, for a workflow with no checks job" % len(self.lint_calls()))
+        self.assertEqual(rc, 0, out + err)
+        self.assert_record_on_stdout_only(out, head)
+        self.assert_one_no_lint_line(err, NO_JOB_REASON)
 
 
 class RunFolderSweep(unittest.TestCase):

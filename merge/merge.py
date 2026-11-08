@@ -22,6 +22,15 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened.
+                          It runs the lane lint (as --lane-lint does) on the reviewed head after those refusals, for every kind,
+                          docs-only too, and prints the record only when the lint passes: the record alone on stdout, a `PASS:` line on
+                          stderr. A FAIL stops with the failing step lines and the log, and prints no record. An unknown (ci-job exit 2,
+                          a timeout, any odd exit) stops as "unknown, not a pass", prints no record, and takes no --lint-unknown-ok.
+                          A head with no .github/workflows/checks.yml, or no `checks` job in it, runs no lint: the record prints, as
+                          on a repo without the lint, and one stderr line says no lint ran and why.
+                          Cost per printed record: one worktree and two git fetches, plus one ci-job run when the head has the job
+                          (691 s measured once, on #1687's head); none on a usage error or an earlier refusal. The run can pass a
+                          600 s foreground call: run the command in the background and read its verdict when it ends.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -103,7 +112,7 @@ GREEN_CITE = "(rule git-never-merge-failing-ci, a head whose checks are not gree
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
-LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
+LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head whose lint passes in `merge <pr> --review-record`, the lane's own check)"
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -2452,7 +2461,8 @@ def ci_job_run(wt, *args):
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    # CI sets no HOOK_CATALOG_ROOT; set, lint/hook_catalog.py checks that other tree and the lint passes falsely.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != "HOOK_CATALOG_ROOT"}  # as the merge's own lint run reads it
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2467,37 +2477,84 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok=""):
+def lint_job():
+    """-> the one job the lane lint runs: `checks`, the first of CHECKS_SUITE_JOBS (lint/workflow_steps.py, the one home of the step parser)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import CHECKS_SUITE_JOBS
+    return CHECKS_SUITE_JOBS[0]
+
+def no_lint_job(wt):
+    """-> why the tree at `wt` has no job for the lane lint to run, or "" when it has one. Only a proven absence is a reason: no
+    .github/workflows/checks.yml, or no `checks` job in it (read with workflow_steps.job_block). A file that exists but cannot be read stops
+    as unknown, so a read error never prints an unlinted record."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import job_block
+    job, path = lint_job(), os.path.join(wt, ".github", "workflows", "checks.yml")
+    if not os.path.lexists(path):
+        return "its tree has no .github/workflows/checks.yml"
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeError) as e:
+        raise Stop(f"the lint is unknown, not a pass, so no review record was printed: .github/workflows/checks.yml cannot be read ({type(e).__name__}). {REVIEW_CITE}")
+    return "" if job_block(text, job) is not None else f"its .github/workflows/checks.yml has no `{job}` job, the one job the lint runs"
+
+def lint_run(root, base, make_tree, skip_no_job=False):
+    """The one home of the lane lint's run: `ci-job checks --lint --base origin/<base>` in the detached tree `make_tree()` makes, removed on
+    every exit. Its one caller is lane_lint, which the review record also calls. With `skip_no_job` (the review record only), a tree with no
+    checks job (no_lint_job) runs nothing. -> ci_job_run's (state, lines, log, liftable), or ("skip", [reason], [], False)."""
+    tmp, wt = make_tree()
+    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        why = no_lint_job(wt) if skip_no_job else ""
+        if why:
+            return "skip", [why], [], False
+        return ci_job_run(wt, lint_job(), "--lint", "--base", f"origin/{base}")
+    finally:
+        drop_worktree(root, tmp, wt)
+
+REVIEW_LINT_REMEDY = "Fix it on the lane, push, review the new head, and run `merge <pr> --review-record` again, as a background command (the lint can pass 600 s). " + REVIEW_CITE
+
+def lane_lint(root, target, host, base="", unknown_ok="", info=None, review_record=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
-    if target.isdigit():
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
+    The review record (decision pr-review-record) calls it with `info`, the PR read it already made, and `review_record=True`: the PASS line goes to stderr so
+    stdout holds the record alone, a FAIL or any unknown stops with no record printed, and no flag lifts an unknown. A head with no checks
+    workflow or no `checks` job in it runs no lint: one stderr line says so and why, and the record prints, as on a repo without the lint."""
+    if info is None and target.isdigit():
         info = (host or Host()).pr(int(target))
+    if info is not None:
         head, base = info["head"], info["base"]
-        tmp, wt = open_worktree(root, info, base)
+        make_tree = lambda: open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
-        tmp, wt = add_worktree(root, head)
-    try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
-    finally:
-        drop_worktree(root, tmp, wt)
+        make_tree = lambda: add_worktree(root, head)
+    state, lines, log, liftable = lint_run(root, base, make_tree, skip_no_job=review_record)
     short = head[:9]
-    if state == "pass":
-        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+    if state == "skip":  # ci-job lints only the checks job, so a head without it prints its record unlinted, and stderr says so once
+        print(f"merge: no lint ran on {short}: {lines[0]}. The record prints unlinted.", file=sys.stderr)
         return 0
+    if state == "pass":
+        if review_record:
+            print(f"PASS: lint of {short} against {base} passes.", file=sys.stderr)
+        else:
+            say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        return 0
+    remedy, no_record = (REVIEW_LINT_REMEDY, ", so no review record was printed:") if review_record else (LANE_LINT_REMEDY, ":")
     if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
-    if liftable and unknown_ok.strip():
+        raise Stop("\n".join([f"the lint of {short} against {base} FAILs{no_record}", *lines, *log, remedy]))
+    if liftable and unknown_ok.strip() and not review_record:
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
-    head_line = f"the lint of {short} against {base} is unknown, not a pass:"
+    head_line = f"the lint of {short} against {base} is unknown, not a pass{no_record}"
+    if review_record and liftable:  # the same hint as the lane lint's, with no --lint-unknown-ok: the record flag takes none
+        raise Stop("\n".join([head_line, *lines, *log, "Run it where the missing tool is present. " + remedy]))
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
-        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+        raise Stop("\n".join([head_line, *lines, remedy]))
     raise Liftable("\n".join([head_line, *lines, *log,
-                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + remedy]))
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
@@ -3251,7 +3308,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --review-record <pr>` (with its --head, --kind and --guard) as a background command: it lints the reviewed head and prints the review record, and the lane posts that review record on the pull request, where the batch runner finds it. `merge --lane-lint <pr>` is the optional early check. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -3312,7 +3369,9 @@ def main(argv, host=None, lock=None):
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
-    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
+    p.add_argument("--review-record", action="store_true", help="lint the reviewed head (as --lane-lint does), then print its review record only on a PASS; posts nothing. "
+                   "The lint can pass 600 s (691 s once), so run it as a background command. A head with no checks.yml or no `checks` job "
+                   "runs no lint: the record prints and one stderr line says why")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
@@ -3373,7 +3432,7 @@ def main(argv, host=None, lock=None):
             say(f"merge: merge role {a.role} recorded for this session.")
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+            raise Stop("this session may not merge. Run `merge --review-record <pr>` (with its --head, --kind and --guard) as a background command: it lints the reviewed head and prints the review record, and the lane posts that review record on the pull request, where the batch runner finds it. `merge --lane-lint <pr>` is the optional early check. " + ROLE_CITE)
         c, root = sh(["git", "rev-parse", "--show-toplevel"])
         if c:
             raise Stop("not in a git checkout")
@@ -3400,6 +3459,8 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
+            with release_on_signals():  # the lint runs on every kind, docs-only too; a signal ends the run through lint_run's `finally`
+                lane_lint(root, str(a.pr), host, info=info, review_record=True)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
