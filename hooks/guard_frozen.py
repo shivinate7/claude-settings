@@ -886,11 +886,11 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
                 return path
-    for node in ast.walk(tree):   # a node `-e` script in the list argv of a subprocess call runs as node code
-        if isinstance(node, ast.Call) and _py_runs_argv(node) and node.args \
-                and isinstance(node.args[0], (ast.List, ast.Tuple)):
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    for node in ast.walk(tree):   # a node `-e` script held in any list literal runs as node code
+        if isinstance(node, (ast.List, ast.Tuple)) and not _py_list_is_data(node, parents):
             words = [item.value if isinstance(item, ast.Constant) and isinstance(item.value, str) else ""
-                     for item in node.args[0].elts]
+                     for item in node.elts]
             if words and _NODE_COMMAND.match(basename(words[0])):
                 for flag, script in zip(words, words[1:]):
                     hit = _js_hit(script, cwd, predicate) if _NODE_EVAL_FLAG.match(flag) else ""
@@ -917,13 +917,36 @@ _PY_SHELL_NAMES = frozenset((
 _PY_INTERPRETER = re.compile(r"python[\d.]*|py")
 
 
-def _py_runs_argv(node) -> bool:
-    """True when the call NODE is named like a subprocess call (`_PY_ARGV_CALLS`), as `run(...)` or as
-    `<owner>.run(...)`, whatever the owner is. A list passed to `print` or `json.dumps` is data."""
+def _py_call_name(node, owner=None) -> str:
+    """The name a Call NODE is made through: `name(...)` gives `name`; `OWNER.name(...)` gives `name`
+    only when OWNER is None or the owner is the plain name OWNER."""
     import ast
     func = node.func
-    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
-    return name in _PY_ARGV_CALLS
+    if isinstance(func, ast.Name) and owner is None:
+        return func.id
+    if isinstance(func, ast.Attribute) and (owner is None or (isinstance(func.value, ast.Name)
+                                                              and func.value.id == owner)):
+        return func.attr
+    return ""
+
+
+def _py_list_is_data(node, parents) -> bool:
+    """True when the list literal NODE is text, not a program to run: a direct argument of `print(...)`,
+    or of a `json.dumps(...)` call that is a statement, an assignment value, or a direct argument of
+    `print(...)`. Any other place, such as `subprocess.run(json.loads(json.dumps([...])))`, may run it."""
+    import ast
+    call = parents.get(node)
+    if not isinstance(call, ast.Call) or node not in call.args:
+        return False
+    if isinstance(call.func, ast.Name) and call.func.id == "print":
+        return True
+    if not (isinstance(call.func, ast.Attribute) and _py_call_name(call, "json") == "dumps"):
+        return False
+    outer = parents.get(call)
+    if isinstance(outer, (ast.Expr, ast.Assign)):
+        return True
+    return isinstance(outer, ast.Call) and isinstance(outer.func, ast.Name) and outer.func.id == "print" \
+        and call in outer.args
 
 
 def _py_named_scripts(tree) -> frozenset:
