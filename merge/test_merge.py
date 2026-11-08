@@ -11859,6 +11859,24 @@ def replace_line(test, text, prefix, line):
     lines[found[0]] = line
     return "\n".join(lines) + "\n"
 
+REVIEW_CUTOVER_PAST = "2000-01-01T00:00:00Z"  # a cutover before every record: the stamp is required
+REVIEW_CUTOVER = "2026-10-20T00:00:00Z"  # records created before it may be unstamped
+REVIEW_BEFORE = "2026-10-02T00:00:00Z"  # a comment created before REVIEW_CUTOVER
+REVIEW_AFTER = "2026-11-01T00:00:00Z"  # a comment created after REVIEW_CUTOVER
+
+def cutover_at(value):
+    """review_stamp_since answers `value` for the case. create=True: the name is new, and a build without it still runs the case."""
+    return unittest.mock.patch.object(merge, "review_stamp_since", lambda *a, **k: value, create=True)
+
+def parse_at(test, text, created=None, cutover=None):
+    """parse_review of `text` with the comment's created time and the cutover. A build without those parameters gets the text alone, so it refuses
+    an unstamped record, and the case fails on that refusal."""
+    fn = review_fn(test, "parse_review")
+    params = inspect.signature(fn).parameters
+    if "created" in params and "cutover" in params:
+        return fn(text, created=created, cutover=cutover)
+    return fn(text)
+
 def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model="haiku"):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
     return f"Fix check: {head}, {role}, {model}, {verdict}"
@@ -12428,6 +12446,11 @@ class ReviewEnv(Env):
         lint = unittest.mock.patch.object(merge, "lane_lint", lambda *a, **k: 0)
         lint.start()
         self.addCleanup(lint.stop)
+        # review_stamp_since reads the repo's git history. Here it answers a cutover before every record, so the stamp is required unless a case sets
+        # its own cutover; no case runs git on the repo.
+        cutover = cutover_at(REVIEW_CUTOVER_PAST)
+        cutover.start()
+        self.addCleanup(cutover.stop)
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
@@ -12968,8 +12991,11 @@ class ReviewedList(ReviewEnv):
             self.fail("merge.Host.review_comments is not defined")
         a, b, c = record_text(rounds=REVIEW_PASS), record_text(n=8, rounds=REVIEW_PASS), record_text(rounds=REVIEW_FAILED_THREE)
         host = PullsHost([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], {},
-                         comments=[review_comment(1, 7, a), review_comment(2, 8, b), review_comment(3, 7, c)])
-        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"), {7: [a, c], 8: [b]})
+                         comments=[review_comment(1, 7, a, created="2026-10-02T00:00:00Z"), review_comment(2, 8, b, created="2026-10-03T00:00:00Z"),
+                                   review_comment(3, 7, c, created="2026-10-04T00:00:00Z")])
+        self.assertEqual(host.review_comments("2026-10-01T00:00:00Z"),
+                         {7: [("2026-10-02T00:00:00Z", a), ("2026-10-04T00:00:00Z", c)], 8: [("2026-10-03T00:00:00Z", b)]},
+                         "review_comments gives (created_at, body) pairs per pull request, oldest first")
         reads = [f for rel, f in host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
@@ -13934,6 +13960,94 @@ C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but n
 def controls(text):
     """The C0 control characters in `text`, in order."""
     return C0_CONTROL.findall(text)
+
+
+class ReviewCutover(ReviewEnv):
+    """The cutover: a record created before review_stamp_since's cutover may be unstamped, and one created at or after it must carry the stamp.
+    A case that needs a cutover sets its own. A new post has no created time, so the guard path always needs the stamp."""
+
+    def test_an_unstamped_record_created_before_the_cutover_parses(self):
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        self.assertIsNotNone(parse_at(self, text, created=REVIEW_BEFORE, cutover=REVIEW_CUTOVER),
+                             "an unstamped record created before the cutover was refused:\n" + text)
+
+    def test_reviewed_shows_an_unstamped_record_created_before_the_cutover_as_done(self):
+        comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE)
+        with cutover_at(REVIEW_CUTOVER):
+            host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
+            rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
+
+    def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
+        rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)
+        state, why = review_fn(self, "review_state")(rec, REVIEW_HEAD)
+        self.assertEqual(state, "bad", "an unstamped record created after the cutover did not read bad: " + why)
+
+    def test_before_the_cutover_a_wrong_stamp_is_still_refused(self):
+        text = replace_line(self, record_text(rounds=REVIEW_PASS), "Stamp: ", "Stamp: 0123456789abcdef")
+        self.assertIsNone(parse_at(self, text, created=REVIEW_BEFORE, cutover=REVIEW_CUTOVER), "a record with a wrong stamp parsed before the cutover")
+
+    def test_with_no_created_time_an_unstamped_record_is_refused(self):
+        # the guard path: a new post has no created time, so the stamp is required
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        self.assertIsNone(parse_at(self, text), "an unstamped record with no created time parsed; the guard path must refuse it")
+
+    def test_with_no_cutover_an_unstamped_record_parses(self):
+        # a cutover of None means every record is before the cutover
+        text = without_stamp(record_text(rounds=REVIEW_PASS))
+        self.assertIsNotNone(parse_at(self, text, created=REVIEW_AFTER, cutover=None), "with no cutover an unstamped record was refused")
+
+    def test_fix_check_takes_an_unstamped_earlier_record_created_before_the_cutover_as_its_base(self):
+        earlier = without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        host = self.record_host(review_comment(1, 7, earlier, created=REVIEW_BEFORE), head=self.head())
+        flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        with cutover_at(REVIEW_CUTOVER):
+            rc, out, err = self.run_args("7", "--review-record", *flags, host=host)
+        self.assertEqual(rc, 0, "--fix-check refused an unstamped earlier record created before the cutover:\n" + out + err)
+        self.assertIn(REVIEW_MARKER, out, "no record was printed:\n" + out + err)
+
+
+class ReviewStampSince(unittest.TestCase):
+    """review_stamp_since is the committer time of the first first-parent commit on origin/<base> whose merge/merge.py holds the salt line.
+    Each case reads a temp repo in this run's folder, not the repo's history, and makes no network call."""
+
+    def commit(self, root, n, text, date):
+        path = os.path.join(root, "merge", "merge.py")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        env = {**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+        subprocess.run(["git", "-C", root, "add", "merge/merge.py"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "commit", "-q", "-m", f"commit {n}"], check=True, capture_output=True, env=env)
+
+    def repo(self, salt_at):
+        """origin/main at commit 3. Commit 1 has no salt line. Commit `salt_at` (2, or None for none) adds it, and commit 3 keeps it.
+        Committer times are fixed: commit 1, then the salt commit, then commit 3."""
+        root = tempfile.mkdtemp(prefix="test-stamp-since-", dir=run_folder())
+        self.addCleanup(shutil.rmtree, root, True)
+        subprocess.run(["git", "-C", root, "init", "-q"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "symbolic-ref", "HEAD", "refs/heads/main"], check=True, capture_output=True)
+        salt = 'REVIEW_STAMP_SALT = "claude-settings review record stamp v1"\n'
+        dates = ["2026-10-20 10:00:00 +0000", "2026-10-21 15:04:05 +0000", "2026-10-22 09:00:00 +0000"]
+        texts = ["def f():\n    return 1\n", "def f():\n    return 2\n", "def f():\n    return 3\n"]
+        if salt_at is not None:
+            for i in range(salt_at - 1, 3):
+                texts[i] = salt + texts[i]
+        for n, (text, date) in enumerate(zip(texts, dates), start=1):
+            self.commit(root, n, text, date)
+        subprocess.run(["git", "-C", root, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True, capture_output=True)
+        return root
+
+    def test_the_cutover_is_the_committer_time_of_the_first_salt_commit(self):
+        root = self.repo(salt_at=2)
+        self.assertEqual(review_fn(self, "review_stamp_since")(root, "main"), "2026-10-21T15:04:05Z",
+                         "review_stamp_since is not the committer time of the commit that adds the salt line")
+
+    def test_without_a_salt_commit_the_cutover_is_none(self):
+        root = self.repo(salt_at=None)
+        self.assertIsNone(review_fn(self, "review_stamp_since")(root, "main"), "a history with no salt commit gave a cutover")
 
 
 if __name__ == "__main__":
