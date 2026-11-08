@@ -13293,6 +13293,27 @@ class ReviewedList(ReviewEnv):
         host, out = self.this_pr([pull_file("docs/debts/x.md")])
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
 
+    # ---- where a `N, this PR` filing counts (decision pr-review-record): the repo's own filing folder, as layout.path gives it. An unrolled repo
+    # files under its legacy folder, and a kind whose extras path legacy-repos keeps files under that path. Each case first asserts the folder.
+
+    def test_an_unrolled_repo_with_a_debt_file_under_its_legacy_debts_folder_is_done(self):
+        self.assertEqual(layout.path(self.co, "debts"), "debts", "scope: an unrolled repo files its debts under the legacy folder")
+        host, out = self.this_pr([pull_file("debts/x.md")])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+
+    def test_an_unrolled_repo_with_lines_added_to_its_legacy_debt_notes_file_is_done(self):
+        self.assertEqual(layout.path(self.co, "debt-notes"), "debts/notes.md", "scope: an unrolled repo keeps its debt notes in the legacy file")
+        host, out = self.this_pr([pull_file("debts/notes.md", status="modified", additions=2, deletions=0)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+
+    def test_a_rolled_out_repo_whose_extras_file_puts_debts_at_a_kept_path_is_done(self):
+        # the layout keeps no debts path of its own, so the kept path is one a legacy-repos entry names; the extras file may repeat it, not move it
+        patched_layout(self, {"shivinate7/other": {"debts": "records/debts"}})
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {"debts": {"path": "records/debts"}}, "rolled-out": True}))
+        self.assertEqual(layout.path(self.co, "debts"), "records/debts", "scope: the extras path is the folder this repo files its debts under")
+        host, out = self.this_pr([pull_file("records/debts/x.md")])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+
 
 def assert_layout_unreadable(test, root):
     """The scope of an unreadable-layout case, asserted before its subject (P7): layout.path cannot give `root` its debts folder, which is the read
