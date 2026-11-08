@@ -14226,13 +14226,14 @@ class BuildEnv(ReviewEnv):
     """A local origin with PR branches (`lane`, `commit`) and a PullsHost for the GitHub reads. Each lint run is `lint_run`, which replaces
     merge.ci_job_run; lint_steps and hit_suites are replaced too, so no ci-job runs. The cpu count is 4, so the lint cap is 2 (cpu_count - 2)
     unless a case sets another. `verdicts` maps a branch to the lint result of a run whose tree holds that branch's file; a branch not listed
-    passes. `check` (a LintCheck) replaces the lint run for a case that needs the runs to overlap."""
+    passes. `script` maps a branch to a list of results, one per lint run of its tree, the last one repeating (a re-run after a fail). `check` (a
+    LintCheck) replaces the lint run for a case that needs the runs to overlap."""
 
     cpus = 4
 
     def setUp(self):
         super().setUp()
-        self.lint_calls, self.verdicts, self.check = [], {}, None  # lint_calls: the branch files each lint tree held, in call order
+        self.lint_calls, self.verdicts, self.check, self.script = [], {}, None, {}  # lint_calls: the branch files each lint tree held, in call order
         for p in (unittest.mock.patch.object(merge, "ci_job_run", self.lint_run),
                   unittest.mock.patch.object(merge, "lint_steps", lambda *a, **k: set(BUILD_STEPS)),
                   unittest.mock.patch.object(merge, "hit_suites", self.suites_hit),
@@ -14245,6 +14246,9 @@ class BuildEnv(ReviewEnv):
         self.lint_calls.append(present)
         if self.check is not None:
             return self.check(wt, *args)
+        for branch, results in self.script.items():
+            if branch in present:
+                return results.pop(0) if len(results) > 1 else results[0]
         return next((verdict for branch, verdict in self.verdicts.items() if branch in present), ("pass", [], [], False))
 
     def suites_hit(self, root, paths, skip):
@@ -14790,6 +14794,223 @@ class BuildBatchLabels(BuildEnv):
         self.assertEqual(left_of(out), [], "the batch label is read as a hold, so a PR with a done record was left out:\n" + out + err)
         self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}", f"joins: #8 feat8 {h8[:9]}"], out + err)
         self.assert_ran(rc, out, err, 2)
+
+
+# ------------------------------------------------------------------ the batch's red line, the drop's record
+# A `Batch: red <head> <job>` comment on a pull request says its lane was dropped from a red batch at that head (rule
+# `git-integration-branch-merge`). These cases seed the state the drop leaves and read it back. No case here runs the drop that writes the
+# line. Each red case has a control beside it, the same read without the line.
+
+BATCH_RED_JOB = "check invariants"
+
+def batch_red_line(cid, n, head, created="2026-10-02T00:00:00Z", job=BATCH_RED_JOB):
+    """A comment on pull request n that is the drop's record for `head`: `Batch: red <head> <job>`."""
+    return review_comment(cid, n, f"Batch: red {head} {job}\n", created=created)
+
+
+class BatchRedLine(BuildEnv):
+    """The ledger reads a live-head `Batch: red` line as `lane batch red`, not as batch, and a plain build leaves that pull request out, so a
+    dropped lane never comes back at the same head. A new head makes the line stale."""
+
+    def test_control_without_the_line_a_done_pr_reads_batch(self):
+        # passes on main too: the record alone is a batch, so the reds below fail on the line, not on the setup
+        host = PullsHost([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], {}, comments=[ledger_record(1, 7, 5, rounds=REVIEW_PASS)], now=LEDGER_NOW)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 5h", out + err)
+
+    def test_the_ledger_reads_a_batch_red_line_on_the_live_head_as_lane_batch_red(self):
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS), batch_red_line(2, 7, REVIEW_HEAD, created=ago(2))]
+        host = PullsHost([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], {}, comments=comments, now=LEDGER_NOW)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 lane batch red: {BATCH_RED_JOB} 2h", "the ledger does not read the batch red line as the next act:\n" + out + err)
+
+    def test_a_plain_build_leaves_out_a_pr_whose_live_head_carries_a_batch_red_line(self):
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 2)  # control: both are candidates before the line
+        host.comments.append(batch_red_line(950, 7, h7))
+        rc, out, err = self.build(host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], "the pull request whose live head carries a Batch: red line joined the batch:\n" + out + err)
+        self.assert_ran(rc, out, err, 1)
+
+    def test_control_a_new_head_makes_the_batch_red_line_stale_so_the_pr_joins_again(self):
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9}, comments=[batch_red_line(950, 7, h7)])
+        h7b = self.commit("feat7", {"feat7-more.txt": "more\n"})
+        host.pulls = [batch_pull(7, h7b), batch_pull(9, h9)]
+        host.comments.extend(self.done(7, h7b))
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7b[:9]}", f"joins: #9 feat9 {h9[:9]}"], out + err)
+
+    def test_a_later_build_pushes_only_the_lanes_without_a_batch_red_line_and_no_revert(self):
+        # The state the drop leaves: #7 is red, #8 is stacked on it, and each carries its line; #9 is clean. The later build joins #9 alone, and
+        # the pushed branch is origin/main with one merge of #9's head and no commit of #7 or #8. This tests the drop's end state, not the drop.
+        h7 = self.lane(7)
+        h8 = self.lane(8, base=h7)  # stacked on #7: its base is feat7
+        h9 = self.lane(9)
+        pulls = [batch_pull(7, h7), batch_pull(8, h8, base="feat7"), batch_pull(9, h9)]
+        host = PullsHost(pulls, {}, comments=self.done(7, h7) + self.done(8, h8) + self.done(9, h9))
+        rc, out, err = self.build(host, "--push", "control-int")  # control: all three join, and the push moves a ref
+        self.assert_ran(rc, out, err, 3)
+        host.comments.extend([batch_red_line(950, 7, h7), batch_red_line(958, 8, h8)])
+        rc, out, err = self.build(host, "--push", "new-int")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], "a pull request with a Batch: red line joined the batch:\n" + out + err)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        pushed, main = self.head("new-int"), self.head("main")
+        self.assertTrue(pushed, "origin has no new-int after the build:\n" + out + err)
+        first_parent = sh(self.co, "git", "log", "--first-parent", "--format=%H %P", f"{main}..{pushed}").splitlines()
+        self.assertEqual(len(first_parent), 1, "the batch's first-parent history is not one merge onto origin/main:\n" + "\n".join(first_parent))
+        self.assertEqual(first_parent[0].split()[1:], [main, h9], "the batch's merge is not origin/main with feat9's head")
+        self.assertFalse({h7, h8} & set(sh(self.co, "git", "rev-list", pushed).split()), "a commit of a dropped lane is in the pushed batch")
+
+    def test_when_every_candidate_carries_a_batch_red_line_nothing_joins_and_nothing_is_pushed(self):
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9})
+        rc, out, err = self.build(host, "--push", "control-int")  # control: both join, and the push moves a ref
+        self.assert_ran(rc, out, err, 2)
+        host.comments.extend([batch_red_line(950, 7, h7), batch_red_line(959, 9, h9)])
+        before = self.refs()
+        rc, out, err = self.build(host, "--push", "empty-int")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(joins_of(out), [], "a pull request with a Batch: red line joined the batch:\n" + out + err)
+        self.assertEqual(self.refs(), before, "a build that joined nothing moved a ref on origin")
+        self.assert_ran(rc, out, err, 0)
+
+
+class CommentHost(FakeHost):
+    """FakeHost with the repo's issue comments. `issue_comments` and `review_comments` are merge.Host's own reads, so a comment read here is the
+    one the real Host makes. Only its `pages` seam is scripted."""
+
+    issue_comments = merge.Host.issue_comments
+    review_comments = merge.Host.review_comments
+
+    def __init__(self, root, other, comments=(), branch="feat"):
+        super().__init__(root, other, branch)
+        self.comments = list(comments)
+
+    def pages(self, rel, key=None, fields=None):
+        if re.fullmatch(r"issues/(\d+/)?comments", rel):
+            return list(self.comments)
+        raise AssertionError(f"unexpected read: {rel}")
+
+
+class BatchRedLineMerge(Env):
+    """A merge of an integration pull request is refused while its live head carries a `Batch: red` line for that head. The batch ran red, and
+    its tree still holds the lane the red job named. The refusal names the rebuild. The same pull request with no line, or with a line for another
+    head, merges."""
+
+    def test_a_merge_is_refused_while_the_head_carries_a_batch_red_line_for_itself(self):
+        head = self.head()
+        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, 1, head)])
+        before = self.refs()
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertNotEqual(rc, 0, "a head that carries its own Batch: red line was merged:\n" + out)
+        self.assertFalse(getattr(host, "merged", False), "the head was merged past its Batch: red line:\n" + out)
+        self.assertEqual(self.refs(), before, "a refused merge moved a ref on origin")
+        self.assertRegex(out, r"--build-batch|rebuil", "the refusal does not name the rebuild:\n" + out)
+
+    def test_control_the_same_head_with_no_batch_red_line_merges(self):
+        host = CommentHost(self.co, self.other)
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(host, "merged", False), out)
+
+    def test_control_a_batch_red_line_for_another_head_does_not_refuse(self):
+        host = CommentHost(self.co, self.other, comments=[batch_red_line(950, 1, self.head("main"))])
+        rc, out = self.run_merge("1", "--confirm", host=host)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(host, "merged", False), out)
+
+
+class BuildBatchLintRerun(BuildEnv):
+    """A lane lint that fails is run once more: a fail that passes on the re-run joins, and the output says it was re-run. A fail that fails
+    again is red: one `Lint: red` line, and the pull request is left out. An unknown is never re-run."""
+
+    def lint_runs(self, branch):
+        """The lint runs whose tree held `branch`'s file, in call order."""
+        return [present for present in self.lint_calls if branch in present]
+
+    def test_a_lint_fail_that_passes_on_the_rerun_joins_and_says_it_was_rerun(self):
+        self.script["feat7"] = [("fail", FAIL_LINES, [], False), ("pass", [], [], False)]
+        h7 = self.lane(7)
+        host = self.done_host({7: h7})
+        rc, out, err = self.build(host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(self.lint_runs("feat7")), 2, "a lint fail was not re-run once:\n" + out + err)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}"], "the lint that passed on the re-run did not join:\n" + out + err)
+        self.assertEqual(host.posts, [], "a lint that passed on the re-run posted a red line")
+        self.assertTrue(any(re.search(r"#7\b.*re-?(ran|run)|re-?(ran|run).*#7", line, re.I) for line in (out + err).splitlines()),
+                        "no line says #7 was re-run:\n" + out + err)
+        self.assert_ran(rc, out, err, 1)
+
+    def test_a_lint_that_fails_twice_is_red_and_posts_one_lint_red_line(self):
+        self.script["feat7"] = [("fail", FAIL_LINES, [], False)]  # one result: it repeats, so both runs fail
+        h7 = self.lane(7)
+        host = self.done_host({7: h7})
+        rc, out, err = self.build(host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(self.lint_runs("feat7")), 2, "a lint that failed was not re-run once:\n" + out + err)
+        self.assertEqual(len(host.posts), 1, f"want one lint-red comment, got {host.posts}:\n" + out + err)
+        self.assertEqual(host.posts[0][1].splitlines()[0], f"Lint: red {h7} check invariants, lint prose", "the comment's first line is not the lint-red line")
+        self.assertTrue(any(line.startswith("left out: #7 feat7: lane lint red: ") for line in left_of(out)), out + err)
+        self.assert_ran(rc, out, err, 0)
+
+    def test_control_an_unknown_lint_is_never_rerun(self):
+        self.verdicts["feat7"] = ("unknown", UNKNOWN_LINES, [], False)
+        h7 = self.lane(7)
+        host = self.done_host({7: h7})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(len(self.lint_runs("feat7")), 1, "an unknown lint was run again:\n" + out + err)
+        self.assertEqual(host.posts, [], "an unknown lint posted a red line")
+
+
+class LaneLintRedLimits(ReviewEnv):
+    """The `lane lint red` and `lane batch red` acts take the `lane round` age limit, from PR_STATE_AGE_HOURS, the one home. Neither act keeps a
+    limit of its own. Each red has its control inside the limit."""
+
+    def ledger_at(self, comments):
+        """-> (rc, out, err) of `merge --reviewed` over one open pull request 7 at REVIEW_HEAD, at LEDGER_NOW."""
+        host = PullsHost([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], {}, comments=comments, now=LEDGER_NOW)
+        return self.run_args("--reviewed", host=host)
+
+    def test_a_lane_lint_red_line_past_the_lane_round_limit_is_red(self):
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS), review_comment(2, 7, f"Lint: red {REVIEW_HEAD} {BATCH_RED_JOB}\n", created=ago(11))]
+        with unittest.mock.patch.dict(merge.PR_STATE_AGE_HOURS, {"lane round": 10}):
+            rc, out, err = self.ledger_at(comments)
+        self.assertEqual(rc, 1, "a lane lint red line 11h old is green under a lane round limit of 10h:\n" + out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 lane lint red: {BATCH_RED_JOB} 11h RED", out + err)
+
+    def test_control_a_lane_lint_red_line_inside_the_lane_round_limit_is_green(self):
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS), review_comment(2, 7, f"Lint: red {REVIEW_HEAD} {BATCH_RED_JOB}\n", created=ago(9))]
+        with unittest.mock.patch.dict(merge.PR_STATE_AGE_HOURS, {"lane round": 10}):
+            rc, out, err = self.ledger_at(comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 lane lint red: {BATCH_RED_JOB} 9h", out + err)
+
+    def test_a_batch_red_line_past_the_lane_round_limit_is_red(self):
+        # the done record is 12h old, inside the batch limit of 24h, so the batch act alone reads green here
+        comments = [ledger_record(1, 7, 12, rounds=REVIEW_PASS), batch_red_line(2, 7, REVIEW_HEAD, created=ago(11))]
+        with unittest.mock.patch.dict(merge.PR_STATE_AGE_HOURS, {"lane round": 10}):
+            rc, out, err = self.ledger_at(comments)
+        self.assertEqual(rc, 1, "a batch red line 11h old is green under a lane round limit of 10h:\n" + out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 lane batch red: {BATCH_RED_JOB} 11h RED", out + err)
+
+    def test_control_a_batch_red_line_inside_the_lane_round_limit_is_green(self):
+        comments = [ledger_record(1, 7, 12, rounds=REVIEW_PASS), batch_red_line(2, 7, REVIEW_HEAD, created=ago(9))]
+        with unittest.mock.patch.dict(merge.PR_STATE_AGE_HOURS, {"lane round": 10}):
+            rc, out, err = self.ledger_at(comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith("#7 feat7 "), out + err)
+
+    def test_the_lane_lint_red_act_has_no_age_limit_key_of_its_own(self):
+        self.assertNotIn("lane lint red", merge.PR_STATE_AGE_HOURS, "the lane lint red act keeps a limit of its own; it must take the lane round limit")
 
 
 if __name__ == "__main__":
