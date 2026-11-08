@@ -1511,4 +1511,3 @@
 - backlog-read-windows-paths: `MERGE_PROGRAM_RE` matches case-sensitively and does not read backslash paths, so a Windows `Merge\merge.py --reviewed` run is no ledger read (lint/report_guard.py). Rule: reports-backlog-counts.
 - backlog-read-subshell: a ledger run inside `bash -c '...'`, `( )`, `$( )` or `uv run python` is no read, so its count must say unknown (lint/report_guard.py `_ledger_kinds`). Rule: reports-backlog-counts.
 - backlog-finished-merge-base-fail: a failed merge-base read counts a draft-held lane as held, so the finished count reads low as a number, as idle_lanes does (skills/roadmap/build.py). Rule: reports-backlog-counts.
-- backlog-finished-on-unread-list: when every archive-list entry is unknown (for example, page items not read), `merge --idle-lanes` exits 1 and prints no finished line, though the finished count needs no page items. The report must then say unknown (merge/merge.py `idle_lanes`). Rule: reports-backlog-counts.

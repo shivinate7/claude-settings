@@ -3417,8 +3417,9 @@ def write_merge_role(tier):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live):
-    """merge --idle-lanes: print one line per lane to archive, then the summary line, then the finished-lanes count line. Exit 1 with no summary when the
-    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
+    """merge --idle-lanes: print one line per lane to archive, then the summary line, then the finished-lanes count line. Exit 1 with no summary, but
+    still the count line, when every archive-list entry is unknown. Exit 1 with no output lines when the live file is not named or the
+    roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
         return 1
@@ -3443,7 +3444,8 @@ def idle_lanes(live):
     # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
     unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        entries = [*entries, idle_lanes_summary(len(lanes)) + " Run get_session on each alone, then archive it.", finished_lanes_line(finished)]
+        entries = [*entries, idle_lanes_summary(len(lanes)) + " Run get_session on each alone, then archive it."]
+    entries = [*entries, finished_lanes_line(finished)]  # the count reads from the sessions, not the archive list, so it prints either way
     say(*entries)
     return 1 if unread else 0
 
