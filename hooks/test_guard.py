@@ -12653,6 +12653,20 @@ sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /t
    "allow", cwd=NOGIT)
 sh("frozen: cp FROM the frozen settings to scratch is a read",
    "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+# A loop keyword or a wrapper in front of `cp` changes nothing: the copy still reads its source and
+# still writes its destination. Each deny is the matching allow with the frozen path moved to DEST.
+sh("frozen: cp FROM a frozen hook to scratch after a loop keyword is a read",
+   "for f in a; do cp " + CFG_HOOK + " ./x; done", "allow", cwd=NOGIT)
+sh("frozen: sudo cp FROM a frozen hook to scratch is a read",
+   "sudo cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: env cp FROM a frozen hook to scratch is a read",
+   "env cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook after a loop keyword still denies",
+   "for f in a; do cp x " + CFG_HOOK + "; done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sudo cp TO a frozen hook still denies", "sudo cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: env cp TO a frozen hook still denies", "env cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
 sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
 sh("frozen: cp from a frozen path TO a frozen path still denies",
@@ -22386,6 +22400,70 @@ def worktree_home_cross_checkout_case():
     return True, "sibling, nested, primary, shell and outside-clone writes judged; reads pass"
 
 
+def worktree_home_cross_checkout_copy_case():
+    """Rule 0, `other-checkout`, the false alarms on a copy, beside
+    `worktree_home_cross_checkout_case`. A copy reads its SOURCE, so a source in another checkout
+    is a read; only the target is a write. An interpreter runs its body as code: a write it makes through
+    os.system, subprocess, a copy call, or open() is judged. A substitution in an unquoted heredoc and
+    a bash body are judged too. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocp")
+    write(os.path.join(lane_b, "bin", "ci-job"), "#!/bin/sh\n")
+    write(os.path.join(lane_b, "x"), "x\n")
+    write(os.path.join(lane_b, "y"), "y\n")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A copy reads its source: the source may sit in another checkout. Only the target is judged.
+    check("for-loop copy of another checkout's file into its own", "allow", "Bash", lane_a,
+          command='B=%s; for f in bin/ci-job; do cp "$B/$f" "$f"; done' % other)
+    check("copy from another checkout, inside a loop body", "allow", "Bash", lane_a,
+          command='for f in a; do cp "%s/bin/ci-job" bin/ci-job; done' % other)
+    check("copy from another checkout into an unresolved quoted target", "allow", "Bash", lane_a,
+          command='cp "%s/x" "$f"' % other)
+    # Controls: each write into another checkout stays refused.
+    check("control: copy into another checkout's file, quoted target", "deny", "Bash", lane_a,
+          command='B=%s; cp bin/x "$B/bin/ci-job"' % other)
+    check("control: copy into another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do cp a "$B/$f"; done' % other)
+    check("control: move out of another checkout", "deny", "Bash", lane_a,
+          command="mv %s/x ./x" % other)
+    check("control: move out of another checkout inside a loop", "deny", "Bash", lane_a,
+          command='B=%s; for f in a; do mv "$B/$f" "$f"; done' % other)
+    check("control: unquoted heredoc whose substitution copies into another checkout", "deny",
+          "Bash", lane_a, command='python3 - <<EOF\nx="$(cp a %s/y)"\nEOF' % other)
+    check("control: quoted heredoc whose interpreter copies into another checkout", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil; shutil.copy('a', '%s/x')\nPY" % other)
+    check("control: bash heredoc body that copies into another checkout", "deny", "Bash", lane_a,
+          command="bash <<'EOF'\ncp a %s/x\nEOF" % other)
+    # A quoted heredoc whose interpreter writes a file in another checkout.
+    check("quoted heredoc whose interpreter opens a file in another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nopen('%s/x','w').write('1')\nPY" % other)
+    # Interpreter bodies that run a write through another call: the body stays in the shell scan.
+    check("python os.system runs a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a %s/x')\nPY" % other)
+    check("python os.system runs an echo redirect into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('echo 1 > %s/x')\nPY" % other)
+    check("python subprocess.run lists a copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','%s/x'])\nPY" % other)
+    check("python from-import copy into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nfrom shutil import copy; copy('a','%s/x')\nPY" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "copy sources in another checkout pass; writes refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -22546,7 +22624,8 @@ def worktree_home_cross_checkout_cost_case():
     checkout; none for a Read, a Grep, a shell call that writes no file (a `2>&1` or `/dev/null`
     redirect included), a git verb that stays in its own checkout (`commit`, `checkout -b`, `stash list`),
     a `cd` within its own checkout, or a write from a cwd with no `.git` at or above it. A `git -C` into a
-    separate clone spends its one list. A stand-in git on PATH logs each spawn."""
+    separate clone spends its one list. A python heredoc that prints spends none; one that opens a
+    file in another checkout spends one. A stand-in git on PATH logs each spawn."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xcocost")
@@ -22591,6 +22670,10 @@ def worktree_home_cross_checkout_cost_case():
          {"command": VCS + " status"}, 0, 0, {"CLAUDE_PROJECT_DIR": primary}),
         ("shell git -C a separate clone commit", "Bash", lane_a,
          {"command": VCS + " -C " + slash(XCL_SEP) + " commit -m x"}, None, 1, {"CLAUDE_PROJECT_DIR": primary}),
+        ("shell python heredoc that prints, from its own checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nprint(1)\nPY"}, None, 0),
+        ("shell python heredoc that opens a file in another checkout", "Bash", lane_a,
+         {"command": "python3 - <<'PY'\nopen('" + slash(lane_b) + "/x','w')\nPY"}, None, 1),
     ):
         if os.path.exists(log):
             os.remove(log)
@@ -23871,6 +23954,9 @@ LOG_CHECKS = (
      "unreadable", worktree_home_case),
     ("worktree-home: any session's write into another checkout of its clone is refused; outside "
      "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: a copy whose source is in another checkout is allowed; a write into another "
+     "checkout, from a copy or an interpreter body, is refused",
+     worktree_home_cross_checkout_copy_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
