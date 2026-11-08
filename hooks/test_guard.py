@@ -7991,6 +7991,8 @@ NM_WORKSPACE_VERSION = (
     "npm verison patch -w a", "npm -w a verison patch",
     "npm version patch --ws", "npm version patch --workspace a", "npm --ws version patch",
     "npm verison patch --ws", "npm version patch --ws=true", "npm version patch --workspaces=true",
+    # A word after a bare flag that is not `false` turns workspace mode on (npm_workspace_mode), so these are refused.
+    "npm version patch --ws ci", "npm version patch --workspaces true",
 )
 # THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
 # --dry-run, so a dry run is no no-change for them. npm resolves the unique abbreviations of rebuild and edit to
