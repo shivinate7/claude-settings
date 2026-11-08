@@ -1,11 +1,11 @@
 {
   "title": "A check refuses a decision's cost line that names a file no test pins",
   "why": "A decision's cost line named file reads from memory, and three fix-check passes on #1850 were needed (lane revive-1042, 05:16 CST Nov 8; rule building-mistake-names-its-guard).",
-  "note": "Fix: a check that each file a decision's cost line names is pinned by a test; red case first on a cost line naming an unpinned file. The write-call pin for #1850 lands in follow-up branch mcp-write-open-pin (Merge after: #1850) in lane revive-1042. Related: step watchers-cost-tests (each mechanism's cost is proved by a test). Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:19 CST Nov 8; the general check has no lane yet. Doing in lane session_013NEJL41VrPLwKBbnK7TWVn (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Sighting 09:33 CST Nov 8 (coordinator; rule verification-checked-reader-for-numbers): lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y) wrote read counts and refusal reasons in a record's cost lines from memory, and review failed it four times; proposed step cost-line-has-reader (a cost line's counts get a checked reader or state a bound such as at most N). Not folded: triage asked this lane at 09:35 CST whether it takes counts and reasons too; if not, cost-line-has-reader goes to lane sim-lease-gaps after #2061.",
+  "note": "Fix: a check that each file a decision's cost line names is pinned by a test; red case first on a cost line naming an unpinned file. The write-call pin for #1850 lands in follow-up branch mcp-write-open-pin (Merge after: #1850) in lane revive-1042. Related: step watchers-cost-tests (each mechanism's cost is proved by a test). Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:19 CST Nov 8; the general check has no lane yet. Doing in lane session_013NEJL41VrPLwKBbnK7TWVn (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Sighting 09:33 CST Nov 8 (coordinator; rule verification-checked-reader-for-numbers): lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y) wrote read counts and refusal reasons in a record's cost lines from memory, and review failed it four times; proposed step cost-line-has-reader (a cost line's counts get a checked reader or state a bound such as at most N). The lane declined at 09:36 CST (#1981 and #1992 are reviewed and with runner 8; counts are a different parse), so it is filed apart as step cost-line-has-reader.",
   "phase": "now",
   "status": "doing",
   "order": 615,
   "owner": "triage",
   "lane": "session_013NEJL41VrPLwKBbnK7TWVn",
-  "updatedAt": "2026-11-08T09:35:00-06:00"
+  "updatedAt": "2026-11-08T09:36:00-06:00"
 }

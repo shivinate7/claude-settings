@@ -1,0 +1,11 @@
+{
+  "title": "A record's cost-line counts and refusal reasons have a checked reader, or state a bound",
+  "why": "Lane sim-lease-gaps wrote read counts and refusal reasons in a record's cost lines from memory, and review failed it four times (rule verification-checked-reader-for-numbers).",
+  "note": "Filed 09:36 CST Nov 8 (coordinator 09:33 CST, rule building-mistake-names-its-guard). Lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y) takes it after #2061 (item 386). Merge after: #1992. One home (lane cost-line-pinned, 09:36 CST): extend lint/check_cost_pins.py, reusing its paragraph and sentence reader (paragraphs, read_paragraph, mid_line_start) and its same-sentence pin or 'not pinned' rule; no second scanner. Red case first: a cost line with an unpinned count.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzSDXuw4rJESuzdw1Y",
+  "status": "todo",
+  "order": 705,
+  "updatedAt": "2026-11-08T09:36:00-06:00"
+}
