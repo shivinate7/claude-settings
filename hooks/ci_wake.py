@@ -244,9 +244,10 @@ def wait_for(sha, cwd, deadline, repo=""):
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, `pauses` apart; the last
     pause ends at the deadline, with one list there. After the first run that ran is judged,
-    list once more at once and judge any run not yet read there, then return. The runs come back
+    list once more at once, even when the deadline has passed, and judge any run not yet read there, then
+    return. The re-list past the deadline may add one list call plus one view per new run. A run still going at the re-list reads as pending, so Unknown. The runs come back
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
-    so a newer run of a name outranks the older one. A refused re-list returns the runs already
+    so a newer run of a name outranks the older one. A refused re-list list or view returns the runs already
     judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
     list does, since the unread list could hold a red or a running run (rule verification-report-unknown-reads). A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
     extra = ["-R", repo] if repo else []
@@ -266,14 +267,19 @@ def wait_for(sha, cwd, deadline, repo=""):
                  and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
         for r in fresh:
             watch_run(r["databaseId"], cwd, deadline, repo)
-        got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
-               for r in fresh]
+        try:
+            got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+                   for r in fresh]
+        except Unknown:
+            if viewed and judged_red(viewed):
+                return viewed   # a refused view in a later list: a red run stays red, as for a refused list
+            raise   # a first-list view, or judged runs that are not red: unread runs could be red or running
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
-        if ran and not relisted and deadline - time.monotonic() > 0:
+        if ran and not relisted:
             relisted = True
-            continue   # the first judged run: list once more at once for a later one
+            continue   # the first judged run: list once more at once for a later one, even at the deadline
         if viewed:
             return viewed
         left = deadline - time.monotonic()
