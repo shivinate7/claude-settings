@@ -916,7 +916,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIn("matches no reviewer spawn, which ran sonnet", out["reason"])
 
     def test_dm_green_round1_haiku_before_last_human_counts(self):
-        # The round 1 reviewer ran before the last human message. Its haiku counts in Done.
+        # A reviewer spawned before the last human message ran haiku. Its haiku counts in Done.
         round_1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
         round_2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
         self.assertIsNone(self.verdict(
@@ -950,7 +950,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIn("'builder haiku' matches no builder spawn", out["reason"])
 
     def test_dm_green_design_reviewer_name_is_not_a_reviewer(self):
-        # design-reviewer is no named role, so its name must not read as "reviewer opus". The round 1
+        # design-reviewer is no named role, so its name must not read as "reviewer opus". The earlier-turn
         # reviewer ran haiku before the last human message, and a reviewer opus name would be refused.
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5 (builder sonnet, design-reviewer opus)\n> **Next** Unstarted: none",
@@ -958,7 +958,7 @@ class DoneNamesModelsTests(unittest.TestCase):
             before_human=[{"subagent_type": "reviewer", "prompt": "Round 1 of 3"}]))
 
     def test_dm_green_spaced_design_reviewer_name_is_not_a_reviewer(self):
-        # "design reviewer opus", with a space, names design-reviewer, which is no named role. The round 1
+        # "design reviewer opus", with a space, names design-reviewer, which is no named role. The earlier-turn
         # reviewer ran haiku before the last human message, and the turn's reviewer ran sonnet.
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet, design reviewer opus)\n"
