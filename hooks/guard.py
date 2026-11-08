@@ -395,6 +395,7 @@ while True:
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
+            substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -3267,9 +3268,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
 
-    # 1. Shared trees.
+    # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
+    # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).
+    # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
+    texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in split_segments(stripped):
+    for segment in (part for text in texts for part in split_segments(text)):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3402,24 +3406,25 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 2. A machine-wide kill. Judged in COMMAND POSITION, from the segment's own tokens, never
     # by the word appearing anywhere in the text. A segment shlex cannot parse fails open:
     # judge nothing rather than guess what it would run.
-    previous = None
     call_tokens = []
-    for segment in split_segments(stripped):
-        if not segment.strip():
-            continue
-        tokens = segment_tokens(segment)
-        if tokens is None:
-            previous = None
-            continue
-        call_tokens.append(tokens)
-        matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
-        previous = tokens
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
-        # Every agent shares the main session's id, so only the main session may own by tag.
-        matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
-        if matched:
-            refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
+    for text in texts:
+        previous = None   # a pipe never reaches across a substitution's edge
+        for segment in split_segments(text):
+            if not segment.strip():
+                continue
+            tokens = segment_tokens(segment)
+            if tokens is None:
+                previous = None
+                continue
+            call_tokens.append(tokens)
+            matched = kill_hit(tokens) or kill_fed_by_name(tokens) or kill_fed_by_pipe(tokens, previous)
+            previous = tokens
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_REASON, matched)
+            # Every agent shares the main session's id, so only the main session may own by tag.
+            matched = foreign_pid_kill(tokens, transcript, "" if agent else session_id)
+            if matched:
+                refuse(tool, "deny", "machine-wide-kill", KILL_PID_REASON, matched)
     # The whole call, not one segment: an `lsof -t` pid list reaches a kill across a filter, a loop or a file.
     matched = lsof_pids_reach_kill(call_tokens)
     if matched:
@@ -3493,16 +3498,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 4. A wide delete refuses, and a force push asks.
     # Split before backslashes turn to slashes, so `it\'s` opens no quote that hides a delete.
-    delete_segments = [delete_text(segment) for segment in split_segments(stripped)]
-    for number in range(len(delete_segments)):
-        matched, reason = parent_delete_hit(delete_segments, number, cwd)
-        if matched:
-            refuse(tool, "deny", "destructive-delete", reason, matched)
+    delete_texts = [[delete_text(segment) for segment in split_segments(text)] for text in texts]
+    for delete_segments in delete_texts:
+        for number in range(len(delete_segments)):
+            matched, reason = parent_delete_hit(delete_segments, number, cwd)
+            if matched:
+                refuse(tool, "deny", "destructive-delete", reason, matched)
     for pattern in DESTRUCTIVE_DELETE:
         found = pattern.search(cmd)
         if found:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, found.group(0))
-    for segment in delete_segments:
+    for segment in (part for delete_segments in delete_texts for part in delete_segments):
         matched = rm_delete_hit(segment) or cmd_exe_delete_hit(segment)
         if matched:
             refuse(tool, "deny", "destructive-delete", DELETE_REASON, matched)
@@ -3511,7 +3517,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
-    for segment in split_segments(stripped):
+    for segment in (part for text in texts for part in split_segments(text)):
         for subcommand, args in git_calls(push_text(segment)):
             where, overrides = push_target(segment, stripped, cwd) if subcommand == "push" else ("", {})
             verdict = push_verdict(args, where, overrides) if subcommand == "push" else ""
