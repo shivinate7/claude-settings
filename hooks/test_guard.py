@@ -9596,11 +9596,11 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # read by repo_tag_names (the exact prefix, no strip, owner/name without case). A tagged repo with no --root is missing,
 # and the reason names it. A --root with no tag is extra, and the reason names it. The own record is read as
 # merge-role-proof reads it: a record that is not a batch runner's is not compared, and an own record that cannot be read
-# refuses. A bare `--reviewed` (no `--root`) is read the same way, and its record is judged the same way: a runner with two or
-# more repo tags is refused, and the reason says to pass one --root per tag; a runner with one tag or none may run it. A
-# session with no session id in its env is a local session: it has no cs tags, so it is no batch runner and its calls allow.
-# A record read before the turn's last user or cross-session message is stale, since a tag another session added since is
-# unseen, so it refuses with the remedy.
+# refuses. A bare `--reviewed` (no `--root`) reads the newest own record with no turn bound: a runner with two or more repo
+# tags is refused, and the reason says to pass one --root per tag. Any other bare call allows, a session whose record cannot
+# be read included. A session with no session id in its env is a local session: it has no cs tags, so it is no batch runner
+# and its calls allow. For a --root call, a record read before the turn's last user or cross-session message is stale, since
+# a tag another session added since is unseen, so it refuses with the remedy.
 ROOTS_RULE = "merge-roots-cover"
 ROOTS_REMEDY = "run get_session (no argument) alone in its own turn, then retry"
 
@@ -9661,8 +9661,8 @@ roots_allow("a runner's newer record after the turn's user message is the one re
             role_path("roots-stale-then-read"))
 roots_allow("a tool result after the runner's record starts no turn, so the record still allows", ROOTS_BOTH,
             role_path("roots-read-then-tool"))
-# A record that cannot be read, or is stale, refuses with the remedy, for a --root call and a bare call alike. This list is the
-# one home of those cases: both calls read it.
+# A --root call whose own record cannot be read, is missing, or is stale refuses with the remedy. ROOTS_UNREADABLE is the
+# home of the records that cannot be read or are missing: a bare call allows them (see the bare block below).
 ROOTS_UNREADABLE = [
     ("no get_session record in the transcript", role_path("no-record")),
     ("a get_session result whose text is not JSON", role_path("not-json")),
@@ -9672,16 +9672,18 @@ ROOTS_UNREADABLE = [
     ("a payload with no transcript_path", None),
     ("a record of another session only", role_path("other-session")),
     ("a list_sessions result that holds the runner tags", role_path("list-runner")),
+]
+# A record read before the turn's last user or cross-session message is stale. Only a --root call refuses on it.
+ROOTS_STALE = [
     ("a record read before the turn's user message", role_path("roots-turn-owner")),
     ("a record read before a cross-session message of the turn", role_path("roots-turn-peer")),
 ]
-for _label, _transcript in ROOTS_UNREADABLE:
+for _label, _transcript in ROOTS_UNREADABLE + ROOTS_STALE:
     roots_refuse("a runner's --root call with " + _label + " is refused, with the remedy", ROOTS_BOTH, _transcript,
                  carries=(ROOTS_REMEDY,))
-    roots_refuse("a runner's bare --reviewed with " + _label + " is refused, with the remedy", roots_cmd([]), _transcript,
-                 carries=(ROOTS_REMEDY,))
-# A bare `--reviewed` is this rule's too. A runner with two or more repo tags names them with one --root each, so its bare call
-# is refused, and the reason names each tag and says to pass one --root per tag. One repo tag, or none, is no second repo to name.
+# A bare `--reviewed` reads the newest own record, with no turn bound. A batch runner with two or more repo tags is refused, and
+# the reason names each tag and says to pass one --root per tag. Every other bare call allows: one repo tag or none, a
+# non-runner, a local session, and a session whose record cannot be read or is missing, since a lane runs the bare listing.
 ROOTS_BARE_CARRIES = ("OWNER/NAME=DIR per tag", "o/alpha", "o/bravo")
 roots_refuse("a batch runner with two repo tags running a bare --reviewed is refused, and the reason says to pass one --root per tag",
              roots_cmd([]), role_path("roots-runner"), carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
@@ -9695,8 +9697,14 @@ roots_allow("a lane with two repo tags running a bare --reviewed allows", roots_
 roots_allow("a coordinator with two repo tags running a bare --reviewed allows", roots_cmd([]), role_path("roots-coord-two"))
 roots_allow("a local session with no session id in the env running a bare --reviewed allows, though its tags would refuse",
             roots_cmd([]), role_path("roots-runner"), env=None)
-# A fresh record of a runner with two repos refuses a bare call with the tags, not the remedy: the record is current, so the
-# remedy would send it to re-read a record it has already read.
+roots_refuse("a batch runner with two repo tags whose newest record predates its turn is refused for a bare --reviewed, with the tags",
+             roots_cmd([]), role_path("roots-turn-owner"), carries=ROOTS_BARE_CARRIES, lacks=(ROOTS_REMEDY,))
+# No record that shows two repo tags allows a bare call: a missing record, one that cannot be read, another session's, a list's,
+# or no transcript at all. The old allow of a bare call with no record is restored here.
+for _label, _transcript in ROOTS_UNREADABLE:
+    roots_allow("a bare --reviewed with " + _label + " allows", roots_cmd([]), _transcript)
+# A bare call judges the newest own record, so a runner with two repo tags is refused on it whether or not the turn has started
+# since. The reason names the tags, never the remedy.
 for _fresh_label, _fresh in (("read after the turn's message", "roots-turn-then-read"),
                              ("re-read after a stale one", "roots-stale-then-read"),
                              ("followed by a tool result", "roots-read-then-tool")):
