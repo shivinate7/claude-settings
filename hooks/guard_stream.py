@@ -342,8 +342,12 @@ def clock_loop(token_rows) -> bool:
     return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
 
 
-def waiter_verdict(segments, background: bool) -> str:
+def waiter_verdict(segments, background: bool, monitor: bool = False) -> str:
     """Return the matched text when a command waits by looping, else ''.
+
+    `monitor` marks a Monitor call, which the harness hands to the guard as a Bash call that carries
+    `timeout_ms` (decision agents-wait-with-monitor). Monitor is the wait the record allows, so its loops
+    and pauses pass. `gh run watch` and `timeout /t` stay refused, as they are under run_in_background.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
@@ -377,6 +381,8 @@ def waiter_verdict(segments, background: bool) -> str:
                 run_watch = run_watch or found
         elif waiter_hit(segment):
             return waiter_hit(segment)
+    if monitor:
+        return run_watch
     if background and clock_loop(token_rows):
         # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
         # that time, so only its pauses are judged.
@@ -392,6 +398,7 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
+    "To wait for a file, a port or another condition, use the Monitor tool once. "
     "To wait until a clock time, use `wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
     "that has a zone. To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "

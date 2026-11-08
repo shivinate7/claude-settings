@@ -13,6 +13,10 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 
 It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.
 
+The guard sees a Monitor call as a Bash call. Monitor's input carries `timeout_ms`, and Bash's carries `timeout`. The guard tells Monitor by `timeout_ms` with no `timeout`, and no `run_in_background`. It then allows the loop and the pauses. `gh run watch` and `timeout /t` stay refused. A Bash call with `timeout` is judged as a foreground call.
+
+Cost: no new process and no new file. The guard reads one more key of the call it already judges.
+
 Why: the guard once refused Monitor and all short pauses, so an agent that followed the Bash tool's text lost a turn. Almost none of the refusals were real loops. That count is unmeasured: it has no source or re-run command.
 Whether Monitor still errors is unmeasured too (notes entry `waiter-monitor-failures-unmeasured`).
 
