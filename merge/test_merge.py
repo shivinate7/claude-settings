@@ -13939,7 +13939,7 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         self.assert_names(err, "Round 1", "design-reviewer")
 
 class ReviewRoundOneReset(ReviewChainFixture):
-    """A fresh round 1 may not reset the round count of a pull request (rule roles-review-cap-three, decision pr-review-record). An earlier record
+    """A fresh first round may not reset the round count of a pull request (rule roles-review-cap-three, decision pr-review-record). An earlier record
     whose top round n is below 3, with a FAIL line in round n, sets the floor to n + 1, unless a record on the pull request from that one on has a
     Fix check line. A new record without a Fix check line whose last round is below the floor is refused where it is written: exit 2, nothing on
     stdout, and `run round N` on stderr. `merge --reviewed` reads such a newest record open, with round N owed in its why. Each red case sits beside
@@ -14050,7 +14050,7 @@ class ReviewRoundOneReset(ReviewChainFixture):
         self.assertEqual(len(reads), 1, f"a fix-check record read the comment list {len(reads)} times, not once")
 
     def test_a_fresh_round_one_after_an_earlier_fix_check_pass_is_accepted(self):
-        # the FAIL record carries a passed fix check; then a later record carries one. Either keeps the fresh round 1 accepted
+        # the FAIL record carries a passed fix check; then a later record carries one. Either keeps the fresh first round accepted
         own = record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict="PASS", head=self.OTHER),))
         rc, out, err, _ = self.write([own], ("1:reviewer:haiku:PASS",))
         self.assertEqual(rc, 0, "a fresh round 1 after a FAIL record with a passed fix check was refused:\n" + out + err)
@@ -14061,7 +14061,7 @@ class ReviewRoundOneReset(ReviewChainFixture):
         self.assertNotIn("run round", err)
 
     def test_a_fresh_round_one_after_an_earlier_failed_or_wide_fix_check_is_accepted(self):
-        # a FAIL or WIDE fix check on the earlier record is not this rule's floor, so the fresh round 1 is written as it is today
+        # a FAIL or WIDE fix check on the earlier record is not this rule's floor, so the fresh first round is written as it is today
         for verdict in ("FAIL", "WIDE"):
             with self.subTest(verdict=verdict):
                 own = record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict=verdict, head=self.OTHER),))
@@ -14070,7 +14070,7 @@ class ReviewRoundOneReset(ReviewChainFixture):
                 self.assertNotIn("run round", err)
 
     def test_a_fresh_round_one_after_a_record_that_reached_round_three_is_not_refused_by_this_rule(self):
-        # a record at round 3 sets no floor of this rule, whatever its verdict, so only the absence of the round text is pinned here
+        # a record at the final round sets no floor of this rule, whatever its verdict, so only the absence of the run text is pinned here
         for rounds in (REVIEW_FAILED_THREE, REVIEW_PASSED_THREE, REVIEW_PARTIAL_THREE):
             with self.subTest(final=rounds[-1]):
                 rc, out, err, _ = self.write([record_text(head=self.EARLIER, rounds=rounds)], ("1:reviewer:haiku:PASS",))
@@ -14086,6 +14086,35 @@ class ReviewRoundOneReset(ReviewChainFixture):
         self.assertEqual(rc, 0, "a fresh round 1 on a pull request with no earlier record was refused:\n" + out + err)
         self.assertIn(REVIEW_MARKER, out)
 
+    def test_a_fix_record_clears_only_the_open_fail_of_the_record_it_follows(self):
+        # a fix check clears the open FAIL of the record it follows, never an older record's, so the older FAIL still floors the fresh first round
+        earlier = [review_comment(1, 7, self.earlier_fail()), review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.PASS_ONE))]
+        rc, out, err, _ = self.run_chain(self.NEWEST, earlier, rounds=("1:reviewer:haiku:PASS",))
+        self.assert_refused_for(rc, out, err, "run round 2")
+
+    def test_a_full_pass_record_after_a_fail_then_a_pass_record_is_not_floored(self):
+        # a false-alarm check: an earlier FAIL that is not in the top round sets no floor, so a later record that passes both rounds is written
+        both_pass = ("Round 1: reviewer, haiku, PASS", "Round 2: reviewer, haiku, PASS")
+        earlier = [record_text(head=self.EARLIER, rounds=self.FAIL_ONE + ("Round 2: reviewer, haiku, PASS",)), record_text(head=self.NEWEST, rounds=both_pass)]
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:PASS", "2:reviewer:haiku:PASS"))
+        self.assertEqual(rc, 0, "a record passing both rounds, after a FAIL record and a PASS record, was refused:\n" + out + err)
+        self.assertNotIn("run round", err)
+
+    def test_a_fresh_first_round_after_a_passed_fix_check_then_an_open_fail_is_refused(self):
+        # a passed fix check on an older record does not clear a FAIL that a later record left open
+        fixed = record_text(head=self.EARLIER, rounds=self.PASS_ONE, fix=(fix_check_line(verdict="PASS", head=self.OTHER),))
+        open_fail = record_text(head=self.NEWEST, rounds=self.FAIL_ONE)
+        rc, out, err, _ = self.write([fixed, open_fail], ("1:reviewer:haiku:PASS",))
+        self.assert_refused_for(rc, out, err, "run round 2")
+
+    def test_a_fresh_first_round_after_an_earlier_partial_round_is_refused(self):
+        # a PARTIAL top line raises the floor like a FAIL: a round-2 record is the control, and a fresh first round is refused
+        earlier = [record_text(head=self.EARLIER, rounds=("Round 1: reviewer, haiku, PARTIAL",))]
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:PASS", "2:reviewer:haiku:PASS"))
+        self.assertEqual(rc, 0, "control: a round-2 record after a round-1 PARTIAL was refused:\n" + out + err)
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:PASS",))
+        self.assert_refused_for(rc, out, err, "run round 2")
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -14097,7 +14126,7 @@ class ReviewedList(ReviewEnv):
         return host, rc, out, err
 
     def test_the_newest_record_decides_the_line(self):
-        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that ends at round 1 after a no-fix Round 1 FAIL reads open, so the newest record here carries Round 2.
+        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that stops at the first round after a no-fix first-round FAIL reads open, so the newest record here carries the second round.
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))),
                     review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
@@ -14204,7 +14233,7 @@ class ReviewedList(ReviewEnv):
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
         # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
-        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that ends at round 1 after a no-fix Round 1 FAIL reads open, so the newest record here carries Round 2.
+        # Ruling, roadmap step round-one-reset (triage, 08:17 CST Nov 8, relayed by the coordinator): a later record that stops at the first round after a no-fix first-round FAIL reads open, so the newest record here carries the second round.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
         newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
