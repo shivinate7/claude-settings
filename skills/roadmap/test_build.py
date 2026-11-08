@@ -621,7 +621,7 @@ class UpkeepFixture(Fixture):
 
     def draft(self, number, branch, created=None, title=None):
         """An open draft pull row. The createdAt key is left out when created is None."""
-        row = {"number": number, "title": title or "lane " + branch, "branch": branch, "draft": True}
+        row = {"number": number, "title": title or "lane " + branch, "branch": branch, "draft": True, "body": None}
         if created is not None:
             row["createdAt"] = created
         return row
@@ -2709,6 +2709,7 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(self.row(out, "notes over %d words" % build.NOTE_WORDS), (0, ""))
 
     def test_core_four_lanes_only_the_one_whose_step_merged_is_listed(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
                    "c3": {"status": "done", "order": 3}, "c4": {"status": "done", "order": 4}})
         self.trailer_on_main("c1")
@@ -2716,25 +2717,28 @@ class IdleLanes(UpkeepFixture):
                                self.lane("session_b", "c2"),
                                self.lane("session_c", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
                                self.lane("session_d", "c4")],
-                     pulls=[{"number": 21, "title": "c2 lane", "branch": "c2"}],
+                     pulls=[{"number": 21, "title": "c2 lane", "branch": "c2", "body": None}],
                      items=[{"n": 4, "status": "open", "home": "step c4", "lane": "c4"}])
         self.assertEqual(self.ids(self.idle_direct()), ["session_a"])
 
     def test_open_pull_on_the_lane_head_form_blocks_its_lane(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
-                     pulls=[{"number": 31, "title": "lane c1", "branch": "lane/c1"}])
+                     pulls=[{"number": 31, "title": "lane c1", "branch": "lane/c1", "body": None}])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
     def test_open_pull_on_the_bare_step_head_blocks_its_lane(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
-                     pulls=[{"number": 32, "title": "lane c2", "branch": "c2"}])
+                     pulls=[{"number": 32, "title": "lane c2", "branch": "c2", "body": None}])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
     def test_open_draft_whose_head_is_an_ancestor_of_main_does_not_block(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
                    "c3": {"status": "done", "order": 3}})
         git(self.repo, "checkout", "-q", "main")
@@ -2750,6 +2754,7 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_c"]))
 
     def test_open_draft_with_no_head_sha_holds_its_lane(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # Green on the old code: a draft with no head sha cannot be shown landed, so it holds. session_b is the control.
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
@@ -2758,6 +2763,7 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
     def test_open_draft_whose_head_git_cannot_read_holds_its_lane(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # Green on the old code: a head sha git does not hold makes the ancestor read fail, and a failed read holds.
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
@@ -2919,11 +2925,12 @@ class IdleLanes(UpkeepFixture):
         self.assert_no_unknown_line(entries)
 
     def test_absent_step_with_a_trailer_held_by_an_open_pull_has_no_line(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # A lane that waits on an open pull reads no line, whether or not its step has a trailer. session_a is the control.
         self.land({"c1": {"status": "done", "order": 1}})
         self.trailer_on_main("ghost")
         self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")],
-                     pulls=[{"number": 61, "title": "lane ghost", "branch": "lane/ghost"}])
+                     pulls=[{"number": 61, "title": "lane ghost", "branch": "lane/ghost", "body": None}])
         entries = self.reported()
         self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
         self.assertEqual([e for e in entries if "session_orphan" in e], [],
@@ -3247,6 +3254,7 @@ class IdleLanes(UpkeepFixture):
                          "a doing step that a Step trailer on main landed still held its lane")
 
     def test_lane_waiting_on_its_own_step_a_pull_or_an_item_gets_no_line_under_a_doing_step(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # Each lane waits on one thing: its own step c1 still doing, an open pull on lane/c2, or an open item on c3. Each
         # has a doing step under it (c1, c4, c5, c6), so a hold check placed before a wait check shows a line here.
         # session_b is the listed control.
@@ -3258,7 +3266,7 @@ class IdleLanes(UpkeepFixture):
                    "c7": {"status": "done", "order": 7}})
         self.publish(sessions=[self.lane("session_own", "c1"), self.lane("session_pull", "c2"),
                                self.lane("session_item", "c3"), self.lane("session_b", "c7")],
-                     pulls=[{"number": 61, "title": "lane c2", "branch": "lane/c2"}],
+                     pulls=[{"number": 61, "title": "lane c2", "branch": "lane/c2", "body": None}],
                      items=[self.item(1, home="step c3", status="open", lane="c3")])
         steps, marks = self.steps_and_marks()
         under = {"session_own": ("c1", "c4"), "session_pull": ("c5",), "session_item": ("c6",)}
@@ -3454,21 +3462,23 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
     def test_an_open_unlanded_pull_beside_a_merged_one_keeps_the_lane_off(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # Green on the old code. The open pull on the same ref is unlanded, so it holds the lane whatever the merged pull says.
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
         off = self.off_main_sha()
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
-                     pulls=[{"number": 63, "title": "lane c1", "branch": "lane/c1", "head": off, "draft": False}],
+                     pulls=[{"number": 63, "title": "lane c1", "branch": "lane/c1", "head": off, "draft": False, "body": None}],
                      closed_pulls=[self.closed(81, "lane/c1", off, merged=True)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
     def test_an_open_ready_pull_keeps_its_lane_off_even_when_its_head_is_in_main(self):
+        """Lane ruling 11:25 CST, process-only (3): an open pull row with no body key holds every lane, so the fixture writes body None."""
         # Green on the old code. The archive guard refuses a ready open pull whatever its head, and releases only an open draft
         # whose head is in main. The landed rule must not release a ready pull. session_b is the control.
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
-                     pulls=[{"number": 64, "title": "lane c1", "branch": "lane/c1", "head": self.main_sha(), "draft": False}],
+                     pulls=[{"number": 64, "title": "lane c1", "branch": "lane/c1", "head": self.main_sha(), "draft": False, "body": None}],
                      closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=True)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
@@ -3525,25 +3535,31 @@ class IdleLanes(UpkeepFixture):
     # lands nor holds. An open pull holds unless it is a draft whose head is in main.
 
     def test_a_pull_on_an_r2_head_whose_body_names_the_session_joins_its_lane(self):
-        # A follow-up lane's pull is on <slug>-r2, outside lane_head_refs. Its body names the session by URL, so the pull
-        # joins the lane's PR set, and its merge into main lands the doing step. session_b is the listed control.
-        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        # Lane ruling 1 (11:25 CST, process-only): a body-named landed pull lands the step for the waiting gate, but only a
+        # pull on the step's own head refs, a Step trailer or status done clears a doing hold. A follow-up pull is on
+        # <slug>-r2, outside lane_head_refs, so c1 is still doing under session_a and session_a holds. session_b is the
+        # listed control.
+        self.land({"c1": {"status": "doing", "order": 1, "lane": "session_a"}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],
                      closed_pulls=[self.closed(91, "c1-r2", self.off_main_sha(), merged=True,
                                                body="Follow-up of https://claude.ai/code/session_a")])
-        count, entries = self.archive()
-        self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
-                         "a pull on an -r2 head whose body names the session did not join its lane: %r" % (entries,))
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"),
+                         "hold (step c1 still doing under this lane; lane session_a)", entries)
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
 
     def test_a_pull_whose_body_names_the_session_by_its_bare_id_joins_its_lane(self):
-        # The bare session id in a body counts the same as the session URL. session_b is the listed control.
-        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
+        # Lane ruling 1 (11:25 CST, process-only): a body-named pull on a head outside the step's own refs does not clear
+        # a doing hold. The bare session id in the body counts as a name, so session_c's doing c1 still holds it. session_b
+        # is the listed control.
+        self.land({"c1": {"status": "doing", "order": 1, "lane": "session_c"}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_c", "c1"), self.lane("session_b", "c2")],
                      closed_pulls=[self.closed(92, "claude/c1-follow", self.off_main_sha(), merged=True,
                                                body="Continues session_c.")])
-        count, entries = self.archive()
-        self.assertEqual((count, self.ids(entries)), (2, ["session_b", "session_c"]),
-                         "a pull whose body names the session by its bare id did not join its lane: %r" % (entries,))
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_c"),
+                         "hold (step c1 still doing under this lane; lane session_c)", entries)
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
 
     def test_a_body_naming_a_longer_session_id_does_not_join_another_lane(self):
         # Green on the old code. The body names session_ab, another session, so session_a's PR set stays empty and its
@@ -3598,6 +3614,20 @@ class IdleLanes(UpkeepFixture):
                      closed_pulls=[self.closed(81, "lane/c1", self.off_main_sha(), merged=False)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
+
+    def test_a_no_body_open_pull_holds_another_lane(self):
+        # Lane ruling 3 (11:25 CST, process-only): an open unlanded pull row with no body key holds every lane of the repo,
+        # since its body is unknown and it may name any session. session_b has no pull of its own, and the no-body open pull
+        # on lane/c1 holds it. The control is the same pull with a body key of None: it names no session, so session_b lists.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
+        pull = {"number": 67, "title": "lane c1", "branch": "lane/c1", "head": self.off_main_sha(), "draft": False}
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")], pulls=[dict(pull)])
+        entries = self.reported()
+        self.assert_held(self.line_for(entries, "session_b"), "session_b")
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")], pulls=[dict(pull, body=None)])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
+        self.assert_held(self.line_for(entries, "session_a"), "session_a")
 
 
 class SharedTagNames(unittest.TestCase):
