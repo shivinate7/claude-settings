@@ -3233,23 +3233,23 @@ for _name, _command in (
     sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
-# heredoc-indented-close: bash ends a heredoc only on a line that is exactly the delimiter. `<<-`
+# heredoc close: bash ends a heredoc only on a line that is exactly the delimiter. `<<-`
 # strips leading tabs from the close and nothing else, so a space-indented EOF is body text.
-sh("heredoc-indented-close: an indented EOF inside a heredoc body does not close it, so a reset in the body is allowed",
+sh("heredoc close: an indented EOF inside a heredoc body does not close it, so a reset in the body is allowed",
    "cat <<EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
-sh("heredoc-indented-close: under <<-, a space-indented EOF does not close the body either, so a reset in it is allowed",
+sh("heredoc close: under <<-, a space-indented EOF does not close the body either, so a reset in it is allowed",
    "cat <<-EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
-sh("heredoc-indented-close: a lone apostrophe in the body, then an indented EOF, does not close the body",
+sh("heredoc close: a lone apostrophe in the body, then an indented EOF, does not close the body",
    "cat <<EOF\ndon't\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
-sh("heredoc-indented-close: a comment opener in a quoted body line, then an indented EOF, does not close the body",
+sh("heredoc close: a comment opener in a quoted body line, then an indented EOF, does not close the body",
    "cat <<EOF\necho \"# note\"\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
-sh("heredoc-indented-close: a quote that spans body lines, with an indented EOF inside it, does not close the body",
+sh("heredoc close: a quote that spans body lines, with an indented EOF inside it, does not close the body",
    "cat <<EOF\necho \"first\n  EOF\nsecond\"\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
 # Controls: a tab-indented EOF under <<- does close, so the reset after it is a command, and an exact
 # EOF closes a body whose indented twin came before it.
-sh("heredoc-indented-close: under <<-, a tab-indented EOF closes the body, so a reset after it is refused",
+sh("heredoc close: under <<-, a tab-indented EOF closes the body, so a reset after it is refused",
    "cat <<-EOF\n\tEOF\n" + VCS + " reset --hard origin/main", "deny", "shared-tree", cwd=NOGIT)
-sh("heredoc-indented-close: an exact EOF closes the body after an indented twin, so a status after it is allowed",
+sh("heredoc close: an exact EOF closes the body after an indented twin, so a status after it is allowed",
    "cat <<EOF\n  EOF\nEOF\n" + VCS + " status", "allow", cwd=NOGIT)
 
 
@@ -3684,11 +3684,11 @@ sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is re
 sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
    "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
    "allow", cwd=PTRMAIN, config=PTRCFG)
-# A mkdir earlier on the line may make the folder a cd then names. While that is open the folder is
-# unknown, so the switch is refused as a pointer act. Neither folder exists at judge time.
-sh("pointer-failed-cd-walk: a mkdir, then a cd into the folder it made, then a switch, is refused",
+# Run from the pointer checkout, the switch is refused. The mkdir and the cd are only the line's
+# shape: these cases do not pin how the guard reads a mkdir.
+sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a cd into its folder is refused",
    "mkdir sub && cd sub && " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
-sh("pointer-failed-cd-walk: a mkdir, then a failed cd into a missing folder, then a switch, is refused",
+sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a failed cd is refused",
    "mkdir x; cd " + POINTER_NONEXIST + "; " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN,
    config=PTRCFG)
 
@@ -3982,17 +3982,17 @@ sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wid
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: killall by name", "killall node", "deny", "machine-wide-kill", cwd=NOGIT)
-# kill-guard-word-only: a wrapper that runs its argument is judged by the command it runs, as `timeout`
+# kill wrapper: a wrapper that runs its argument is judged by the command it runs, as `timeout`
 # is. `gtimeout` (GNU timeout under Homebrew) and `watch` run their argument, so each reads the same way.
-sh("kill-guard-word-only: gtimeout runs its argument, so gtimeout 5 pkill foo is refused",
+sh("kill wrapper: gtimeout runs its argument, so gtimeout 5 pkill foo is refused",
    "gtimeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill-guard-word-only: watch runs its argument, so watch pkill foo is refused",
+sh("kill wrapper: watch runs its argument, so watch pkill foo is refused",
    "watch pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill-guard-word-only: timeout runs its argument, so timeout 5 pkill foo is refused (parity)",
+sh("kill wrapper: timeout runs its argument, so timeout 5 pkill foo is refused (parity)",
    "timeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
-sh("kill-guard-word-only: a quoted echo of the gtimeout form calls nothing",
+sh("kill wrapper: a quoted echo of the gtimeout form calls nothing",
    'echo "gtimeout 5 pkill foo"', "allow", cwd=NOGIT)
-sh("kill-guard-word-only: gtimeout around a command that kills nothing is allowed",
+sh("kill wrapper: gtimeout around a command that kills nothing is allowed",
    "gtimeout 5 ls", "allow", cwd=NOGIT)
 # kill-quoted-wrapper: watch runs its argument, and the argument may be one quoted word. The quoted form
 # runs the same pkill as the bare one, so the kill rule judges it the same way.
@@ -7329,22 +7329,22 @@ sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", c
 
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home variable", "rm -rf $HOME", "deny", "destructive-delete", cwd=NOGIT)
-# guard-home-delete-literal: the home folder written out is the home folder, as `$HOME` is. The rule
+# home folder literal: the home folder written out is the home folder, as `$HOME` is. The rule
 # guards the folder, so another user's home folder counts too. HOME is this run's own home, read here.
-sh("guard-home-delete-literal: the home folder written out is refused, as $HOME is",
+sh("home folder literal: the home folder written out is refused, as $HOME is",
    "rm -rf " + HOME, "deny", "destructive-delete", cwd=NOGIT)
-sh("guard-home-delete-literal: the home folder's contents written out are refused, as $HOME/* is",
+sh("home folder literal: the home folder's contents written out are refused, as $HOME/* is",
    "rm -rf " + HOME + "/*", "deny", "destructive-delete", cwd=NOGIT)
-sh("guard-home-delete-literal: another user's home folder written out is refused",
+sh("home folder literal: another user's home folder written out is refused",
    "rm -rf /home/someone", "deny", "destructive-delete", cwd=NOGIT)
-sh("guard-home-delete-literal: rd /s /q of another user's home folder is refused",
+sh("home folder literal: rd /s /q of another user's home folder is refused",
    "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", cwd=NOGIT)
-sh("guard-home-delete-literal: rd /s /q of another user's home folder, PowerShell, is refused",
+sh("home folder literal: rd /s /q of another user's home folder, PowerShell, is refused",
    "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
 # The near forms: a folder inside the home folder is no home delete, and stays allowed.
-sh("guard-home-delete-literal: a folder inside the home folder is allowed",
+sh("home folder literal: a folder inside the home folder is allowed",
    "rm -rf " + HOME + "/build", "allow", cwd=NOGIT)
-sh("guard-home-delete-literal: rd /s /q of a folder inside another user's home is allowed",
+sh("home folder literal: rd /s /q of a folder inside another user's home is allowed",
    "rd /s /q C:\\Users\\someone\\build", "allow", cwd=NOGIT)
 # home-parent-delete: the folder that holds every home folder is the same kind of delete. Removing it removes
 # each home with it, so it is refused as a home folder is, whatever user's home it holds.
@@ -11976,21 +11976,21 @@ sh("frozen: a redirect onto the global CLAUDE.md", "echo x > " + CFG_CLAUDEMD, "
    "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto a config hook", "cat template.py > " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
-# perl-ruby-bodies-unread: an interpreter that edits its file in place writes it as `sed -i` does.
-sh("perl-ruby-bodies-unread: perl -pi -e on a config hook is refused, as sed -i is",
+# interpreter in-place edit: an interpreter that edits its file in place writes it as `sed -i` does.
+sh("interpreter in-place edit: perl -pi -e on a config hook is refused, as sed -i is",
    "perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
-sh("perl-ruby-bodies-unread: ruby -i -pe on a config hook is refused, as sed -i is",
+sh("interpreter in-place edit: ruby -i -pe on a config hook is refused, as sed -i is",
    "ruby -i -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
-sh("perl-ruby-bodies-unread: a perl heredoc body that writes a config hook is refused",
+sh("interpreter in-place edit: a perl heredoc body that writes a config hook is refused",
    "perl <<'EOF'\nopen(F, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("perl-ruby-bodies-unread: a ruby heredoc body that writes a config hook is refused",
+sh("interpreter in-place edit: a ruby heredoc body that writes a config hook is refused",
    "ruby <<'EOF'\nFile.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("perl-ruby-bodies-unread: sed -i on a config hook is refused (parity)",
+sh("interpreter in-place edit: sed -i on a config hook is refused (parity)",
    "sed -i s/a/b/ " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 # The near forms: a read of a frozen file, and an in-place edit of a file that is not frozen, stay allowed.
-sh("perl-ruby-bodies-unread: perl -ne reads a config hook and writes nothing, allowed",
+sh("interpreter in-place edit: perl -ne reads a config hook and writes nothing, allowed",
    "perl -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
-sh("perl-ruby-bodies-unread: perl -pi -e on a file that is not frozen is allowed",
+sh("interpreter in-place edit: perl -pi -e on a file that is not frozen is allowed",
    "perl -pi -e 's/a/b/' notes.txt", "allow", cwd=NOGIT)
 # frozen-digit-switch: perl takes its switches in a cluster, and a digit may come before the `i`: `-0pi`
 # sets the record separator, then edits in place. The in-place switch reads that cluster as perl does.
