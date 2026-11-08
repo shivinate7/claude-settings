@@ -554,7 +554,7 @@ def has_text(value):
 
 
 def open_ask_lines(asks, complete=True):
-    """One open-ask line per owner ask with no session reply, oldest first: id, time, text. A dismissed root is the owner's own
+    """One open-ask line per ask with no session reply, oldest first: id, time, text. A dismissed root is the owner's own
     close and is not listed. An ask the owner wrote as a reply under an answer (`re`) waits like any other. With `complete` False
     (that folder may be cut short) one unknown line, never a clear."""
     if not complete:
@@ -639,7 +639,7 @@ def single_page(argv):
 
 
 def open_asks_mode(args, state, item_problem, code):
-    """With --asks: print each owner ask with no reply (and, with --items and --answers, each open item holding a kept answer and no reply, lane or waits), then one FAIL line
+    """With --asks: print each ask with no reply (and, with --items and --answers, each open item holding a kept answer and no reply, lane or waits), then one FAIL line
     the writer cannot skip. A waiting ask makes a current page exit 1; a cut-short or unreadable asks list exits 2. A behind or unknown
     page keeps its own code."""
     try:

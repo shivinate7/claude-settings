@@ -1271,7 +1271,7 @@ class Stale(unittest.TestCase):
                 self.assertNotIn("Traceback", r.stdout + r.stderr)
                 self.assert_page_word(r, "current", 0)
 
-    # Single-page mode with --asks <file or folder>: one open-ask line per owner ask with no reply, then a FAIL line, exit non-zero.
+    # Single-page mode with --asks <file or folder>: one open-ask line per ask with no reply, then a FAIL line, exit non-zero.
     # Incident: an ask was routed to a step but never closed on the page, so the owner saw an ask with no answer.
 
     def asks_run(self, asks, extra=(), page=None):
