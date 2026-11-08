@@ -1503,3 +1503,5 @@
 - note-lines-without-bullet-skip-fix: note lines in the forms `1. x:` and `  - x:` are no bullet, so the Fix check and the ratchet skip them (lint/check_record_slugs.py NOTE_LINE). Fix: none — rare and harmless Until: 2026-11-21
 - old-slugless-bullet-edit-reds: editing one of the 7 old bullets with no `- <slug>:` form reads as a new line with no Fix, so it goes red until the editor adds a Fix (lint/check_record_slugs.py NOTE_SLUG). Fix: none — rare and harmless Until: 2026-11-21
 - quoted-fix-in-prose-misparses: a note that quotes a `Fix:` after its real one is parsed from the last mark, so the quote can hide the real field (lint/check_record_slugs.py parse_fix). Fix: none — rare and harmless Until: 2026-11-21
+- cite-uppercase-hex-unread: the cite rule reads only lowercase hex as a commit, so an uppercase sha after a none reason passes (lint/check_record_slugs.py COMMIT). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-check-output-anywhere: check output anywhere after the reason clears the cite rule, even when it sits before the cost or the commit (lint/check_record_slugs.py cite_problem). Fix: none — rare and harmless. Until: 2026-11-21

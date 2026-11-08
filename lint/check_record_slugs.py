@@ -21,10 +21,12 @@ Four more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13
     reads no base.
   Until: a `Fix: none` line the branch adds or edits carries `Until: YYYY-MM-DD`, today or later and no more than
     UNTIL_CAP_DAYS (14) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
-  Cite: a `Fix: none` line the branch adds or edits, whose text after the reason names a commit (a 7 to 40 digit hex
-    word with a digit and a letter a-f) or a cost (a number with a time, size or count unit, or linear, quadratic, O(...)),
-    carries check output after it: a backticked command, then a verdict word (pass, fail, ok, red, green). Read with
-    the Until check; each refused note prints one FAIL line with its slug.
+  Cite: a `Fix: none` line the branch adds or edits, whose text after the reason names a commit (a 7 to 40 digit
+    lowercase hex word with a digit and a letter a-f) or a cost (a number with a time, size or count unit, in any case;
+    a spelled number one to ten with a time unit; Nx; linear or quadratic, with -ly or -ally; O(...)), carries check output
+    after the reason: a backticked command, then a colon, comma, semicolon, dash, em dash or arrow, then a verdict word
+    (pass, fail, ok, red, green), which may follow a count ("12 passed"). Read with the Until check; each refused note
+    prints one FAIL line with its slug.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
@@ -329,11 +331,18 @@ def until_problem(line, now):
 # A `Fix: none` reason is a bare listed phrase. A commit or a cost after it is a claim about a fix or a cost that nobody
 # re-reads, so it needs check output beside it.
 COMMIT = re.compile(r"\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b")
-COST_UNITS = ("ms", "s", "sec", "secs", "second", "seconds", "min", "mins", "minute", "minutes", "hour", "hours",
-              "line", "lines", "char", "chars", "character", "characters", "byte", "bytes", "KB", "MB", "GB")
-COST = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?[ \t-]?(?:" + "|".join(COST_UNITS) + r")(?!\w)"
-                  + r"|(?<!\w)(?:quadratic|linear)(?!\w)|(?<!\w)O\(")
-CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*[:,;-]?[ \t]*(?:pass|passed|fail|failed|ok|red|green)(?!\w)", re.I)
+TIME_UNITS = ("ms", "milliseconds?", "s", "secs?", "seconds?", "mins?", "minutes?", "hrs?", "hours?", "days?")
+SIZE_UNITS = ("lines?", "chars?", "characters?", "bytes?", "[kmg]i?b")
+COUNT_UNITS = ("queries", "times", "calls")
+SPELLED = "one|two|three|four|five|six|seven|eight|nine|ten"
+# The "," in the lookbehind keeps a start inside a run of "1," from retrying, so the scan stays linear. "a second" is not
+# a cost: only a spelled number then a time unit is, and "linearizable" is no "linear".
+COST = re.compile(
+    r"(?<![\w.,])\d[\d,]*(?:\.\d+)?(?:[ \t-]?(?:" + "|".join(TIME_UNITS + SIZE_UNITS + COUNT_UNITS) + r")|x)(?!\w)"
+    + r"|(?<!\w)(?:" + SPELLED + r")[ \t]+(?:" + "|".join(TIME_UNITS) + r")(?!\w)"
+    + r"|(?<!\w)(?:quadratic(?:ally)?|linear(?:ly)?)(?!\w)|(?<!\w)(?-i:O)\(", re.I)
+CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|[:,;\u2014\u2192-])?[ \t]*(?:\d+[ \t]+)?(?:pass|passed|fail|failed|ok|red|green)(?!\w)",
+                          re.I)
 
 
 def cite_problem(line):
