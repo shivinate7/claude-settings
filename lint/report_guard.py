@@ -660,7 +660,7 @@ def done_models_problem(text, spawned, session=None):
     """Name what Done gets wrong about the spawned roles' models, else ''.
 
     `spawned` is the in-turn spawns: they set which roles Done must name. `session` is every spawn
-    of the session, and sets which models a name may match, since a round 1 reviewer that ran in an
+    of the session, and sets which models a name may match, since a reviewer that ran in an
     earlier turn is still a reviewer this report names. It defaults to `spawned`.
     """
     if not spawned:
