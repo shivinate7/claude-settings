@@ -12926,6 +12926,23 @@ class ReviewFixFiling(ReviewEnv):
         self.assertIn(fix_check_line(head=self.reviewed), out)
         self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
 
+    def test_a_code_only_push_passes_the_fix_check_on_a_record_with_findings(self):
+        # a small fix to a finding gets a fix check (owner ruling item 203 a): the push changes code and files nothing
+        new = self.push({"merge/widget.py": "two\n"})
+        rc, out, err = self.fix_run(new, "1, this PR")
+        self.assertEqual(rc, 0, "a code-only fix check on a record with Findings: 1, this PR was refused:\n" + out + err)
+        self.assertIn(findings_line("1, this PR"), out)
+        self.assertIn(fix_check_line(head=self.reviewed), out)
+        self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
+
+    def test_a_filing_push_that_also_edits_code_passes_the_fix_check(self):
+        # a fix check may pass a push that files a finding and also changes code: the tool reads no fix-check diff (owner ruling item 394 a)
+        new = self.push({"docs/debts/missing-cache.md": "a debt\n", "merge/widget.py": "two\n"})
+        rc, out, err = self.fix_run(new, "2, this PR")
+        self.assertEqual(rc, 0, "a push that files a debt and edits code was refused as a fix check:\n" + out + err)
+        self.assertIn(fix_check_line(head=self.reviewed), out)
+        self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
+
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments, at the
