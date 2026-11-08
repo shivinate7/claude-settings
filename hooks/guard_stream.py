@@ -84,8 +84,10 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
-# The lone file-writer stage the check rule lets through: each writes the output to a file the agent reads
-# back, so no filter cuts it. Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
+# The lone writer stage the check rule lets through: `tee`, `tee.exe`, `Tee-Object` and `Out-File`. Each
+# keeps the whole stream, so no filter cuts it: `tee`, `Tee-Object -FilePath` and `Out-File` write it to a
+# file the agent reads back, and `Tee-Object -Variable` writes no file but prints the stream in full.
+# Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
 FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
 SCRIPT_INTERPRETERS = ("python", "python3", "py")
 
@@ -135,7 +137,8 @@ NARRATED_TAIL_REASON = (
 )
 
 
-# A CHECK piped into any filter but a lone `tee` (decision background-check-through-verdict). A filter
+# A CHECK piped into any filter but a lone `tee`, `tee.exe`, `Tee-Object` or `Out-File` (decision
+# background-check-through-verdict). A filter
 # after the run can cut or hide the verdict line, the one useful line, so it can be lost or never read. `verdict <cmd>` keeps the whole log and prints the
 # verdict itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
@@ -201,8 +204,8 @@ def _walk_pipelines(stripped: str, find_stage, any_filter: bool = False) -> str:
 
 
 def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into any filter but a lone `tee`, directly or
-    through other filters."""
+    """The matched text when a call pipes a named check into any filter but a lone `tee`, `tee.exe`,
+    `Tee-Object` or `Out-File`, directly or through other filters."""
     return _walk_pipelines(stripped, lambda segment: check_stage(segment, background), any_filter=True)
 
 
