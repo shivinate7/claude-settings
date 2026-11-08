@@ -13354,6 +13354,16 @@ add("builder-test: continue-on-error added under the cd hooks test step is refus
 add("builder-test: if: false added under the working-directory test step is refused", "deny", rule=BT,
     tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_WD, new_string=LINT + TEST_GUARD_WD_IF_FALSE,
     carries=("test-author", "Report"), **B)
+# A mutation test's whole step is a test run too: deleting it leaves its mutants unrun, so the deletion is refused by
+# the file name the step runs. The control deletes an upload step beside the kept mutate step, in the same job.
+UPLOAD_REPORT = ("      - name: Upload report\n        uses: actions/upload-artifact@v4\n"
+                 "        with:\n          name: report\n          path: out/report.json\n")
+add("builder-test: a whole mutate_guard step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a whole mutate_sweep step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an upload step deleted beside the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD + UPLOAD_REPORT, new_string=LINT + MUTATE_GUARD, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
