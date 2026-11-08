@@ -2900,6 +2900,46 @@ class NoteRowEdits(NotesFixture, unittest.TestCase):
         with self.assertRaises(C.Unknown):
             C.check(self.r.dir, "origin/main", "HEAD")
 
+    def edited_notes_spawns(self):
+        """(problem lines, git processes edited_notes starts during verdict()). The window wraps C.edited_notes alone, which
+        check() calls by name, so revived_notes' reads and check's own reads sit outside it: the count is this read's."""
+        fault, real = SpawnCount(), C.edited_notes
+
+        def windowed(*a, **k):
+            with fault.armed():
+                return real(*a, **k)
+        with unittest.mock.patch.object(C, "edited_notes", windowed):
+            got = self.r.verdict()
+        return got, fault.n
+
+    def test_a_notes_file_with_a_note_at_head_costs_three_git_spawns(self):
+        """Not moved. The spawns, and why each: `show` of the head file, for the rows the check compares. `merge-base`, once,
+        for the base. `show` of the base file, for the rows the head is compared with. No rename lookup runs, since the head
+        file sits at its own path. Three in all."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE, self.OTHER, self.OWN),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertIn(self.BASE, self.notes_at("HEAD"), "premise: the notes file at head holds a note")
+        got, spawns = self.edited_notes_spawns()
+        self.assertEqual(got, [], "premise: the check passes, so the count is for a clean read: %r" % got)
+        self.assertEqual(spawns, 3, "git spawns in edited_notes for a note at head, not moved: %d, expected 3" % spawns)
+
+    def test_a_moved_notes_file_with_a_note_at_head_costs_seven_git_spawns(self):
+        """Moved, read at its new path. The spawns, in order, and why each: `show` of the head path, which fails because the
+        path is gone, then `ls-tree` to confirm it is unlisted. `merge-base`, once. `show` of the base path, which holds the
+        rows the rename lookup starts from. `diff-tree` of the two revs, which finds the deleted path, then `diff-tree -M` for
+        the rename pair. `show` of the new path at head, for the rows it is compared with. The base path is read a second time
+        for the same text, a repeat of the read before the rename lookup. Without that repeat the count is 7."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.THIRD),
+                   branch=(self.BASE, self.OTHER, self.THIRD, self.OWN), main=(self.BASE, self.OTHER, self.THIRD, self.MAIN))
+        self.move_notes(None, "move the notes file and change nothing else")
+        self.assertEqual(self.r.sh("ls-tree", "--name-only", "HEAD", "--", self.NOTES), "", "premise: the notes path is absent at head")
+        self.assertIn(self.BASE, self.r.sh("show", "HEAD:%s" % self.MOVED).splitlines(), "premise: the moved file holds a note at head")
+        self.assertTrue(self.git_sees_the_notes_moved(), "premise: git reads the notes file as renamed")
+        got, spawns = self.edited_notes_spawns()
+        self.assertEqual(got, [], "premise: the check passes, so the count is for a clean read: %r" % got)
+        self.assertEqual(spawns, 7, "git spawns in edited_notes for a moved notes file: %d, expected 7: the base notes file is "
+                                    "read twice, and the second read repeats the first" % spawns)
+
 
 if __name__ == "__main__":
     unittest.main()
