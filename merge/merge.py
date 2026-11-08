@@ -2069,7 +2069,7 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
 
 def owed_round(num, bodies, sha):
     """-> (kind, why) when pull request `num` owes its third round for lane tip `sha`, else None. `kind` picks the remedy: "held" (net value negative: the
-    owner decides, no more rounds), "net" (round 3 is done and its net-value test is owed), "round" (round 3 is owed, or the record is bad). `bodies`: its record bodies,
+    owner decides, no more rounds), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed, or the record is bad). `bodies`: its record bodies,
     oldest first. The newest one whose Head line is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha`
     and fails to parse, or whose PR line is not `num`, is bad and refuses: its Guard or check value is unknown, never read as no."""
     mine = [b for b in bodies if re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M)]
@@ -2104,7 +2104,7 @@ def head_in_history(root, head, tip):
 def stale_guard_round(num, bodies, live, new_to_batch):
     """-> the why when pull request `num` has records that name none of the `live` heads (the lane tips and the pull request's own head), its newest record has Guard or
     check yes, and that record's head is new to the batch (`new_to_batch(head)`: in the history of the pull request's own head and not on its base), else None. A push
-    after the review made that record stale, and a stale yes does not shed the guard or check owing: round 3 is owed on the new head. A record for a head outside that
+    after the review made that record stale, and a stale yes does not shed the guard or check owing: the third round is owed on the new head. A record for a head outside that
     history belongs to a pull request that is no part of this batch, and one for a head on the base belongs to a pull request merged earlier: neither owes anything here.
     A stale Guard or check no passes. A newest record that does not parse owes nothing here, as a lane with no record does (decision pr-review-record, Q1).
     `new_to_batch` raises when git cannot tell; the caller refuses as unknown."""
@@ -2144,7 +2144,7 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
     A read that fails refuses (unknown is red, READ_CITE), unless the run has the reason flag --undo-check-unknown-ok "<reason>", as refuse_dropped_lane does:
     the same flag lifts the dropped-lane check. A lift returns its reason; a lifted date read reads every comment, so the own head is still checked.
     `root`: a checkout that holds the pull request's head and its base. The refusal's last line is its remedy, by the states found: held, net-value test owed,
-    round 3 owed. It never prints a passing record line."""
+    the third round owed. It never prints a passing record line."""
     epoch = "1970-01-01T00:00:00Z"  # a host that cannot date the read gets every comment, never a missed record
     base_ref, lifted = f"origin/{info['base']}", None
     if tips_unread:

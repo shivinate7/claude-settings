@@ -12194,7 +12194,7 @@ class ReviewRecordRules(unittest.TestCase):
                 self.assertEqual(record_state(self, record_text(rounds=rounds, guard="yes", net=net)), want)
 
     def test_a_pass_in_round_two_with_guard_yes_owes_round_three(self):
-        # item 359 pick b: a guard or check change owes round 3 whatever round 2 said, so the PASS does not read done
+        # item 359 pick b: a guard or check change owes the third round whatever the second round said, so the PASS does not read done
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="not owed"))
         self.assertEqual(state, "open", f"round 3 is owed on a guard or check change, so the record must not read done: {why!r}")
@@ -12209,7 +12209,7 @@ class ReviewRecordRules(unittest.TestCase):
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL is open, whatever
     the rounds say. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, a change with
-    Guard or check no is done whatever that round's verdict. A guard or check change owes round 3 whatever the fix check says (item 359 pick b).
+    Guard or check no is done whatever that round's verdict. A guard or check change owes the third round whatever the fix check says (item 359 pick b).
     A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
     why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
     value that is still owed. With no round recorded the record is open. The rule cases build their record with fix_state(); the last case
@@ -12232,7 +12232,7 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check failed", why)
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
-        # A fix PASS after the first round counts as that round passing. Guard or check no is done; guard or check yes owes round 3 (item 359 pick b)
+        # A fix PASS after the first round counts as that round passing. Guard or check no is done; guard or check yes owes the third round (item 359 pick b)
         for verdict in ("PASS", "FAIL"):
             for guard, want in (("no", "done"), ("yes", "open")):
                 with self.subTest(verdict=verdict, guard=guard):
@@ -12243,7 +12243,7 @@ class ReviewFixRules(unittest.TestCase):
                         self.assertIn("round 3", why, f"the why does not say round 3 is owed: {why!r}")
 
     def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
-        # A fix PASS after the second round counts as that round passing. Guard or check no is done; guard or check yes owes round 3 (item 359 pick b)
+        # A fix PASS after the second round counts as that round passing. Guard or check no is done; guard or check yes owes the third round (item 359 pick b)
         for verdict in ("PASS", "FAIL"):
             for guard, want in (("no", "done"), ("yes", "open")):
                 with self.subTest(verdict=verdict, guard=guard):
@@ -13014,7 +13014,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
 
     def test_a_lone_pr_whose_guard_record_names_an_older_head_is_refused(self):
         # no lane tips: the pull request is its own lane and reads its own record. Its head moved on after review, so the record names the head it
-        # replaced, which is in its history: the stale record owes round 3 on the new head
+        # replaced, which is in its history: the stale record owes the third round on the new head
         older = self.push_feat_commit()
         host = self.batch_host({}, [round_check_comment(1, 7, older, guard="yes", rounds=REVIEW_PASS)])
         self.assertEqual(self.history_exit(older, self.head("feat")), 0, "the replaced head is not in the history of feat")
@@ -13025,7 +13025,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
 
     def test_a_lone_pr_whose_history_merged_a_lane_still_checks_its_own_head(self):
         # the pull request's own head is checked along with the lane tips, not instead of them: feat holds lane1's merge, so read_lanes
-        # gives one tip with no open pull request at it, and feat's own guard record for its head, round 1 PASS, owes round 3
+        # gives one tip with no open pull request at it, and feat's own guard record for its head, first-round PASS, owes the third round
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=REVIEW_PASS)])
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -13037,7 +13037,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
 
     def test_an_integration_pr_with_its_own_guard_record_is_refused_beside_a_lane_tip(self):
-        # the integration pull request's own record owes round 3 even though the batch has a lane tip with no record of its own
+        # the integration pull request's own record owes the third round even though the batch has a lane tip with no record of its own
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
@@ -13104,7 +13104,7 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
 
 class ReviewRoundCheckLiftedRead(ReviewRoundCheckEnv):
     """A failed dropped-lane read, lifted by the reason flag, leaves no lane tips to check. The round-3 check still runs on the pull request's
-    own head (decision hold-unsafe-after-round-3): feat's guard record at round 2 PASS owes round 3, and the refusal says the lane tips were unread.
+    own head (decision hold-unsafe-after-round-3): feat's guard record at second-round PASS owes the third round, and the refusal says the lane tips were unread.
     The same holds for `merge 7` and for `merge 7 --confirm`."""
 
     def unread_tips_host(self):
@@ -13159,8 +13159,8 @@ class ReviewRoundCheckCommentRead(ReviewRoundCheckEnv):
 
 class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
     """What a refusal tells Claude to do, by the state of the lane's newest record for its tip (decision hold-unsafe-after-round-3). A held change
-    says it is held for the owner and asks for no more rounds. Round 3 done with its net value owed names the net-value test. Below round 3 names
-    round 3 as owed. No state prints a passing record line."""
+    says it is held for the owner and asks for no more rounds. A finished third round with its net value owed names the net-value test. Below the third round names
+    the third round as owed. No state prints a passing record line."""
 
     def test_a_held_lane_says_it_is_held_for_the_owner_and_asks_for_no_more_rounds(self):
         tips = lane_batch(self, "agent/lane1")
@@ -13185,7 +13185,7 @@ class ReviewRoundCheckRemedy(ReviewRoundCheckEnv):
         self.assertNotIn("round 3 is owed", out, "the refusal says round 3 is owed, though round 3 is done:\n" + out)
 
     def test_a_lane_below_round_three_names_round_three_as_owed(self):
-        # a pin: the base already says round 3 is owed below round 3, and it names no net-value test there
+        # a pin: the base already says the third round is owed below the third round, and it names no net-value test there
         host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))])
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
@@ -13272,7 +13272,7 @@ LANE_OLD_WINDOW = "2026-09-30T00:00:00Z"  # the comment read's since for it: a d
 
 class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
-    is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes round 3 when its
+    is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
     batch still refuses."""
 
