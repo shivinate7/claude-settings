@@ -11770,9 +11770,9 @@ class CloudAllow(unittest.TestCase):
             return json.load(f)["permissions"]["allow"]
 
     # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
-    def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
+    def test_the_rules_file_has_confirm_rules_plus_one_role_rule_per_merge_role_and_no_coordinator_rule(self):
         allow = self.allow()
-        self.assertEqual(len(allow), 3, allow)
+        self.assertEqual(len(allow), len(CLOUD_ALLOW_RULES + CLOUD_ROLE_RULES), allow)  # CLOUD_ROLE_RULES: one per tier in merge.MERGE_ROLES
         self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
         self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
 
