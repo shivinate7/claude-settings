@@ -727,12 +727,12 @@ def main(argv):
     ap.add_argument("--pr-body", default=None, metavar="TEXT", help="the pull request body (default: the event file named by env GITHUB_EVENT_PATH)")
     a = ap.parse_args(argv)
     try:
-        pr_body = a.pr_body if a.pr_body is not None else event_body()
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
             say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
+        pr_body = a.pr_body if a.pr_body is not None else event_body()
         problems, notes = check(a.repo, a.upstream, a.head, pr_body=pr_body)
     except Unknown as e:
         say("silent-undo: UNKNOWN: %s" % e)

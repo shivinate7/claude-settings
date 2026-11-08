@@ -43,10 +43,9 @@
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD. The pull request body is data, never an expression: a step env or
 # run: line that holds ${{ github.event.pull_request.body }} reads unknown. A step reads the body from its event file, as CI gives it:
 # pr_body() reads the UTF-8 file named by env CI_JOB_PR_BODY_FILE (the merge tool's way: an env string past 128 KB does not exec on
-# Linux, and a 65536-character body can be 256 KB), else `.pull_request.body` of the event file at $GITHUB_EVENT_PATH (a CI run:
-# no token, no step env), else None. With CI_JOB_PR_BODY_FILE named, each step gets its own temp event file holding
-# {"pull_request": {"body": <the body>}} in its GITHUB_EVENT_PATH; a file that cannot be read gives an event file with no
-# pull request, which the step's reader takes as unknown, never as an empty body. With no body file, GITHUB_EVENT_PATH is the
+# Linux, and a 65536-character body can be 256 KB), else None. With CI_JOB_PR_BODY_FILE named, each step gets its own temp event
+# file holding {"pull_request": {"body": <the body>}} in its GITHUB_EVENT_PATH; a file that cannot be read gives an event file with
+# no pull request, which the step's reader takes as unknown, never as an empty body. With no body file, GITHUB_EVENT_PATH is the
 # caller's own, as on a runner.
 # Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
@@ -157,27 +156,18 @@ def condition(text, pr):
     return bool(eval(expr.replace("T", "True").replace("F", "False"), {"__builtins__": {}}))  # only T, F, and, or, not, ()
 
 
-EXEC_STRING_MAX = 131072  # Linux: one env string, "NAME=value" and its NUL, past this does not exec (MAX_ARG_STRLEN)
-
-
 def pr_body(environ=None):
-    """The pull request body, the one home of that read: the UTF-8 file named by CI_JOB_PR_BODY_FILE, else the event file at
-    GITHUB_EVENT_PATH (`.pull_request.body`). -> None when no source is named or a named one cannot be read."""
+    """The pull request body, the one home of that read: the UTF-8 file named by CI_JOB_PR_BODY_FILE.
+    -> None when no file is named or the named one cannot be read."""
     environ = os.environ if environ is None else environ
     path = environ.get("CI_JOB_PR_BODY_FILE")
+    if path is None:
+        return None
     try:
-        if path is not None:
-            with open(path, encoding="utf-8", newline="") as f:  # strict: bytes that are not UTF-8 are unreadable, not a changed body
-                return f.read()
-        event = environ.get("GITHUB_EVENT_PATH")
-        if event:
-            with open(event, encoding="utf-8") as f:
-                pull = json.load(f).get("pull_request")
-            if isinstance(pull, dict) and (pull.get("body") is None or isinstance(pull.get("body"), str)):
-                return pull.get("body") or ""
-    except (OSError, ValueError, AttributeError):
-        pass
-    return None
+        with open(path, encoding="utf-8", newline="") as f:  # strict: bytes that are not UTF-8 are unreadable, not a changed body
+            return f.read()
+    except (OSError, ValueError):
+        return None
 
 
 def expand(value, values):
@@ -355,10 +345,6 @@ def plan(step, pr, values, top):
         val = expand(raw.strip("'\""), values)
         if val is None:
             return "unknown", "env %s needs an expression this runner cannot read: %s" % (name, raw), None, None, None
-        size = len(val.encode("utf-8", "surrogatepass"))
-        if sys.platform.startswith("linux") and len(name.encode()) + size + 2 > EXEC_STRING_MAX:
-            return "unknown", "env %s holds %d bytes, past the %d a Linux exec takes in one env string: %s" % (
-                name, size, EXEC_STRING_MAX, raw), None, None, None
         env[name] = val
     exprs = EXPR.findall(body)
     if exprs:
