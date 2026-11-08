@@ -8964,6 +8964,26 @@ sh("draft-pr: a node file from a quoted heredoc, with a bare gh pr create line, 
    "\n".join(["cat > f.js <<'EOF'", PR_BODY, "EOF", "node f.js"]), "allow", cwd=NOGIT)
 add("draft-pr: a Write of a file holding a gh pr create line is allowed", "allow", tool="Write",
     cwd=NOGIT, file_path=slash(os.path.join(NOGIT, "probe.py")), content=PR_BODY + "\n")
+# Single quotes do not protect a `$( )` or a backtick span in an unquoted heredoc body: bash runs it while it
+# writes the body, so the body is refused whatever quotes surround it. The controls are a quoted delimiter, which
+# bash does not expand, and a backslash-escaped `\$(`, which bash writes as a literal `$(`.
+for _name, _command in (
+    ("a python body fed from a quoted heredoc, with a single-quoted $( ), is allowed",
+     "\n".join(["python3 - <<'EOF'", "x = '$(gh pr create)'", "EOF"])),
+    ("a python body fed from a double-quoted heredoc delimiter, with a single-quoted $( ), is allowed",
+     "\n".join(['python3 - <<"EOF"', "x = '$(gh pr create)'", "EOF"])),
+    ("a python body fed from a quoted heredoc, with a single-quoted backtick span, is allowed",
+     "\n".join(["python3 - <<'EOF'", "x = '`gh pr create`'", "EOF"])),
+    ("a node body fed from a quoted heredoc, with a single-quoted $( ), is allowed",
+     "\n".join(["node - <<'EOF'", "x = '$(gh pr create)'", "EOF"])),
+    ("a perl body fed from a quoted heredoc, with a single-quoted $( ), is allowed",
+     "\n".join(["perl - <<'EOF'", "x = '$(gh pr create)';", "EOF"])),
+    ("a python body fed from a quoted heredoc, with a bare gh pr create line, is allowed",
+     "\n".join(["python3 - <<'EOF'", PR_BODY, "EOF"])),
+    ("an unquoted body with a backslash-escaped $( ), fed to python, is allowed",
+     "\n".join(["python3 - <<EOF", "x = '\\$(gh pr create)'", "EOF"])),
+):
+    sh("draft-pr: sq-subst, " + _name, _command, "allow", cwd=NOGIT)
 for _name, _command in (
     ("sh runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "sh p.sh"])),
     ("bash runs the body file", "\n".join(["cat > p.sh <<'EOF'", PR_BODY, "EOF", "bash p.sh"])),
@@ -8980,6 +9000,26 @@ for _name, _command in (
      "\n".join(["cat > f.py <<EOF", 'x = "$(gh pr create -t x)"', "EOF", "python3 f.py"])),
     ("an unquoted body a shell expands, fed to python",
      "\n".join(["python3 - <<EOF", 'x = "$(gh pr create -t x)"', "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted $( ), fed to python3 -",
+     "\n".join(["python3 - <<EOF", "x = '$(gh pr create)'", "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted backtick span, fed to python3 -",
+     "\n".join(["python3 - <<EOF", "x = '`gh pr create`'", "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted $( ), run from a written f.py",
+     "\n".join(["cat > f.py <<EOF", "x = '$(gh pr create)'", "EOF", "python3 f.py"])),
+    ("sq-subst, an unquoted body with a single-quoted backtick span, run from a written f.py",
+     "\n".join(["cat > f.py <<EOF", "x = '`gh pr create`'", "EOF", "python3 f.py"])),
+    ("sq-subst, an unquoted body with a single-quoted $( ), fed to node -",
+     "\n".join(["node - <<EOF", "x = '$(gh pr create)'", "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted backtick span, fed to node -",
+     "\n".join(["node - <<EOF", "x = '`gh pr create`'", "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted $( ), fed to perl -",
+     "\n".join(["perl - <<EOF", "x = '$(gh pr create)';", "EOF"])),
+    ("sq-subst, an unquoted body with a single-quoted backtick span, fed to perl -",
+     "\n".join(["perl - <<EOF", "x = '`gh pr create`';", "EOF"])),
+    ("sq-subst, an unquoted body with a double-quoted $( ), fed to node -",
+     "\n".join(["node - <<EOF", 'x = "$(gh pr create)"', "EOF"])),
+    ("sq-subst, an unquoted body with a double-quoted $( ), fed to perl -",
+     "\n".join(["perl - <<EOF", 'x = "$(gh pr create)";', "EOF"])),
     ("a bash -c wrapper with short flags", "bash -c 'gh pr create -t x'"),
 ):
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
