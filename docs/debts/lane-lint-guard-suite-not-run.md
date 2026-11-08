@@ -6,6 +6,6 @@
 
 **Decision.** `lanes-run-no-full-ci-job`, the lane lint runs the picked suites and not the full CI job.
 
-**Retire.** Lane lint runs the install of `actions/playwright-setup` by that action's own home, then runs `hooks/test_guard.py`. The suite then reads `PASS` or `FAIL` in lane lint, never `not run`.
+**Retire.** Lane lint runs the install of `actions/playwright-setup` by that action's own home, then runs hooks/test_guard.py. The suite then reads `PASS` or `FAIL` in lane lint, never `not run`. Proof: `merge/test_lane_lint.py`, the case, added by the fix, that lane lint runs the guard suite after that install.
 
 Fix: queued as step lane-lint-guard-suite-install (proposed to triage). Until: 2026-11-21
