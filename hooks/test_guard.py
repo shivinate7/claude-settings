@@ -132,7 +132,7 @@ FAMILIES = {
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
-    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the copies without reread_check.py or precompact_handoff.py (refused, never allowed), and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -23589,6 +23589,7 @@ FAILCLOSED_REMEDY = ("install.sh", "install.ps1")
 FAILCLOSED_CALL = "ls"                # harmless: a refusal can only come from the missing module
 FAILCLOSED_CONTROL = "pkill -f node"  # an intact copy denies it, so its exit code is the deny's
 FAILCLOSED_CHECKS = []
+GUARD_CRASH = "guard-crash"           # the reason word of the wait-then-refuse refusal (decision install-hooks-whole)
 
 
 def _guard_copy(name, drop):
@@ -23604,9 +23605,10 @@ def _guard_copy(name, drop):
     return folder
 
 
-def _run_copy(folder, command, name):
-    """One Bash call through the copy's guard.py, with a config folder of its own. No -I, and no
-    PYTHONPATH, so the script's own folder is on the path and the sibling imports resolve there."""
+def _copy_env(name, pythonpath=None):
+    """The environment of one copy's run, with a config folder of its own. PYTHONPATH is unset unless
+    `pythonpath` names a folder, so a case's sitecustomize.py is the one a run loads. No -I, so the script's
+    own folder is on the path."""
     cfg = os.path.join(ROOT, "failclosed-cfg", name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
@@ -23615,9 +23617,17 @@ def _run_copy(folder, command, name):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    if pythonpath:
+        env["PYTHONPATH"] = pythonpath
+    return env
+
+
+def _run_copy(folder, command, name, pythonpath=None):
+    """One Bash call through the copy's guard.py, with a config folder of its own. The script's own folder
+    is on the path, so the sibling imports resolve there."""
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
     return subprocess.run([sys.executable, os.path.join(folder, "guard.py")], input=payload,
-                          capture_output=True, text=True, env=env, timeout=120)
+                          capture_output=True, text=True, env=_copy_env(name, pythonpath), timeout=120)
 
 
 def _decision(run):
@@ -23656,9 +23666,9 @@ def fail_closed_case(module):
         folder = _guard_copy(module, drop)
         run = _run_copy(folder, FAILCLOSED_CALL, module)
         decision, reason = _decision(run)
+        if decision != "deny":   # one cause per message: a call that was not refused has no reason to judge
+            return False, "the call is %r with %s missing, want deny" % (decision, drop)
         problems = []
-        if decision != "deny":
-            problems.append("the call is %r with %s missing, want deny" % (decision, drop))
         if run.returncode != control.returncode:
             problems.append("exit %d, the other denies exit %d" % (run.returncode, control.returncode))
         if not any(step in reason for step in FAILCLOSED_REMEDY):
@@ -23686,11 +23696,61 @@ for _module in FAILCLOSED_MODULES:
 _check = fail_closed_case("git_reads")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
+# guard_kill.py imports proc_env.py at its top level, for its session-tag read. proc_env.py is no guard_*
+# sibling, so FAILCLOSED_MODULES does not hold it either. A copy without it refuses as guard-crash, never
+# judges the call with the read missing (decision install-hooks-whole).
+_check = fail_closed_case("proc_env")
+FAILCLOSED_CHECKS.append(_check)
+LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env (guard_kill's session-tag read) "
+                         "refuses a Bash call as guard-crash", _check))
 for _label, _check in (
     ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
 ):
     FAILCLOSED_CHECKS.append(_check)
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+# A Python without _ctypes fails `import ctypes`. proc_env.py imports ctypes inside its one read, not at the
+# top (decision install-hooks-whole), so a copy that a no-_ctypes Python loads still judges a plain call.
+# A top-level import there would refuse every call as guard-crash.
+NO_CTYPES_SHIM = os.path.join(ROOT, "noctypes-shim")  # a folder whose sitecustomize.py drops ctypes
+NO_CTYPES_SOURCE = "import sys\nsys.modules['ctypes'] = None\n"
+NO_CTYPES_LABEL = "install-hooks-whole fail-closed: with ctypes blocked a copy loads and allows a plain Bash call"
+NO_CTYPES_WINDOWS = "a Windows CPython always ships _ctypes, so the blocked import is a POSIX build case"
+
+
+def no_ctypes_case():
+    """With ctypes blocked in the guard's interpreter, a copy loads and judges a plain Bash call: allow, exit 0,
+    never the guard-crash refusal. The shim's reach is probed first, so a shim that never blocks ctypes cannot
+    pass. The control call must be denied by a rule, not by the crash path."""
+    def check():
+        write(os.path.join(NO_CTYPES_SHIM, "sitecustomize.py"), NO_CTYPES_SOURCE)
+        probe = subprocess.run([sys.executable, "-c", "import ctypes"], capture_output=True, text=True,
+                               env=_copy_env("no-ctypes-probe", NO_CTYPES_SHIM), timeout=120)
+        if probe.returncode == 0 or not any(word in probe.stderr for word in ("ImportError", "ModuleNotFoundError")):
+            return False, "the shim did not block ctypes in the guard's interpreter: exit %d, stderr %r" % (
+                probe.returncode, probe.stderr[-90:])
+        folder = _guard_copy("no-ctypes", None)
+        run = _run_copy(folder, FAILCLOSED_CALL, "no-ctypes", pythonpath=NO_CTYPES_SHIM)
+        decision, reason = _decision(run)
+        if decision == "deny" and GUARD_CRASH in reason:
+            return False, "refused as guard-crash: the copy did not load with ctypes blocked"
+        if decision != "allow":
+            return False, "with ctypes blocked the plain call is %r, want allow: %r" % (decision, reason[:90])
+        if run.returncode != 0:
+            return False, "with ctypes blocked the plain call exits %d, want 0" % run.returncode
+        control = _run_copy(folder, FAILCLOSED_CONTROL, "no-ctypes-control", pythonpath=NO_CTYPES_SHIM)
+        control_decision, control_reason = _decision(control)
+        if control_decision != "deny" or GUARD_CRASH in control_reason:
+            return False, "with ctypes blocked the control call is %r, want a rule's deny" % (
+                (control_decision, control_reason[:90]),)
+        return True, "with ctypes blocked the plain call is allowed, exit 0, and the control is denied by a rule"
+    return check
+
+
+if os.name == "nt":
+    skip_case(NO_CTYPES_LABEL, NO_CTYPES_WINDOWS)
+else:
+    LOG_CHECKS_EXTRA.append((NO_CTYPES_LABEL, no_ctypes_case()))
 
 
 def _guard_family_constant(path):
@@ -23862,11 +23922,16 @@ def _fix_with(folder, good, names):
     return fix
 
 
-def _reload_run(folder, name, fix=None, command=None):
-    """One Bash call through the copy's guard.py. fix, when given, runs once, RELOAD_DELAY_S after the
-    guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
-    only if the guard waited."""
-    cfg = os.path.join(ROOT, "reload-cfg", name)
+def _reload_cfg(name):
+    """The CLAUDE_CONFIG_DIR of the copy `name`: one folder each."""
+    return os.path.join(ROOT, "reload-cfg", name)
+
+
+def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S, session=None):
+    """One Bash call through the copy's guard.py. fix, when given, runs once, delay seconds after the
+    guard starts. session, when given, is the payload's session_id. Returns (run, fixed): fixed is True
+    when fix ran, which is before the guard ended only if the guard waited."""
+    cfg = _reload_cfg(name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
@@ -23874,14 +23939,16 @@ def _reload_run(folder, name, fix=None, command=None):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL},
-                          "cwd": NOGIT})
+    body = {"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL}, "cwd": NOGIT}
+    if session:
+        body["session_id"] = session
+    payload = json.dumps(body)
     fixed = threading.Event()
 
     def land():
         fix()
         fixed.set()
-    timer = threading.Timer(RELOAD_DELAY_S, land) if fix else None
+    timer = threading.Timer(delay, land) if fix else None
     if timer:
         timer.daemon = True
         timer.start()
@@ -23957,6 +24024,98 @@ RELOAD_CHECKS = (
 )
 for _label, _check in RELOAD_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# A flat module (no INSTALL_ID line) is an older copy, or missing, when the guard first loads it. Its whole file
+# lands LATE_LAND_S after the guard starts, and the guard waits and reloads. A module that loaded stays in
+# sys.modules until the retry pops it, so each case needs its module popped: reread_check and proc_env cache
+# an older copy, and precompact_handoff caches an older copy that reread_check reuses on the retry.
+LATE_LAND_S = 1.5
+
+
+def _source_text(module):
+    with open(os.path.join(os.path.dirname(GUARD), module), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def late_land_case(module, older_text):
+    """`module` is in the copy as older_text, or missing for None. Its source file lands whole LATE_LAND_S
+    after the guard starts. The guard waits, reloads it, and allows the call."""
+    def check():
+        name = "late-" + module[:-3]
+        folder, _good = _reload_copy(name, INSTALL_ID)
+        target = os.path.join(folder, module)
+        if older_text is None:
+            os.remove(target)
+        else:
+            _put_whole(target, older_text)
+        run, fixed = _reload_run(folder, name, _fix_with(folder, {module: _source_text(module)}, [module]),
+                                 delay=LATE_LAND_S)
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before %s landed, so it never waited to reload: %r"
+                           % (decision, module, reason[:90]))
+        if decision != "allow" or run.returncode != 0:
+            return False, ("%s landed late, but the call is %r, exit %d, want allow: %r"
+                           % (module, decision, run.returncode, reason[:90]))
+        return True, "%s landed late, the guard waited and reloaded it, and the call is allowed, exit 0" % module
+    return check
+
+
+def late_land_stale_ph_case():
+    """A stale precompact_handoff loads first and stays in sys.modules until the retry pops it. guard_core
+    carries a stale stamp, so the first load fails the install-id check, after reread_check has imported
+    precompact_handoff. Both fresh files land LATE_LAND_S after the guard starts, precompact_handoff first.
+    The reload must read the fresh one: a session with the re-read flag set is refused handoff-unread. The
+    stale copy names its flag file elsewhere, so reused, it finds no flag and the call is allowed."""
+    def check():
+        name = "late-stale-ph"
+        fresh = _source_text("precompact_handoff.py")
+        stale = fresh.replace('"%s.reread"', '"%s.reread-old"', 1)
+        if stale == fresh:
+            raise RuntimeError("precompact_handoff.py has no flag path literal to age")
+        # Control first: an intact copy with the flag set refuses, so the miss below is the stale copy's.
+        control = name + "-control"
+        control_folder, _good = _reload_copy(control, INSTALL_ID)
+        hu_files(_reload_cfg(control), flag=True, handoff=True)
+        control_run, _fixed = _reload_run(control_folder, control, session=HU_SID)
+        control_decision, control_reason = _decision(control_run)
+        if control_decision != "deny" or "(handoff unread)" not in control_reason \
+                or hu_paths(_reload_cfg(control), HU_SID)[0] not in control_reason:
+            return False, ("control: an intact copy with the flag set is %r, want deny naming the handoff: %r"
+                           % (control_decision, control_reason[:90]))
+        folder, good = _reload_copy(name, INSTALL_ID)
+        _put_whole(os.path.join(folder, "precompact_handoff.py"), stale)
+        _damage_stamp(folder, good)   # guard_core's stamp is stale: the first load fails the install-id check
+        fix = _fix_with(folder, {"precompact_handoff.py": fresh, RELOAD_CORE: good[RELOAD_CORE]},
+                        ["precompact_handoff.py", RELOAD_CORE])   # ph first, so a reload that sees matching ids sees fresh ph
+        hu_files(_reload_cfg(name), flag=True, handoff=True)
+        run, fixed = _reload_run(folder, name, fix, session=HU_SID, delay=LATE_LAND_S)
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before precompact_handoff landed, so it never waited to reload: %r"
+                           % (decision, reason[:90]))
+        if decision != "deny" or "(handoff unread)" not in reason:
+            return False, ("after the reload the flagged call is %r, want deny: the stale precompact_handoff was reused"
+                           % decision)
+        return True, ("precompact_handoff landed late, the guard reloaded the fresh one, and the flagged call "
+                      "is refused handoff-unread")
+    return check
+
+
+LATE_LAND_CHECKS = (
+    ("late-land: reread_check.py, an older copy with no ph name, lands late: the call is allowed",
+     late_land_case("reread_check.py", '"""An older copy: no ph name yet."""\n')),
+    ("late-land: precompact_handoff.py missing until it lands late: reread_check reloads ph, the call is allowed",
+     late_land_case("precompact_handoff.py", None)),
+    ("late-land: proc_env.py, an older copy with no holds_session_tag name, lands late: the call is allowed",
+     late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n')),
+    ("late-land: a stale precompact_handoff loads first, the reload picks up the fresh one: a flagged call is refused",
+     late_land_stale_ph_case()),
+)
+for _label, _check in LATE_LAND_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)  # builds only its copy and reads no lazy fixture
 
 
 def reload_crash_stamp_case():
@@ -26054,31 +26213,33 @@ def hu_cost_check():
     return True, "one existence check (%s) on the flag, no write, no process start" % name
 
 
-def hu_copy_check():
-    """With reread_check.py missing beside guard.py, the guard fails open: a call that an intact copy refuses
-    for the unread handoff is allowed. The intact copy is the control, so the fixture is shown to bite.
-    `echo hi` is allowed by every rule, so a copy that crashes and allows everything passes it too. So the
-    dropped copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the model floor refuses."""
+def hu_copy_check(drop="reread_check.py"):
+    """install-hooks-whole (decision install-hooks-whole): with `drop` missing beside guard.py, the guard never
+    allows a call. A failed import of reread_check or of precompact_handoff takes the same wait-then-refuse path
+    as a missing sibling: the guard loads again for about 5 s, then refuses each call as guard-crash. The intact
+    copy is the control, so the fixture is shown to bite. `echo hi` is allowed by every rule, so the dropped
+    copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the intact copy refuses
+    for the model floor. The dropped copy refuses that spawn as guard-crash too, never by a rule it cannot run."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
-    dropped = _guard_copy("hu-no-reread", "reread_check.py")
+    dropped = _guard_copy("hu-no-" + drop[:-3], drop)
     control = _hu_copy_run(intact, cfg)
     why = ov_want(*_decision(control), "deny", HU_RULE)
     if why:
         return False, "the intact copy, the control: %s" % why
     run = _hu_copy_run(dropped, cfg)
     decision, reason = _decision(run)
-    if run.returncode != 0 or decision != "allow" or reason:
-        return False, "without reread_check.py the call is %r (exit %d), want a silent allow" % (
-            decision, run.returncode)
+    if run.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
+        return False, "without %s the call is %r as %r (exit %d), want deny as guard-crash" % (
+            drop, decision, reason[:70], run.returncode)
     spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
-    why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
-    if why:
-        return False, "without reread_check.py a Haiku spawn is not refused: %s (exit %d)" % (
-            why, spawn.returncode)
-    return True, ("reread_check.py missing: the call is allowed, exit 0, and a Haiku spawn is refused by the "
-                  "model floor; the intact copy refuses the call")
+    decision, reason = _decision(spawn)
+    if spawn.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
+        return False, "without %s a Haiku spawn is %r as %r (exit %d), want deny as guard-crash" % (
+            drop, decision, reason[:70], spawn.returncode)
+    return True, ("%s missing: the call is refused as guard-crash, exit 0, and so is a Haiku "
+                  "spawn; the intact copy refuses the call for the unread handoff" % drop)
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
@@ -26195,8 +26356,10 @@ for _label, _check in (
      hu_cycle_check),
     ("handoff-unread: unread_handoff makes one existence check, on the flag, with no write or process start",
      hu_cost_check),
-    ("handoff-unread: a guard copy without reread_check.py fails open, and the intact copy refuses",
+    ("handoff-unread: install-hooks-whole: a guard copy without reread_check.py refuses as guard-crash, never allows",
      hu_copy_check),
+    ("handoff-unread: install-hooks-whole: a guard copy without precompact_handoff.py refuses as guard-crash, never allows",
+     lambda: hu_copy_check("precompact_handoff.py")),
     ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
      hu_override_check),
     ("handoff-unread: unread_handoff returns the path only when every condition holds, and never raises",
