@@ -1007,6 +1007,12 @@ else:
     head = state["pr"]["head"]["sha"]
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
+    failing = state.get("fail") or {}
+    if failing.get("route") == rel:  # a read that fails the way its reply does: HTTP 403, or a reply that is not JSON
+        if failing.get("how") == "403":
+            api_error(403, "Resource not accessible by integration")
+        print("not json")
+        sys.exit(0)
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
     elif rel == "pulls":
@@ -1017,6 +1023,8 @@ else:
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
         print(listing(rows, None, fields, flags))
+    elif rel == "issues/comments":  # the repo's issue comments, the review records among them (merge.py's review_comments)
+        print(listing(state.get("comments", []), None, fields, flags))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
@@ -1051,11 +1059,15 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None):
+                 count_file=None, compares=None, comments=(), fail=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `comments` are the repo's issue comments, each {body, issue_url}, served by the comment list read (`issues/comments`).
+    `fail` is {"route": "pulls" | "issues/comments", "how": "403" | "text"}: that read fails the way its reply does, an
+    HTTP 403 or a reply that is not JSON. Every other read answers as usual.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1102,7 +1114,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     # what _verify_fake_gh_delay reads. `broken` answers every call with text that is not JSON.
     state = {
         "pr": {"state": "open", "merged": False, "draft": False, "body": None, "mergeable": True, "mergeable_state": "clean",
-               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base}},
+               "merge_commit_sha": "e" * 40, "head": {"ref": "feat", "sha": "abc1234"}, "base": {"ref": base},
+               "created_at": "2026-11-01T09:00:00Z"},
         "number": 12,
         "checks": checks if checks is not None else [{"name": "checks", "bucket": "pass", "link": ""}],
         "statuses": statuses if statuses is not None else [],
@@ -1118,6 +1131,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "comments": [dict(c) for c in comments],  # the repo's issue comments (see the docstring)
+        "fail": fail,  # None, or the read that fails and how (see the docstring)
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -13924,6 +13939,197 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
                          archive_writes_nothing_case))
 
 
+# =========================================================================== reviewed-head-push
+#
+# Rule reviewed-head-push. The incident: a lane pushed onto the head of a reviewed pull request whose one fix check
+# was already used. The merge tool writes one fix check per record, so it could write no record for the new head, and
+# the lane hand-wrote one. A `git push` that would land on the head of an open pull request ASKS, when that head's
+# newest review record is done and already carries its fix check. The ask says to stack the change on a new branch.
+# The reader is guard_merge's helper, on the merge tool's own parser and state rule. Every record a case reads is
+# built by the tool's own review_body.
+#
+# Each case runs the guard as a process with a counted fake `gh` on PATH, as the merge cases do. So a missing rule
+# shows as a wrong decision or a wrong read count, never as a crash. A case checks in this order: the decision, the
+# gh reads (the scope of an allow), and the stderr lines. A fail-open read prints exactly one line, naming the rule.
+
+RPUSH_RULE = "reviewed-head-push"
+RPUSH_ASK = "stack the change on a new branch"
+RPUSH_BRANCH = "reviewed-lane"
+RPUSH_PUSH = VCS + " push origin HEAD:" + RPUSH_BRANCH
+RPUSH_LIVE, RPUSH_PREFIX, RPUSH_OLD = "a" * 40, "b" * 40, "c" * 40  # the PR's head now, the head its round reviewed, an older head
+RPUSH_N = 21  # the reviewed pull request's number
+RPUSH_OPEN = {"number": RPUSH_N, "head": RPUSH_LIVE, "ref": RPUSH_BRANCH}
+RPUSH_PULLS, RPUSH_COMMENTS = "pulls", "issues/comments"  # the two reads, by their route
+RPUSH_BOTH = (RPUSH_PULLS, RPUSH_COMMENTS)
+RPUSH_ROUND = (1, "reviewer", "sonnet", "PASS")
+RPUSH_FIX = (RPUSH_PREFIX, "reviewer", "sonnet", "PASS")  # a fix check that passed, on the live head
+RPUSH_FIX_FAILED = (RPUSH_PREFIX, "reviewer", "sonnet", "FAIL")
+RPUSH_CHATTER = "looks fine to me"  # an issue comment that is no review record
+RPUSH_ROOT = os.path.join(ROOT, "reviewed-head-push")
+_RPUSH_TOOL = []
+
+
+def rpush_tool():
+    """merge/merge.py, loaded once. Its review_body writes every record a case reads, so no case writes one by hand."""
+    if not _RPUSH_TOOL:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("merge_tool_for_records", os.path.join(REPO, "merge", "merge.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _RPUSH_TOOL.append(module)
+    return _RPUSH_TOOL[0]
+
+
+def rpush_record(head=RPUSH_LIVE, fix=None, rounds=(RPUSH_ROUND,), n=RPUSH_N):
+    """One review record: the reviewed `head`, its round lines, and the fix check or None."""
+    return rpush_tool().review_body(n, head, "normal", "no", list(rounds), "not owed", fix=fix)
+
+
+def rpush_comment(body, n=RPUSH_N):
+    """One issue comment on pull request `n`, in the shape the comment list read returns."""
+    return {"body": body, "issue_url": "https://api.github.com/repos/y/x/issues/%d" % n}
+
+
+def rpush_record_comments(*specs, before=0):
+    """A case's comments, built when its check runs: `before` chatter comments, then one record per spec, each spec
+    the keywords of rpush_record."""
+    def build():
+        return ([rpush_comment(RPUSH_CHATTER) for _ in range(before)]
+                + [rpush_comment(rpush_record(**spec)) for spec in specs])
+    return build
+
+
+def rpush_repo():
+    """A merge-tool repo whose origin names main, so a push to another branch reads as settled. STAMPREPO has no origin,
+    and a push with no default branch to read asks as a force push. Built on first use, from STAMPREPO's stamp."""
+    if not os.path.isdir(os.path.join(RPUSH_ROOT, "repo", ".git")):
+        with open(os.path.join(STAMPREPO, ".github", "stamp.json"), encoding="utf-8") as handle:
+            stamp = handle.read()
+        make_repo(os.path.join(RPUSH_ROOT, "repo"), {".github/stamp.json": stamp, "hooks/keep": "x\n"})
+        where = os.path.join(RPUSH_ROOT, "repo")
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "remote", "set-head", "origin", "main")
+    return os.path.join(RPUSH_ROOT, "repo")
+
+
+def rpush_no_tool_guard():
+    """A copy of the guard family in a folder with no merge tool beside it, and a config folder with no rules file. The
+    helper finds no tool to load, so its read fails open. Built on each run, so it copies the guard as it is then."""
+    folder = os.path.join(RPUSH_ROOT, "no-tool")
+    hooks = os.path.join(folder, "hooks")
+    os.makedirs(hooks, exist_ok=True)
+    os.makedirs(os.path.join(folder, "cfg"), exist_ok=True)
+    copy_guard_family(hooks)
+    return os.path.join(hooks, "guard.py"), os.path.join(folder, "cfg")
+
+
+def rpush_route(argv):
+    """The route a counted gh call reads: argv[1] is `repos/<owner>/<repo>/<route>`, and the route is what follows the repo."""
+    parts = argv[1].split("/", 3) if len(argv) > 1 else []
+    return parts[3] if len(parts) == 4 else ""
+
+
+def rpush_case(label, want, reads, lines=0, command=RPUSH_PUSH, cwd=STAMPREPO, origin=False, comments=(),
+               others=(RPUSH_OPEN,), fail=None, page_cap=100, no_tool=False):
+    """Register one check of reviewed-head-push. `want` is the decision, "ask" or "allow". `reads` are the gh routes the
+    run makes, in order. `lines` is the stderr lines the run prints: 0, or 1 for a read that fails open, naming the rule.
+    `origin` runs the push in rpush_repo(), a repo with an origin. `comments` is a list, or a callable that builds one
+    when the check runs. The decision is judged first; the reads after it, so an allow control proves its reads."""
+    folder = os.path.join(RPUSH_ROOT, re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:70])
+
+    def check():
+        gh_calls_taken(folder)  # clear a call log an earlier run of this case left
+        listed = comments() if callable(comments) else list(comments)
+        make_fake_gh(folder, "main", others=list(others), comments=listed, fail=fail, page_cap=page_cap,
+                     count_file=os.path.join(folder, ARCHIVE_CALLS))
+        guard, config = rpush_no_tool_guard() if no_tool else (None, None)
+        where = rpush_repo() if origin else cwd
+        case = {"raw": None, "tool": "Bash", "cwd": where, "process_cwd": where, "session": None,
+                "env_path": fake_gh_path(folder) + os.pathsep + GIT_PATH, "config": config or MERGECFG,
+                "agent_id": None, "agent_type": None, "temp": None, "load": None, "env": None, "transcript": None,
+                "guard": guard, "tool_input": {"command": command}}
+        got, reason = decide(case)
+        made = [rpush_route(json.loads(line)) for line in gh_calls_taken(folder)]
+        if got != want:
+            return False, "decision %s, wanted %s: %s" % (got, want, reason[:110])
+        if want == "ask":
+            if RPUSH_RULE not in reason or RPUSH_ASK not in reason:
+                return False, "the ask does not name the rule and say to stack the change: %s" % reason[:110]
+            if names_the_target(reason, RPUSH_RULE):
+                return False, "the ask names a forbidden fragment %r" % names_the_target(reason, RPUSH_RULE)
+        elif reason:
+            return False, "an allow printed a reason: %s" % reason[:110]
+        if made != list(reads):
+            return False, "gh reads %r, wanted %r" % (made, list(reads))
+        printed = [line for line in LAST_RUN["stderr"].splitlines() if line.strip()]
+        if len(printed) != lines:
+            return False, "%d stderr line(s) wanted, %d printed: %r" % (lines, len(printed), printed[:2])
+        if lines and RPUSH_RULE not in printed[0]:
+            return False, "the stderr line does not name the rule: %s" % printed[0][:110]
+        return True, "%s after %d gh read(s)" % (want, len(made))
+
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+# The ask. The newest record decides, and a done record whose one fix check passed asks on the head it reviewed.
+rpush_case("reviewed-head-push: a done record with a passed fix check on the live head asks",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a newer record without a fix check after an older one with it allows",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX}, {}))
+rpush_case("reviewed-head-push: a newer fix check after an older record without one asks",
+           "ask", RPUSH_BOTH, comments=rpush_record_comments({}, {"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a record on page two of the comments still asks",
+           "ask", RPUSH_BOTH, page_cap=2, comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
+
+# The allow controls. Each names its two reads, so it cannot pass on a read that never happened.
+rpush_case("reviewed-head-push: a done record with no fix check allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({}))
+rpush_case("reviewed-head-push: a fix check that failed allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX_FAILED}))
+rpush_case("reviewed-head-push: a record for an older head allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"head": RPUSH_OLD, "fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a record that names another pull request allows, after both reads",
+           "allow", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX, "n": RPUSH_N + 1}))
+rpush_case("reviewed-head-push: a newest record that does not parse allows, after both reads",
+           "allow", RPUSH_BOTH,
+           comments=lambda: [rpush_comment(rpush_record(fix=RPUSH_FIX).replace("Round 1:", "Round 9:"))])
+rpush_case("reviewed-head-push: an open pull request with no comment allows, after both reads",
+           "allow", RPUSH_BOTH, comments=())
+rpush_case("reviewed-head-push: a closed pull request on the branch allows, after the list read only",
+           "allow", (RPUSH_PULLS,), others=[dict(RPUSH_OPEN, state="closed")],
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a branch with no pull request allows, after the list read only",
+           "allow", (RPUSH_PULLS,), command=VCS + " push origin HEAD:lane-without-pr",
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+
+# The fail-open reads. A read that fails allows the push and prints exactly one line, naming the rule.
+rpush_case("reviewed-head-push: a 403 on the pull request list allows, with one stderr line naming the rule",
+           "allow", (RPUSH_PULLS,), lines=1, fail={"route": RPUSH_PULLS, "how": "403"})
+rpush_case("reviewed-head-push: a 403 on the comment list allows, with one stderr line naming the rule",
+           "allow", RPUSH_BOTH, lines=1, fail={"route": RPUSH_COMMENTS, "how": "403"},
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a pull request list that is not JSON allows, with one stderr line naming the rule",
+           "allow", (RPUSH_PULLS,), lines=1, fail={"route": RPUSH_PULLS, "how": "text"})
+rpush_case("reviewed-head-push: a merge tool that cannot be loaded allows, with one stderr line naming the rule",
+           "allow", (), lines=1, no_tool=True, comments=rpush_record_comments({"fix": RPUSH_FIX}))
+
+# The no-read controls. A push that cannot ask, or that writes no head, reads nothing from gh.
+rpush_case("reviewed-head-push: a repo with no stamp allows, with no gh read",
+           "allow", (), cwd=STAMPNONE, comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a repo whose stamp has no merge block allows, with no gh read",
+           "allow", (), cwd=STAMPNOBLOCK, comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a dry-run push allows, with no gh read",
+           "allow", (), command=VCS + " push --dry-run origin HEAD:" + RPUSH_BRANCH,
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a delete by refspec allows, with no gh read",
+           "allow", (), origin=True, command=VCS + " push origin :" + RPUSH_BRANCH,
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+rpush_case("reviewed-head-push: a delete by --delete allows, with no gh read",
+           "allow", (), origin=True, command=VCS + " push --delete origin " + RPUSH_BRANCH,
+           comments=rpush_record_comments({"fix": RPUSH_FIX}))
+
+
 # The own-record reader on each shape, read directly. A check passes when the tags it reads are one of `accept`,
 # where None is no record. The guard's archive and brief reads both go through this reader.
 def _load_own_session():
@@ -17661,6 +17867,9 @@ FAMILY = "owner-judge"   # the family the cases after this section have always r
 # --------------------------------------------------------------------------- the runner
 
 
+LAST_RUN = {"stderr": ""}   # the stderr of the guard run decide made last
+
+
 def decide(case):
     """Return (decision, reason) for one case."""
     materialize_for(case)
@@ -17740,6 +17949,7 @@ def decide(case):
             raise
         return "slow", "still judging after %s s, over the %s s limit" % (limit + 1, limit)
     elapsed = time.monotonic() - started
+    LAST_RUN["stderr"] = result.stderr   # a check reads the lines a fail-open path prints (reviewed-head-push)
     if case.get("max_seconds") and elapsed > case["max_seconds"]:
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
