@@ -33,7 +33,9 @@ set_override_veto and session_home_keep):
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
 
-Shell tools (Bash, PowerShell), in judge_shell order:
+Shell tools (Bash, PowerShell, and Monitor's `command`), in judge_shell order. A Monitor call gets every
+rule below except the stream family: live-stream, waiter, narrated-tail and background-end never refuse
+it (agents-wait-with-monitor):
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
                        against the commits the builder made and its working tree. The reason gives
                        the undo route and names no path. No override lifts it. SubagentStop
@@ -3524,6 +3526,9 @@ def settle_ask(tool: str, raw: str) -> None:
     refuse(tool, "ask", rule, reason, matched)
 
 
+MONITOR_TOOL = "Monitor"   # runs a shell command: judged by judge_shell, minus the stream family
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "") -> None:
@@ -3723,25 +3728,28 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's
     # own command line and never go false.
+    # A Monitor call is a stream by design (decision agents-wait-with-monitor), so the stream family
+    # (live-stream, waiter, narrated tail, background-end) never refuses it. Every other rule still judges it.
+    stream_family = tool != MONITOR_TOOL
     poller = ""
     for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
-        if matched:
+        if matched and stream_family:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
         poller = loop_condition_polls_a_pattern(segment) or poller
     matched = waiter_verdict(split_segments(stripped), background)
-    if matched:
+    if matched and stream_family:
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
     matched = narrated_tail_hit(stripped)
-    if matched:
+    if matched and stream_family:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
     matched = verdict_pipe_hit(stripped)
     if matched:
         refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
-    if matched:
+    if matched and stream_family:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
@@ -5235,14 +5243,14 @@ def judge(payload) -> None:
             refuse(tool, "deny", "page-stale", behind[0], behind[1])
         return
 
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
-                        tool_input.get("run_in_background") is True,
+                        tool_input.get("run_in_background") is True or tool == MONITOR_TOOL,
                         tool_input.get("description") or "")
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
