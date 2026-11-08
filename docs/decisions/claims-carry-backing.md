@@ -41,7 +41,7 @@ A definitive claim in prose carries one of these backings:
 
 A code span used as a claim's subject still counts as a claim. A claim with no backing is unbacked.
 
-A cite to a Python name in prose, "`file.py` `name`" or "(file.py name)", must name a name bound at head. STALE010 checks it (decision `record-cites-live-code`, claims about code cite live code names).
+A cite to a Python name in prose, "`file.py` `name`" or "(file.py name)", must name a name bound at head. STALE010 checks it when its top folder is tracked (decision `record-cites-live-code`, claims about code cite live code names).
 
 ## STALE005: a capability stated without a backing
 

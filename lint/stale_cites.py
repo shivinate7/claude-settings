@@ -128,7 +128,7 @@ A touched .py adds one `git cat-file --batch` and, through the report below, one
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
-at head through the one `cat-file` the run opens, once per range. That `cat-file` is one start, and it opens only when an
+at head through the one `cat-file` the run opens, once per range, plus head's root tree for the top-folder test. That `cat-file` is one start, and it opens only when an
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
 (NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
