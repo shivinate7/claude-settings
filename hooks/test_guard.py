@@ -7584,6 +7584,10 @@ sh("push-new-branch: a local branch named as the source is not judged, allows",
    VCS + " push origin main:refs/heads/skc-localsrc", "allow", cwd=PUSHNEWBR)
 sh("push: a stacked commit named by a sha, not HEAD, allows",
    VCS + " push origin HEAD~0:refs/heads/skc-stacked-sha", "allow", cwd=PUSHNEWBR)
+# ALLOW, the `@{` arm at the current commit: HEAD@{0} is B, which no remote holds, so it is not a stray branch.
+# Pins the arm's allow side: a mutant that denies every `@{` source passes the HEAD@{1} deny and fails here.
+sh("push-new-branch: a reflog source HEAD@{0} off every remote tip, allows",
+   VCS + " push origin HEAD@{0}:refs/heads/skc-reflog-tip", "allow", cwd=PUSHNEWBR)
 sh("push: a lease at another branch's tip, leased, allows",
    VCS + " push" + LEASE + " origin HEAD~1:refs/heads/skc-lease", "allow", cwd=PUSHNEWBR)
 push_case("a forced push at another branch's tip is refused by the force rule, not the new-branch rule",
