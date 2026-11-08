@@ -30,11 +30,11 @@ Hook: stall_watch.py --hook
   drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled.
 
   BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
-  design appends there too (hooks/stall_beat.py: bin/verdict's heartbeat, bin/ci-job's start line per step), and the watcher relays it to its stdout (the
+  design appends there too (hooks/stall_beat.py: bin/verdict's heartbeat, bin/ci-job's start line per step, and its `fetch:` line once on a shallow clone), and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
-  Cost: one append per heartbeat or step start by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
+  Cost: one append per heartbeat, step start or unshallow fetch by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -250,7 +250,7 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
     except (OSError, ValueError):
         beat_used = False
     if beat_used:
-        lines.append("Beat file (verdict heartbeat, ci-job start lines), no growth: " + os.path.abspath(beat))
+        lines.append("Beat file (verdict heartbeat, ci-job start and fetch lines), no growth: " + os.path.abspath(beat))
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
 
