@@ -1623,9 +1623,8 @@ def case_step_foreach_cmdlet_is_a_shell_line():
 
 
 def case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line():
-    # `time` is a command wrapper (guard_core's COMMAND_WRAPPERS), so the token reader takes the cmdlet path after it as
-    # the command, as it does after `sudo`. _cmdlet_prefix reads the same wrapper list, so a backslash path after `time`
-    # is refused too. The forward-slash form is the control: the token reader refuses it already.
+    # A command wrapper does not hide a backslash cmdlet path: `time C:\tools\Get-Thing` is refused, as `sudo` is. The
+    # forward-slash form is the control.
     refused = ("command-in-item", "shell line")
     page("a step holding `time C:/tools/Get-Thing` is refused as a shell line, a control", "set",
          entry_of(task_item(["Check the output of `time C:/tools/Get-Thing`"])), refused)
@@ -1635,23 +1634,19 @@ def case_step_time_prefix_before_a_cmdlet_path_is_a_shell_line():
 
 def case_step_prefixed_folder_path_is_text():
     # A folder path after `&` or after other text names a folder, not a cmdlet. `Read-Me` is a PowerShell verb (Read),
-    # so the path shape and the prefix decide. _cmdlet_prefix takes only `&`, `VAR=value` and command-wrapper words
-    # before a path, so the `Tom` before the `&` keeps `Tom & C:\Docs\Read-Me` text. `& docs\Read-Me` has no drive or
-    # leading separator, so it is no path. The last folder, `& ~\Documents\Claude-Settings`, has a verb (`Claude`) that
-    # is no PowerShell verb, so the path check passes it. It pins that the verb list still applies after `&`.
+    # so the path shape and the prefix decide. `Tom` is no prefix word, so the path check starts at `Tom` and finds no
+    # path there: `Tom & C:\Docs\Read-Me` is text. `& docs\Read-Me` has no drive or leading separator, so it is no path.
+    # The last folder, `& ~\Documents\Claude-Settings`, has a verb (`Claude`) that is no PowerShell verb, so the path
+    # check passes it. It pins that the verb list still applies after `&`.
     for span in (r"Tom & C:\Docs\Read-Me", r"& docs\Read-Me", r"& ~\Documents\Claude-Settings"):
         page("a step holding `%s` is text and passes" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), None)
 
 
 def case_step_wrapper_flags_before_a_cmdlet_path_is_a_shell_line():
-    # `_cmdlet_prefix` skips a command-wrapper word (`sudo`, `nice`, `time`, `timeout`) but not the flags or values
-    # after it, so the cmdlet path behind them is never reached: `sudo -u bob C:\tools\Get-Thing` passes on main. The
-    # forward-slash forms are refused on main already, so they are the controls. The reader to reuse is guard_core's
-    # token reader: guard_core._walk_wrappers walks COMMAND_WRAPPERS, and _wrapper_flags skips each flag and its value
-    # (WRAPPER_VALUE_FLAGS: `-u bob` for sudo, `-n 5` for nice). Its `timeout` branch skips the DURATION word (`5`).
-    # That reader takes tokens, and the POSIX reader strips the backslashes of a raw path, so the fix must walk the
-    # segment's raw words the same way.
+    # A Verb-Noun cmdlet at a backslash path is a shell line behind a command wrapper's flags and values, as it is at a
+    # forward slash. `sudo -u bob` and `nice -n 5` skip a value flag, `time -p` a plain flag, `timeout 5` a duration.
+    # The forward-slash forms are the controls.
     refused = ("command-in-item", "shell line")
     for span in (r"sudo -u bob C:\tools\Get-Thing", r"nice -n 5 C:\tools\Get-Thing", r"time -p C:\tools\Get-Thing",
                  r"timeout 5 C:\tools\Get-Thing"):
@@ -1664,13 +1659,12 @@ def case_step_wrapper_flags_before_a_cmdlet_path_is_a_shell_line():
 
 
 def case_step_wrapper_flags_before_a_folder_or_prose_is_text():
-    # The fix must not over-reach. Flags and values are skipped only to find a cmdlet path, so prose with no path, and
-    # a folder whose path ends in a separator, pass after the same wrapper and flags. All four pass on main already:
-    # the prose names no path, and a folder with a `/` or `\` at its end is text
-    # (case_step_verb_noun_folder_with_slash_is_text). The folder controls have Verb-Noun names, so each tests that the
-    # trailing separator keeps the path check from matching. `nice -n 5 C:\Docs\Notes\` is no control here: main refuses
-    # it with the generic shell-line text, since its POSIX read fails on the trailing `\` (segment_tokens is None) and
-    # the fallback reads `-n` as a flag.
+    # Flags and values are skipped only to find a cmdlet path, so prose with no path, and a folder whose path ends in a
+    # separator, pass behind the same wrapper and flags. The prose names no path. A folder with a `/` or `\` at its end
+    # is text, even with a Verb-Noun name: the separator keeps the path check from matching
+    # (case_step_verb_noun_folder_with_slash_is_text). `nice -n 5 C:\Docs\Notes\` is no control here: the generic
+    # shell-line text refuses it, since its POSIX read fails on the trailing `\` (segment_tokens is None) and the
+    # fallback reads `-n` as a flag.
     for span in ("time -p is the POSIX flag", "sudo -u bob C:\\Docs\\Read-Me/", "nice -n 5 C:\\Docs\\Read-Me/",
                  "timeout 5 C:\\Docs\\Read-Me\\"):
         page("a step holding `%s` is text and passes, a control" % span, "set",
