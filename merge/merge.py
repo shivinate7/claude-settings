@@ -2998,7 +2998,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 except Stop as e:
                     ok, why = False, str(e)
                 if not ok:
-                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed: " + why)
+                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed " + WAIT_CITE + ": " + why)
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
