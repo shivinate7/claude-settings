@@ -2549,6 +2549,48 @@ class NamedExcerptTests(unittest.TestCase):
         self.assertNotIn("60: " + lines[59], rows, "the rerun( row 60 is in the excerpt of run()")
         self.assertNotIn("70: " + lines[69], rows, "the run_x( row 70 is in the excerpt of run()")
 
+    def test_a_dotted_name_whose_prefix_is_a_def_not_a_class_takes_no_def_body(self):
+        # main is a def, not a class, so main.run names no class. Hub.run is the only run in the file, and it is not main's.
+        lines = ["def main():", "    return 1", "", "", "class Hub:", "    def run(self):"]
+        lines += ["        hub_%02d = self" % n for n in range(1, 9)]
+        lines += ["pad_%02d = %d" % (n, n) for n in range(15, 41)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "main"), 1, "scope: main is not defined on row 1")
+        self.assertEqual(self.stale.defined_line(text, "run"), 6, "scope: run is not defined on row 6")
+        rows = self.excerpt_rows(["main.run"], text)
+        self.assertNotIn("6: " + lines[5], rows, "the def row of Hub.run is in the excerpt of main.run: main is a def, not a class")
+        self.assertNotIn("10: " + lines[9], rows, "the body of Hub.run is in the excerpt of main.run: main is a def, not a class")
+
+    def test_a_dotted_name_whose_class_has_no_such_def_takes_no_module_def_body(self):
+        # Foo is a class with no run. The module-level def run is not Foo's, so Foo.run takes no def body.
+        lines = ["class Foo:", "    attr = 1", "", "", "def run(tool):"]
+        lines += ["    step_%02d = tool" % n for n in range(1, 9)]
+        lines += ["pad_%02d = %d" % (n, n) for n in range(14, 41)]
+        text = "\n".join(lines) + "\n"
+        self.assertEqual(self.stale.defined_line(text, "Foo"), 1, "scope: Foo is not defined on row 1")
+        self.assertEqual(self.stale.defined_line(text, "run"), 5, "scope: run is not defined on row 5")
+        rows = self.excerpt_rows(["Foo.run"], text)
+        self.assertNotIn("5: " + lines[4], rows, "the def row of the module-level run is in the excerpt of Foo.run: Foo has no run")
+        self.assertNotIn("8: " + lines[7], rows, "the body of the module-level run is in the excerpt of Foo.run: Foo has no run")
+
+    def test_a_name_that_strips_to_empty_matches_no_row(self):
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 31)]
+        lines[9] = "def run(tool):"
+        lines[10] = "    return tool"
+        text = "\n".join(lines) + "\n"
+        self.assertIsNotNone(self.stale.named_excerpt(["run"], text), "scope: run has no excerpt in its own file")
+        matched = [name for name in ("()", "( )", "(...)")
+                   if any(re.match(r"\d+: ", row) for row in self.excerpt_rows([name], text))]
+        self.assertEqual(matched, [], "these names strip to empty and still match rows of the file")
+
+    def test_an_unbalanced_call_span_matches_call_rows_as_its_bare_name_does(self):
+        lines = ["pad_%02d = %d" % (n, n) for n in range(1, 41)]
+        lines[19] = "result = obj.run(self)"
+        text = "\n".join(lines) + "\n"
+        self.assertIn("20: " + lines[19], self.excerpt_rows(["run"], text), "scope: the call row 20 of run is not in the excerpt of run")
+        self.assertIn("20: " + lines[19], self.excerpt_rows(["run("], text),
+                      "the call row 20, obj.run(self), is not in the excerpt of run(: the unbalanced span did not match it")
+
 
 if __name__ == "__main__":
     unittest.main()
