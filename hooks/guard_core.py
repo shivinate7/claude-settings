@@ -354,7 +354,7 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
         index += 1
     segments.append("".join(current))
     ends is None or ends.append("")
-    # a restore that closed a quote reports open, so the second reading still runs
+    # a restore that closed a quote reports the reading as open, so split_segments may take the second reading
     return segments, ("" if quote == BLIND else quote or ("'" if leaked else "")), shaped
 
 
