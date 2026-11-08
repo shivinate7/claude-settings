@@ -3,9 +3,9 @@
 
     python3 lint/test_check_hook_dup_names.py
 
-A hook module that assigns one top-level name twice keeps only the second value at import. Incident:
-PR 1678's second top-level RECORD_REASON in hooks/guard_merge.py replaced the roadmap-one-writer
-refusal text, and a wrong refusal sends the reader to the wrong remedy.
+A hook module that assigns one top-level name twice keeps only the second value at import. A second
+top-level RECORD_REASON replaces the first refusal text, and a wrong refusal sends the reader to the
+wrong remedy.
 
 Each case writes a fixture root under this run's folder (test-temp-standard, lint/_test_temp.py),
 then runs the real script with --root on it. CHECK_HOOK_DUP_NAMES_UNDER_TEST overrides the module
@@ -243,8 +243,8 @@ class DupNameTests(unittest.TestCase):
         self.assert_unknown(rc, out, "hooks")
 
     def test_19_pre_fix_shape_names_the_second_record_reason(self):
-        # The shape of PR 1678's hooks/guard_merge.py: a second top-level RECORD_REASON after a
-        # function. The real file sits on the PR ref, which CI does not fetch, so this is its shape.
+        # A second top-level RECORD_REASON after a function replaces the first refusal text. CI has no
+        # copy of a real hooks/guard_merge.py to read, so this module is built with the same shape.
         self.write("hooks/guard_merge.py", "\n".join([
             'RECORD_WRITER_TIER = "triage"',
             'DEFAULT_RECORD_BRANCH = "roadmap"',
