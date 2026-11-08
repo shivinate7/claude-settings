@@ -1,11 +1,11 @@
 {
   "title": "A report that says an act cannot be done shows a failed try on each route",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.9,
   "owner": "coordinator",
-  "lane": null,
+  "lane": "session_013NEJL4AtAVhGNb2poKhrsi",
   "why": "At 21:47 CST Nov 7 the coordinator reported that it could not open a PR, after only a plugin connect-failure notice. mcp__github__create_pull_request then worked on its first try at 21:52 CST (#1768). Owner, 21:52 CST: \"dont we know to just use the rest api etc theres tons of ways how did u make a bad assumption\".",
-  "note": "Guard: lint/report_guard.py refuses a report line that claims an act cannot be done, unless the turn shows a failed try on each route (GitHub MCP tool, gh api, REST). Rule: shiv-stylisms output-never-hand-off-doable-step. Safety-class fix; it waits under the owner's 21:42 CST hold (item 384), as it does not drain the queue (triage). Slug and guard from the coordinator, 21:52 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:53:00-06:00"
+  "note": "Guard: lint/report_guard.py refuses a report line that claims an act cannot be done, unless the turn shows a failed try on each route (GitHub MCP tool, gh api, REST). Rule: shiv-stylisms output-never-hand-off-doable-step. Safety-class fix; it waits under the owner's 21:42 CST hold (item 384), as it does not drain the queue (triage). Slug and guard from the coordinator, 21:52 CST Nov 7. Lane session_013NEJL4AtAVhGNb2poKhrsi started as an owner ask under item 387 a (coordinator, 22:33 CST Nov 7).",
+  "updatedAt": "2026-11-07T22:31:00-06:00"
 }
