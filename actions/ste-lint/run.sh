@@ -2,10 +2,11 @@
 # The ste-lint step. One home: actions/ste-lint/action.yml and bin/ste-changed both run it.
 # Reads the env that action.yml sets; bin/ste-changed sets the same names.
 set -euo pipefail
-# Needs actions/checkout with fetch-depth 0: scope 'changed' diffs against the
-# base branch, and a shallow clone would not carry that history.
+# Scope 'changed' diffs against the base branch. A clone without that history (shallow, or the base ref
+# missing) fetches it first, so only a failed fetch is UNKNOWN.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
 STALE_CITES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/stale_cites.py"
+LINT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint"
 
 cd "$(git rev-parse --show-toplevel)"  # git diff prints root-relative paths; match them from any subdirectory
 
@@ -21,6 +22,10 @@ while IFS= read -r p || [ -n "$p" ]; do
   EXCLUDE_PATTERNS+=("$p")
   EXCLUDE_PATHSPECS+=(":(exclude,glob)$p")
 done < <([ -f .ste-lint-exclude ] && cat .ste-lint-exclude; echo; printf '%s\n' "${EXCLUDE:-}" | tr ',' '\n')
+
+# Helper scripts live here, never in the linted repo, so a planted module there cannot run.
+EMIT_DIR="$(mktemp -d)"
+TOP="$(pwd)"
 
 RAW_FILES=()
 FILES=()
@@ -40,8 +45,29 @@ else
   else
     BASE="$DEFAULT_BRANCH"
   fi
-  if ! git rev-parse --verify -q "refs/remotes/origin/$BASE" >/dev/null; then
-    git fetch origin "$BASE" --depth=1
+  # A shallow clone or a missing base ref has no base history (decision ci-unknown-is-red): fetch it with its
+  # history through lint/git_fetch.py, the one home of that fetch. Only a failed fetch is UNKNOWN. A base that
+  # shares no history with HEAD, and HEAD~1 of a first commit, no fetch can supply: diff_failed names them.
+  if [ "$(git rev-parse --is-shallow-repository)" = "true" ] ||
+     ! git rev-parse --verify -q "refs/remotes/origin/$BASE" >/dev/null; then
+    # A script file, not `python3 -c`: -c puts the linted repo's root first on sys.path. The lint dir goes
+    # after the script's own dir, so it never shadows a module there.
+    cat > "$EMIT_DIR/ste_fetch.py" <<'PYEOF'
+import sys
+top, lint_dir, base = sys.argv[1:4]
+sys.path.append(lint_dir)
+import git_fetch
+ok, message = git_fetch.fetch(top, refs=[base], unshallow=git_fetch.is_shallow(top), timeout=300)
+if not ok:
+    print(message)
+    sys.exit(1)
+PYEOF
+    if ! FETCH_MSG="$(python3 "$EMIT_DIR/ste_fetch.py" "$TOP" "$LINT_DIR" "$BASE")"; then
+      echo "ste-lint: UNKNOWN, could not fetch history for $BASE ($FETCH_MSG); check out with fetch-depth 0" >&2
+      # An unread input is red when CI is set, whatever FAIL says: fail=false covers findings only.
+      [ -n "${CI:-}" ] && exit 1
+      exit 0
+    fi
   fi
   if [ -z "$BASE_REF" ] && [ "$REF_NAME" = "$BASE" ]; then
     # A push to the default branch itself has no other side to diff against.
@@ -104,7 +130,6 @@ EXCLUDED_COUNT=$((${#RAW_FILES[@]} - ${#FILES[@]}))
 
 # Log + annotate findings. One home for both scopes. GitHub workflow-command
 # escaping: data escapes % \r \n; a property also escapes : and ,.
-EMIT_DIR="$(mktemp -d)"
 cat > "$EMIT_DIR/ste_emit.py" <<'PYEOF'
 def _esc(s, prop=False):
     s = str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
