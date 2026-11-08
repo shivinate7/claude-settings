@@ -23,7 +23,7 @@ the writer made ("I broke ...", a first-person clause with a fault word and no n
 guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
 (`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
 
-Every block reason reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
+Every refusal reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
 owner line from owner_line(): the check, what is wrong, and a cite of that decision. The steps to fix it live in
 that record, never in the reason.
 
@@ -204,13 +204,13 @@ REMEDY_CITE = "decision guard-remedy-not-to-owner"
 
 
 def owner_line(check, wrong):
-    """The one owner line that opens every block reason: the check's name, what is wrong, and the record that
-    holds the steps (the one home; no site writes its own). The owner reads each reason in chat, so a reason holds
+    """The one owner line that opens every refusal: the check's name, what is wrong, and the record that
+    holds the steps (the one home; no site writes its own). The owner reads each refusal in chat, so a refusal holds
     facts only, never an instruction to the session. `wrong` may hold a %s slot for the caller to fill."""
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
-# Wording that tells the session what to do. A block reason reaches the owner in chat, so it holds facts only.
+# Wording that tells the session what to do. A refusal reaches the owner in chat, so it holds facts only.
 # `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
 SESSION_PHRASES = (
     "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
@@ -1202,7 +1202,7 @@ def says_refusal_right(text, tool):
     """True when the reply says "refusal was right" or "refusal is right" directly after `tool`'s name
     (as names_tool counts a name; an optional colon may sit between), on any line. A hedge in the same
     clause, before the name or after the phrase ("not sure", "or wrong", "?"), does not clear. The
-    guard's own block reason never clears: it puts the phrase after the placeholder `<tool_name>`. A
+    guard's own refusal never clears: it puts the phrase after the placeholder `<tool_name>`. A
     plural ("refusals were right") does not clear."""
     if "__" in tool:
         pattern = re.compile(r"(?<!\w)" + re.escape(tool) + r"(?!\w)" + PHRASE + r"(?!\w)", re.I)
@@ -1307,7 +1307,7 @@ def pending_refusals(hook, text):
 
 
 def hold_reason(entries):
-    """The block reason for the triage hold, naming its `entries` (joined)."""
+    """The refusal for the triage hold, naming its `entries` (joined)."""
     return HOLD_REASON % entries
 
 
@@ -1531,7 +1531,7 @@ def hand_off_problem(hook, text):
 
 
 def refusal_reason(tools, hold=""):
-    """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
+    """The refusal for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
     held = hold_reason(hold) if hold else ""
     if not tools:
         return held

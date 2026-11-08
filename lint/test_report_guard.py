@@ -36,6 +36,9 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
+# The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
+# record holds both. Lower case, to match a lowered reason or record.
+CORRECTION_STEP = ("post only the corrected lines", "never send the report again")
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
 
 # Isolation. Every spawned guard inherits this process's environment (env=None, or a copy
@@ -1017,28 +1020,30 @@ class NoResendTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_nr_red_each_report_block_asks_for_the_corrected_lines_only(self):
+    def test_nr_red_each_refusal_holds_no_correction_tail(self):
         rows = [
-            # Catches: the label-word block asks for the report again.
+            # Catches: the label-word refusal carries the correction tail.
             ("label words", "> **Done** fixed it in abc123\n> **Next** none", ()),
-            # Catches: the model-name block asks for the report again.
+            # Catches: the model-name refusal carries the correction tail.
             ("model names", "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
              (self.BUILDER,)),
-            # Catches: the Unstarted block asks for the report again.
+            # Catches: the Unstarted refusal carries the correction tail.
             ("Unstarted line", "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** merge",
              (self.BUILDER,)),
-            # Catches: the cite-gloss block asks for the report again.
+            # Catches: the cite-gloss refusal carries the correction tail.
             ("cite gloss", "Per D12.\n\n> **Done** BUILT guard, PR #5\n> **Next** none", ()),
-            # Catches: two joined reasons each carry the tail.
+            # Catches: a joined refusal carries the correction tail.
             ("label words and cite gloss", "Per D12.\n\n> **Done** fixed it\n> **Next** none", ()),
         ]
         for name, reply, spawns in rows:
-            with self.subTest(block=name):
+            with self.subTest(refusal=name):
                 out = self.verdict(reply, spawns)
                 self.assertEqual(out["decision"], "block")
                 reason = out["reason"].lower()
                 self.assertIn("decision guard-remedy-not-to-owner", reason)
                 self.assertNotIn("send the report now", reason)
+                for phrase in CORRECTION_STEP:
+                    self.assertNotIn(phrase, reason, "the refusal carries the correction tail: %r" % phrase)
                 self.assertEqual(reason.count("rule reports-order-of-labels"), 1)
                 self.assertIn("rule reports-order-of-labels", reason)
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Owner-safe block reasons for report_guard.py (decision guard-remedy-not-to-owner).
+"""Owner-safe refusal reasons for report_guard.py (decision guard-remedy-not-to-owner).
 
-A Stop block reason reaches the owner in chat. So each reason opens with one plain line that names its check,
+A Stop refusal reason reaches the owner in chat. So each reason opens with one plain line that names its check,
 cites the record guard-remedy-not-to-owner, and holds no order to the session. The detector for an order is
 report_guard.session_wording, one home for the phrase list and the order rule. The steps for each check live in
 that record, under a heading for the check, with at least one step line under each heading.
 
-Each block path that has a fixture below runs through report_guard as a Stop hook. Not fixtured: the hand-off
+Each refusal path that has a fixture below runs through report_guard as a Stop hook. Not fixtured: the hand-off
 guard's measured-premise-with-no-date and route-cite refusals, the departs guard's separator, empty-side,
 placeholder and no-change misses, and the Unvetted "the check failed with <Exc>" text, which only an exception
 inside the past-ruling check reaches. Each is one miss of a check that has a fixture. The transcript records and the
@@ -14,12 +14,12 @@ guard runner come from lint/test_report_guard.py. The repo fixtures and the mode
 hooks/test_call_judge.py. The triage records come from lint/test_report_guard_stalled.py.
 
 Case 1a checks that no reason holds a session phrase or an order to the session. Case 1b checks the record cite.
-Case 1c checks that the first sentence names the check. Case 2 checks that each path still blocks, and that a clean
-report is not blocked. Case 3 checks that the record holds a step heading for each check name that report_guard
+Case 1c checks that the first sentence names the check. Case 2 checks that each path still refuses, and that a clean
+report is not refused. Case 3 checks that the record holds a step heading for each check name that report_guard
 passes to owner_line, and a step line under each heading. Controls pin session_wording on fact sentences, on plain
 and mid-clause orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span
 or one a span hides is still flagged. A judge reason that carries an order is checked at the Stop boundary:
-the block still fires, the ruling id stays, and the order does not reach the owner word for word.
+the refusal still fires, the ruling id stays, and the order does not reach the owner word for word.
 
 Run it as:
 
@@ -174,9 +174,9 @@ def builder_turn(model, reply):
 
 
 def case(records, word, cwd, env=None, extra=None, prep=None):
-    """One block path: the transcript `records`, the word the first sentence must hold, the repo `cwd`, the env and the
-    hook fields (`extra`) the Stop needs, and `prep`, a case run first. A rewrite path blocks only after a
-    missing-report block has left its marker, so its prep is that block."""
+    """One refusal path: the transcript `records`, the word the first sentence must hold, the repo `cwd`, the env and
+    the hook fields (`extra`) the Stop needs, and `prep`, a case run first. A rewrite path refuses only after a
+    missing-report refusal has left its marker, so its prep is that refusal."""
     return {"records": records, "word": word, "cwd": cwd, "env": env or {}, "extra": extra or {}, "prep": prep}
 
 
@@ -217,14 +217,14 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         return cfg
 
     def rewrite(self, name, first, again, word, clean):
-        """A missing-report block on `first`, then the rewrite `again` under the same session id, which the marker
-        of that block reads. `first` and `again` hold the same turn up to the reply."""
+        """A missing-report refusal on `first`, then the rewrite `again` under the same session id, which the marker
+        of that refusal reads. `first` and `again` hold the same turn up to the reply."""
         sid = "remedy-rewrite-" + name
-        block = case(first, "report", clean, extra={"session_id": sid})
-        return case(again, word, clean, extra={"session_id": sid, "stop_hook_active": True}, prep=block)
+        refusal = case(first, "report", clean, extra={"session_id": sid})
+        return case(again, word, clean, extra={"session_id": sid, "stop_hook_active": True}, prep=refusal)
 
     def fixture(self, name):
-        """The block path `name`, as a case dict. Every case names a cwd that tcj.make_repo built, so no check reads
+        """The refusal path `name`, as a case dict. Every case names a cwd that tcj.make_repo built, so no check reads
         this worktree's own records."""
         clean = tcj.make_repo("remedy-clean")
         bare = tcj.make_repo("remedy-bare")
@@ -246,7 +246,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             "past_ruling": lambda: case([trg.human("decide"), *self.sent_to_writer(),
                                          trg.assistant_text(trg.RELAY)], "past-ruling", decided,
                                         env={"CJ_ANSWER": trg.REFUSE_APPS}),
-            # The judge's reason carries an order. The block must still fire, with the ruling id, and no order.
+            # The judge's reason carries an order. The refusal must still fire, with the ruling id, and no order.
             "past_ruling_order": lambda: case([trg.human("decide"), *self.sent_to_writer(),
                                                trg.assistant_text(trg.RELAY)], "past-ruling", decided,
                                               env={"CJ_ANSWER": judge_answer(
@@ -304,7 +304,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                                             trg.assistant_text(trg.RELAY)], "unvetted", decided,
                                            env={"CJ_ANSWER": json.dumps({"ok": False, "reason":
                                                 "decisions/ghost-ruling: already decides this, 2026-10-28."})}),
-            # Rewrite paths: the rewrite of a missing-report block is checked for the model, Unstarted, answered and
+            # Rewrite paths: the rewrite of a missing-report refusal is checked for the model, Unstarted, answered and
             # Recovered reasons.
             "rewrite_model": lambda: self.rewrite("model", builder_turn("sonnet", "All done."),
                                                   builder_turn("sonnet", "> **Done** BUILT abc123 (builder opus)\n"
@@ -343,15 +343,15 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         self.assertEqual(run.returncode, 0, "the guard exited with an error: %s" % run.stderr[-300:])
         return json.loads(run.stdout) if run.stdout.strip() else {}
 
-    def block_for(self, name):
-        """(reason, word) of the block path `name`. The path must block, and its prep, when it has one, runs first."""
+    def refusal_for(self, name):
+        """(reason, word) of the refusal path `name`. The path must refuse. Its prep, when it has one, runs first."""
         c = self.fixture(name)
         if c["prep"]:
             first = self.run_stop(c["prep"])
             self.assertEqual(first.get("decision"), "block",
-                             "%s: the block before the rewrite is missing: %r" % (name, first))
+                             "%s: the refusal before the rewrite is missing: %r" % (name, first))
         out = self.run_stop(c)
-        self.assertEqual(out.get("decision"), "block", "%s: the path does not block: %r" % (name, out))
+        self.assertEqual(out.get("decision"), "block", "%s: the path does not refuse: %r" % (name, out))
         return out["reason"], c["word"]
 
     def check_no_session_problem(self, name, reason):
@@ -369,15 +369,16 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
 
     def test_2_clean_report_is_not_blocked(self):
         out = self.run_stop(case(landed(trg.GOOD_REPORT), "clean", tcj.make_repo("remedy-clean")))
-        self.assertNotEqual(out.get("decision"), "block", "2 a clean report is blocked: %r" % out)
+        self.assertNotEqual(out.get("decision"), "block", "2 a clean report is refused: %r" % out)
 
     def assert_past_ruling_verdict(self, out, slug):
-        """The block is the past-ruling verdict itself, not the Unvetted refusal, and it keeps the ruling id. The
+        """The refusal is the past-ruling verdict itself, not the Unvetted refusal, and it keeps the ruling id. The
         verdict is checked first, since the id and the order asserts read the same reason."""
-        self.assertEqual(out.get("decision"), "block", "the past-ruling block did not fire: %r" % out)
+        self.assertEqual(out.get("decision"), "block", "the past-ruling refusal did not fire: %r" % out)
         reason = out["reason"]
-        self.assertTrue(reason.startswith("Past-ruling guard"), "the block is not the past-ruling verdict: %r" % reason)
-        self.assertNotIn("Unvetted", reason, "the block is the Unvetted refusal, not the verdict: %r" % reason)
+        self.assertTrue(reason.startswith("Past-ruling guard"),
+                        "the refusal is not the past-ruling verdict: %r" % reason)
+        self.assertNotIn("Unvetted", reason, "the refusal is the Unvetted one, not the verdict: %r" % reason)
         self.assertIn(slug, reason, "the reason lost the ruling id: %r" % reason)
         return reason
 
@@ -387,9 +388,9 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         self.assertEqual(RG.session_wording(reason), "", "the reason holds an order to the session: %r" % reason)
 
     def test_recovered_no_source_names_the_item_miss(self):
-        reason, _ = self.block_for("recovered_no_source")
-        self.assertTrue(reason.startswith("Recovered guard"), "the block is not the Recovered verdict: %r" % reason)
-        self.assertIn("names no source", reason, "the block is not the no-source miss: %r" % reason)
+        reason, _ = self.refusal_for("recovered_no_source")
+        self.assertTrue(reason.startswith("Recovered guard"), "the refusal is not the Recovered verdict: %r" % reason)
+        self.assertIn("names no source", reason, "the refusal is not the no-source miss: %r" % reason)
 
     def test_mid_clause_orders_from_the_judge_do_not_reach_the_owner(self):
         decided = tcj.make_repo("remedy-decided-mid", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
@@ -515,6 +516,19 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                 self.assertEqual(record_problems(record, [name]), [],
                                  "3 the record holds no step heading and step line for the check %r" % name)
 
+    def test_3_record_holds_the_correction_step_in_shared_tails(self):
+        # The refusals hold no correction text, so the one step that asks for the corrected lines lives in the record's
+        # shared tails. The section must exist first; the two phrases are then read inside it.
+        with open(RECORD, encoding="utf-8") as handle:
+            record = handle.read()
+        scope = re.search(r"(?m)^## Shared tails\n", record)
+        self.assertTrue(scope, "3 the record has no Shared tails section")
+        end = SECTION_END.search(record, scope.end())
+        tails = record[scope.end():end.start() if end else len(record)].lower()
+        for phrase in trg.CORRECTION_STEP:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, tails, "3 the record's Shared tails hold no correction step with %r" % phrase)
+
     def test_3_section_with_no_step_line_is_flagged(self):
         # A section that holds its heading and prose, and no step, is a problem. A section with a step is not.
         emptied = "### Recovered guard\n\nText: `RECOVERED_REASON`.\n\n### Pick guard\n\n- Pick the one.\n"
@@ -525,28 +539,28 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
 
 def _case_1a(name):
     def test(self):
-        reason, _ = self.block_for(name)
+        reason, _ = self.refusal_for(name)
         self.check_no_session_problem(name, reason)
     return test
 
 
 def _case_1b(name):
     def test(self):
-        reason, _ = self.block_for(name)
+        reason, _ = self.refusal_for(name)
         self.check_cites_record(name, reason)
     return test
 
 
 def _case_1c(name):
     def test(self):
-        reason, word = self.block_for(name)
+        reason, word = self.refusal_for(name)
         self.check_first_sentence(name, reason, word)
     return test
 
 
 def _case_2(name):
     def test(self):
-        self.block_for(name)  # asserts the block itself
+        self.refusal_for(name)  # asserts the refusal itself
     return test
 
 
