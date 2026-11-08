@@ -936,11 +936,12 @@ def _statement(node, mod):
     return cur
 
 
-def _in_lambda(node, mod):
-    """True when a lambda within `node`'s own def holds it. A lambda runs when it is called, so it may read any binding."""
+def _deferred(node, mod):
+    """True when a lambda or a generator expression within `node`'s own def holds it. Each runs later than its
+    statement, when it is called or pulled, so it may read a binding made after its statement."""
     cur = mod.parents.get(id(node))
     while cur is not None and not isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        if isinstance(cur, ast.Lambda):
+        if isinstance(cur, (ast.Lambda, ast.GeneratorExp)):
             return True
         cur = mod.parents.get(id(cur))
     return False
@@ -957,12 +958,12 @@ def _enclosing_defs(node, mod):
 
 
 def _reaching(entries, read, mod):
-    """The bindings a read sees. Where a read runs in a lambda, all of them: the lambda may run after any of them. Else
+    """The bindings a read sees. Where a read runs in a lambda or a generator expression, all of them: it may run after any of them. Else
     one reaches the read when it sits in the read's own statement, or when it takes effect before the read and is not
     in an arm of an `if` the read is not in. A binding after the read, or in a sibling arm, never ran before it. A loop
     body that holds both pools them all, since the loop may run the binding again before the read. A run-time binding
     that reaches the read still leaves it unresolved. When unsure, a binding stays in."""
-    if _in_lambda(read, mod):
+    if _deferred(read, mod):
         return list(entries)
     loops = {id(loop) for loop in _loops_holding(read, mod)}
     chain = _branch_chain(read, mod)
