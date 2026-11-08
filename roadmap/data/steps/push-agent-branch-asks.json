@@ -1,11 +1,11 @@
 {
   "title": "The push guard asks before an agent-worktree branch with no upstream is pushed",
   "why": "claude/agent-a22bb0ed47825117b, an agent-worktree branch with no upstream, was pushed to origin (coordinator, 01:13 CST Nov 8). Rule push-stray-branch does not cover a branch with no upstream.",
-  "note": "Built in lane push-head-upstream-name as a follow-up PR after #1814 (coordinator). Incident: a test-author of q_max lane #1102 (session_013NEJL42jmjfd1eLhrpSQx6) pushed it by mistake, which that lane reported at 00:33 CST Nov 8. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:15 CST Nov 8. Second incident: the test-author of lane comment-check-scans-shell pushed branch shell-tests-2 unasked, 01:19 CST Nov 8. Its name is not agent-<hex>, so this step's name-shape ask misses it; step push-ask-reads-brief covers it (coordinator, 01:37 CST). Built as PR #1833, with runner 8 and its review record (guard or check: yes, 3 rounds, net value positive). It also rewrites plan section 8 of docs/plans/child-guard-promotion.md, the stale push-HEAD text. New note push-agent-autosetup-rare-forms (lane, 02:53 CST Nov 8).",
+  "note": "Built in lane push-head-upstream-name as a follow-up PR after #1814 (coordinator). Incident: a test-author of q_max lane #1102 (session_013NEJL42jmjfd1eLhrpSQx6) pushed it by mistake, which that lane reported at 00:33 CST Nov 8. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:15 CST Nov 8. Second incident: the test-author of lane comment-check-scans-shell pushed branch shell-tests-2 unasked, 01:19 CST Nov 8. Its name is not agent-<hex>, so this step's name-shape ask misses it; step push-ask-reads-brief covers it (coordinator, 01:37 CST). Built as PR #1833, with runner 8 and its review record (guard or check: yes, 3 rounds, net value positive). It also rewrites plan section 8 of docs/plans/child-guard-promotion.md, the stale push-HEAD text. New note push-agent-autosetup-rare-forms (lane, 02:53 CST Nov 8). Lane 13:39 CST Nov 8: #1852 re-handed to runner 8 at head 94f71b159, lint PASS, record 6726156411.",
   "phase": "now",
   "status": "ready",
   "order": 557,
   "owner": "triage",
   "lane": "session_013NEJL1YxsYqim39RK6JeZP",
-  "updatedAt": "2026-11-08T02:53:00-06:00"
+  "updatedAt": "2026-11-08T13:40:00-06:00"
 }
