@@ -855,6 +855,31 @@ CASES = [
     ("ste-push: the control, all in one tree: `cd <B> && git -C <B> commit -am m && git push` with B's note dirty "
      "is denied to push in its own call",
      folder_chain_case("cd %(b)s && git -C %(b)s commit -am m && git push origin topic", ("b",), "b")),
+    # A commit's folder is the shell's folder when it runs: a subshell's cd, or a pushd and popd pair, does not move it.
+    ("ste-push: `pushd <A> && popd && git commit -am m && git push` from B, with B's note dirty, is denied to push in "
+     "its own call (popd returns the shell to B, where the commit runs)",
+     folder_chain_case("pushd %(a)s && popd && git commit -am m && git push origin topic", ("b",), "b")),
+    ("ste-push: `(cd <A>) && git commit -am m && git push` from B, with B's note dirty, is denied to push in its own "
+     "call (the subshell's cd ends with the parenthesis, so the commit runs in B)",
+     folder_chain_case("(cd %(a)s) && git commit -am m && git push origin topic", ("b",), "b")),
+    # After `&&` a failed cd ends the chain, so the commit never runs. The `;` then runs the push in the original
+    # folder, which holds no new commit, so the push has nothing to lint.
+    ("ste-push: `cd /nonexistent && git commit -am m; git push` from B, with B's note dirty, is allowed with no lint",
+     folder_chain_case("cd /nonexistent && git commit -am m; git push origin topic", ("b",), "b", want_quiet)),
+    ("ste-push: the control, `cd /nonexistent; git commit -am m && git push` from B, with B's note dirty, is denied "
+     "to push in its own call (after `;` the commit runs in B)",
+     folder_chain_case("cd /nonexistent; git commit -am m && git push origin topic", ("b",), "b")),
+    # `--work-tree` names the files a commit reads, not the repo it lands in. Real git: `git --work-tree=A commit -am m`
+    # run in B committed A's note on B's branch, so the push from B sends it.
+    ("ste-push: `git --work-tree=<A> commit -am m && git push` from B, with A's note dirty and B clean, is denied "
+     "to push in its own call (the commit lands in B with A's prose)",
+     folder_chain_case("git --work-tree=%(a)s commit -am m && git push origin topic", ("a",), "b")),
+    ("ste-push: `git --work-tree=<A> commit -am m && git push` from B, with B's note dirty and A clean, is allowed "
+     "with no lint (B's dirty note is not in the commit)",
+     folder_chain_case("git --work-tree=%(a)s commit -am m && git push origin topic", ("b",), "b", want_quiet)),
+    ("ste-push: the control, `git --work-tree=<B> commit -am m && git push` from B, with B's note dirty, is denied "
+     "to push in its own call",
+     folder_chain_case("git --work-tree=%(b)s commit -am m && git push origin topic", ("b",), "b")),
     ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
      with_case("with: fail: false", pinned_with('fail: "false"'), want_allowed_no_note)),
     ("ste-push: a pinned exclude naming the bad note is allowed with no unknown note",
