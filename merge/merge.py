@@ -3082,13 +3082,16 @@ _stamp_since = {}
 
 def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/`base` whose merge/merge.py holds `REVIEW_STAMP_SALT =`,
-    or None when there is none or the read fails. One call per (root, base) in a process. A record created before this time may carry no Stamp line."""
+    or None when the read ran and found none. A read that cannot run (git errors, or no origin/`base` ref) raises Stop naming it, never None: an unknown
+    cutover must not read every unstamped record as old (rule verification-report-unknown-reads). One call per (root, base) in a process. A record created before this time may carry no Stamp line."""
     key = (root, base)
     if key not in _stamp_since:
         c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{base}", "--", "merge/merge.py")
+        if c:
+            raise Stop(f"could not read origin/{base} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again.")
         first = out.split()[:1]
         _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                             if not c and first and first[0].isdigit() else None)
+                             if first and first[0].isdigit() else None)
     return _stamp_since[key]
 
 def parse_review(text, created=None, cutover=None):
