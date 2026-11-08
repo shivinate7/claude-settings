@@ -162,6 +162,12 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
+    def review_comments(self, since):  # the third-round gate's comment read: no record unless a case scripts one (LanePulls, PullsHost)
+        return {}
+
+    def open_heads(self):  # the third-round gate's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
+        return merge.OpenHeads()
+
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
         return "green", ""
 
@@ -3350,6 +3356,9 @@ try:
         if m_run:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
+
+    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the third-round gate reads for review records: none in this fake
+        finish(listing([], None, params, flags, jq, cap), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
         finish(one({"status": "diverged"}, jq), 0, include)
