@@ -123,7 +123,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   pr-body-placeholder  deny. A PR body update (MCP `update_pull_request` with a `body`, or `gh pr edit` with --body,
                        -b, --body-file or a heredoc body) whose stripped body is empty or one word of at most 40
-                       characters. No live read. A body with a shell expansion, or piped with no heredoc, is unread.
+                       characters. No live read. A `gh pr edit` body with a real shell expansion, or piped with no heredoc, is unread.
                        (pr-body-placeholder)
   pr-body-shrink       ask. The same updates, when the live body is at least 400 characters and the new body is under
                        one third of it. One live read through the merge tool's `Host.pr`; a read that fails passes and is
@@ -1404,6 +1404,18 @@ def heredoc_offsets(segments, ends, bodies_kept=True):
     return offsets
 
 
+def own_heredoc_quotes(segment: str, raw: str, before: int):
+    """Return {body: quoted} for the heredocs own_heredoc_bodies reads: `quoted` is true when the
+    delimiter is quoted (`<<'EOF'`), so the shell expands nothing in the body. A body both readings
+    produce is quoted only when each reading quotes it."""
+    count = len(heredoc_heads(segment)[0])
+    quotes = {}
+    for contractions_are_text in (False, True):
+        for quote, body, _ in _split_heredocs(raw, contractions_are_text)[1][before:before + count]:
+            quotes[body] = quotes.get(body, True) and bool(quote)
+    return quotes
+
+
 def own_heredoc_bodies(segment: str, raw: str, before: int):
     """Return the bodies of the heredocs whose headers sit inside this segment, in order. A heredoc
     of another command (`cat <<A && git commit -F - <<B`) is not the message.
@@ -1497,18 +1509,68 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
 
 
 # ---- a pull request body update that wipes the body (decision pr-body-placeholder)
+def _word_expands(word: str) -> bool:
+    """True when the shell would expand a `$` or a backtick in this word, read with its quotes kept:
+    outside single quotes and not escaped."""
+    quote, index = "", 0
+    while index < len(word):
+        char = word[index]
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif char == "\\":
+            index += 1
+        elif quote == '"':
+            if char == '"':
+                quote = ""
+            elif char in "$`":
+                return True
+        elif char in "'\"":
+            quote = char
+        elif char in "$`":
+            return True
+        index += 1
+    return False
+
+
+def _inline_body_literal(segment: str, body: str) -> bool:
+    """True when every word of the segment that carries this inline body keeps its `$` and backticks
+    literal (single quotes, or escaped). No such word found is not literal: the text is unknown."""
+    try:
+        words = shlex.split(segment, posix=False)
+    except ValueError:
+        return False
+    carriers = []
+    for word in words:
+        try:
+            if any(body in part for part in shlex.split(word)):
+                carriers.append(word)
+        except ValueError:
+            continue
+    return bool(carriers) and not any(_word_expands(word) for word in carriers)
+
+
 def pr_edit_body(segment: str, raw: str, where: str, before: int):
     """Return (selector, repo, body) for a `gh pr edit` segment that sets a body this guard can read,
-    else None. The last body text wins, as gh reads it. A body that holds a shell expansion (`$` or a
-    backtick) is not the text the call will send, an unread message file is cite-by-id's to refuse, and
-    a body piped in with no heredoc is unseen: each is no hit."""
+    else None. The last body text wins, as gh reads it. A body with a `$` or a backtick is judged only
+    when the shell sends it as it stands: a message file (gh reads it as it is), a quoted heredoc, or a
+    single-quoted value. A real expansion (`"$BODY"`, `"$(cat f)"`, an unquoted heredoc) is not the text
+    the call will send. An unread message file is cite-by-id's to refuse, and a body piped in with no
+    heredoc is unseen: each is no hit."""
     call = pr_call_of(segment, "edit", PR_EDIT_VALUE_FLAGS)
     read = message_texts(segment, raw, where, before) if call is not None else None
     if read is None or read[2] or not read[1]:
         return None
     body = read[1][-1]
     if "$" in body or "`" in body:
-        return None
+        quotes = own_heredoc_quotes(segment, raw, before) if "<<" in segment else {}
+        if body in quotes:
+            literal = quotes[body]
+        elif message_sources(gh_call_of(segment)[2:], "edit")[1]:
+            literal = True   # the last text is a message file's content, which gh reads as it is
+        else:
+            literal = _inline_body_literal(segment, body)
+        if not literal:
+            return None
     return call[0], call[1], body
 
 

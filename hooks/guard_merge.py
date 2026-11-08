@@ -129,6 +129,8 @@ def pr_call_of(segment: str, verb: str, value_flags):
             index += 1
         elif arg.startswith("--repo="):
             repo = arg[len("--repo="):]
+        elif arg.startswith("-R") and not arg.startswith("--"):
+            repo = arg[2:].removeprefix("=")   # the attached form `-Rowner/repo`
         elif arg in value_flags:
             index += 1
         elif arg.startswith("-"):
@@ -368,7 +370,8 @@ def live_pr_body(selector, repo: str, where: str):
         return None
     try:
         host = module.Host(repo=repo or None, cwd=where or None)
-        return host.pr(selector)["body"]
+        with module.shared_deadline(MERGE_READ_TIMEOUT):   # a rate-limit wait must not pass the hook budget
+            return host.pr(selector)["body"]
     except (Exception, SystemExit):
         return None
 

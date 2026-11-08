@@ -11,12 +11,14 @@ Incident, 2026-11-08: a cloud lane sent "PLACEHOLDER" as the whole body of PR #1
 
 Why these numbers: sample of 100 recent PRs of this repo, body length min 212, p10 694, median 1243 (read 2026-11-08). A live body under 400 is short, so a short rewrite of it loses little. A new body under one third of the live one is far below a real full rewrite. It asks, never denies, because a real short rewrite is possible.
 
-Cost: one GitHub read per body update that is not a placeholder, no file written, no process kept. A placeholder, a title-, state- or draft-only update costs no read.
+Cost: one GitHub read per body update that is not a placeholder, bounded by the merge tool's shared read deadline (a read that times out passes as unread). These rules write no file, and keep no process. A placeholder, a title-, state- or draft-only update costs no read.
+
+Matcher switch-on: adding `mcp__github__update_pull_request` to the guard's PreToolUse matcher also puts that call under the guard's other all-tool steps. Rule `handoff-unread` now judges it after compaction. `session_home_keep` may write the session's lane record (one small file, as for any judged call) on the first judged MCP call of a lane. Neither is a cost of these two rules' own reads.
 
 Limits:
 
 - `gh api -X PATCH .../pulls/N -f body=` is not judged.
-- A `gh pr edit` body that holds a shell expansion (`$` or a backtick), or is piped in with no heredoc, is not the text the guard can read, so it passes unjudged.
+- A `gh pr edit` body with a `$` or a backtick is judged when the shell sends it as it stands: a message file, a quoted heredoc (`<<'EOF'`, also inside `$(cat <<'EOF' ...)`) or a single-quoted value. A real expansion (`"$BODY"`, `"$(cat f)"`, an unquoted heredoc holding `$`) is not the text the call sends, so it passes unjudged, as does a body piped in with no heredoc.
 - A `gh pr edit` inside `sh -c` or a command substitution is not read, as cite-by-id does not read it.
 - Unmeasured: how often a lane rewrites a body far shorter on purpose.
 
