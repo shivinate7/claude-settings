@@ -8,6 +8,7 @@ git_reads.py, shared with the janitor: a test or the janitor that patches one of
 there, on the one object that every caller reads.
 """
 import ast
+import bisect
 import copy
 import errno
 import functools
@@ -2459,12 +2460,16 @@ def _py_format_text(call, bound, depth) -> str:
 
 def _py_bound_entry(name, bound):
     """(end, expression) of the last `name = ...` that ends before `name` is read, so `p = p / "x"` reads
-    the p before it. A name read before every assignment takes the first one. None for a name never bound."""
+    the p before it. A name read before every assignment takes the first one. None for a name never bound.
+    `values` is sorted by end (`_python_paths`), so a binary search finds it: a name rebound 2000 times
+    (`n += 1`) is read in log time, not by a scan of every binding."""
     values = bound.get(name.id)
     if not values:
         return None
-    here = (name.lineno, name.col_offset)
-    return next((entry for entry in reversed(values) if entry[0] <= here), values[0])
+    # The probe's column sits half way past the read, so it is never equal to an end and the search
+    # never compares two expressions; an end at the read itself counts as before it.
+    at = bisect.bisect_right(values, ((name.lineno, name.col_offset + 0.5),))
+    return values[at - 1] if at else values[0]
 
 
 def _py_bound_value(name, bound):
@@ -2584,7 +2589,7 @@ def _py_composed_paths(tree, parents, names, bound):
     parts of `os.path.join(a, b, c)` are string literals the reader names one by one, and none of them
     is a frozen file; the built path is. A crash on one expression (`_py_composed_node`) loses that
     expression only, never the rest of the script."""
-    found = []
+    found, capped = [], False
     augmented = [value for values in bound.values() for _, value in values
                  if isinstance(parents.get(value), ast.AugAssign)]
     for node in [*ast.walk(tree), *augmented]:
@@ -2594,29 +2599,51 @@ def _py_composed_paths(tree, parents, names, bound):
             # The cap read nothing of this path. Only this expression is lost, and the composed paths of
             # the rest of the script stay. A write target, or a use the reader cannot tell, must not read
             # as harmless: the entry tells the frozen caller to read the script as plain text as well.
-            if not _py_cap_hit_is_harmless(node, parents, names, bound):
+            # One entry is enough for that, so a later cap hit is not judged.
+            if not capped and not _py_cap_hit_is_harmless(node, parents, names, bound):
                 found.append(("", CAPPED_MODE))
+                capped = True
             continue
         except Exception:   # one unreadable expression must not hide a write later in the script
             continue
     return found
 
 
+_PY_HARMLESS_MODES = ("read", "exists", "text")
+
+
 def _py_cap_hit_is_harmless(node, parents, names, bound) -> bool:
-    """True when the use of an expression the depth cap could not read is a read, an existence check or a
-    printed or compared string, so losing its path hides no write. A value bound to a name that only longer
-    path expressions read is a link of a chain: the chain's last expression is read for its own use."""
+    """True when what an expression the depth cap could not read feeds is a read, an existence check or a
+    printed or compared string, so losing its path hides no write. A value bound to a name (`v = v0 / "x"`,
+    `n += 1`) feeds the loads of that name and nothing else: no load feeds nothing, and a load inside a
+    longer path expression is a link of a chain, whose expression is judged for its own use. A rebind
+    `n += 1` loads no name of the script, so a chain of rebinds is judged by the loads after it."""
     parent = parents.get(node)
-    if isinstance(parent, ast.Assign) and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name):
-        loads = names.get(parent.targets[0].id, [])
-        if loads and all(_py_builds_path(parents.get(load), bound) for load in loads):
-            return True
+    target = _assign_target(parent) if isinstance(parent, (ast.Assign, ast.AugAssign)) else None
+    path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
+        isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
     try:
-        path_object = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) or (
-            isinstance(node, ast.Call) and (_call_name(node).endswith("Path") or _call_name(node) == "joinpath"))
-        return _python_mode(node, parents, path_object, names, frozen=True, bound=bound) in ("read", "exists", "text")
+        if isinstance(target, ast.Name):
+            return all(_py_load_is_harmless(load, parents, path_object, names, bound)
+                       for load in names.get(target.id, ()))
+        return _python_mode(node, parents, path_object, names, frozen=True, bound=bound) in _PY_HARMLESS_MODES
     except Exception:
         return False
+
+
+def _py_load_is_harmless(load, parents, path_object, names, bound) -> bool:
+    """True when one load of a name bound to a value the cap could not read hides no write: it is a part
+    of a longer path expression (through `str(p)` or an f-string hole, as `_py_composed_text` reads it),
+    which the cap meets again and judges for its own use, or its own use is a read, a check or text."""
+    value = load
+    while isinstance(parents.get(value), ast.FormattedValue) or (
+            isinstance(parents.get(value), ast.Call) and _call_name(parents[value]) == "str"
+            and parents[value].args[:1] == [value]):
+        value = parents[value]
+    outer = parents.get(value)
+    if _py_builds_path(outer, bound) and (not isinstance(outer, ast.Call) or value in outer.args):
+        return True
+    return _python_mode(load, parents, path_object, names, frozen=True, bound=bound) in _PY_HARMLESS_MODES
 
 
 def _py_composed_node(node, parents, names, bound):

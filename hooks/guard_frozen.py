@@ -1030,12 +1030,15 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
             literals = code_paths(code, language, frozen=True)
         except Exception:   # a crash, or node code nested past JS_DEPTH (ValueError): the plain text is read
             return _crash_text_hit(code, where, predicate, language)
+        text_read = False
         for text, mode in literals:
             text = text.strip()
             if mode == guard_core.CAPPED_MODE:   # a path the composed reader could not read: the plain text is read too
-                found = _crash_text_hit(code, where, predicate, language)
-                if found:
-                    return found
+                if not text_read:   # once per script: a second read of the same text finds nothing new
+                    text_read = True
+                    found = _crash_text_hit(code, where, predicate, language)
+                    if found:
+                        return found
                 continue
             if mode == "shell":   # `sh -c <script>` from subprocess: the shell write scan reads the script
                 found = frozen_shell_hit(text, where)
