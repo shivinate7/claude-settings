@@ -1511,3 +1511,4 @@
 - merge-text-in-commit-heredoc: merge-checks refused `git commit -F - <<EOF` whose body quoted a merge command, though heredoc bodies are data (hooks/guard_core.py). The trigger is not pinned. Decision: no-merge-during-batch-ci.
 - silent-write-help: silent-write refused `gh pr merge --help 2>/dev/null`, which merges nothing (hooks/guard.py). Decision: none.
 - agent-moves-held-branch: a builder agent moved branch auto-merge-refused from its own worktree while the lane worktree held it. The lane tree then showed the reverse diff as staged changes, which a commit would have undone. No guard refuses moving a branch that another worktree holds. Decision: none.
+- classifier-refuses-lane-force-push: the auto-mode classifier refused `git push --force-with-lease --force-if-includes` of a rebased lane branch that only this lane writes ("Git Destructive"). The lane pushed under a new branch name instead. Decision: refusals-reach-the-owner.
