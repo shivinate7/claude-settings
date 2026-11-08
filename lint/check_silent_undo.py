@@ -558,12 +558,37 @@ def fmt_lost(m, path, p, lost):
 # ----------------------------------------------------------------------- modes
 
 
-def resolve_upstream(cwd, upstream):
+def resolve_upstream(cwd, upstream, notes=None):
+    """upstream if it exists; origin/main falls back to local main, and the fallback is appended to notes
+    (a list) so a reader of the verdict knows which main it was read against."""
     if git(cwd, "rev-parse", "--verify", "-q", upstream + "^{commit}", ok=(0, 1))[0] == 0:
         return upstream
     if upstream == "origin/main" and git(cwd, "rev-parse", "--verify", "-q", "main^{commit}", ok=(0, 1))[0] == 0:
+        if notes is not None:
+            notes.append("no origin/main here, compared against the local main")
         return "main"
     raise Unknown("no %s here, nothing to compare against" % upstream)
+
+
+def resolve_base(cwd, head):
+    """(upstream, notes) for a run that names none, the one home of the choice. A pull request's base, as CI reads it:
+    env GITHUB_BASE_REF (empty is unset), else the branch's gh-merge-base config, each as origin/<name>. A candidate that is
+    missing here or already holds the head is no base (a run against it reads no commit): it is named and passed over.
+    With no base, origin/main, with a note that the base is unknown."""
+    notes, cur = [], git(cwd, "symbolic-ref", "--short", "-q", "HEAD", ok=(0, 1))[1].strip()
+    cands = [os.environ.get("GITHUB_BASE_REF") or ""]
+    if cur:
+        cands.append(git(cwd, "config", "--get", "branch.%s.gh-merge-base" % cur, ok=(0, 1))[1].strip())
+    h = git(cwd, "rev-parse", "--verify", "-q", head + "^{commit}", ok=(0, 1))[1].strip()
+    for name in dict.fromkeys(c for c in cands if c):
+        cand = "origin/" + name
+        if git(cwd, "rev-parse", "--verify", "-q", cand + "^{commit}", ok=(0, 1))[0] != 0:
+            notes.append("the PR base %s is not here, so it is not used" % cand)
+        elif h and git(cwd, "merge-base", "--is-ancestor", h, cand, ok=(0, 1))[0] == 0:
+            notes.append("the PR base %s already holds the head, so it is not used" % cand)
+        else:
+            return cand, notes
+    return "origin/main", notes + ["the PR base is unknown, compared against origin/main"]
 
 
 def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
@@ -638,10 +663,11 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     main, up, the fork commit included. The window starts at the fork point, never at a commit time (one-second resolution)."""
     if git(cwd, "rev-parse", "--is-shallow-repository")[1].strip() != "false":
         raise Unknown("the history is shallow; fetch with depth 0")
-    upstream = resolve_upstream(cwd, upstream)
+    pre = []
+    upstream = resolve_upstream(cwd, upstream, pre)
     h = git(cwd, "rev-parse", head + "^{commit}")[1].strip()
     if git(cwd, "merge-base", "--is-ancestor", h, upstream, ok=(0, 1))[0] == 0:
-        return [], []  # at or behind upstream: nothing lands
+        return [], pre  # at or behind upstream: nothing lands
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
@@ -671,7 +697,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
         excused, cite_notes = retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths)
         ok = dict(excused, **ok)
     bad, notes = judge(items, ok)
-    return bad, notes + cite_notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
+    return bad, pre + notes + cite_notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
 
 
 def history(cwd, rev, window):
@@ -720,7 +746,7 @@ class RunReader:
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--upstream", default="origin/main")
+    ap.add_argument("--upstream", default=None, help="default: the PR's base (env GITHUB_BASE_REF, else the branch's gh-merge-base), else origin/main")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--window", type=int, default=60, help="history mode only")
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
@@ -728,7 +754,10 @@ def main(argv):
     ap.add_argument("--repo", default=os.getcwd())
     ap.add_argument("--pr-body-env", metavar="NAME", help="read the PR body from env NAME, and cited runs through merge.Host.cited_run")
     a = ap.parse_args(argv)
+    base_notes = []
     try:
+        if a.upstream is None and not a.history:
+            a.upstream, base_notes = resolve_base(a.repo, a.head)
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
@@ -742,7 +771,7 @@ def main(argv):
     except Unknown as e:
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
-    for n in notes:
+    for n in base_notes + notes:
         say("silent-undo: " + n)
     for p in problems:
         say("silent-undo: FAIL: " + p)
