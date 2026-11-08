@@ -9016,17 +9016,14 @@ add("merge-checks: the merge tool of the host denies on a pending head", "deny",
 add("merge-checks: the merge tool of the host denies on a failed head", "deny", "merge-checks",
     carries="settled: red", tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=12,
     repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
-# The host's auto-merge tool merges the head once its checks pass, so it is refused on a pending or red head as the
-# merge tool is. The shell form `gh pr merge --auto` is judged already (merge-checks: --auto is guarded).
-add("merge-checks: enable auto-merge of the host denies on a pending head", "deny", "merge-checks",
-    carries="pending", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
-    repo="x", owner="y", env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
-add("merge-checks: enable auto-merge of the host denies on a failed head", "deny", "merge-checks",
-    carries="settled: red", tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
-    repo="x", owner="y", env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
-add("merge-checks: enable auto-merge of the host is allowed on a green head", "allow",
-    tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
-    silent=True, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+# ---- auto-merge (owner ruling of 2026-11-07 19:03 CST): a hook refuses auto-merge for Claude, and the button stays the
+# owner's. Auto-merge skips the merge tool's records rebuild. The rule runs before merge-checks and bare-merge, so a pending
+# or red head still prints the auto-merge reason. It denies in every repo, merge-tool stamp or not. Its cases sit in the
+# auto-merge section after the bare-merge cases, where the stamp repos are built.
+AUTO_MERGE = "auto-merge"
+AUTO_SAYS = ("merge <pr> --confirm",)   # the remedy literal that every merge reason prints
+AUTO_LACKS = ("not settled",)           # merge-checks' wording: the auto-merge rule speaks first, so it must not appear
+AUTO_QUERY = 'mutation{enablePullRequestAutoMerge(input:{pullRequestId:"PR_x"}){clientMutationId}}'
 # The batch brake (roadmap step c195): a merge is refused while another ready pull request on the base has a required check
 # pending, by `gh pr merge` and by the host's merge tool. The merged pull request is 1, the other is 2 (its head is pr-two-head).
 BATCH_ON = GHBATCH + os.pathsep + PY_PATH
@@ -9129,8 +9126,9 @@ sh("merge-checks: a read run in the wrong folder is unknown, and denies",
 add("merge-checks: the host merge tool reads the repo of the call's folder", "allow", silent=True,
     tool="mcp__github__merge_pull_request", cwd=CTXREPO, pullNumber=5, repo="x", owner="y",
     env_path=GHCWD + os.pathsep + PY_PATH, config=MERGECFG)
+# The name is pinned by the mutant list in hooks/mutate_guard.py. Its verdict is now the auto-merge rule's, which runs first.
 sh("merge-checks: --auto is guarded like any merge", "gh pr merge 12 --auto --squash", "deny",
-   "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
+   AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH,
    config=MERGECFG)
 sh("merge-checks: help merges nothing", "gh pr merge --help", "allow", silent=True,
    cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
@@ -9240,9 +9238,10 @@ for _name, _where in (
        cwd=_where, **_BARE_GUARD)
 sh("bare-merge: a subfolder of a repo with no stamp.json allows", "gh pr merge 12 --squash", "allow",
    silent=True, cwd=os.path.join(STAMPNONE, "hooks"), **_BARE_GUARD)
-# The host's merge tools are judged as `gh pr merge` is (decision bare-merge-asks): a green merge through either tool asks in a
-# repo with a merge block, and allows in a repo without one. A pending head still denies first.
-for _tool in ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge"):
+# The host's merge tool is judged as `gh pr merge` is (decision bare-merge-asks): a green merge asks in a repo with a
+# merge block, and allows in a repo without one. A pending head still denies first. Its auto-merge tool is refused in
+# every repo, so it is not here: see the auto-merge cases after the bare-merge section.
+for _tool in ("mcp__github__merge_pull_request",):
     add("bare-merge: %s of the host asks in a repo with a merge block" % _tool, "ask", BARE_MERGE, carries=BARE_SAYS,
         tool=_tool, cwd=STAMPREPO, pullNumber=12, repo="x", owner="y", **_BARE_GUARD)
     for _name, _where in (("a repo with no stamp.json", STAMPNONE), ("a stamp.json with no merge block", STAMPNOBLOCK)):
@@ -9261,6 +9260,93 @@ sh("bare-merge: a heredoc body that names a merge is data",
    "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
    silent=True, cwd=STAMPREPO)
+
+
+# ---- auto-merge cases (owner ruling of 2026-11-07 19:03 CST). Each denial names the merge tool and never asks. A gh api PUT
+# of a merge path merges the head, so it is judged as `gh pr merge 5 -R o/r` is (coordinator answer, 2026-11-07 19:07 CST).
+_AUTO_GREEN = dict(env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+_AUTO_PENDING = dict(env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+_AUTO_RED = dict(env_path=GHRED + os.pathsep + PY_PATH, config=MERGECFG)
+# The shell form, in every repo: no merge tool, a merge-tool stamp, a cd into one, and each spelling of the repo flag.
+for _command in ("gh pr merge 5 --auto", "gh pr merge 5 --auto -R o/r", "gh -R o/r pr merge 5 --auto"):
+    sh("auto-merge: %s is refused on a green head with no merge tool" % _command, _command, "deny", AUTO_MERGE,
+       carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_GREEN)
+sh("auto-merge: gh pr merge --auto in a repo with a merge block is refused, and asks nothing",
+   "gh pr merge 5 --auto", "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=STAMPREPO, **_BARE_GUARD)
+sh("auto-merge: a cd into a repo with a merge block does not lift the refusal",
+   "cd " + slash(STAMPREPO) + " && gh pr merge 5 --auto", "deny", AUTO_MERGE, carries=AUTO_SAYS,
+   lacks=AUTO_LACKS, cwd=NOGIT, **_BARE_GUARD)
+# A pending or failed head still prints the auto-merge reason, not the merge-checks one (lacks names its wording).
+sh("auto-merge: gh pr merge --auto on a pending head prints the auto-merge reason", "gh pr merge 5 --auto",
+   "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_PENDING)
+sh("auto-merge: gh pr merge --auto on a failed head prints the auto-merge reason", "gh pr merge 5 --auto",
+   "deny", AUTO_MERGE, carries=AUTO_SAYS, lacks=AUTO_LACKS, cwd=NOGIT, **_AUTO_RED)
+# The GraphQL mutation, under each flag that takes the query, with no pull request number in the call.
+for _flag in ("-f", "-F", "--field", "--raw-field"):
+    sh("auto-merge: gh api graphql %s query refused" % _flag, "gh api graphql %s query='%s'" % (_flag, AUTO_QUERY),
+       "deny", AUTO_MERGE, carries=AUTO_SAYS, cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: the graphql mutation is refused in a repo with a merge block too",
+   "gh api graphql -f query='%s'" % AUTO_QUERY, "deny", AUTO_MERGE, carries=AUTO_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+# Scanner traps (building-scanner-respects-strings): a comment opener on a line of a quoted multi-line query, and a lone
+# quote in another argument. Neither hides the mutation.
+sh("auto-merge: a comment opener on a line of a quoted query hides no mutation",
+   "gh api graphql -f query='mutation{\n# note // x /* y\nenablePullRequestAutoMerge(input:{pullRequestId:\"PR_x\"}){clientMutationId}}'",
+   "deny", AUTO_MERGE, carries=AUTO_SAYS, cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: a lone quote in another argument hides no mutation",
+   "gh api graphql -f query='%s' -f note=\"don't\"" % AUTO_QUERY, "deny", AUTO_MERGE, carries=AUTO_SAYS,
+   cwd=NOGIT, config=MERGECFG)
+# The host's auto-merge tool, in every repo: no merge tool, a merge block, and each stamp that is not a merge block.
+add("auto-merge: enable auto-merge of the host is refused on a pending head", "deny", AUTO_MERGE,
+    carries=AUTO_SAYS, lacks=AUTO_LACKS, tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", **_AUTO_PENDING)
+add("auto-merge: enable auto-merge of the host is refused on a failed head", "deny", AUTO_MERGE,
+    carries=AUTO_SAYS, lacks=AUTO_LACKS, tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12,
+    repo="x", owner="y", **_AUTO_RED)
+for _name, _where in (("no merge tool in the repo", NOGIT), ("a repo with a merge block", STAMPREPO),
+                      ("a repo with no stamp.json", STAMPNONE), ("a stamp.json with no merge block", STAMPNOBLOCK)):
+    add("auto-merge: enable auto-merge of the host is refused on a green head, in %s" % _name, "deny", AUTO_MERGE,
+        carries=AUTO_SAYS, lacks=AUTO_LACKS, tool="mcp__github__enable_pr_auto_merge", cwd=_where, pullNumber=12,
+        repo="x", owner="y", **_AUTO_GREEN)
+# False alarms, each must stay allowed and silent: the disable spellings, a read of the merge path, and text that names it.
+sh("auto-merge: gh pr merge --disable-auto is not an auto-merge", "gh pr merge 5 --disable-auto", "allow",
+   silent=True, cwd=NOGIT, **_AUTO_GREEN)
+sh("auto-merge: the graphql disable mutation is allowed",
+   "gh api graphql -f query='mutation{disablePullRequestAutoMerge(input:{pullRequestId:\"PR_x\"}){clientMutationId}}'",
+   "allow", silent=True, cwd=NOGIT, config=MERGECFG)
+add("auto-merge: disable auto-merge of the host is allowed on a pending head", "allow", silent=True,
+    tool="mcp__github__disable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y", **_AUTO_PENDING)
+sh("gh api: a GET of the merge path is a read, on a pending head", "gh api repos/o/r/pulls/5/merge", "allow",
+   silent=True, cwd=NOGIT, **_AUTO_PENDING)
+sh("gh api: a GET named with -X GET is a read, on a pending head", "gh api -X GET repos/o/r/pulls/5/merge", "allow",
+   silent=True, cwd=NOGIT, **_AUTO_PENDING)
+sh("auto-merge: echo of the mutation name is text", "echo enablePullRequestAutoMerge", "allow", silent=True,
+   cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: the mutation name in a heredoc body is data", "cat > notes.txt <<'EOF'\nenablePullRequestAutoMerge\nEOF",
+   "allow", silent=True, cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: a comment that names the mutation is text", "echo done # enablePullRequestAutoMerge", "allow",
+   silent=True, cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: a comment that names an auto-merge call is text", "echo done # gh pr merge 5 --auto", "allow",
+   silent=True, cwd=NOGIT, config=MERGECFG)
+sh("auto-merge: a lone quote in echo text is text", "echo \"don't enablePullRequestAutoMerge\"", "allow", silent=True,
+   cwd=NOGIT, config=MERGECFG)
+# Plain merges keep today's verdict: the merge-checks deny on a pending head, and the bare-merge ask in a merge-block repo.
+sh("auto-merge: a plain gh pr merge on a pending head keeps the merge-checks verdict", "gh pr merge 5", "deny",
+   "merge-checks", carries="pending", cwd=NOGIT, **_AUTO_PENDING)
+sh("auto-merge: a plain gh pr merge in a repo with a merge block keeps the bare-merge ask", "gh pr merge 5", "ask",
+   BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, **_BARE_GUARD)
+# gh api PUT of a merge path merges the head: judged as `gh pr merge 5 -R o/r`, in each spelling of the method.
+for _spell in ("-X PUT", "--method PUT", "--method=PUT", "-XPUT"):
+    sh("merge-checks: gh api %s of the merge path is refused on a pending head" % _spell,
+       "gh api %s repos/o/r/pulls/5/merge" % _spell, "deny", "merge-checks", carries="pending", cwd=NOGIT,
+       **_AUTO_PENDING)
+    sh("merge-checks: gh api %s of the merge path is refused on a failed head" % _spell,
+       "gh api %s repos/o/r/pulls/5/merge" % _spell, "deny", "merge-checks", carries="settled: red", cwd=NOGIT,
+       **_AUTO_RED)
+    sh("bare-merge: gh api %s of the merge path asks on a green head in a repo with a merge block" % _spell,
+       "gh api %s repos/o/r/pulls/5/merge" % _spell, "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO,
+       **_BARE_GUARD)
+sh("merge-checks: gh api -X PUT of the merge path allows a green head in a repo with no merge tool",
+   "gh api -X PUT repos/o/r/pulls/5/merge", "allow", silent=True, cwd=NOGIT, **_AUTO_GREEN)
 
 
 # =========================================================================== 5e. the merge role record
