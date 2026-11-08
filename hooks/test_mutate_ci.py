@@ -1831,6 +1831,15 @@ class LintSuitesChainTests(unittest.TestCase):
                          "--lint-suites must not pick %s for a diff of only hooks/leaf.py: the loop zips two tuples and opens n, "
                          "the second of each pair, which is x.py; leaf.py is only the first" % CHAIN_SUITE)
 
+    def test_a_diff_that_deletes_a_module_that_a_suite_reaches_by_import_picks_the_suite(self):
+        # the control is test_a_diff_of_only_a_module_that_a_suite_reaches_by_import_picks_the_suite: the same fixture, with
+        # leaf.py edited. Here the lane deletes leaf.py, and the unchanged entry.py still imports it.
+        repo = chain_repo(CHAIN_LOADS["import"], {"hooks/leaf.py": None})
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only the deletion of leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff that deletes hooks/leaf.py: entry.py, unchanged, imports it, and the "
+                      "suite opens entry.py" % CHAIN_SUITE)
+
 
 if __name__ == "__main__":
     unittest.main()

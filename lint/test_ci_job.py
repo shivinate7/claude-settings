@@ -1178,6 +1178,17 @@ class SuiteSteps(Job):
                          "--lint must read a picked CI step behind a guard preamble whose npm ci passes, and whose suite passes, as PASS\n"
                          + out)
 
+    def test_a_picked_ci_step_whose_preamble_prints_no_newline_and_whose_suite_exits_one_reads_fail(self):
+        # the control is test_a_picked_ci_step_whose_guard_preamble_npm_passes_and_whose_suite_exits_one_reads_fail: the same
+        # suite behind a preamble that ends in a newline. Here the preamble prints with no newline, so the marker lands mid-line.
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",), code=1)},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(step("Wiring suite", "printf x\npython3 hooks/test_wiring.py"), args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
+                         "--lint must read a picked suite's exit 1 behind a preamble that prints with no trailing newline as FAIL, "
+                         "and exit 1\n" + out)
+
     def test_a_picked_ci_step_whose_npm_sits_in_a_skipped_if_block_reads_the_suite_verdict(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",), code=1)},
                        {"hooks/bridge.py": "V = 2\n"})
