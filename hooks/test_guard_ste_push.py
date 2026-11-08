@@ -676,20 +676,20 @@ def other_checkout(case_dir):
     return other
 
 
-def folder_chain_case(template, dirty, start):
+def folder_chain_case(template, dirty, start, want=want_chain_denied_unlinted):
     """The call `template` makes. %(a)s is the checkout `other` and %(b)s the clone `clone`. The in-scope note is dirty
-    in the folder `dirty` names ("a" or "b"), and the call starts in the folder `start` names. The commit adds that note
-    in the folder the call's `cd` or `git -C` names. The push's range holds nothing, so no lint can judge the commit: the
-    push is denied to run in its own call, and no lint starts."""
+    in each folder the tuple `dirty` names ("a", "b"), and the call starts in the folder `start` names. `want(out, label)`
+    judges the decision. The push's range holds nothing, so no lint judges a commit the call makes."""
     def check(case_dir):
         clone = make_pair(case_dir, MAIN_C, None)
         other = other_checkout(case_dir)
         folders = {"a": other, "b": clone}
-        write_c_bad(folders[dirty])
+        for name in dirty:
+            write_c_bad(folders[name])
+            require_lint(folders[name], ["docs/notes/c.md"], [])
         require_range(clone, [])
-        require_lint(folders[dirty], ["docs/notes/c.md"], [])
         command = template % {"a": shlex.quote(other), "b": shlex.quote(clone)}
-        return want_chain_denied_unlinted(guard_run(folders[start], command, case_dir), command)
+        return want(guard_run(folders[start], command, case_dir), command)
     return check
 
 
@@ -842,16 +842,19 @@ CASES = [
      verb_case(REVERT_PUSH, bad_note_then_removed)),
     ("ste-push: `git -C <A> status && cd <B> && git commit -am m && git push`, with B's in-scope note dirty, is denied "
      "to push in its own call (the commit runs in B, after the cd)",
-     folder_chain_case("git -C %(a)s status && cd %(b)s && git commit -am m && git push origin topic", "b", "a")),
-    ("ste-push: `cd <B> && git -C <A> commit -am m && git push` from B, with only A's in-scope note dirty, is denied "
-     "to push in its own call (the commit runs in A, judged on A's tree)",
-     folder_chain_case("cd %(b)s && git -C %(a)s commit -am m && git push origin topic", "a", "b")),
+     folder_chain_case("git -C %(a)s status && cd %(b)s && git commit -am m && git push origin topic", ("b",), "a")),
+    ("ste-push: `cd <B> && git -C <A> commit -am m && git push` from B, with only A's in-scope note dirty, is allowed: "
+     "the push from B sends no A commit, and B's range holds nothing in scope, so no lint",
+     folder_chain_case("cd %(b)s && git -C %(a)s commit -am m && git push origin topic", ("a",), "b", want_quiet)),
+    ("ste-push: the mirror control, the same chain with B's own in-scope note dirty and no commit in B, is allowed "
+     "with no lint (a push folder with a dirty note is not refused)",
+     folder_chain_case("cd %(b)s && git -C %(a)s commit -am m && git push origin topic", ("a", "b"), "b", want_quiet)),
     ("ste-push: the control, all in one tree: `git -C <B> status && cd <B> && git commit -am m && git push` with B's "
      "note dirty is denied to push in its own call",
-     folder_chain_case("git -C %(b)s status && cd %(b)s && git commit -am m && git push origin topic", "b", "b")),
+     folder_chain_case("git -C %(b)s status && cd %(b)s && git commit -am m && git push origin topic", ("b",), "b")),
     ("ste-push: the control, all in one tree: `cd <B> && git -C <B> commit -am m && git push` with B's note dirty "
      "is denied to push in its own call",
-     folder_chain_case("cd %(b)s && git -C %(b)s commit -am m && git push origin topic", "b", "b")),
+     folder_chain_case("cd %(b)s && git -C %(b)s commit -am m && git push origin topic", ("b",), "b")),
     ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
      with_case("with: fail: false", pinned_with('fail: "false"'), want_allowed_no_note)),
     ("ste-push: a pinned exclude naming the bad note is allowed with no unknown note",
