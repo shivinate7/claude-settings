@@ -703,15 +703,20 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 HELD = 0.5
 PAIR_HELD = 0.75
 PAIR_WORDS = 5
+GENERIC_SHARE = 0.1
+GENERIC_MIN = 20
 TAG_CLAUSE = re.compile(r"Decision\b", re.I)
 CLAUSE_END = re.compile(r"(?<=[.!?])\s+|;\s*|,?\s+(?:and|but|though|although|which|while|so)\s+", re.I)
+FIELD_LABEL = re.compile(r"\b[A-Z][a-z]+:(?:\s+none\b)?")
 STOPWORDS = frozenset("a an the and or of to in on for is are was were be been it its this that these those with as at by from "
                       "which who also then so if but though although while when each every any".split())
 
 
 def content_words(text):
-    """The set of a text's words, lower case, without stopwords and without a trailing `s` on a word of 4 or more letters."""
-    words = (w.lower() for w in re.findall(r"[A-Za-z0-9]+", text))
+    """The set of a text's words, lower case, without stopwords, without a note's field labels (a capitalised word before a colon,
+    as `Fix:`, `Until:`, `Decision:`) and their filler, and without a trailing `s` on a word of 4 or more letters. A label is
+    on every note, so it never says that a clause was kept."""
+    words = (w.lower() for w in re.findall(r"[A-Za-z0-9]+", FIELD_LABEL.sub(" ", text)))
     return {w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words if w not in STOPWORDS}
 
 
@@ -751,6 +756,16 @@ def renamed_to(body, added, old_slugs):
     return [x for x in added if x[0] not in old_slugs and any(held(c, content_words(x[1]), PAIR_HELD) for c in mine)]
 
 
+def generic_words(now):
+    """The content words that at least GENERIC_SHARE of head's note lines hold, when head has at least GENERIC_MIN of them. Such a
+    word (`merge`, `read`, `name`) shows up in a line that has nothing to do with the clause, so it never says a clause moved."""
+    notes = note_bodies(counts(now).elements())
+    if len(notes) < GENERIC_MIN:
+        return set()
+    seen = collections.Counter(w for _, t in notes for w in content_words(t))
+    return {w for w, n in seen.items() if n >= GENERIC_SHARE * len(notes)}
+
+
 def dropped_in_pair(slug, body, pair, now, moved):
     """[(slug, [fold slugs], clause)] for the clauses of the removed note `body` that no line the branch added for it holds (`moved`,
     a list with the content words of each note line added or changed since the note was removed, so a clause moved into one note
@@ -760,8 +775,9 @@ def dropped_in_pair(slug, body, pair, now, moved):
     if not at_head:
         return []  # a later commit retired the note
     new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
+    generic = generic_words(now)
     return [(slug, sorted(slugs - {slug}), c) for c in clauses(body)
-            if not held(c, new_words) and not held(c, head_words) and not any(held(c, w) for w in moved)]
+            if not held(c, new_words) and not held(c, head_words) and not any(held(c, w - generic) for w in moved)]
 
 
 def dropped_clauses(before, after, now, pending=None):
