@@ -5334,6 +5334,14 @@ sh("git-after-cd: a check, then ; an if on a git fetch with a git push in its th
    cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a git fetch protected by || exit 1, then ; a git push -u, passes",
    "%s fetch origin || exit 1; %s push -u origin b" % (VCS, VCS), "allow", cwd=NOGIT)
+# An exit tail covers only the command it tests: the `make lint` in an `if !` or a `|| { ...; exit 1; }` group.
+# The pytest before it still guards the push, so both pushes are refused.
+sh("git-after-cd: a check, then ; an if ! exit tail on make lint, then a git push -u, is refused",
+   "pytest -q; if ! make lint; then exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a make lint protected by || a braced exit 1, then a git push -u, is refused",
+   "pytest -q; make lint || { echo bad; exit 1; }; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
