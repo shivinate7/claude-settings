@@ -412,7 +412,7 @@ WRAPPER_VALUE_FLAGS.update({
     # The runners below start the next word as a program. Each set is read from the tool's own `--help` where it is
     # installed (nsenter, chroot, setpriv and systemd-run on this machine). A value flag missing from a set makes its
     # value the command word, which hides the write verb behind it. `nsenter` takes `-S`, `-G`, `-r`, `-w` and each
-    # namespace flag with a glued value only (`--setuid[=<uid>]`), so those are no entry here.
+    # namespace flag with a glued value only (`--setuid[=<uid>]`): they are no entry here but in `WRAPPER_GLUED_FLAGS`.
     "nsenter": {"-t", "--target", "-W", "--wdns"},
     "chroot": {"--groups", "--userspec"},   # NEWROOT is skipped in `_walk_wrappers`
     "setpriv": {"--ruid", "--euid", "--rgid", "--egid", "--reuid", "--regid", "--groups", "--inh-caps",
@@ -422,22 +422,31 @@ WRAPPER_VALUE_FLAGS.update({
                     "--slice", "--expand-environment", "--service-type", "--uid", "--gid", "--nice",
                     "--working-directory", "-E", "--setenv", "--path-property", "--socket-property",
                     "--on-active", "--on-boot", "--on-startup", "--on-unit-active", "--on-unit-inactive",
-                    "--on-calendar", "--timer-property", "--json", "--background"},
-    # `numactl` and `parallel` are not installed here: their sets come from numactl(8) and parallel(1), unchecked
-    # against a binary. `eatmydata` takes no value flag.
+                    "--on-calendar", "--timer-property"},
+    # `numactl`, `parallel` and `eatmydata` are not installed here. `numactl` is read from the `opts` table of its
+    # upstream numactl.c (github.com/numactl/numactl, master): each option with `has_arg` 1 takes a value, and
+    # `-c`/`--cpubind` is one of them. `parallel` is read from the OPTIONS of parallel.pod, the source of parallel(1),
+    # as the github.com/gitGNU/gnu_parallel mirror holds it: gnu.org/software/parallel/parallel.html itself answered
+    # HTTP 429/503 on each try. That mirror predates `--memsuspend`, `--limit`, `--group-by` and `--tmp`, so those are
+    # no entry. An option the manual writes as `-l[N]`, `--max-lines[=N]`, `-i[S]`, `--replace[=S]`, `-e[S]` or
+    # `--eof[=S]` takes a glued value only. `--semaphore-name` is the name the owner's rows ask for (the manual spells
+    # it `--semaphorename` and `--id`). `eatmydata` is a shell script that takes no flag but a bare `--`.
     "numactl": {"-i", "--interleave", "-p", "--preferred", "-P", "--preferred-many", "-m", "--membind",
-                "-N", "--cpunodebind", "--cpubind", "-C", "--physcpubind", "-w", "--weighted-interleave",
+                "-N", "--cpunodebind", "-c", "--cpubind", "-C", "--physcpubind", "-w", "--weighted-interleave",
                 "-S", "--shm", "-f", "--file", "-M", "--shmmode", "-I", "--shmid", "-o", "--offset",
                 "-L", "--length"},
-    "parallel": {"-j", "--jobs", "--procs", "-P", "--max-procs", "-S", "--sshlogin", "--sshloginfile", "--slf",
-                 "-a", "--arg-file", "--arg-file-sep", "--arg-sep", "-n", "--max-args", "-N", "-L", "-l",
-                 "--max-lines", "-s", "--max-chars", "-I", "-E", "-d", "--delimiter", "-C", "--colsep",
-                 "--header", "--results", "--res", "--joblog", "--tmpdir", "--tmp", "--timeout", "--delay",
-                 "--retries", "--load", "--memfree", "--memsuspend", "--nice", "--halt", "--halt-on-error",
-                 "--workdir", "--wd", "--basefile", "--bf", "--transferfile", "--tf", "--return", "--env",
-                 "--rpl", "--parens", "--block", "--block-size", "--recstart", "--recend", "--tagstring",
-                 "--sql", "--sqlandworker", "--sqlworker", "-J", "--profile", "--group-by", "--sshdelay",
-                 "--ssh", "--limit", "--termseq", "--tmux", "--shuf", "--max-replace-args"},
+    "parallel": {"-j", "--jobs", "-P", "--max-procs", "-S", "--sshlogin", "--sshloginfile", "--slf",
+                 "-a", "--arg-file", "--arg-file-sep", "--arg-sep", "-n", "--max-args", "-N", "--max-replace-args",
+                 "-L", "-s", "--max-chars", "-I", "-E", "-d", "--delimiter", "-C", "--colsep", "--header",
+                 "--results", "--res", "--joblog", "--tmpdir", "--timeout", "--delay", "--retries", "--load",
+                 "--memfree", "--nice", "--halt", "--halt-on-error", "--workdir", "--wd", "--basefile", "--bf",
+                 "--transferfile", "--tf", "--trc", "--return", "--env", "--rpl", "--parens", "--block",
+                 "--block-size", "--recstart", "--recend", "--tagstring", "--sql", "--sqlmaster",
+                 "--sqlandworker", "--sqlworker", "-J", "--profile", "--sshdelay", "--ssh", "--termseq",
+                 "--semaphorename", "--semaphore-name", "--id", "--semaphoretimeout", "--st", "--trim",
+                 "--compress-program", "--decompress-program", "--minversion", "--seqreplace", "--slotreplace",
+                 "--basenamereplace", "--bnr", "--basenameextensionreplace", "--bner", "--dirnamereplace", "--dnr",
+                 "--extensionreplace", "--er"},
     "eatmydata": set(),
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -456,6 +465,12 @@ DURATION = re.compile(r"^\d+(\.\d+)?[smhd]?$")
 TIMEOUT_FLAGS_WITH_VALUE = {"-k", "-s", "--kill-after", "--signal"}
 TIMEOUT_FLAGS_BARE = {"--preserve-status", "--foreground"}
 WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
+# The short flags whose value is optional, so it is glued to the letter or absent, never the next word: the rest
+# of the cluster is that value (`nsenter -m/proc/1/ns/mnt cp` holds `-m` and its file, no `-t`). Read from
+# `nsenter --help` on util-linux 2.39: `-m -u -i -n -p -C -U -T` take `[=<file>]`, `-S -G` `[=<id>]`, `-r -w` `[=<dir>]`.
+WRAPPER_GLUED_FLAGS = {"nsenter": set("muinpCUTSGrw")}
+# The words that open `parallel`'s input sources (parallel(1), "::: arguments"): they are no part of the command.
+PARALLEL_INPUT_MARKS = {":::", "::::", ":::+", "::::+"}
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -687,6 +702,7 @@ def _wrapper_flags(word: str, tokens, index: int):
     value (WRAPPER_VALUE_FLAGS) takes the rest of the cluster, or the next word when it is the last
     letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value."""
     takes = WRAPPER_VALUE_FLAGS.get(word, ())
+    glued = WRAPPER_GLUED_FLAGS.get(word, ())
     end = len(tokens)
     found = []
     while index < end and tokens[index].startswith("-"):
@@ -701,6 +717,9 @@ def _wrapper_flags(word: str, tokens, index: int):
             continue
         for at in range(1, len(token)):
             flag = "-" + token[at]
+            if token[at] in glued:
+                found.append((flag, token[at + 1:]))   # an optional value is glued or absent, never the next word
+                break
             if flag not in takes:
                 found.append((flag, ""))
                 continue
@@ -735,6 +754,8 @@ def _walk_wrappers(tokens):
             index += 1
         if word in ("taskset", "chrt", "chroot"):
             index += index < end   # the CPU mask, the priority or the new root
+        if word == "parallel" and index < end and re.search(r"\s", tokens[index]):
+            return start, tuple(chain), index > end   # a command string: `wrapped_commands` reads it as a script
         if word == "uv":
             table = word
             if index < end and tokens[index] == "tool":   # `uv tool run [flags] cmd` reads its flags as `uvx` does
@@ -2006,6 +2027,14 @@ def wrapped_commands(tokens, at: int):
             return [rest[i + 1] for i, t in enumerate(rest[:-1]) if t in ("-c", "--command")][:1]
         inner = rest[index:]
         return [shlex.join(inner)] if inner else []
+    elif word == "parallel":
+        # `parallel 'rm {}' ::: P`: one quoted command string, which the shell reads as a script, and the words after
+        # it (the `:::` markers dropped) are the inputs it runs on, so they stay as its arguments: `rm {} P`.
+        index, _ = _wrapper_flags(word, rest, 0)
+        if index >= len(rest) or not re.search(r"\s", rest[index]):
+            return []   # the walk read an unquoted command as the command word
+        inputs = [t for t in rest[index + 1:] if t not in PARALLEL_INPUT_MARKS]
+        return [PosixScript(" ".join([rest[index], *([shlex.join(inputs)] if inputs else [])]))]
     elif word not in ("stdbuf", "unbuffer", "caffeinate", "setsid", "ionice", "strace"):
         return []
     index, _ = _wrapper_flags(word, rest, 0)
