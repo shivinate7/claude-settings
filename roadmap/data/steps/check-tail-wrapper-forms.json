@@ -1,0 +1,11 @@
+{
+  "title": "The check-tail gate sees a command behind a wrapper such as uv run",
+  "phase": "now",
+  "status": "doing",
+  "order": 50,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
+  "why": "check-tail misses `uv run python merge/merge.py --lane-lint | tail`, because the gate reads only the first word.",
+  "note": "Coordinator pick, 18:09 CST Nov 7, can be undone. Related: step bg-tail-loses-verdict (#1666).",
+  "updatedAt": "2026-11-07T18:10:00-06:00"
+}
