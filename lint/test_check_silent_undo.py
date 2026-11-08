@@ -2764,6 +2764,7 @@ class LostSentence(unittest.TestCase):
     notes_at = RevivedNote.notes_at
     body = RevivedNote.body
     commit_notes = RevivedNote.commit_notes
+    run_main = PrintedFindings.run_main  # main() on the repo, its stdout read as text: (exit code, printed text)
     FILLER = ["- filler-%03d: a finding the branch never touches (lint/check_filler_%03d.py)." % (i, i) for i in range(1, 301)]
 
     DROP_OLD = "- drop-note: The finder lists each sleep call in the file. The sleep scan ignores fake timers. Decision: test-practices (P5)."
@@ -2968,6 +2969,34 @@ class LostSentence(unittest.TestCase):
         self.assertTrue(self.named(self.r.verdict(), "count-note", "checks 3 files"),
                         "a rewrite that dropped only the 3 from `The finder checks 3 files.` in count-note was not refused by a problem "
                         "that names the note and that clause")
+
+    def test_a_lost_sentence_refusal_gives_the_slug_form_in_the_footer_of_the_cli_and_the_merge_tool(self):
+        """A rewrite that drops a sentence is refused with a footer that gives the `- <slug>` form. A path-only trailer does
+        not excuse a lost sentence, so the footer must not offer it as the whole remedy. Both surfaces are read: the CLI's
+        output, and the merge tool's refusal, whose footer is the sentence that starts `Put it back, or add the trailer`."""
+        import merge
+        self.start([self.DROP_OLD])
+        head = self.rewrite("Reword the drop note", [self.DROP_NEW])
+        self.premises(head, self.DROP_OLD, "drop-note", "ignores fake timers")
+        rc, text = self.run_main(["--upstream", "origin/main", "--head", "HEAD", "--repo", self.r.dir], "utf-8")
+        self.assertEqual(rc, 1, "premise: the CLI does not refuse the rewrite: %r" % text)
+        self.assertTrue(self.named(text.splitlines(), "drop-note", "ignores fake timers"),
+                        "premise: the CLI does not refuse the dropped sentence of drop-note: %r" % text)
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(merge.Stop) as cm:
+            merge.undo_check(self.r.dir, "origin/main")
+        refusal = str(cm.exception)
+        self.assertTrue(self.named(refusal.splitlines(), "drop-note", "ignores fake timers"),
+                        "premise: the merge tool does not refuse the dropped sentence of drop-note: %r" % refusal)
+        footers = {
+            "the CLI": [line for line in text.splitlines() if line.startswith("silent-undo: put the work back")],
+            "the merge tool": [line for line in refusal.splitlines() if line.startswith("Put it back, or add the trailer")],
+        }
+        for surface, lines in footers.items():
+            with self.subTest(surface=surface):
+                self.assertEqual(len(lines), 1, "premise: %s prints one footer line: %r" % (surface, lines))
+                self.assertTrue("- <slug>" in lines[0] or "- drop-note" in lines[0],
+                                "the footer %s prints for a lost sentence does not give the `- <slug>` form for drop-note: %r"
+                                % (surface, lines[0]))
 
 
 if __name__ == "__main__":
