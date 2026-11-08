@@ -768,6 +768,70 @@ class EmittedRuleIdsTests(unittest.TestCase):
         self.assertNotIn("watch-rule", ids)
 
 
+class WidenedHookScopeTests(unittest.TestCase):
+    """`emitted_rule_ids(root)` lists the ids every hooks module writes to guard.log, not only the guard
+    modules'. A test module in hooks/ is not a hook, so its fixture refusals stay out."""
+
+    def guard_only(self):
+        return {os.path.join("hooks", "guard.py"): 'refuse(tool, "deny", "main-rule", REASON, matched)\n'}
+
+    def test_a_literal_refuse_id_in_a_non_guard_hook_is_listed(self):
+        files = self.guard_only()
+        files[os.path.join("hooks", "some_hook.py")] = 'refuse(tool, "deny", "hook-literal-rule", REASON, matched)\n'
+        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
+        self.assertIn("main-rule", ids)  # control: the guard module's id is listed
+        self.assertIn("hook-literal-rule", ids)
+
+    def test_a_module_constant_id_in_a_non_guard_hook_is_listed(self):
+        # The shape hooks/blind_brief.py writes: a module constant that a local refuse() helper hands to guard_core.
+        hook = ('RULE = "constant-hook-rule"\n'
+                'def refuse(payload, tool, reason, matched):\n'
+                '    guard_core.refuse(tool, "deny", RULE, reason, matched)\n')
+        files = self.guard_only()
+        files[os.path.join("hooks", "some_hook.py")] = hook
+        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
+        self.assertIn("constant-hook-rule", ids)
+
+    def test_a_test_module_in_hooks_is_not_read(self):
+        # Control, green on the old code too: a test module's fixture refusal names no id a hook writes.
+        files = self.guard_only()
+        files[os.path.join("hooks", "test_some_hook.py")] = 'refuse(tool, "deny", "test-fixture-rule", R, m)\n'
+        ids = rule_audit.emitted_rule_ids(GuardTextTests.tree(self, files))
+        self.assertNotIn("test-fixture-rule", ids)
+
+    def test_every_hook_module_is_read_without_a_refusal(self):
+        # The widened scope reads each hooks module. A module the reader refuses names no id it can list.
+        refused = []
+        for path in sorted(glob.glob(os.path.join(rule_audit.ROOT, "hooks", "*.py"))):
+            if os.path.basename(path).startswith("test_"):
+                continue
+            try:
+                rule_audit.guard_rule_names(rule_audit.read(path), os.path.relpath(path, rule_audit.ROOT),
+                                            os.path.dirname(path))
+            except ValueError as why:
+                refused.append(str(why))
+        self.assertEqual(refused, [], "the reader refuses these hook sites:\n" + "\n".join(refused))
+
+
+class HookIdsOnTheRealTreeTests(unittest.TestCase):
+    """The ids blind_brief.py and call_judge.py write, read from the constants those hooks emit."""
+
+    def hook_ids(self):
+        import blind_brief
+        import call_judge
+        import question_form
+        return {blind_brief.RULE, call_judge.SPAWN_RULE, call_judge.QUESTION_RULE, question_form.PAST_RULING_RULE}
+
+    def test_the_ids_those_hooks_write_are_listed(self):
+        missing = sorted(self.hook_ids() - rule_audit.emitted_rule_ids())
+        self.assertEqual(missing, [], "emitted_rule_ids does not list: " + ", ".join(missing))
+
+    def test_each_of_those_ids_has_a_guards_row(self):
+        rows = json.loads(rule_audit.read(rule_audit.MAP_FILE))["guards"]
+        missing = sorted(i for i in self.hook_ids() if i not in rows)
+        self.assertEqual(missing, [], "lint/rule_mechanisms.json has no guards row for: " + ", ".join(missing))
+
+
 # ------------------------------------------------------------ guards section
 # rule_mechanisms.json gives each guard rule id its own row under `guards`, keyed by the id, and each
 # row names the test that proves that guard. The ids come from the guard source the same way the audit
@@ -910,6 +974,15 @@ class GuardRuleIdReadTests(unittest.TestCase):
         except ValueError as why:
             self.fail("the reader refused a def-local rule id: %s" % why)
 
+    def refused_at(self, call, line):
+        """`call()` raises the reader's ValueError at hooks/guard.py:`line`. A return that lists ids fails here, naming them."""
+        try:
+            ids = call()
+        except ValueError as why:
+            self.assertRegex(str(why), r"hooks[\\/]guard\.py:%d: refuse\(\) takes a rule id the reader cannot resolve" % line)
+            return
+        self.fail("the reader listed %s for a loop it cannot read; it must raise, or a cull never sees the id" % sorted(ids))
+
     def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
         # Scope first: the same call with the literal inline is read, so the local line is the only gap.
         self.assertEqual(self.listed('def go():\n    refuse(tool, "deny", "zzz-local-new", R, m)\n'),
@@ -946,6 +1019,48 @@ class GuardRuleIdReadTests(unittest.TestCase):
         src = ('def outer():\n    rid = make()\n    def inner():\n        refuse(tool, "deny", rid, R, m)\n'
                '    return inner\n')
         self.assertEqual(self.listed(src), set())
+
+    def test_a_literal_tuple_unpack_lists_both_ids(self):
+        # Each name a literal tuple unpack binds is passed as a rule id below, so both values are ids.
+        src = ('def go(tool):\n    rule, why = "tuple-rule-x", "tuple-rule-y"\n'
+               '    refuse(tool, "deny", rule, R, m)\n    refuse(tool, "deny", why, R, m)\n')
+        self.assertEqual(self.listed(src), {"tuple-rule-x", "tuple-rule-y"})
+
+    def test_a_table_unpack_lists_the_ids_of_a_literal_table(self):
+        src = ('TABLE = (("table-rule-a", "why a"), ("table-rule-b", "why b"))\n'
+               'def go(tool):\n    for hit in TABLE:\n        rule, why = hit\n'
+               '        refuse(tool, "deny", rule, why, m)\n')
+        self.assertEqual(self.listed(src), {"table-rule-a", "table-rule-b"},
+                         "a literal table of (id, reason) rows names its ids and no reason text")
+
+    def test_a_loop_unpack_of_a_dict_items_call_raises_with_path_and_line(self):
+        # Scope first: the same loop over a literal table is read, empty or not, so the `.items()` call is the only gap.
+        loop = 'def go(tool):\n    for rule, why in TABLE:\n        refuse(tool, "deny", rule, why, m)\n'
+        self.assertEqual(self.listed('TABLE = (("loop-rule-a", "why a"),)\n' + loop), {"loop-rule-a"},
+                         "control: a literal table loop is listed")
+        self.assertEqual(self.listed('TABLE = ()\n' + loop), set(), "control: an empty literal table lists no id")
+        src = ('RULES = {"loop-rule-b": "why b", "loop-rule-c": "why c"}\n'
+               'def go(tool):\n    for rule, why in RULES.items():\n        refuse(tool, "deny", rule, why, m)\n')
+        self.refused_at(lambda: rule_audit.guard_rule_names(src, "hooks/guard.py"), 4)
+
+    def test_a_loop_unpack_of_an_imported_table_raises_with_path_and_line(self):
+        # The table lives in a sibling module, so this module holds no rows the reader can read.
+        root = self.fixture({
+            os.path.join("hooks", "rule_table.py"): 'CHECKS = (("sibling-loop-a", "why a"),)\n',
+            os.path.join("hooks", "guard.py"):
+                'from rule_table import CHECKS\ndef go(tool):\n    for rule, why in CHECKS:\n'
+                '        refuse(tool, "deny", rule, why, m)\n',
+        })
+        self.refused_at(lambda: rule_audit.emitted_rule_ids(root), 4)
+
+    def test_an_inline_conditional_of_two_literal_ids_lists_both(self):
+        # A false alarm today: the reader refuses an inline conditional of two literals it could list.
+        src = 'def go(x):\n    refuse(tool, "deny", "inline-a" if x else "inline-b", R, m)\n'
+        try:
+            ids = rule_audit.guard_rule_names(src, "hooks/guard.py")
+        except ValueError as why:
+            self.fail("false alarm: the reader refused an inline conditional of two literal ids: %s" % why)
+        self.assertEqual(ids, {"inline-a", "inline-b"})
 
 
 # ------------------------------------------------------------ parse cache

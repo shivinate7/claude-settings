@@ -1064,87 +1064,334 @@ class OverrideDecisionTests(unittest.TestCase):
 # expected set below is read from that source with `ast`, never copied into this file. A copy
 # would go stale the day a rule is added, and the cull would trust it.
 
-GUARD_SOURCES = sorted(glob.glob(os.path.join(HOOKS_DIR, "guard*.py"))) + [
-    os.path.join(HOOKS_DIR, "config_watch.py")]  # config_watch writes `agent-model-cap` reverts
-RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}  # the position of the rule id in each call
+HOOK_SOURCES = sorted(p for p in glob.glob(os.path.join(HOOKS_DIR, "*.py"))
+                      if not os.path.basename(p).startswith("test_"))  # every hook module; a test module writes no id
+RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}  # the position of the rule id in each guard call
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 
 def _text_constants(node):
     return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
-def _module_constants(tree):
-    """Module-level names bound once, to a string literal: {name: text}. A name bound twice, or to anything
-    but a literal, is no constant. Written here from the source, not read from lint/rule_audit.py."""
-    bound, literal = {}, {}
+def _text(node):
+    """The text of a string literal, or None."""
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _module_bindings(tree):
+    """{name: [value]} for each top-level binding. A plain assignment gives its value node. Any other binding (an
+    import, a def, a class, a name unpacked from a call) gives None. A tuple of the same length unpacks pairwise."""
+    out = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
-            pairs = [(target, node.value) for target in node.targets]
+            pairs = []
+            for target in node.targets:
+                if isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple) \
+                        and len(target.elts) == len(node.value.elts):
+                    pairs += list(zip(target.elts, node.value.elts))
+                else:
+                    pairs.append((target, node.value))
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             pairs = [(node.target, node.value)]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.setdefault(node.name, []).append(None)
+            continue
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                out.setdefault((alias.asname or alias.name).split(".")[0], []).append(None)
+            continue
         else:
             continue
         for target, value in pairs:
-            for name in (n for n in ast.walk(target) if isinstance(n, ast.Name)):
-                bound[name.id] = bound.get(name.id, 0) + 1
-                if name is target and isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    literal[name.id] = value.value
-    return {name: text for name, text in literal.items() if bound[name] == 1}
+            for name in (n for n in ast.walk(target) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)):
+                out.setdefault(name.id, []).append(value if name is target else None)
+    return out
 
 
-def _names_bound_in_defs(tree):
-    """{id(call): the names the defs around that call bind: parameters and assigned names}. A name the def
-    binds is that local, not a module constant of the same name."""
-    held = {}
-    for fn in ast.walk(tree):
-        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            args = fn.args
-            names = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
-            names |= {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
-            for call in ast.walk(fn):
-                if isinstance(call, ast.Call):
-                    held.setdefault(id(call), set()).update(names)
+def _constants(bindings):
+    """{name: text} for each top-level name bound once, to a string literal."""
+    return {n: _text(vs[0]) for n, vs in bindings.items() if len(vs) == 1 and _text(vs[0]) is not None}
+
+
+def _tables(bindings):
+    """{name: Dict node} for each top-level name bound once, to a dict display."""
+    return {n: vs[0] for n, vs in bindings.items() if len(vs) == 1 and isinstance(vs[0], ast.Dict)}
+
+
+def _scope_chains(tree):
+    """{id(call): the defs and lambdas that hold it, innermost first}. Iterative, so a long expression cannot hit
+    the recursion limit."""
+    held, todo = {}, [(tree, ())]
+    while todo:
+        node, chain = todo.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                held[id(child)] = chain
+            todo.append((child, (child,) + chain if isinstance(child, _SCOPES) else chain))
     return held
 
 
-def emitted_guard_rules(source):
-    """The rule ids one guard source can write to guard.log, read with `ast`.
+def _own_nodes(scope):
+    """The nodes of a def's or lambda's own body. A nested def, lambda or class is another scope: its name is bound
+    here, but its body is not read here."""
+    todo = list(scope.body) if isinstance(scope.body, list) else [scope.body]
+    out = []
+    while todo:
+        node = todo.pop()
+        out.append(node)
+        if not isinstance(node, _SCOPES + (ast.ClassDef,)):
+            todo.extend(ast.iter_child_nodes(node))
+    return out
 
-    Three shapes write an id: a literal in refuse()/record() (third argument) or ask_command()
-    (first argument), or a module-level string constant in that place; the table in diff_rule(); and the
-    `code, why = {...}` role-scope table. A call that passes any other variable (`record(tool, decision,
-    rule, ...)`, or a parameter or local of the def around it) names no id.
+
+def _literal_tuples(bindings):
+    """{name: [text]} for each top-level name bound once, to a tuple of string literals."""
+    out = {}
+    for name, vs in bindings.items():
+        if len(vs) == 1 and isinstance(vs[0], ast.Tuple) and all(_text(e) is not None for e in vs[0].elts):
+            out[name] = [_text(e) for e in vs[0].elts]
+    return out
+
+
+class _Bound:
+    """What one def binds a name to: the rule ids the name can hold, and for a tuple-valued name the ids in each
+    column."""
+
+    def __init__(self):
+        self.ids, self.columns = set(), {}
+
+
+class _Chain:
+    """What the names visible at one call hold: the nearest def that binds a name, else the module."""
+
+    def __init__(self, reader, scopes):
+        self.reader, self.scopes = reader, scopes
+
+    def _bound(self, name):
+        for scope in self.scopes:
+            names = self.reader.bound_in(scope)
+            if name in names:
+                return names[name]
+        return None
+
+    def name(self, name):
+        found = self._bound(name)
+        return found.ids if found is not None else self.reader.module_ids(name)
+
+    def column(self, name, index):
+        found = self._bound(name)
+        return found.columns.get(index, set()) if found is not None else set()
+
+
+class _Local:
+    """The names a def binds while its own assigned values are read: a name reads as the module's constant, and a
+    tuple-valued name reads the columns that the first pass has read from its comprehension."""
+
+    def __init__(self, reader, bound):
+        self.reader, self.bound = reader, bound
+
+    def name(self, name):
+        return self.reader.module_ids(name)
+
+    def column(self, name, index):
+        found = self.bound.get(name)
+        return found.columns.get(index, set()) if found is not None else set()
+
+
+class _Reader:
+    """One hook module's rule ids. A value it cannot place holds no id, so a call that passes one names nothing, as
+    a variable always has (test_a_variable_rule_names_no_id). Read from the source with `ast`, never from rule_audit."""
+
+    def __init__(self, source, base_dir):
+        self.tree = ast.parse(source)
+        bindings = _module_bindings(self.tree)
+        self.constants, self.tables = _constants(bindings), _tables(bindings)
+        self.literal_tuples = _literal_tuples(bindings)
+        self.defs = {n.name: n for n in self.tree.body if isinstance(n, ast.FunctionDef)}
+        self.chains = _scope_chains(self.tree)
+        self.base_dir = base_dir
+        self.siblings = self._sibling_imports()
+        self.module = _Chain(self, ())
+        self.sibling_cache, self.scope_names = {}, {}
+
+    def _sibling_imports(self):
+        """{name: module} for each `import X` that names a sibling module file under base_dir."""
+        found = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Import) and self.base_dir:
+                for alias in node.names:
+                    if "." not in alias.name and os.path.isfile(os.path.join(self.base_dir, alias.name + ".py")):
+                        found[alias.asname or alias.name] = alias.name
+        return found
+
+    def sibling_constant(self, local, attr):
+        """The string constant `attr` of the sibling module that `local` names, or None."""
+        module = self.siblings.get(local)
+        if module is None:
+            return None
+        if module not in self.sibling_cache:
+            with open(os.path.join(self.base_dir, module + ".py"), encoding="utf-8") as handle:
+                self.sibling_cache[module] = _constants(_module_bindings(ast.parse(handle.read())))
+        return self.sibling_cache[module].get(attr)
+
+    def module_ids(self, name):
+        return {self.constants[name]} if name in self.constants else set()
+
+    def bound_in(self, scope):
+        """{name: _Bound} for the names a def or lambda binds, read once per scope."""
+        if id(scope) not in self.scope_names:
+            self.scope_names[id(scope)] = self._bind(scope)
+        return self.scope_names[id(scope)]
+
+    def ids(self, expr, ctx):
+        """The ids an expression can hold, read through `ctx`: a string literal, a name, a conditional's branches,
+        the element of min() or max() over a tuple-valued name, or a sibling module's constant. Anything else holds
+        none."""
+        text = _text(expr)
+        if text is not None:
+            return {text}
+        if isinstance(expr, ast.Name):
+            return ctx.name(expr.id)
+        if isinstance(expr, ast.IfExp):
+            return self.ids(expr.body, ctx) | self.ids(expr.orelse, ctx)
+        if isinstance(expr, ast.Subscript) and isinstance(expr.slice, ast.Constant) \
+                and isinstance(expr.slice.value, int) and isinstance(expr.value, ast.Call) \
+                and isinstance(expr.value.func, ast.Name) and expr.value.func.id in ("min", "max") \
+                and len(expr.value.args) == 1 and isinstance(expr.value.args[0], ast.Name):
+            return ctx.column(expr.value.args[0].id, expr.slice.value)
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+            const = self.sibling_constant(expr.value.id, expr.attr)
+            return {const} if const is not None else set()
+        return set()
+
+    def column(self, table, index):
+        """The ids in column `index` of a literal table: the element there of each row, when it names an id."""
+        found = set()
+        for row in table.values:
+            if isinstance(row, ast.Tuple) and len(row.elts) > index:
+                found |= self.ids(row.elts[index], self.module)
+        return found
+
+    def comprehension_columns(self, comp):
+        """{index: ids} for a comprehension whose element is a tuple: an element that is the loop variable over a
+        literal tuple of the module holds that tuple's strings in its column."""
+        columns = {}
+        if not isinstance(comp.elt, ast.Tuple):
+            return columns
+        for gen in comp.generators:
+            if isinstance(gen.target, ast.Name) and isinstance(gen.iter, ast.Name) \
+                    and gen.iter.id in self.literal_tuples:
+                for index, elt in enumerate(comp.elt.elts):
+                    if isinstance(elt, ast.Name) and elt.id == gen.target.id:
+                        columns.setdefault(index, set()).update(self.literal_tuples[gen.iter.id])
+        return columns
+
+    def assign(self, target, value, bound, ctx):
+        """Add the ids that a value gives each name it is assigned to."""
+        if isinstance(target, ast.Name):
+            bound[target.id].ids |= self.ids(value, ctx)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+                for t, v in zip(target.elts, value.elts):
+                    self.assign(t, v, bound, ctx)
+            elif isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name) \
+                    and value.value.id in self.tables:
+                for index, t in enumerate(target.elts):
+                    if isinstance(t, ast.Name):
+                        bound[t.id].ids |= self.column(self.tables[value.value.id], index)
+
+    def _bind(self, scope):
+        bound, args = {}, scope.args
+        for arg in args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]:
+            if arg is not None:
+                bound[arg.arg] = _Bound()
+        own = _own_nodes(scope)
+        for node in own:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.setdefault(node.name, _Bound())
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    bound.setdefault((alias.asname or alias.name).split(".")[0], _Bound())
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                bound.setdefault(node.id, _Bound())
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                bound.setdefault(node.name, _Bound())
+        # The first pass reads each name bound to a comprehension, so that the second pass can read its columns.
+        for node in own:
+            if isinstance(node, ast.Assign) and isinstance(node.value, (ast.ListComp, ast.GeneratorExp)):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bound[target.id].columns.update(self.comprehension_columns(node.value))
+        local = _Local(self, bound)
+        for node in own:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    self.assign(target, node.value, bound, local)
+            elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and isinstance(node.target, ast.Name) \
+                    and node.value is not None:
+                bound[node.target.id].ids |= self.ids(node.value, local)
+        return bound
+
+    def forwarded(self, helper):
+        """The position of the helper's parameter that one of its guard calls takes as the rule, or None."""
+        params = [a.arg for a in helper.args.posonlyargs + helper.args.args]
+        for node in ast.walk(helper):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                at = RULE_ARG.get(node.func.attr)
+                if at is not None and len(node.args) > at and isinstance(node.args[at], ast.Name) \
+                        and node.args[at].id in params:
+                    return params.index(node.args[at].id)
+        return None
+
+    def rule_position(self, call):
+        """The argument a guard call takes as its rule, or None. A module def named like a guard function that makes
+        guard calls of its own is a helper with its own signature: a call to it takes the rule where the def forwards
+        it. A def that makes none (guard.py's ask_command) keeps the guard function's position."""
+        func = call.func
+        if isinstance(func, ast.Name) and func.id in self.defs and any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in RULE_ARG
+                for n in ast.walk(self.defs[func.id])):
+            return self.forwarded(self.defs[func.id])
+        return RULE_ARG.get(func.id if isinstance(func, ast.Name) else getattr(func, "attr", ""))
+
+    def ids_written(self):
+        ids = set()
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Call):
+                at = self.rule_position(node)
+                if at is not None and len(node.args) > at:
+                    ids |= self.ids(node.args[at], _Chain(self, self.chains.get(id(node), ())))
+            elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
+                for stmt in node.body:  # a docstring is a bare string statement: it names no id
+                    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
+                        ids |= _text_constants(stmt)
+            elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple) \
+                    and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]:
+                ids |= _text_constants(node.value)
+        return ids
+
+
+def emitted_guard_rules(source, base_dir=None):
+    """The rule ids one hook source can write to guard.log, read with `ast`.
+
+    A literal, a module-level string constant, or a name the def around the call binds to literals (or a
+    conditional of them), in refuse()/record() (third argument) or ask_command() (first argument) writes an id.
+    So does a constant that a module tuple or literal table holds in that place, and a constant or literal that a
+    module helper named refuse() forwards as the rule. A sibling module's constant is read from base_dir. The
+    diff_rule() table and the `code, why = {...}` role-scope table write ids too. A call that passes any other
+    value (a parameter, a call's result, a variable of unknown value) names no id.
     """
-    tree = ast.parse(source)
-    constants, held = _module_constants(tree), _names_bound_in_defs(tree)
-    ids = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
-            at = RULE_ARG.get(name)
-            if at is not None and len(node.args) > at:
-                arg = node.args[at]
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    ids.add(arg.value)
-                elif isinstance(arg, ast.Name) and arg.id in constants and arg.id not in held.get(id(node), ()):
-                    ids.add(constants[arg.id])
-        elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
-            for stmt in node.body:  # a docstring is a bare string statement: it names no id
-                if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
-                    ids |= _text_constants(stmt)
-        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Tuple) \
-                and [getattr(e, "id", "") for e in node.targets[0].elts] == ["code", "why"]:
-            ids |= _text_constants(node.value)
-    return ids
+    return _Reader(source, base_dir).ids_written()
 
 
 def emitted_rules():
-    """Every id the guard writes. No STE id is emitted: no hook writes one now (decision
-    ste-guard-fixes-not-nags), so an STE row of --all-rules comes from the log alone."""
+    """Every id a hook writes. No STE id is emitted: no hook writes one now (decision ste-guard-fixes-not-nags),
+    so an STE row of --all-rules comes from the log alone."""
     ids = set()
-    for path in GUARD_SOURCES:
+    for path in HOOK_SOURCES:
         with open(path, encoding="utf-8") as handle:
-            ids |= emitted_guard_rules(handle.read())
+            ids |= emitted_guard_rules(handle.read(), HOOKS_DIR)
     return ids
 
 
@@ -1193,6 +1440,193 @@ class EmittedRuleReaderTests(unittest.TestCase):
     def test_a_parameter_named_like_a_constant_is_no_constant(self):
         src = 'RID = "const-rule-id"\ndef go(RID):\n    refuse(tool, "deny", RID, R, m)\n'
         self.assertEqual(emitted_guard_rules(src), set())
+
+    def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
+        src = 'def go():\n    rid = "oracle-local-rule"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(emitted_guard_rules(src), {"oracle-local-rule"})
+
+    def test_a_def_local_name_assigned_a_conditional_of_literals_lists_both(self):
+        src = 'def go(c):\n    rid = "oracle-a" if c else "oracle-b"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(emitted_guard_rules(src), {"oracle-a", "oracle-b"})
+
+    def test_the_oracle_lists_the_ids_of_every_hook_that_writes_one(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import blind_brief
+        import call_judge
+        import prose_judge
+        import question_form
+        import reply_judge
+        import sendmessage_state
+        wanted = {blind_brief.RULE, prose_judge.RULE, sendmessage_state.RULE, reply_judge.JUDGE_RULE,
+                  call_judge.SPAWN_RULE, call_judge.QUESTION_RULE, question_form.PAST_RULING_RULE}
+        self.assertEqual(sorted(wanted - emitted_rules()), [],
+                         "the oracle reads only guard*.py and config_watch.py, so these ids are not in its list")
+
+    def test_a_helper_forwards_its_fourth_argument_as_the_rule(self):
+        # call_judge's refuse(payload, tool, args, rule, reason) hands its fourth argument on as the rule.
+        src = ('def refuse(payload, tool, args, rule, reason):\n'
+               '    guard_core.refuse(tool, "deny", rule, reason, "")\n'
+               'def go(payload, tool, args):\n'
+               '    refuse(payload, tool, args, "helper-rule", "why")\n')
+        self.assertEqual(emitted_guard_rules(src), {"helper-rule"})
+
+    def test_a_helper_whose_rule_is_a_constant_leaves_its_literal_reason_unlisted(self):
+        # blind_brief's refuse(payload, tool, reason, matched) takes its rule from a constant, so the literal
+        # in its third argument is a reason, not an id.
+        src = ('RULE = "fixed-helper-rule"\n'
+               'def refuse(payload, tool, reason, matched):\n'
+               '    guard_core.refuse(tool, "deny", RULE, reason, matched)\n'
+               'def go(payload, tool):\n'
+               '    refuse(payload, tool, "a literal reason", "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"fixed-helper-rule"})
+
+    def test_a_tuple_of_literal_constants_names_each_constant(self):
+        src = ('SPAWN_RULE, QUESTION_RULE = "tuple-x", "tuple-y"\n'
+               'def go(tool):\n'
+               '    refuse(tool, "deny", SPAWN_RULE, R, m)\n'
+               '    refuse(tool, "deny", QUESTION_RULE, R, m)\n')
+        self.assertEqual(emitted_guard_rules(src), {"tuple-x", "tuple-y"})
+
+    def test_a_name_unpacked_from_a_literal_table_names_that_column(self):
+        # call_judge's JUDGES table: `prompt, model, timeout, rule, fallback = JUDGES[tool]` reads column 3.
+        src = ('JUDGES = {"Agent": (1, ROUTE_RULE), "Ask": (2, "ask-rule")}\n'
+               'ROUTE_RULE = "route-rule"\n'
+               'def go(tool):\n'
+               '    count, rule = JUDGES[tool]\n'
+               '    refuse(tool, "deny", rule, R, m)\n')
+        self.assertEqual(emitted_guard_rules(src), {"route-rule", "ask-rule"})
+
+    def test_a_computed_rule_with_a_constant_branch_names_the_constant(self):
+        # reply_judge: `rule = min(found)[1] if found else JUDGE_RULE`. The computed branch names no id here.
+        src = ('JUDGE_RULE = "judge-const"\n'
+               'def go(found):\n'
+               '    rule = min(found)[1] if found else JUDGE_RULE\n'
+               '    record("Stop", "noted", rule, "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"judge-const"})
+
+    def test_a_minimum_of_a_comprehension_over_a_literal_tuple_names_its_elements(self):
+        # reply_judge's log_finding: the rule is the element of the literal tuple that the reason names, `min(found)[1]`.
+        src = ('JUDGED = ("alpha-judged", "beta-judged")\n'
+               'def go(reason):\n'
+               '    found = [(reason.find(r), r) for r in JUDGED if r in reason]\n'
+               '    rule = min(found)[1] if found else "fallback-rule"\n'
+               '    record("Stop", "noted", rule, "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"alpha-judged", "beta-judged", "fallback-rule"})
+
+
+# ------------------------------------------------------------ the rule id each hook logs, exactly
+# A guard.log line carries the rule id as its fourth tab field. Each case drives one hook in-process, with the model
+# call patched and CLAUDE_CONFIG_DIR at a folder of its own, then reads that field exactly. A substring, or the
+# decision field, would pass a line that names the wrong id.
+
+def guard_log_rows(config):
+    """The guard.log lines of `config`, each as its tab fields. No file is no line."""
+    try:
+        with open(os.path.join(config, "guard.log"), encoding="utf-8") as handle:
+            return [line.rstrip("\n").split("\t") for line in handle]
+    except OSError:
+        return []
+
+
+def stdin_of(payload):
+    """A stdin that reads as the hooks read it: text for json.load, and a .buffer for sys.stdin.buffer.read()."""
+    return io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode("utf-8")), encoding="utf-8")
+
+
+def reply_reason(rule):
+    """A reply judge's reason that names one rule id, as the model writes it."""
+    return "The reply breaks %s, so the owner gets a rewrite." % rule
+
+
+class ExactGuardLogRuleTests(unittest.TestCase):
+    """The rule id each hook writes to guard.log, read from that line's own rule field."""
+
+    def config(self):
+        folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        return folder
+
+    def logged(self, config, decision):
+        return [row[3] for row in guard_log_rows(config) if len(row) >= 4 and row[2] == decision]
+
+    def reply_rules_logged(self, rule):
+        import decision_watch
+        import reply_judge
+        config = self.config()
+        payload = {"session_id": "sess-reply", "last_assistant_message": "A finished reply for the owner."}
+        verdict = {"ok": False, "reason": reply_reason(rule)}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(decision_watch, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            reply_judge.main()
+        return self.logged(config, "noted")
+
+    def test_an_owner_override_reason_logs_the_owner_override_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import override
+        config = self.config()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            override.grant("sess-owner", "override, fix the widget", datetime.now(timezone.utc))
+        self.assertEqual(self.logged(config, "override-reason"), ["owner-override"])
+
+    def test_a_past_ruling_cite_logs_the_past_ruling_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import call_judge
+        import question_form
+        config = self.config()
+        payload = {"tool_name": "AskUserQuestion", "tool_input": {"questions": []}, "session_id": "sess-past",
+                   "cwd": config}
+        verdict = {"ok": False, "reason": "decisions/apps-keep-access: the owner already ruled this."}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(question_form, "chat_hit", return_value=("", "")), \
+                mock.patch.object(question_form, "chat_units", return_value=[("", "the question")]), \
+                mock.patch.object(call_judge, "past_ruling_context",
+                                  return_value=("", ["decisions/apps-keep-access"], [])), \
+                mock.patch.object(call_judge, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):  # the refusal exits after it logs
+                call_judge.main()
+        self.assertEqual(self.logged(config, "deny"), ["past-ruling"])
+
+    def test_a_prose_refusal_logs_the_prose_judge_rule(self):
+        if HOOKS_DIR not in sys.path:
+            sys.path.insert(0, HOOKS_DIR)
+        import prose_judge
+        config = self.config()
+        payload = {"tool_name": "Edit",
+                   "tool_input": {"file_path": "docs/decisions/a-record.md", "old_string": "x", "new_string": "y"},
+                   "session_id": "sess-prose", "cwd": config}
+        verdict = {"ok": False, "reason": "the edit breaks the record's rules."}
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}), \
+                mock.patch.object(prose_judge, "invoke_model", return_value=(verdict, None)), \
+                mock.patch("sys.stdin", stdin_of(payload)), contextlib.redirect_stdout(io.StringIO()):
+            prose_judge.main()
+        self.assertEqual(self.logged(config, "deny"), ["prose-judge"])
+
+    def test_output_never_paste_passing_output_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("output-never-paste-passing-output"),
+                         ["output-never-paste-passing-output"])
+
+    def test_output_start_with_point_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("output-start-with-point"), ["output-start-with-point"])
+
+    def test_questions_go_to_owner_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("questions-go-to-owner"), ["questions-go-to-owner"])
+
+    def test_style_cut_narration_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-cut-narration"), ["style-cut-narration"])
+
+    def test_style_limits_kept_silently_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-limits-kept-silently"), ["style-limits-kept-silently"])
+
+    def test_style_question_form_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-question-form"), ["style-question-form"])
+
+    def test_style_table_gold_column_is_logged_by_its_own_id(self):
+        self.assertEqual(self.reply_rules_logged("style-table-gold-column"), ["style-table-gold-column"])
 
 
 def run_cli(argv):
