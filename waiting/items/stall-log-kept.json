@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T07:02:00Z",
+  "context": "Goal: after the stall watcher flags a quiet job, you can still read whether that job passed.\nProblem (rule): a job removes its log when it ends, even after a STALL report. Tonight a lint was flagged, ran on unseen, and its log was deleted, so no one could tell if it passed. That line has no ruling of yours behind it, so changing it needs your word.\nBased on (record): decision stall-watch: \"The job removes its log and beat file when it ends, also after a STALL report\" (lane commit 78c608d45, Nov 4, to stop leftover files). Test A1 holds it.\nBased on (ruling): decisions/stall-watch (owner, 2026-10-18 15:15 CDT): the watcher never stops a job; it only reports. Option b goes against that.\nBased on (record): verdict already keeps its own logs 7 days, then prunes them (KEEP = 7 days).\nDeparts from: decision stall-watch, a stalled job's log is removed when the job ends \u2014 a stalled job's log is kept until a 7-day prune.\nMeanwhile: the lane ships the beat-file fix, the cause of tonight's stalls, on its own. It waits on this part only.",
+  "home": "stall-watch-quiet-lint",
+  "id": "stall-log-kept",
+  "kind": "decision",
+  "n": 405,
+  "options": [
+    {
+      "gain": "A flagged job's result stays readable, and cleanup needs no new process.",
+      "how": "On a stall, the watcher writes a marker beside the log. When the job ends, it keeps the log if the marker is there and still removes the beat file. The next stall-watch hook call removes such logs older than 7 days, so no timer runs.",
+      "key": "a",
+      "label": "Keep a stalled job's log for 7 days",
+      "lose": "Up to 7 days of small temp logs, one per stalled job."
+    },
+    {
+      "gain": "No files are left behind.",
+      "how": "On a stall, the watcher stops the job, so it leaves no files. This goes against your 2026-10-18 ruling that the watcher never stops a job.",
+      "key": "b",
+      "label": "Stop the job when it stalls",
+      "lose": "A healthy but quiet job is killed on a false stall."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "A job removes its log when it ends, stalled or not.",
+      "key": "c",
+      "label": "Keep today's rule",
+      "lose": "A stalled job's result stays unreadable, as it was tonight."
+    }
+  ],
+  "owner": "lane stall-watch-quiet-lint (session_013NEJL2LYXQpmabnoQqYgNv)",
+  "pick": "a",
+  "ref": "decision stall-watch (the job removes its log and beat file when it ends, also after a STALL report; lane commit 78c608d45, Nov 4); test A1 in hooks/test_stall_watch.py; #1803's lane incident",
+  "short": "Keep a stalled job's log",
+  "status": "open",
+  "title": "Should a stalled job's log stay readable after the job ends?"
+}
