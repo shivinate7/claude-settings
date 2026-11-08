@@ -11543,6 +11543,20 @@ sh("frozen: cp FROM a frozen hook to scratch is a read", "cp " + CFG_HOOK + " /t
    "allow", cwd=NOGIT)
 sh("frozen: cp FROM the frozen settings to scratch is a read",
    "cp " + CFG_SETTINGS + " /tmp/settings.copy", "allow", cwd=NOGIT)
+# A loop keyword or a wrapper in front of `cp` changes nothing: the copy still reads its source and
+# still writes its destination. Each deny is the matching allow with the frozen path moved to DEST.
+sh("frozen: cp FROM a frozen hook to scratch after a loop keyword is a read",
+   "for f in a; do cp " + CFG_HOOK + " ./x; done", "allow", cwd=NOGIT)
+sh("frozen: sudo cp FROM a frozen hook to scratch is a read",
+   "sudo cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: env cp FROM a frozen hook to scratch is a read",
+   "env cp " + CFG_HOOK + " ./x", "allow", cwd=NOGIT)
+sh("frozen: cp TO a frozen hook after a loop keyword still denies",
+   "for f in a; do cp x " + CFG_HOOK + "; done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sudo cp TO a frozen hook still denies", "sudo cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: env cp TO a frozen hook still denies", "env cp x " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
 sh("frozen: cp TO a frozen hook still denies", "cp /tmp/x.py " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
 sh("frozen: cp from a frozen path TO a frozen path still denies",
