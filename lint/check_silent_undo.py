@@ -591,12 +591,17 @@ def fmt_lost(m, path, p, lost):
 
 # --------------------------------------------------------------------- revived
 
-NOTE = re.compile(r"^- ([^\s:]+):")
+NOTE = re.compile(r"^- ([^\s:]+):\s*(.*)$")
+
+
+def note_bodies(lines):
+    """[(slug, text after the slug)] for the note lines among `lines`. A slug is the `- <slug>:` at line start."""
+    return [(m.group(1), m.group(2)) for m in map(NOTE.match, lines) if m]
 
 
 def note_counts(text):
-    """slug -> how many note lines carry it. A slug is the `- <slug>:` at line start."""
-    return collections.Counter(m.group(1) for m in map(NOTE.match, text.splitlines()) if m)
+    """slug -> how many note lines carry it."""
+    return collections.Counter(slug for slug, _ in note_bodies(text.splitlines()))
 
 
 class Revived(str):
@@ -674,12 +679,12 @@ def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
 # note line, and a clause the old line said is gone from the new one. It reads the texts revived_notes already reads,
 # through its `each` hook, so it adds no git read: per run and per notes path, the revived check's own reads and no more.
 #
-# A removed note line is paired with the added line of its own slug. With none, a fold target is the added line that holds
-# the most of its clauses, at least 2 and at least half (a lone `Decision:` clause is shared by unrelated notes). A removed
+# A removed note line is paired with each added line under the same slug or under a folding slug: an added line whose text
+# names the removed slug. Shared topic words or a shared `Decision:` tag never pair (unrelated notes share them). A removed
 # line with no pair is a plain retire and is no finding. The line is cut into clauses at a
 # sentence end, `;`, and `and`, `but`, `which`, `though`, `while`, `so`, so a clause that rides on the end of a sentence is
 # judged on its own. A fragment of fewer than 3 content words joins its neighbour. A clause is held when at least HELD of its
-# content words (stopwords out, a trailing `s` off) are among the content words of the pair. A reworded clause keeps most of
+# content words (stopwords out, a trailing `s` off) are among the content words of the pair, and every number token of it is. A reworded clause keeps most of
 # its words (one word in five changed: 0.8). A dropped clause keeps only the words other clauses share with it (0.2 to 0.25
 # in the two cases that began this check). 0.5 sits in the gap, so a clause that is reworded, split, merged or reflowed
 # passes, and one that lost its point fails. A clause that head's text for the note holds is no finding: a later commit of
@@ -688,7 +693,6 @@ HELD = 0.5
 CLAUSE_END = re.compile(r"(?<=[.!?])\s+|;\s*|,?\s+(?:and|but|though|although|which|while|so)\s+", re.I)
 STOPWORDS = frozenset("a an the and or of to in on for is are was were be been it its this that these those with as at by from "
                       "which who also then so if but though although while when each every any".split())
-NOTE_LINE = re.compile(r"^- ([^\s:]+):\s*(.*)$")
 
 
 def content_words(text):
@@ -715,35 +719,33 @@ def clauses(body):
 
 
 def held(clause, words):
+    """True when `words` hold at least HELD of the clause's content words and every one of its number tokens."""
     mine = content_words(clause)
-    return not mine or len(mine & words) >= HELD * len(mine)
+    numbers = {w for w in mine if w.isdigit()}
+    return not mine or (numbers <= words and len(mine & words) >= HELD * len(mine))
 
 
-def note_bodies(counter):
-    """[(slug, text after the slug)] for the note lines of a Counter of normalized lines."""
-    return [(m.group(1), m.group(2)) for m in map(NOTE_LINE.match, counter.elements()) if m]
+def names(text, slug):
+    """True when `text` names the note `slug`: the slug stands alone, not inside a longer slug."""
+    return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(slug), text) is not None
 
 
 def dropped_clauses(before, after, now):
     """[(slug, [fold slugs], clause)] for one commit's file texts (the parent's, the commit's, and head's): each clause of a
     removed note line that the commit's added lines for that note (or its fold target) no longer hold, and that head's text
     for the same notes does not hold either. See HELD above."""
-    gone = note_bodies(counts(before) - counts(after))
+    gone = note_bodies((counts(before) - counts(after)).elements())
     if not gone:
         return []
-    added = note_bodies(counts(after) - counts(before))
+    added = note_bodies((counts(after) - counts(before)).elements())
     found = []
     for slug, body in gone:
         mine = clauses(body)
-        pair = [x for x in added if x[0] == slug]
-        if not pair:  # a fold: the added line that holds the most clauses, at least 2 and at least half of them
-            top = max(added, key=lambda x: sum(held(c, content_words(x[1])) for c in mine), default=None)
-            n = sum(held(c, content_words(top[1])) for c in mine) if top else 0
-            pair = [top] if n >= 2 and 2 * n >= len(mine) else []
+        pair = [x for x in added if x[0] == slug or names(x[1], slug)]
         if not pair:
             continue  # a plain retire
         slugs = {x[0] for x in pair}
-        at_head = [t for s, t in note_bodies(counts(now)) if s in slugs | {slug}]
+        at_head = [t for s, t in note_bodies(counts(now).elements()) if s in slugs | {slug}]
         if not at_head:
             continue  # a later commit retired the note
         new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
