@@ -88,6 +88,13 @@ LANE_FOLDED_ROW = "- Alpha-slug: the same finding, in another case.\n"
 LANE_SPACED_ROW = "- alpha-slug : the same finding, with a space before the colon.\n"
 # both rows of a new duplicate
 LANE_EPSILON_ROWS = "- epsilon-slug: first row. Don't stop.\n- epsilon-slug: second row.\n"
+LANE_KEPT_THIRD_ROW = "- kept-dup: a third row, added by the lane.\n"  # a third row of a slug main holds twice
+# Main folds fold-dup to one row after the lane branched off. The lane leaves its two rows untouched.
+FOLD_BASE_TEXT = ("# Notes\n\n"
+                  "- fold-dup: the first row. Don't stop at `/*`.\n"
+                  "- fold-dup: the second row, from the branch point.\n")
+FOLD_MAIN_TEXT = "# Notes\n\n- fold-dup: the one row main keeps after folding. Don't stop at `/*`.\n"
+FOLD_LANE_ROW = "- lane-only-slug: a row the lane adds.\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -161,6 +168,26 @@ class RecordSlugsTests(unittest.TestCase):
     def commit_change(self):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "change")
+
+    def git_out(self, *args):
+        return subprocess.run(["git", "-C", self.tree, *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def branch_apart(self, notes, base_text, main_text, lane_text):
+        """A base commit, a lane commit on it, and a main commit on the base that the lane never saw. origin/main is
+        main's commit and HEAD is the lane, so their merge base is the base commit, not origin/main."""
+        self.git("init", "-q")
+        self.put(notes, base_text)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("checkout", "-q", "-b", "lane")
+        self.put(notes, lane_text)
+        self.commit_change()
+        self.git("checkout", "-q", "-b", "main-side", "HEAD~1")
+        self.put(notes, main_text)
+        self.commit_change()
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "lane")
 
     def delete(self, *rels):
         for rel in rels:
@@ -513,6 +540,32 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 0, "editing one row of a duplicate already on main fails the lane: " + out)
         self.assertEqual(fail_lines(out), [], "a duplicate already on main is named as a failure: " + out)
+
+    def test_lane_third_row_of_a_main_duplicate_fails_and_names_it(self):
+        notes = self.notes_path()
+        self.put(notes, NOTES_MAIN_DUP)
+        self.commit_base()
+        self.put(notes, NOTES_MAIN_DUP + LANE_KEPT_THIRD_ROW)
+        self.commit_change()
+        self.assertEqual(NOTES_MAIN_DUP.count("- kept-dup:"), 2)  # scope: main holds kept-dup twice
+        self.assertEqual((NOTES_MAIN_DUP + LANE_KEPT_THIRD_ROW).count("- kept-dup:"), 3)  # scope: the lane adds a third
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertNotEqual(rc, 0, "the lane's third row of a main duplicate exits 0: " + out)
+        named = fail_lines(out)
+        self.assertEqual(len(named), 1, "the lane's third row is not named once: " + out)
+        self.assertIn("kept-dup", named[0], "the lane's third row names another slug: " + out)
+
+    def test_main_folding_a_duplicate_after_the_branch_point_fails_nothing(self):
+        # The check must read the base the lane branched from. Read origin/main, which folded fold-dup to one row,
+        # and the lane's two untouched rows look like a new duplicate.
+        notes = self.notes_path()
+        self.branch_apart(notes, FOLD_BASE_TEXT, FOLD_MAIN_TEXT, FOLD_BASE_TEXT + FOLD_LANE_ROW)
+        self.assertEqual(FOLD_BASE_TEXT.count("- fold-dup:"), 2)  # scope: the base the lane branched from holds two rows
+        self.assertEqual(FOLD_MAIN_TEXT.count("- fold-dup:"), 1)  # scope: origin/main folded them to one row
+        self.assertEqual(self.git_out("merge-base", "origin/main", "HEAD"), self.git_out("rev-parse", "HEAD~1"),
+                         "scope: the merge base is not the base commit the lane branched from")
+        self.assertNotEqual(self.git_out("rev-parse", "origin/main"), self.git_out("rev-parse", "HEAD~1"))
+        self.assert_passes()  # no file arguments: the diff against origin/main
 
     def test_unreadable_main_notes_say_unknown_and_are_not_read_as_clean(self):
         notes = self.notes_path()
