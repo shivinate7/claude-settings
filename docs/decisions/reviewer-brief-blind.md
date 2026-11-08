@@ -23,8 +23,13 @@ reviewer and whose brief holds a report-shaped block or a verdict line. The rule
 - A verdict line: a line with `verdict`, or a round label with or without `result`, before its colon,
   and a reviewer verdict word right after the colon. A report's leading verdict, `FAIL, round 1 of 3, ...`,
   is one too. The verdict words are one constant in `hooks/guard.py`.
-- The check matches shapes at line start, never words. A brief that quotes the task's words ("never
+- A report shape counts at line start only. A verdict label counts anywhere in its sentence before
+  the colon. The check matches shapes, never words: a brief that quotes the task's words ("never
   holds the builder's report or a prior verdict") passes.
+- Before the match, each backtick span is blanked unless it holds only a verdict word, each line is
+  split into sentences, and a choice list of verdict words that ends its sentence is blanked. So a
+  line that only names the verdict format passes: `End your report with a verdict: PASS, FAIL or
+  PARTIAL.`
 - The role set is one constant: `reviewer`, and the refuter, the agent that argues back (owner, item
   282, pick b, 2026-11-06). The refuter's name has one home, `REFUTER_ROLE` in `hooks/guard_core.py`
   (decision plan-refuter), and `hooks/guard.py` imports it.
