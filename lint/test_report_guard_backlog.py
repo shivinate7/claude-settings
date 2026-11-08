@@ -41,11 +41,7 @@ import shared_names  # noqa: E402  the one home of the Backlog item word and lab
 import test_report_guard as trg  # noqa: E402  the fixture, helpers and run folder (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the own-record, tag and tool-call helpers (one home)
 import build  # noqa: E402  the idle-lanes row label, IDLE_LANES_LINE (one home, skills/roadmap/build.py)
-from shared_names import BACKLOG_FIELDS, BACKLOG_ITEM  # noqa: E402  the Backlog item word and field labels, one home each
-try:
-    from shared_names import FINISHED_LANES_LINE  # noqa: E402  the third field's label, the finished-lanes line's (hooks/shared_names.py)
-except ImportError:  # the stand-in until the constant lands there; ItemWordTests pins the constant and its text
-    FINISHED_LANES_LINE = "finished lanes not archived"
+from shared_names import BACKLOG_FIELDS, BACKLOG_ITEM, FINISHED_LANES_LINE  # noqa: E402  the Backlog item word, field labels and the finished-lanes label, one home each
 
 human = trg.human
 assistant_text = trg.assistant_text
@@ -696,8 +692,8 @@ class ItemWordTests(unittest.TestCase):
                          "the third Backlog field is %r, not the finished-lanes label" % (BACKLOG_FIELDS[2],))
 
     def test_bk_red_the_finished_lanes_label_is_a_constant_with_its_text(self):
-        # Catches: the label has no constant in hooks/shared_names.py, or the constant reads other text. The stand-in above would
-        # hide either, so the constant and its text are pinned here.
+        # Catches: the constant in hooks/shared_names.py reads other text than the finished-lanes label. A missing constant fails
+        # the import at the top of this module, so only its text is pinned here.
         self.assertEqual(getattr(shared_names, "FINISHED_LANES_LINE", None), "finished lanes not archived",
                          "hooks/shared_names.py does not define FINISHED_LANES_LINE as the finished-lanes label's text")
 

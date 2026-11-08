@@ -25,13 +25,11 @@ HERE = pathlib.Path(__file__).resolve().parent
 MERGE = HERE / "merge.py"
 sys.path.insert(0, str(HERE.parent / "skills" / "roadmap"))
 sys.path.insert(1, str(HERE.parent / "lint"))
+sys.path.insert(2, str(HERE.parent / "hooks"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_build as roadmap  # noqa: E402  the roadmap fixture: make_repo, session_row, iso_ago (one home)
-try:
-    from shared_names import FINISHED_LANES_LINE  # the one home of the finished-lanes label (hooks/shared_names.py)
-except ImportError:  # the stand-in until the constant lands there; test_report_guard_backlog pins its text
-    FINISHED_LANES_LINE = "finished lanes not archived"
+from shared_names import FINISHED_LANES_LINE  # noqa: E402  the one home of the finished-lanes label (hooks/shared_names.py)
 
 REPO = "cs-repo:owner/fixture"
 SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then archive it."
