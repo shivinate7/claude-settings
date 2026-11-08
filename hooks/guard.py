@@ -64,8 +64,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (lanes-start-in-tool-worktrees)
   impeccable-review-only  deny. A build or settings-writer command of the impeccable skill.
                        (design-skills)
-  cite-by-id          deny. A commit message or PR body that cites a record by its path.
-  lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
+  cite-by-id          deny. A commit message or PR body that cites a record by its path, also an MCP
+                       create or update call's body.
+  lane-by-slug         deny. A commit message or PR text that names a lane by a session number, also an
+                       MCP create or update call's body or title.
                        (lane-by-slug)
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
@@ -384,7 +386,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
+            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, UPDATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -5010,8 +5012,9 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
-    # The same cite and lane scans as the shell create, on the tool's own body and title.
-    if tool == CREATE_PR_TOOL:
+    # The same cite and lane scans as the shell create, on the tool's own body and title. An update that sets
+    # neither (a state or draft change) has no text, so both scans read nothing.
+    if tool in (CREATE_PR_TOOL, UPDATE_PR_TOOL):
         body, title = (tool_input.get(k) for k in ("body", "title"))
         body_texts = [body] if isinstance(body, str) else []
         matched = cited_in_texts(body_texts, False, tool)
