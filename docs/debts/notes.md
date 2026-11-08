@@ -1497,5 +1497,3 @@
 - sim-status-fail-reads-empty: A failed `sim-lease status` in sim-test reads as no leases, so the reuse check passes a Duo that another pid holds. The take gate still never grants a held slot (bin/sim-test, leased_by_others). Decision: sim-lease-tool.
 - sim-queued-boot-holds-lock: A queued own-boot holds the Mac lock through its lease wait, so a reuse of a free Duo waits behind it. Main held the lock for the whole run, so this is no worse than main (bin/sim-test). Decision: sim-test-is-the-one-boot-path (ruling 1, the lock hold).
 - sim-take-over-deletes-live-lock: take_over removes the folder it took when another run has re-created the lock, even if that folder holds a live pid's file. The window is milliseconds (bin/sim-test). Decision: sim-test-is-the-one-boot-path (ruling 3, the take-over).
-- sim-renew-crash-false-lost: A `sim-lease renew` that crashes (a traceback that exits 1) prints a false "lease lost" in sim-test (bin/sim-test, the renew check). Decision: sim-lease-tool.
-- sim-renew-below-max-unchecked: The rule that SIM_TEST_RENEW stays below SIM_LEASE_MAX is in the bin/sim-test header only, with no check. Decision: sim-lease-tool.
