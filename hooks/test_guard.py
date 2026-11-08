@@ -14953,10 +14953,11 @@ def ors_stop_into(ctx, role=ORS_REVIEWER):
 
 
 def ors_push(ctx):
-    """The lane's push, judged by the guard in the lane's checkout, in the case's session and config."""
+    """The lane's push, judged by the guard in the checkout it is pushed from (the lane's, unless a case names
+    `push_from`), in the case's session and config, as the agent the case names (none unless it names one)."""
     tool_input = ctx["tool_input"] or {"command": ctx["command"]}
-    return ov_call(ctx["tool"], tool_input, ctx["lane"], ctx["config"], ctx["session"], 0,
-                   env_path=ors_path(ctx["gh"]))
+    return ov_call(ctx["tool"], tool_input, ctx.get("push_from") or ctx["lane"], ctx["config"], ctx["session"], 0,
+                   agent_id=ctx.get("agent_id"), agent_type=ctx.get("agent_type"), env_path=ors_path(ctx["gh"]))
 
 
 def ors_scope_problem(ctx, red):
@@ -14970,7 +14971,7 @@ def ors_scope_problem(ctx, red):
             problem = "scope: origin's lane ref still holds the head, so the rewrite did not happen"
     elif not ors_holds(ctx["main"], ctx["head"]):
         problem = "scope: origin's lane ref does not hold the head the case reviews"
-    elif red and not ctx.get("chained") and ors_head(ctx["lane"]) == ctx["head"]:   # a chain is judged before its commit runs
+    elif red and not ctx.get("chained") and ors_head(ctx.get("push_from") or ctx["lane"]) == ctx["head"]:   # a chain is judged before its commit runs
         problem = "scope: the push source is the reviewed head, so the push owes nothing"
     elif ctx["scope"]:
         problem = ctx["scope"](ctx)
@@ -15484,6 +15485,41 @@ ors_red("push-owes-review-record: H3 a rebase then a push in one command, an ent
 ors_red("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: asks",
         ors_h4)
 ors_allow("push-owes-review-record: H5 a status check then a push, HEAD at H and the remote at H: allowed silently", ors_h5)
+
+
+ORS_PEER_AGENT = "a9c8b7a6f5e4d3c21"   # an agent id in the shape AGENT_ID accepts
+
+
+def ors_peer(label, agent_type, rel):
+    """H6, the reviewer stopped at H and left an entry. An agent commits one step past H in its own worktree of the
+    same repo, and pushes from there with no record. The entry belongs to the repo, not to a worktree."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    peer = ctx["lane"] + "-peer"
+    shutil.rmtree(peer, ignore_errors=True)
+    _must(ctx["lane"], "worktree", "add", "-q", "--detach", peer, ctx["head"])
+    ors_commit(peer, "agent fix", "x = 3\n", rel=rel)
+    ctx.update(push_from=peer, agent_id=ORS_PEER_AGENT, agent_type=agent_type, command=ORS_PUSH)
+    ctx["scope"] = ors_entries_scope
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "a %s pushes from its own worktree, an entry at H with no record" % agent_type
+    return ctx
+
+
+def ors_h6(label):
+    """H6, a builder's push from its own worktree."""
+    return ors_peer(label, "builder", "src/app.py")
+
+
+def ors_h6t(label):
+    """H6t, a test-author's push from its own worktree, of a test file."""
+    return ors_peer(label, "test-author", "test_peer.py")
+
+
+# A control: the orchestrator's push and the agents' pushes meet the same rule.
+ors_red("push-owes-review-record: H6 a builder pushes from its own worktree, an entry at H with no record: asks", ors_h6)
+ors_red("push-owes-review-record: H6t a test-author pushes from its own worktree, an entry at H with no record: asks",
+        ors_h6t)
 
 
 def ors_entries_scope(c):
