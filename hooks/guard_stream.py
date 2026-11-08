@@ -9,8 +9,8 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
-    git_calls, segment_tokens, split_segments,
+    bare_words, command_indexes, dir_before_segment, inline_script, inner_commands, is_powershell,
+    resolve_command, git_calls, segment_tokens, split_segments,
 )
 from guard_env import _substitutions
 from merge_options import MERGE_OPTIONS
@@ -290,8 +290,11 @@ def _merge_flag(tokens, flag: str) -> bool:
     """True when a token is the merge tool's option `flag` or an argparse prefix that names it alone.
     argparse takes an exact name first, else a prefix that matches one option (`--lane` is `--lane-lint`).
     A prefix that matches two or more is an error and runs nothing, so it is no flag (`--l`). The option
-    names are MERGE_OPTIONS, the list the merge parser is checked against."""
+    names are MERGE_OPTIONS, the list the merge parser is checked against. argparse splits `--name=value`
+    at the first `=` before it matches, so `--lane=7` names --lane-lint as `--lane 7` does."""
     for token in tokens:
+        if token.startswith("--"):
+            token = token.split("=", 1)[0]
         if len(token) > 2 and token.startswith("--") and token not in MERGE_OPTIONS:
             named = [name for name in MERGE_OPTIONS if name.startswith(token)]
             if named == [flag]:
@@ -343,18 +346,23 @@ def _enters_lint_dir(segment: str, in_lint: bool) -> bool:
 LINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lint")
 
 
-def _is_lint_file(name: str) -> bool:
-    """Whether `name` is a file in the lint folder of the checkout this guard runs from. No list of lint
-    scripts exists (LINT_SCRIPT is a path pattern), so the folder is the one home. Under `cd lint`, a bare
-    name that is no file there (`-m pytest` reads as `pytest.py`) runs no lint script."""
-    return os.path.isfile(os.path.join(LINT_DIR, name))
+def _is_lint_file(name: str, folder=None) -> bool:
+    """Whether `name` is a file in the lint folder the call has entered. `folder` is that folder, read
+    from the call's own cwd and its `cd`. A copy install has no lint/ beside its guard, and another repo
+    has its own lint scripts. So the guard's own folder is wrong for both. LINT_DIR, the lint/ of the
+    checkout this guard runs from, is read only when `folder` is None: the cwd is unknown, or a `cd`
+    went to a folder that does not exist. No list of lint scripts exists (LINT_SCRIPT is a path
+    pattern), so the folder is the one home. Under `cd lint`, a bare name that is no file there
+    (`-m pytest` reads as `pytest.py`) runs no lint script."""
+    return os.path.isfile(os.path.join(folder or LINT_DIR, name))
 
 
-def lint_stage(segment: str, background: bool, in_lint: bool = False) -> str:
+def lint_stage(segment: str, background: bool, in_lint: bool = False, folder=None) -> str:
     """`lint` when one segment runs a script under `lint/`, through an interpreter, as `-m lint.<name>`,
     or as the `.py` command word (`uv run lint/x.py`), else ''. With `in_lint` (an earlier `cd lint` in
-    the same command), a script named by its basename is under `lint/` too (`./ste_lint.py`). The
-    `background` argument keeps the signature of check_stage, the other stage reader."""
+    the same command), a script named by its basename is under `lint/` too (`./ste_lint.py`) when it is
+    a file in `folder`, the folder the segment runs in (see _is_lint_file). The `background` argument
+    keeps the signature of check_stage, the other stage reader."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
@@ -363,7 +371,8 @@ def lint_stage(segment: str, background: bool, in_lint: bool = False) -> str:
     if index >= len(tokens):   # a redirect-only segment (`> out.txt`) leaves no command word
         return ""
     script = _script_run(tokens, index).replace("\\", "/").lstrip("(")   # `(./x.py` opens a subshell
-    if in_lint and script and "/" not in script.removeprefix("./") and _is_lint_file(script.removeprefix("./")):
+    if in_lint and script and "/" not in script.removeprefix("./") and _is_lint_file(
+            script.removeprefix("./"), folder):
         script = "lint/" + script.removeprefix("./")
     if LINT_SCRIPT.search(script):
         return "lint"
@@ -373,18 +382,30 @@ def lint_stage(segment: str, background: bool, in_lint: bool = False) -> str:
 SUBSTITUTION_SLOT = re.compile(r"(?<![\w.-])x(?![\w.-])|`x`")
 
 
-def _inherited_in_lint(pipelines) -> bool:
-    """Whether a command substitution inside the outer text `pipelines` runs with `lint/` as its working
-    directory. `_substitutions` leaves each substitution's place in the outer text as `x`, so a segment
-    holding that slot, reached after a `cd lint`, hands `lint/` to every substitution. Which slot a text
-    fills is not tracked, so one slot after `cd lint` counts for all (the reading that refuses more)."""
-    in_lint = False
+def _flat(pipelines):
+    """The segments of `pipelines` in order, and the `ends` that dir_before_segment reads. Only a pipe
+    end matters to it here (a pipe part's `cd` moves nothing), so each pipeline ends in `;`."""
+    segments, ends = [], []
     for stages in pipelines:
-        for segment in stages:
-            if in_lint and SUBSTITUTION_SLOT.search(segment):
-                return True
-            in_lint = _enters_lint_dir(segment, in_lint)
-    return False
+        for place, segment in enumerate(stages):
+            segments.append(segment)
+            ends.append("|" if place < len(stages) - 1 else ";")
+    return segments, ends
+
+
+def _inherited_in_lint(pipelines, cwd: str = ""):
+    """Whether a command substitution inside the outer text `pipelines` runs with `lint/` as its working
+    directory, and the folder it runs in (None when unknown). `_substitutions` leaves each substitution's
+    place in the outer text as `x`, so a segment holding that slot, reached after a `cd lint`, hands
+    `lint/` to every substitution. Which slot a text fills is not tracked, so one slot after `cd lint`
+    counts for all (the reading that refuses more)."""
+    segments, ends = _flat(pipelines)
+    in_lint = False
+    for number, segment in enumerate(segments):
+        if in_lint and SUBSTITUTION_SLOT.search(segment):
+            return True, dir_before_segment(segments, number, cwd, ends)
+        in_lint = _enters_lint_dir(segment, in_lint)
+    return False, None
 
 
 def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_later: bool = False) -> str:
@@ -432,7 +453,7 @@ def _pipelines(text: str):
     return pipelines
 
 
-def check_tail_hit(stripped: str, background: bool) -> str:
+def check_tail_hit(stripped: str, background: bool, cwd: str = "") -> str:
     """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
     filters. Each command substitution is its own text, read through the one reader in guard_env as
     `verdict_pipe_hit` reads it, so a pipe inside `$(...)` counts. A lint script piped into any later
@@ -440,7 +461,10 @@ def check_tail_hit(stripped: str, background: bool) -> str:
     the last stage's, so a red lint hides, and the commit or push runs on it (incident, lane
     windows-tests-for-touched-files). Order across texts is not tracked: a lint inside a substitution
     counts when any other text of the call runs a commit or a push, and so does an outer lint when a
-    substitution after it runs one (`lint | tail -2 && out=$(git commit ...)`)."""
+    substitution after it runs one (`lint | tail -2 && out=$(git commit ...)`). Under `cd lint`, a bare
+    script name is looked up in the folder its pipeline runs in. That folder is read from `cwd`, the
+    call's own, and each `cd` before it. A pipe part's `cd` moves nothing, so all stages of a pipeline
+    share the folder of its first stage. With no cwd, the guard's own lint/ is read (see _is_lint_file)."""
     texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
     if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
         texts = [(stripped, False)]
@@ -450,12 +474,18 @@ def check_tail_hit(stripped: str, background: bool) -> str:
             hit = _pipeline_hit(stages, background)
             if hit:
                 return hit
-    inherited = len(texts) > 1 and _inherited_in_lint(texts[-1])
+    inherited, slot_folder = _inherited_in_lint(texts[-1], cwd) if len(texts) > 1 else (False, None)
     for number, pipelines in enumerate(texts):
-        in_lint = inherited and number < len(texts) - 1
+        inner = number < len(texts) - 1
+        in_lint = inherited and inner
+        segments, ends = _flat(pipelines)
+        start = slot_folder if inner else cwd
+        first = 0
         for at, stages in enumerate(pipelines):
-            hit = _pipeline_hit(stages, background, lambda segment, bg: lint_stage(segment, bg, in_lint),
-                                any_later=True)
+            folder = dir_before_segment(segments, first, start, ends) if stages else None
+            first += len(stages)
+            hit = _pipeline_hit(stages, background,
+                                lambda segment, bg: lint_stage(segment, bg, in_lint, folder), any_later=True)
             for segment in stages:
                 in_lint = _enters_lint_dir(segment, in_lint)
             if not hit:

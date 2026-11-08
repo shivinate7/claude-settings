@@ -3459,7 +3459,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = verdict_pipe_hit(stripped)
     if matched:
         refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
-    matched = check_tail_hit(stripped, background)
+    matched = check_tail_hit(stripped, background, cwd)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
