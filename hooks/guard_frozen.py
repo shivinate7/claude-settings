@@ -898,11 +898,49 @@ _PY_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__")
 _PY_CODING = re.compile(r"^[ \t]*#.*coding[:=][ \t]*(?![ \t]|utf-?8\b)", re.IGNORECASE | re.MULTILINE)
 
 
+# The subprocess calls that start a program from a list argv. `_py_list_argv_call` clears one of them.
+_PY_ARGV_CALLS = frozenset(("run", "call", "check_call", "check_output", "Popen"))
+# Shells and wrappers that take a command line as text: a list argv that starts with one is a shell run.
+_PY_SHELL_NAMES = frozenset((
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "pwsh", "powershell", "cmd", "env", "csh", "tcsh", "ash",
+    "busybox"))
+
+
+def _py_list_argv_call(node) -> bool:
+    """True when NODE is `subprocess.<run|call|check_call|check_output|Popen>(...)` that runs a program
+    with no shell: the first argument is a list or tuple literal; its first element is a string that is
+    not a shell name, or `sys.executable`; `shell=` is absent or the literal False; and there is no
+    `**kwargs` and no `executable=`, which would swap the program the argv names."""
+    import ast
+    func = node.func
+    if not (isinstance(func, ast.Attribute) and func.attr in _PY_ARGV_CALLS
+            and isinstance(func.value, ast.Name) and func.value.id == "subprocess"):
+        return False
+    if not node.args or not isinstance(node.args[0], (ast.List, ast.Tuple)) or not node.args[0].elts:
+        return False
+    first = node.args[0].elts[0]
+    if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        if os.path.splitext(basename(first.value))[0] in _PY_SHELL_NAMES or not first.value:
+            return False
+    elif not (isinstance(first, ast.Attribute) and first.attr == "executable"
+              and isinstance(first.value, ast.Name) and first.value.id == "sys"):
+        return False
+    for keyword in node.keywords:
+        if keyword.arg is None or keyword.arg == "executable":
+            return False
+        if keyword.arg == "shell" and not (
+                isinstance(keyword.value, ast.Constant) and keyword.value.value is False):
+            return False
+    return True
+
+
 def python_body_is_text(body: str) -> bool:
     """True when BODY parses with `ast` and its tree names none of _PY_RUNS_TEXT and no dunder but
     `__name__`, `__file__` and `__doc__`, in an import, a name or an attribute. A string, a comment and an
     f-string's text are never read as names. A body that does not parse, or declares a source encoding
-    other than utf-8, is not text. What such a body writes to a file is `_py_hit`'s to judge."""
+    other than utf-8, is not text. One name is cleared: `subprocess` in `import subprocess`, or as the
+    owner of a call `_py_list_argv_call` accepts. Any other use of it keeps the body out. What such a
+    body writes to a file is `_py_hit`'s to judge."""
     import ast
     import textwrap
     if _PY_CODING.search("\n".join(body.split("\n")[:2])):
@@ -911,12 +949,20 @@ def python_body_is_text(body: str) -> bool:
         tree = ast.parse(textwrap.dedent(body))
     except Exception:   # a syntax error, a null byte, a tree too deep to parse
         return False
+    cleared = set()   # ids of the `subprocess` Name nodes, and of the plain `import subprocess` aliases
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _py_list_argv_call(node):
+            cleared.add(id(node.func.value))
+        elif isinstance(node, ast.Import):
+            cleared.update(id(alias) for alias in node.names if alias.name == "subprocess" and not alias.asname)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            names = [alias.name.split(".")[0] for alias in node.names]
+            names = [alias.name.split(".")[0] for alias in node.names if id(alias) not in cleared]
         elif isinstance(node, ast.ImportFrom):
             names = [(node.module or "").split(".")[0]] + [alias.name for alias in node.names]
         elif isinstance(node, (ast.Name, ast.Attribute)):
+            if id(node) in cleared:
+                continue
             names = [node.id if isinstance(node, ast.Name) else node.attr]
         else:
             continue
