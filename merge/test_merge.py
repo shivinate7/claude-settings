@@ -15112,6 +15112,18 @@ class HandedLaneCheck(RecordsEnv):
         self.assert_refused_untouched(rc, out, refs)
         self.assert_names(out, 9)
 
+    def test_handed_lane_preview_prints_one_blocked_line_for_a_ready_merge(self):
+        self.on("feat", {"docs/records.md": page()})  # a current page, as in the ready-merge case
+        self.fixture("Lanes: #12", handed=[9, 12], held=[12], draft=False)  # #9 is handed, not in the batch, and named nowhere
+        refs = self.refs()
+        rc, out = self.run_merge("7")  # the preview: no --confirm
+        self.assertEqual(rc, 1, f"the preview did not refuse the ready integration PR:\n{out}")
+        blocked = [l for l in out.splitlines() if l.startswith("BLOCKED:")]
+        self.assertEqual(len(blocked), 1, f"the preview does not print one BLOCKED line:\n{out}")
+        self.assertRegex(blocked[0], r"#9\b", f"the BLOCKED line does not name #9:\n{out}")
+        self.assertEqual(self.refs(), refs, "the preview pushed")
+        self.assertEqual(self.host.readies, [], "the preview marked a PR ready")
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
