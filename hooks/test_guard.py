@@ -21765,6 +21765,78 @@ lazy_fixture((XCL_REMOTE, XCL_BARE_A, XCL_BARE_B), _build_shared_bare_origin)
 add("other-checkout: a Write into a clone that shares a local bare origin with this clone is refused",
     "deny", "other-checkout", tool="Write", cwd=XCL_BARE_A,
     file_path=os.path.join(XCL_BARE_B, "note.txt"), content="x")
+
+# ------------------------------------------------------------------ other-checkout: sibling forms
+#
+# The write forms the shell-write scan does not read as writes: a python `-c` or heredoc script that
+# opens a path for writing, and `git -C <dir>` with a verb that changes files. Into a sibling worktree of
+# the same clone, and from a lane into the primary, each is refused as the shell append beside it is. A
+# read, a git read verb run with -C, and a write into the own checkout pass. The verb list is
+# SESSION_HOME_GIT_VERBS. Decision: docs/decisions/an-agent-outside-its-home-tree-must-stop.md (other-checkout).
+#
+# Each form is its own case. MUTATE_ONLY="other-checkout: sibling forms" runs this block alone.
+SF = "other-checkout: sibling forms: "
+SIB_NAME = "sibforms"
+SIB_PRIMARY = os.path.join(ROOT, SIB_NAME + "_primary")   # the clone, with two agent worktrees
+SIB_AGENT_ID = "sfa0001"                                   # the calling agent
+SIB_OTHER_ID = "sfa0002"                                   # its sibling
+SIB_AGENT = os.path.join(SIB_PRIMARY, ".claude", "worktrees", "agent-" + SIB_AGENT_ID)
+SIB_OTHER = os.path.join(SIB_PRIMARY, ".claude", "worktrees", "agent-" + SIB_OTHER_ID)
+SIB_FILE = os.path.join("src", "app.py")                   # tracked in every checkout of the clone
+
+
+def _build_sibling_forms():
+    """The clone with one worktree per agent. Each row names the paths it needs."""
+    _cross_checkout_fixture(SIB_NAME, lanes=("agent-" + SIB_AGENT_ID, "agent-" + SIB_OTHER_ID))
+    for where in (SIB_AGENT, SIB_OTHER):
+        if not os.path.exists(os.path.join(where, ".git")):
+            sys.exit("fixture setup failed: no .git at %r" % where)
+
+
+lazy_fixture((SIB_PRIMARY, SIB_AGENT, SIB_OTHER), _build_sibling_forms)
+
+
+def _sibling_write_forms(placement, file_path, dir_path, **who):
+    """One deny case per write form. `file_path` is a file in the other checkout, `dir_path` its root."""
+    target = slash(file_path)
+    folder = slash(dir_path)
+    forms = (
+        ("a shell append", "echo x >> " + target),
+        ("a python -c open in mode w", "python3 -c \"open('%s','w').write('x')\"" % target),
+        ("a python -c open in mode a", "python3 -c \"open('%s','a').write('x')\"" % target),
+        ("a python -c open in mode r+", "python3 -c \"open('%s','r+').write('x')\"" % target),
+        ("a python heredoc open in mode w", "python3 <<'EOF'\nopen('%s','w').write('x')\nEOF" % target),
+        ("a git -C commit", VCS + " -C " + folder + " commit -m x"),
+        ("a git -C add", VCS + " -C " + folder + " add " + slash(SIB_FILE)),
+        ("a git -C checkout", VCS + " -C " + folder + " checkout -- " + slash(SIB_FILE)),
+    )
+    for label, command in forms:
+        sh(SF + placement + ": " + label + " is refused", command, "deny", "other-checkout", **who)
+
+
+_sibling_write_forms("from an agent worktree into its sibling",
+                     os.path.join(SIB_OTHER, SIB_FILE), SIB_OTHER,
+                     cwd=SIB_AGENT, agent_id=SIB_AGENT_ID)
+_sibling_write_forms("from a lane worktree into the primary",
+                     os.path.join(SIB_PRIMARY, SIB_FILE), SIB_PRIMARY, cwd=SIB_OTHER)
+
+# Allowed: the git read verbs run with -C into a sibling, a python read of one, and a write into the own checkout.
+for verb_args in ("log --oneline -1", "show --stat HEAD", "status --short", "diff"):
+    sh(SF + "a git " + verb_args.split()[0] + " run with -C into a sibling worktree is allowed",
+       VCS + " -C " + slash(SIB_OTHER) + " " + verb_args, "allow", cwd=SIB_AGENT, agent_id=SIB_AGENT_ID)
+sh(SF + "a python read of a sibling worktree is allowed",
+   "python3 -c \"print(open('%s').read())\"" % slash(os.path.join(SIB_OTHER, SIB_FILE)),
+   "allow", cwd=SIB_AGENT, agent_id=SIB_AGENT_ID)
+sh(SF + "a python write into the own checkout is allowed",
+   "python3 -c \"open('%s','a').write('x')\"" % slash(os.path.join(SIB_AGENT, "src", "new.txt")),
+   "allow", cwd=SIB_AGENT, agent_id=SIB_AGENT_ID)
+sh(SF + "a git -C commit into the own checkout is allowed",
+   VCS + " -C " + slash(SIB_AGENT) + " commit -m x", "allow", cwd=SIB_AGENT, agent_id=SIB_AGENT_ID)
+
+# Unruled: a top-level session's git -C commit into an agent worktree. The expected verdict follows the
+# decision's "Every session" text. It awaits a ruling, so a red here is reported, not fixed in this block.
+sh(SF + "unruled: a top-level git -C commit into an agent worktree is refused",
+   VCS + " -C " + slash(SIB_AGENT) + " commit -m x", "deny", "other-checkout", cwd=SIB_PRIMARY)
 TEMP_DIR = None  # back to the system temp for the sections below
 
 
