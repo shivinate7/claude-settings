@@ -13607,6 +13607,91 @@ sh("builder-diff: commit that only adds to hooks/mutate_guard.py is allowed", CO
    cwd=_mut_add, agent_id="bld1", agent_type="builder")
 add("builder-diff: stop after a change that only adds to hooks/mutate_guard.py is allowed", "allow",
     event="SubagentStop", cwd=_mut_add, agent_id="bld1", agent_type="builder")
+
+# ---- the mutation-test set: hooks/guard.py's AUTHOR_MUTATION_TESTS. A builder may ADD a name to the set and may not
+# remove or change one. Every file the set lists is add-only for a builder, as hooks/mutate_guard.py is (coordinator
+# rulings 2026-11-07 18:44 and 18:54 CST). The names come from this repository's hooks/guard.py, the constant the code
+# emits, so a mutant copy that drops a name still meets that name's case.
+def _author_mutation_names():
+    with open(os.path.join(HERE, "guard.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Set)
+                and any(isinstance(t, ast.Name) and t.id == "AUTHOR_MUTATION_TESTS" for t in node.targets)):
+            return [elt.value for elt in node.value.elts
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str)]
+    sys.exit("fixture setup failed: AUTHOR_MUTATION_TESTS is no set literal in hooks/guard.py")
+
+
+SET_FILE = "hooks/guard.py"
+AUTHOR_SET_NAMES = _author_mutation_names()
+AUTHOR_SET_OTHERS = [name for name in AUTHOR_SET_NAMES if name != MUTATE_PATH]
+SET_OTHER_TEXT = "MUTANT_FIXTURE = 1\n"
+PROBE_NAME = "hooks/mutate_probe.py"
+
+
+def _set_line(names):
+    return "AUTHOR_MUTATION_TESTS = {%s}" % ", ".join('"%s"' % name for name in names)
+
+
+def _set_text(names):
+    return _set_line(names) + "\nOTHER_CONSTANT = 1\n"
+
+
+def _without(names, gone):
+    return [name for name in names if name != gone]
+
+
+def _renamed(names, old):
+    return [name[:-3] + "_v2.py" if name == old else name for name in names]
+
+
+SET_FILES = {**BASE_FILES, **{name: SET_OTHER_TEXT for name in AUTHOR_SET_OTHERS},
+             SET_FILE: _set_text(AUTHOR_SET_NAMES)}
+SET_REPO = diff_repo("g-set-base", lambda w: None, files=SET_FILES)
+SET_BUILDER = dict(B, cwd=SET_REPO)
+
+# An Edit or Write of hooks/guard.py, judged by the names the set holds. A removal, a change or a drop of a name
+# refuses. An add rewrites the set's line and is allowed, as is a line elsewhere in the file.
+for _name in AUTHOR_SET_NAMES:
+    add("builder-set: Edit of hooks/guard.py that removes %s from AUTHOR_MUTATION_TESTS is refused" % _name,
+        "deny", rule=BT, tool="Edit", file_path=SET_FILE, old_string=_set_line(AUTHOR_SET_NAMES),
+        new_string=_set_line(_without(AUTHOR_SET_NAMES, _name)), carries=("test-author",), **SET_BUILDER)
+    add("builder-set: Edit of hooks/guard.py that changes %s in AUTHOR_MUTATION_TESTS is refused" % _name,
+        "deny", rule=BT, tool="Edit", file_path=SET_FILE, old_string=_set_line(AUTHOR_SET_NAMES),
+        new_string=_set_line(_renamed(AUTHOR_SET_NAMES, _name)), carries=("test-author",), **SET_BUILDER)
+    add("builder-set: Write of hooks/guard.py that drops %s from AUTHOR_MUTATION_TESTS is refused" % _name,
+        "deny", rule=BT, tool="Write", file_path=SET_FILE, content=_set_text(_without(AUTHOR_SET_NAMES, _name)),
+        carries=("test-author",), **SET_BUILDER)
+add("builder-set: Edit of hooks/guard.py that adds %s to AUTHOR_MUTATION_TESTS is allowed" % PROBE_NAME,
+    "allow", tool="Edit", file_path=SET_FILE, old_string=_set_line(AUTHOR_SET_NAMES),
+    new_string=_set_line(AUTHOR_SET_NAMES + [PROBE_NAME]), **SET_BUILDER)
+add("builder-set: Edit of hooks/guard.py elsewhere, on a line outside the set, is allowed", "allow", tool="Edit",
+    file_path=SET_FILE, old_string="OTHER_CONSTANT = 1", new_string="OTHER_CONSTANT = 2", **SET_BUILDER)
+
+# Every other file the set lists: a change of an existing line is refused, and an add of a line is allowed.
+for _name in AUTHOR_SET_OTHERS:
+    add("builder-set: Edit of %s that changes an existing line is refused" % _name, "deny", rule=BT,
+        tool="Edit", file_path=_name, old_string="MUTANT_FIXTURE = 1", new_string="MUTANT_FIXTURE = 2",
+        carries=("test-author",), **SET_BUILDER)
+    add("builder-set: Edit of %s that only adds a line is allowed" % _name, "allow", tool="Edit",
+        file_path=_name, old_string="MUTANT_FIXTURE = 1", new_string="MUTANT_FIXTURE = 1\nMUTANT_EXTRA = 3",
+        **SET_BUILDER)
+
+# A builder's commit and stop are judged on the diff against HEAD. A diff that drops a name from the set is refused,
+# and a diff that only adds one is allowed.
+for _index, _name in enumerate(AUTHOR_SET_NAMES):
+    _drop = diff_repo("g-set-drop-%d" % _index, _put(SET_FILE, _set_text(_without(AUTHOR_SET_NAMES, _name))),
+                      files=SET_FILES)
+    sh("builder-set: commit that drops %s from AUTHOR_MUTATION_TESTS is refused" % _name, COMMIT, "deny",
+       rule=BDIFF, cwd=_drop, agent_id="bld1", agent_type="builder")
+    add("builder-set: stop after a change that drops %s from AUTHOR_MUTATION_TESTS is blocked" % _name, "deny",
+        rule=BDIFF, event="SubagentStop", cwd=_drop, agent_id="bld1", agent_type="builder")
+_set_add = diff_repo("g-set-add", _put(SET_FILE, _set_text(AUTHOR_SET_NAMES + [PROBE_NAME])), files=SET_FILES)
+sh("builder-set: commit that adds %s to AUTHOR_MUTATION_TESTS is allowed" % PROBE_NAME, COMMIT, "allow",
+   cwd=_set_add, agent_id="bld1", agent_type="builder")
+add("builder-set: stop after a change that adds %s to AUTHOR_MUTATION_TESTS is allowed" % PROBE_NAME, "allow",
+    event="SubagentStop", cwd=_set_add, agent_id="bld1", agent_type="builder")
 FAMILY = "diff"
 _inh_main = os.path.join(DIFFROOT, "g-inherited-main")
 _inh = os.path.join(DIFFROOT, "g-inherited")
