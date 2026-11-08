@@ -122,14 +122,14 @@ the rows file or that file's presence at head, all through the one `cat-file` th
 for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
 STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A full claim is not needed: "- Run the tests." in a
 decision record starts 4. A Markdown range starts 3 when it adds none of these: a line in a decision record holding a code
-verb, a STALE005 capability verb or route word, a folder .py name cite. It starts 4 with any of them
+verb, a STALE005 capability verb or route word, a folder .py name cite, a value cite of a code file. It starts 4 with any of them
 (CostTests pins the 3 and the 4 for a STALE005 line or a code verb, NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
-at head through the one `cat-file` the run opens, once per range. That `cat-file` is one start, and it opens only when an
+at head through the one `cat-file` the run opens, once per range, plus head's root tree for the top-folder test. That `cat-file` is one start, and it opens only when an
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
 (NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
