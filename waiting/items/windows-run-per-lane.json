@@ -31,8 +31,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "decision draft-until-reviewed; rule git-integration-branch-merge; #1472; #1782; #1543",
+  "reply": "You picked a (06:08 CST Nov 8): a draft-only CI job runs just the test files a lane touches, on Windows and on macOS where a macOS job exists. Routed to the coordinator and lane session_013NEJL4HeTtQTFg5s9G62RY; home: step windows-tests-for-touched-files. Closed 06:12 CST Nov 8.",
   "short": "Windows tests per lane",
-  "status": "open",
+  "status": "closed",
   "title": "How should a lane's tests run on Windows and macOS before its batch?",
   "why": "The coordinator recommends a: it finds a Windows red on the lane with no manual step, and costs one job only when a lane touches a test."
 }

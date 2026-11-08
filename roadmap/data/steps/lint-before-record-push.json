@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
   "why": "Lane replay-profile-parts pushed four notes over the STE sentence limit to #1653 (coordinator, 17:33 CST Nov 7). The gap showed only in CI.",
-  "note": "Related: step lane-lint-runs-local-tools (#1461). Done check: a red test where a push of failing Markdown is refused, and a push with no Markdown change starts nothing. Owner pick a on page item 377 (ste-lint-at-push), 19:03 CST Nov 7: allow the push-time lint. Second incident (Degen, via the owner's ask ask-mw79tt4bwr, 21:26 CST Nov 7): a 32-word sentence in debt archiver-start-no-join reached Degen batch 14, and the batch runner had to split it. The owner's text names the check `make lint-ste` on changed *.md records; this step's lint covers it.",
-  "updatedAt": "2026-11-07T21:30:00-06:00"
+  "note": "Related: step lane-lint-runs-local-tools (#1461). Done check: a red test where a push of failing Markdown is refused, and a push with no Markdown change starts nothing. Owner pick a on page item 377 (ste-lint-at-push), 19:03 CST Nov 7: allow the push-time lint. Second incident (Degen, via the owner's ask ask-mw79tt4bwr, 21:26 CST Nov 7): a 32-word sentence in debt archiver-start-no-join reached Degen batch 14, and the batch runner had to split it. The owner's text names the check `make lint-ste` on changed *.md records; this step's lint covers it. #1898 failed round 3 with negative net value (F3: after a heredoc commit message the guard reads the push folder as empty). Held on page item 413 (held-1898-push-target), coordinator 06:08 CST Nov 8.",
+  "updatedAt": "2026-11-08T06:09:00-06:00"
 }

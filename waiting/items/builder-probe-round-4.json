@@ -31,8 +31,9 @@
   "owner": "lane builder-probe-false-alarm (session_013NEJKzDBTjFbhzwzV96i8v), via the coordinator",
   "pick": "a",
   "ref": "decision hold-unsafe-after-round-3; step builder-probe-false-alarm",
+  "reply": "You picked a (06:08 CST Nov 8): the held builder-probe fix gets a fourth round. Routed to lane builder-probe-false-alarm (session_013NEJKzDBTjFbhzwzV96i8v) via the coordinator; home: step builder-probe-false-alarm. Closed 06:12 CST Nov 8.",
   "short": "Fourth round for the builder-probe fix",
-  "status": "open",
+  "status": "closed",
   "title": "May the held builder-probe fix get a fourth review round?",
   "why": "The coordinator recommends a: the hole is understood and the fix is small, so one more round closes the false alarm with no new hole."
 }

@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T12:09:00Z",
+  "context": "Goal: the guard reads where a push goes, so that pushes to main or with --force are still stopped.\nProblem (risk): PR #1898 (lane lint-before-record-push, session_013NEJKzXyKNARtJsbz3Q1R2) failed round 3 with a negative net value. It closes F1, F2 and N1, but opens F3: after a heredoc commit message, the standard `git commit -m \"$(cat <<'EOF' ...)\" && git push`, the guard reads the push folder as empty. Then a push to main and a push to a stray branch stop asking, and `--force` drops from a refusal to an ask. The rule parks it until you decide.\nBased on (ruling): decision hold-unsafe-after-round-3 parks a held change, with no fix lane, until you decide.\nBased on (read): the round-3 reviewer's (sonnet) record on #1898, net value negative.\nBased on (read): the F3 fix is known: push_target finds the segment in the caller's split_segments, not in a re-stripped copy, red first on a push after a heredoc commit message.\nDeparts from: main, where #1898 is parked with no work \u2014 starts a fix lane for F3 at round 1, try 1.\nMeanwhile: #1898 waits. #1755 goes on alone with its one-anchor test fix.",
+  "home": "lint-before-record-push",
+  "id": "held-1898-push-target",
+  "kind": "decision",
+  "n": 413,
+  "options": [
+    {
+      "gain": "F1, F2 and N1 land once F3 is closed, and the push guard keeps stopping pushes to main and --force pushes.",
+      "how": "Lane lint-before-record-push starts a fix lane for F3 at round 1, try 1, red first on a push after a heredoc commit message.",
+      "key": "a",
+      "label": "Start a fix lane for F3 in the same lane session",
+      "lose": "One more lane run."
+    },
+    {
+      "gain": "No more work now.",
+      "how": "#1898 closes. F1, F2 and N1 each become a debt, Until 2026-11-21.",
+      "key": "b",
+      "label": "Close #1898 and refile F1, F2 and N1 as debts",
+      "lose": "Three known guard gaps stay open."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "#1898; steps lint-before-record-push, ste-push-subshell-cd-push-target, ste-push-segment-top-c-then-cd; decision hold-unsafe-after-round-3",
+  "short": "Held #1898: fix its push-folder gap, or close",
+  "status": "open",
+  "title": "PR #1898 failed round 3 by opening a push-guard gap. Start a fix lane for it, or close the PR?"
+}

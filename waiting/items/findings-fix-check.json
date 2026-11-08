@@ -25,8 +25,9 @@
   "owner": "lane findings-ride-in-lane (session_013NEJKyuRd6zdQhuiRC27g9), via the coordinator",
   "pick": "b",
   "ref": "item 386 b; decision hold-unsafe-after-round-3",
+  "reply": "You picked a (06:08 CST Nov 8): a short fix check passes a push that only files the round's findings in the lane's own PR. This is the widening option, against your ruling that a repo changes to fit a shared tool; your pick overrides it for this case. Routed to lane findings-ride-in-lane (session_013NEJKyuRd6zdQhuiRC27g9) via the coordinator; home: step findings-ride-in-lane. Closed 06:12 CST Nov 8.",
   "short": "Findings in the lane's PR after review",
-  "status": "open",
+  "status": "closed",
   "title": "May a short fix check pass a push that only files the review's findings in the lane's own PR?",
   "why": "The coordinator recommends b: a widens what the shared fix check accepts, and a widening option is never the pick."
 }

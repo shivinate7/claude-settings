@@ -24,8 +24,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "debt env-interpreter-code-reads; decision env-file-stays-unread; #1767",
+  "reply": "You picked a (06:08 CST Nov 8): the env guard also judges code in python3 -c, node -e and quoted heredocs. Routed to the coordinator and lane session_013NEJKytPs46Qp4KDoqbDvz; home: step env-file-shell-c. Closed 06:12 CST Nov 8.",
   "short": "Env guard reads interpreter code",
-  "status": "open",
+  "status": "closed",
   "title": "Should the env-file guard also judge code run through python3 -c, node -e or a quoted heredoc?",
   "why": "The coordinator recommends a: a debug one-liner that opens .env is a mistake Claude is likely to make, so it falls under guard-guards-mistakes-only."
 }

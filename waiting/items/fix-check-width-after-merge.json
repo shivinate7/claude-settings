@@ -24,8 +24,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "rule roles-review-cap-three; decisions/hold-unsafe-after-round-3; #1787",
+  "reply": "You picked a (06:08 CST Nov 8): after a main merge, a fix's size is judged on main...head plus conflict edits. Routed to the coordinator and lane session_013NEJKzEteiJ3oyJR8P7PPn; home: step fix-check-guard-scope (PR #1787). Closed 06:12 CST Nov 8.",
   "short": "Fix-check width after a main merge",
-  "status": "open",
+  "status": "closed",
   "title": "After a main merge, is a fix's size judged on the PR's own diff?",
   "why": "The coordinator recommends a: it keeps reviews on real changes, and the fix check still reads the conflict edits."
 }

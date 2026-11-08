@@ -24,8 +24,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "items 359 b and 271 b; decisions/hold-unsafe-after-round-3; #1773; #1789",
+  "reply": "You picked a (06:08 CST Nov 8): a guard or check change still gets round 3 and the net-value test after an earlier fix check passes. Routed to the coordinator and lane session_013NEJKzfcSeBe5Ym9pCtxHn; home: step review-rounds-rework. Closed 06:12 CST Nov 8.",
   "short": "Guard change: round 3 after a fix-check pass",
-  "status": "open",
+  "status": "closed",
   "title": "Does a guard or check change still get round 3 after a fix check passes before it?",
   "why": "The coordinator recommends a: every guard change should be judged for safety holes once, and #1773 already enforces it."
 }
