@@ -4588,7 +4588,7 @@ _ul_ask("a plain commit with docs/a.md removed by git rm and docs/b.md unstaged 
 _ul_ask("a plain commit with docs/a.md staged and docs/b.md unstaged asks", VCS + " commit -m x", UL_EDIT)
 _ul_ask("git -C naming the repo with the unstaged edit, from a cwd that is no git tree, asks",
         VCS + " -C " + slash(UL_EDIT) + " commit -m x", NOGIT)
-# A leading `cd X &&` is no extra command (decision ask-commands-run-alone, owner 2026-10-15), so this asks once.
+# A leading `cd X &&` is no extra command (decision ask-commands-run-alone), so this asks once.
 _ul_ask("a cd into the repo with the unstaged edit before the commit asks",
         "cd " + slash(UL_EDIT) + " && " + VCS + " commit -m x", NOGIT)
 _ul_ask("commit --amend -m x with docs/b.md unstaged beside a git rm asks", VCS + " commit --amend -m x", UL_ASK)
