@@ -2855,6 +2855,19 @@ class PrBase(unittest.TestCase):
         self.assertIn("main deletes line 1", text, "an explicit --upstream origin/main lost the FAIL for the restored line")
         self.assertEqual(rc, 1, "an explicit --upstream origin/main exited %d, not 1" % rc)
 
+    def test_empty_github_base_ref_is_unset(self):
+        self.stack("theirs")
+        self.r.sh("config", "branch.lane.gh-merge-base", "pr-base")
+        self.assert_theirs_scope()
+        rc, text = self.run_default({"GITHUB_BASE_REF": ""})
+        self.assertIn("added by pr-base", text, "GITHUB_BASE_REF='' was not read as unset: the configured pr-base was not used")
+        self.assertEqual(rc, 1, "the run printed the base's FAIL but exited %d, not 1" % rc)
+        self.r.sh("config", "--unset", "branch.lane.gh-merge-base")
+        rc, text = self.run_default({"GITHUB_BASE_REF": ""})
+        notes = [x for x in text.splitlines() if "origin/main" in x and "unknown" in x.lower()]
+        self.assertTrue(notes, "with no base named, no line says the base is unknown and names origin/main: %r" % text)
+        self.assertEqual(rc, 0, "the default run on origin/main exited %d on a lane origin/main holds" % rc)
+
 
 if __name__ == "__main__":
     unittest.main()
