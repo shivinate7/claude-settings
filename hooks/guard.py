@@ -3942,7 +3942,8 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 # What runs a here-string, by the command word around it. Before it, three forms run it. `iex` or
 # `Invoke-Expression` takes it as its argument, and a `(` may open it. `[scriptblock]::Create(` builds a block
 # from it. A pwsh or powershell launch ends in `-Command` or `-c`. After it, the closing parens of such a call,
-# then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A
+# then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A closing
+# paren on the last word of a stage is dropped (`$(@"…"@ | iex)`, `(@"…"@ | Out-String) | iex`). A
 # here-string given to Set-Content matches neither. Nor does one held in a variable that no word on its own
 # line runs. A later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
 # The before side keeps its own word list for the PowerShell forms. `nested_script` (guard_core.py) answers a
@@ -3953,7 +3954,7 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 _HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
                               r"|\[scriptblock\]::Create\("
                               r"|(?:^|[\s;&|(){}])(?:pwsh|powershell)(?:\.exe)?(?=[ \t])[^\n;&|]*?[ \t]-c(?:ommand)?[ \t]+)"
-                              r"[ \t]*\Z", re.I).search
+                              r"[ \t(]*\Z", re.I).search
 _HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|([^\n]*)").match
 # A pwsh switch that takes the next word as its value, by the name without its dash. `-ExecutionPolicy` may be
 # cut to any prefix of two letters or more.
@@ -3987,12 +3988,17 @@ def _here_string_is_run(found) -> bool:
     if _HERE_RUN_BEFORE(before):
         return True
     last = split_segments(before)[-1:]   # a stand-in word sits where the here-string is: it must be the script
-    if last and inline_script(segment_tokens(last[0]) + ["x"]) == "x":
+    # An unclosed quote leaves no tokens (None): the before side then says nothing, and the pipe after it still decides.
+    ahead = segment_tokens(last[0]) if last else None
+    if ahead is not None and inline_script(ahead + ["x"]) == "x":
         return True
     piped = _HERE_PIPE_AFTER(found.string, found.end())
     for stage in piped.group(1).split("|") if piped else []:
         parts = split_segments(stage)
-        tokens = segment_tokens(parts[0]) if parts else []
+        tokens = (segment_tokens(parts[0]) if parts else None) or []
+        if tokens:
+            tokens = list(tokens[:-1]) + [tokens[-1].rstrip(")")]   # the parens that close `(` or `$(` ahead of the here-string
+            tokens = [token for token in tokens if token]
         at = resolve_command(tokens)   # steps over the `&` call operator and a wrapper word
         tokens = tokens[at:] if at is not None else []
         word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
