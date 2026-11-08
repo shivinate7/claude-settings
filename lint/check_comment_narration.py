@@ -7,9 +7,10 @@ Rule: building-comments-say-why. A comment says what complex code does and why.
 Only lines the diff against the merge base adds can fail, so old lines never do.
 --exclude PREFIX (repeatable) drops each path that starts with PREFIX, a folder prefix such as `vendor/`.
 Languages come from the rows of actions/code-check/standard.json (extensions, and shebangs for a file with no
-extension): python, typescript, javascript, astro and swift. Python comments come from `tokenize`, docstrings from
-`ast`. JS, TS and Astro comments come from one lint/comment_scan.mjs process that parses with the pinned
-TypeScript. Swift comments come from a one-pass scanner in this file. The same words in any string never fail.
+extension): python, typescript, javascript, astro, swift and shell. Python comments come from `tokenize`, docstrings
+from `ast`. JS, TS and Astro comments come from one lint/comment_scan.mjs process that parses with the pinned
+TypeScript. Swift and shell comments come from one-pass scanners in this file. The same words in any string, and in
+a shell heredoc body, never fail.
 
 Exit 0 clean. Exit 1 on a hit, printed as `path:line: pattern: matched text`.
 Exit 2 when the base or a file cannot be read: an unread diff is never a clean one. An unread file does not stop
@@ -98,7 +99,7 @@ HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
 STANDARD = os.path.join(HERE, "..", "actions", "code-check", "standard.json")
 SCAN_SCRIPT = os.path.join(HERE, "comment_scan.mjs")
 NODE_LANGUAGES = ("typescript", "javascript", "astro")
-SCANNED = ("python", "swift") + NODE_LANGUAGES
+SCANNED = ("python", "swift", "shell") + NODE_LANGUAGES
 
 
 class Unread(Exception):
@@ -280,6 +281,244 @@ def swift_comments(path):
             yield line + k, text
 
 
+SH_WORD_END = " \t\n;&|()<>"
+
+
+def sh_quote_end(src, i):
+    """Index after the single-quoted string whose body starts at i."""
+    j = src.find("'", i)
+    if j < 0:
+        raise Unread("single quote never closes")
+    return j + 1
+
+
+def sh_ansi_end(src, i):
+    """Index after the $'...' string whose body starts at i; a backslash escapes a quote there."""
+    while i < len(src):
+        if src[i] == "\\":
+            i += 2
+        elif src[i] == "'":
+            return i + 1
+        else:
+            i += 1
+    raise Unread("$' string never closes")
+
+
+def sh_dollar_end(src, i, spans, pending, in_dq=False):
+    """Index after the expansion that starts at the `$` at i. Inside a double quote, `$'` and `$"` are a plain `$`."""
+    nxt = src[i + 1:i + 2]
+    if nxt == "{":
+        return sh_param_end(src, i + 2, spans, pending, in_dq)
+    if src.startswith("$((", i):
+        return sh_arith_end(src, i + 3, spans, pending)
+    if nxt == "(":
+        return sh_code_end(src, i + 2, spans, pending, ")")
+    if nxt == "'" and not in_dq:
+        return sh_ansi_end(src, i + 2)
+    if nxt == '"' and not in_dq:
+        return sh_dquote_end(src, i + 2, spans, pending)
+    return i + 2 if nxt and nxt in "#?!$@*-" else i + 1
+
+
+def sh_param_end(src, i, spans, pending, in_dq):
+    """Index after the ${...} whose body starts at i. A `#` inside is an operator, never a comment. In a double
+    quote a single quote is a plain character, as it is in bash."""
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == "}":
+            return i + 1
+        elif c == "'" and not in_dq:
+            i = sh_quote_end(src, i + 1)
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+        elif c == "`":
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending, in_dq)
+        else:
+            i += 1
+    raise Unread("${ never closes")
+
+
+def sh_dquote_end(src, i, spans, pending):
+    """Index after the double-quoted string whose body starts at i. $(...) and backticks inside hold code."""
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == '"':
+            return i + 1
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending, True)
+        elif c == "`":
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+        else:
+            i += 1
+    raise Unread("double quote never closes")
+
+
+def sh_arith_end(src, i, spans, pending):
+    """Index after the $(( or (( expression whose body starts at i. A `#` there is a base prefix, and `<<` a shift."""
+    depth = 0
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+        elif c == "'":
+            i = sh_quote_end(src, i + 1)
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending)
+        elif c == "(":
+            depth += 1
+            i += 1
+        elif c == ")":
+            if depth:
+                depth -= 1
+                i += 1
+            elif src.startswith("))", i):
+                return i + 2
+            else:
+                raise Unread("arithmetic expression ends with a lone )")
+        else:
+            i += 1
+    raise Unread("arithmetic expression never closes")
+
+
+def sh_heredoc_word(src, i):
+    """Read the delimiter after `<<` (i is just past it). Returns (index after the word, (delimiter, tab_strip)).
+    The delimiter is the word with its quoting removed; a quoted word makes the body literal, which changes nothing
+    here, since no heredoc body is read for comments."""
+    strip = src.startswith("-", i)
+    i += strip
+    while i < len(src) and src[i] in " \t":
+        i += 1
+    word, start = [], i
+    while i < len(src) and src[i] not in SH_WORD_END:
+        c = src[i]
+        if c in "'\"":
+            j = src.find(c, i + 1)
+            if j < 0:
+                raise Unread("heredoc delimiter quote never closes")
+            word.append(src[i + 1:j])
+            i = j + 1
+        elif c == "\\":
+            word.append(src[i + 1:i + 2])
+            i += 2
+        else:
+            word.append(c)
+            i += 1
+    if i == start:
+        raise Unread("heredoc has no delimiter")
+    return i, ("".join(word), strip)
+
+
+def sh_heredoc_bodies(src, i, pending):
+    """Index after the bodies of the pending heredocs, read in order from the line that starts at i. A body is
+    data, so a `#` in it is never a comment."""
+    for word, strip in pending:
+        while True:
+            if i >= len(src):
+                raise Unread("heredoc %s never ends" % word)
+            end = src.find("\n", i)
+            end = len(src) if end < 0 else end
+            line = src[i:end]
+            i = min(end + 1, len(src))
+            if (line.lstrip("\t") if strip else line) == word:
+                break
+    pending.clear()
+    return i
+
+
+def sh_code_end(src, i, spans, pending, close=None):
+    """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
+    the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
+    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment."""
+    depth, ws = 0, True
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            i += 2
+            ws = False
+        elif c == "'":
+            i = sh_quote_end(src, i + 1)
+            ws = False
+        elif c == '"':
+            i = sh_dquote_end(src, i + 1, spans, pending)
+            ws = False
+        elif c == "`":
+            if close == "`":
+                return i + 1
+            i = sh_code_end(src, i + 1, spans, pending, "`")
+            ws = False
+        elif c == "$":
+            i = sh_dollar_end(src, i, spans, pending)
+            ws = False
+        elif c == "#" and ws:
+            end = src.find("\n", i)
+            end = len(src) if end < 0 else end
+            spans.append((i, end))
+            i = end
+        elif c == "\n":
+            i += 1
+            if pending:
+                i = sh_heredoc_bodies(src, i, pending)
+            ws = True
+        elif src.startswith("<<<", i):
+            i += 3  # a here-string, not a heredoc
+            ws = True
+        elif src.startswith("<<", i):
+            i, entry = sh_heredoc_word(src, i + 2)
+            pending.append(entry)
+            ws = False
+        elif ws and src.startswith("((", i):
+            i = sh_arith_end(src, i + 2, spans, pending)
+            ws = False
+        elif c == "(":
+            depth += 1
+            i += 1
+            ws = True
+        elif c == ")":
+            if close == ")" and depth == 0:
+                return i + 1
+            depth -= 1
+            i += 1
+            ws = True
+        else:
+            i += 1
+            ws = c in " \t;&|<>"
+    if close:
+        raise Unread("command substitution never closes")
+    return i
+
+
+def shell_comments(path):
+    """Yield (line, text) for each comment in a shell file: sh and bash, the rows of standard.json. zsh is not read:
+    no tracked file is zsh, and its quoting differs. No parser: shfmt is not installed in CI, so one pass reads the
+    quoting a `#` can hide in. A comment inside $(...) or backticks counts; a heredoc body never does. An unclosed
+    quote, expansion or heredoc raises Unread. The line `#!` on line 1 is not a comment."""
+    try:
+        with open(path, "rb") as f:
+            src = f.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
+    src = re.sub(r"\r\n|\r", "\n", src)
+    starts = [0] + [m.end() for m in re.finditer("\n", src)]
+    spans, pending = [], []
+    try:
+        first = src.find("\n") if src.startswith("#!") else 0
+        sh_code_end(src, len(src) if first < 0 else first, spans, pending)
+        if pending:
+            raise Unread("heredoc %s never starts" % pending[0][0])
+    except Unread as e:
+        raise Unread("%s: cannot read: %s" % (path, e))
+    for start, end in spans:
+        yield bisect.bisect_right(starts, start), src[start:end]
+
+
 def node_comments(paths, std):
     """Run comment_scan.mjs once over every JS, TS and Astro path, each named with its language row.
     Returns ({path: [(line, text)]}, [unread]); raises NodeToolFailed when the tool cannot run."""
@@ -310,6 +549,9 @@ def node_comments(paths, std):
     return found, unread
 
 
+READERS = {"python": narrated_lines, "swift": swift_comments, "shell": shell_comments}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="ref the change is measured against, such as origin/main")
@@ -324,9 +566,9 @@ def main(argv=None):
         return 2
     comments, unread = {}, []
     for path, (lang, _) in sorted(files.items()):
-        if lang in ("python", "swift"):
+        if lang in READERS:
             try:
-                comments[path] = list(narrated_lines(path) if lang == "python" else swift_comments(path))
+                comments[path] = list(READERS[lang](path))
             except Unread as e:
                 unread.append(str(e))
     node_paths = [(p, lang) for p, (lang, _) in sorted(files.items()) if lang in NODE_LANGUAGES]
