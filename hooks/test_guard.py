@@ -4871,6 +4871,11 @@ sh("git-after-cd: the 2026-11-07 incident, a cd joined by && then ; git writes, 
    % ((VCS,) * 4), "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then a git push is refused",
    "cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# In Bash a Set-Location is no cd, so the push after ; is refused by the push-after-check path, under
+# the git-after-cd rule. That refusal wins over the push-main ask for a push to main.
+sh("git-after-cd: a Set-Location then ; then a git push to main is refused",
+   "Set-Location /tmp ; %s push origin main" % VCS, "deny", "git-after-cd", cwd=PUSHMAIN,
+   carries=("&&",))
 sh("git-after-cd: a cd then a newline then a git merge is refused",
    "cd /tmp/w\n%s merge claude/lane-a" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "-C"))
