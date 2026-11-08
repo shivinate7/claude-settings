@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-08T01:16:00Z",
+  "context": "Goal: the past-ruling check stops refusing because a healthy model call was slow.\nProblem (rule): the call (15 s) plus the #1422 retry (10 s) already fill the Stop hook's 35 s limit, so a longer call needs a longer hook limit in settings.json, and only you set that.\nBased on (read): hooks/call_judge.py PAST_RULING_TIMEOUT is 15 s; #1422 adds PAST_RULING_RETRY_TIMEOUT 10 s plus a 10 s start-up allowance.\nBased on (notes): how often it times out is unmeasured; #1431 logs each timeout once it merges.\nDeparts from: main's 35 s Stop limit and 15 s call \u2014 the limit and both tries grow (a, b), or stay until the log reads (c).\nAfter you pick, type the pick in the lane's chat (https://claude.ai/code/session_013NEJKzQsAzQkvsohtkLuJP): a settings.json change needs your typed words in the session that makes it.",
+  "home": "judge-timeout-retries-once",
+  "id": "past-ruling-check-time",
+  "kind": "decision",
+  "n": 379,
+  "options": [
+    {
+      "gain": "Slow but healthy calls pass, with the most headroom.",
+      "how": "Raise the Stop hook to 50 s in settings.json, the first call to 25 s and the retry to 15 s.",
+      "key": "a",
+      "label": "Stop limit 50 s: first try 25 s, retry 15 s",
+      "lose": "A stuck model can hold the end of a relaying turn for up to about 50 s."
+    },
+    {
+      "gain": "A shorter worst-case wait than a.",
+      "how": "Raise the Stop hook to 45 s, the first call to 20 s and the retry to 15 s.",
+      "key": "b",
+      "label": "Stop limit 45 s: first try 20 s, retry 15 s",
+      "lose": "Less headroom, so more slow calls may still be refused."
+    },
+    {
+      "gain": "The limit rests on a measured rate.",
+      "how": "Merge #1431, read its timeout log, then choose a limit from the measured rate.",
+      "key": "c",
+      "label": "Keep 35 s and decide after the timeout log",
+      "lose": "Refusals keep reaching you until the log has enough runs."
+    }
+  ],
+  "owner": "lane judge-timeout-retries-once (session_013NEJKzQsAzQkvsohtkLuJP)",
+  "pick": "a",
+  "ref": "your ask ask-mw74r3oubd (\"increase the time maybe\"), 19:04 CST; step judge-timeout-retries-once; PR #1422 (one retry); PR #1431 (timeout log)",
+  "short": "Past-ruling check time limit",
+  "status": "open",
+  "title": "How long may the past-ruling check wait for its model?",
+  "why": "The coordinator and the lane recommend a: your ask was to give the check more time, and a gives the most. A stuck call costs at most about 50 s at a turn's end."
+}
