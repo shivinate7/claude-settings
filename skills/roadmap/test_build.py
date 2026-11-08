@@ -2622,6 +2622,9 @@ class IdleLanes(UpkeepFixture):
     never an empty list. Each negative case shares its live file with a listed control, so an empty row cannot pass."""
 
     ROW = "lanes to archive"
+    # Rows live_work skips: a session id that is not a string, and a pull number that is not an int.
+    BROKEN_SESSION = {"id": 7, "session_status": "SESSION_STATUS_IDLE", "tags": []}
+    BROKEN_PULL = {"number": "twelve", "title": "lane c2", "branch": "c2"}
 
     def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
@@ -2834,10 +2837,8 @@ class IdleLanes(UpkeepFixture):
 
     def test_skipped_session_or_pull_row_reads_the_whole_list_unknown(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
-        broken_session = {"id": 7, "session_status": "SESSION_STATUS_IDLE", "tags": []}
-        broken_pull = {"number": "twelve", "title": "lane c2", "branch": "c2"}
-        cases = (("session", [broken_session, self.lane("session_a", "c1")], ()),
-                 ("pull", [self.lane("session_a", "c1")], [broken_pull]))
+        cases = (("session", [self.BROKEN_SESSION, self.lane("session_a", "c1")], ()),
+                 ("pull", [self.lane("session_a", "c1")], [self.BROKEN_PULL]))
         for label, sessions, pulls in cases:
             with self.subTest(row=label):
                 self.publish(sessions=sessions, pulls=pulls)
@@ -3208,6 +3209,22 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(self.finished_count(), 1, "the control lane is not counted")
         value = self.finished_of(build.live_work(None, None, self.SLUG))
         self.assertTrue(self.unknown_reading(value), "no live file reads the count %r, not unknown" % (value,))
+
+    def test_a_stale_read_or_a_skipped_row_reads_the_count_unknown(self):
+        # Pins current behaviour: finished_lanes returns live_why first, so each defect reads the count unknown. The good
+        # lane counts 1 on the same file before each defect, so an unknown is the defect's doing, not an empty read.
+        self.finished_steps()
+        good = self.lane("session_a", "c1")
+        cases = (("a stale readAt", [good], (), iso_ago(build.STALE_LIVE_MINUTES + 30)),
+                 ("a skipped session row", [self.BROKEN_SESSION, good], (), None),
+                 ("a skipped pull row", [good], [self.BROKEN_PULL], None))
+        for label, sessions, pulls, read_at in cases:
+            with self.subTest(defect=label):
+                self.publish(sessions=[good])
+                self.assertEqual(self.finished_count(), 1, "the control lane is not counted before %s is added" % label)
+                self.publish(sessions=sessions, pulls=pulls, read_at=read_at)
+                value = self.finished_of(self.live_work_direct())
+                self.assertTrue(self.unknown_reading(value), "%s reads the count %r, not unknown" % (label, value))
 
     def test_repo_and_lane_tags_are_read_as_idle_lanes_reads_them(self):
         # A repo tag with a space or a trailing space is not this repo, as idle_lanes reads it. A lane tag with a leading space
