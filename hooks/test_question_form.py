@@ -43,8 +43,10 @@ Interface the module must match (the lane's form contract):
   `checked_with`. A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused.
   A `repo` that is not owner/name is refused with the format reason. `repo` is required on the set: a direct call
   with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown (ruling of
-  2026-11-08 12:16 CST, option a). A str_replace on `repo` or `checked_with` is refused as this rule. item_hit and
-  page_item_hit take the writer's session_id from guard.py's payload. The page repo is read from the checkout at cwd,
+  2026-11-08 12:16 CST, option a). A str_replace on `repo` or `checked_with` is refused as this rule. An update that
+  carries `checked_with` without `repo` is refused, naming `repo`. item_hit and page_item_hit take the writer's
+  session_id. guard.py passes the cloud session's record id (env CLAUDE_CODE_REMOTE_SESSION_ID read as session_<x>),
+  never the payload's local UUID. The page repo is read from the checkout at cwd,
   and None (no cwd, or no origin) skips only the compare.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
@@ -2029,7 +2031,7 @@ def case_cross_repo_malformed_checked_with():
 # a crash. The writer's session is judged through cross_judged: a build with no session_id parameter is called with the
 # signature it has, so its verdict shows instead of a TypeError. The case that needs the parameter asserts it first.
 
-WRITER_SESSION = "session_01WRITERxyz"  # the session that files the item: guard.py's payload session_id
+WRITER_SESSION = "session_01WRITERxyz"  # the record id of the session that files the item: the env's cse_<x> read as session_<x>, never the payload's UUID (case_cross_repo_writer_guard_path)
 NO_REPO_FRAGMENTS = (r"\brepo\b",)  # the reason names `repo`; with no page repo it cannot name the page's own
 
 
@@ -2162,6 +2164,129 @@ def case_cross_repo_writer_session_controls():
                     ma144(checked=WRITER_SESSION, owner="coordinator"), None)
 
 
+# ------------------------------------------------------------------ the writer's session, through the guard's dispatch
+#
+# Rule question-checked-with-repo, the writer's own session. The hook payload's session_id is the local session's UUID.
+# A cloud session's record id is the env CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x> by
+# override.remote_session_id). The writer's refusal compares checked_with with that record id. The cases below run
+# guard.judge(payload) in process, as the hook runs it, so the session id has to travel from the payload and the env
+# through the guard's dispatch into page_item_hit. The cases above that call cross_repo_hit with a session id directly
+# cannot show that.
+
+LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+CLOUD_LANE = "cse_013TESTabc"  # this cloud session's env value
+CLOUD_RECORD = "session_013TESTabc"  # the same session's record id: the writer's session id in checked_with
+OTHER_SESSION = "session_013OTHERxyz"  # another session's record id
+LOCAL_UUID = "60f6df14-79ff-4a1e-9c2b-5d7e8f901a2b"  # the hook payload's session_id: a UUID, not a record id
+
+
+def writer_input(checked=None, **over):
+    """The tool_input of one `set` on the incident item, as ArtifactData sends it, with checked_with set to `checked`
+    (None leaves it out). `over` sets or replaces any other field of the item."""
+    return dict(ma144_write(checked=checked, **over), url=PAGE_URL, action="set")
+
+
+def guard_refusal(tool_input, lane_env):
+    """The reason guard.judge prints for one ArtifactData call at the page's checkout, with the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to lane_env (None unsets it: a local session). None when the
+    call passes. guard.judge exits through refuse(), which prints the deny JSON, so the print is what is read."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": tool_input}
+    printed = io.StringIO()
+    with mock.patch.dict(os.environ):  # the env is put back as it was on exit
+        if lane_env is None:
+            os.environ.pop(LANE_ENV, None)
+        else:
+            os.environ[LANE_ENV] = lane_env
+        try:
+            with contextlib.redirect_stdout(printed):
+                guard.judge(payload)
+        except SystemExit:
+            pass
+        except Exception as exc:  # a crash is a wrong verdict, shown by name
+            return "RAISED %s: %s" % (type(exc).__name__, exc)
+    text = printed.getvalue().strip()
+    return json.loads(text)["hookSpecificOutput"]["permissionDecisionReason"] if text else None
+
+
+def writer_verdict(name, reason, refused):
+    """refused: the reason names the rule and `checked_with`. Else the call passes, with no refusal printed."""
+    if refused:
+        ok = isinstance(reason, str) and CROSS_REPO_RULE in reason and "checked_with" in reason
+        check(name, ok, "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, reason))
+    else:
+        check(name, reason is None, "want a pass (no refusal), got %r" % (reason,))
+
+
+def case_cross_repo_writer_guard_path():
+    """(xviii) guard.judge refuses a checked_with equal to the writer's own session. The cloud session's record id comes
+    from CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x> read as session_<x>), not from the payload's UUID. The red: on the
+    build that reads the payload's UUID, the writer's session is never the record id, so the refusal does not fire.
+    The controls: another session passes; a local session (env unset) has no writer's session to refuse; a missing
+    checked_with is refused end to end (green on the build that has this rule: it shows the guard dispatches it)."""
+    writer_verdict("(xviii) guard: checked_with is this cloud session's record id, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), CLOUD_LANE), refused=True)
+    writer_verdict("(xviii control) guard: checked_with is another session, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=OTHER_SESSION, owner="coordinator"), CLOUD_LANE), refused=False)
+    writer_verdict("(xviii control) guard: local session, env unset, checked_with is the record id",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), None), refused=False)
+    writer_verdict("(xviii control) guard: no checked_with is refused, env cse_013TESTabc",
+                   guard_refusal(writer_input(owner="coordinator"), CLOUD_LANE), refused=True)
+
+
+def case_cross_repo_writer_page_item_hit():
+    """(xix) page_item_hit takes the writer's session id and refuses a checked_with equal to it. It is called direct, so a
+    build that drops the id on the way (question_form.py, item_hit's cross-repo call) fails here too, not only in the
+    guard case above. Green on the build that threads the id: this case holds the threading in place."""
+    got = call("page_item_hit", writer_input(checked=CLOUD_RECORD, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    ok = isinstance(hit, tuple) and len(hit) == 2 and hit[0] == CROSS_REPO_RULE and "checked_with" in str(hit[1])
+    check("page_item_hit: checked_with equal to the writer's session is refused, naming checked_with", ok,
+          "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, hit))
+    got = call("page_item_hit", writer_input(checked=OTHER_SESSION, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    check("control: page_item_hit, checked_with another session passes", hit == ("", ""),
+          "want a pass, got %r" % (hit,))
+
+
+def model_calls_of_call_judge(checked):
+    """How many model calls hooks/call_judge.py makes for one ArtifactData write of the page, the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to CLOUD_LANE. A write that a rule refuses makes none."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": writer_input(checked=checked, owner="coordinator")}
+    with mock.patch.dict(os.environ, {LANE_ENV: CLOUD_LANE}):
+        run = tcj.run_hook(json.dumps(payload))
+    return len(run.calls)
+
+
+def case_cross_repo_writer_call_judge():
+    """(xxi) call_judge.py reads the writer's session the way guard.py does. A checked_with equal to the cloud session's
+    record id is a hit, so call_judge asks no model about the write. The red: on a build that passes the payload's UUID,
+    the write is no hit there and the model is asked. The control, another session's checked_with, is asked, so the
+    model call is seen."""
+    refused = model_calls_of_call_judge(CLOUD_RECORD)
+    check("(xxi) call_judge: checked_with is this cloud session's record id, no model call", refused == 0,
+          "want no model call for a write the rule refuses, got %d call(s)" % refused)
+    asked = model_calls_of_call_judge(OTHER_SESSION)
+    check("(xxi control) call_judge: checked_with is another session, the model is asked", asked > 0,
+          "want a model call for a write no rule refuses, got %d" % asked)
+
+
+def case_cross_repo_update_checked_with_needs_repo():
+    """(xviii) An update that carries checked_with but no repo is refused, and the reason names `repo`. The stored repo
+    is unseen, so a checked_with alone cannot be judged against it. The controls carry repo, so they hold with or
+    without this refusal."""
+    cross("(xx) update with checked_with, no repo", "update", {"checked_with": CHECKED}, PAGE_REPO_NAME, ("`repo`",))
+    at_page("(xx) update with checked_with, no repo", "update", entry_of({"checked_with": CHECKED}, doc_id=MA144_ID),
+            tcj.origin_page_repo(), ("`repo`",))
+    cross("(xx control) update with a foreign repo and checked_with", "update",
+          {"repo": OTHER_REPO, "checked_with": CHECKED}, PAGE_REPO_NAME)
+    cross("(xx control) update with the page's own repo and checked_with", "update",
+          {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
@@ -2197,7 +2322,9 @@ def main():
                  case_cross_repo_open_filter_is_the_one_home, case_cross_repo_open_filter_controls,
                  case_cross_repo_str_replace_on_repo_and_checked_with, case_cross_repo_required_when_page_repo_unknown,
                  case_cross_repo_malformed_repo_is_a_format_refusal, case_cross_repo_malformed_repo_controls,
-                 case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls):
+                 case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
+                 case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
+                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo):
         try:
             case()
         except Exception as exc:
