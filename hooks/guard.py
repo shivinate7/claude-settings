@@ -93,7 +93,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        counts as one. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
-                       upstream. Only with an upstream on the pushed remote that is not main or master.
+                       upstream and is not yet on the remote. Only with an upstream on the pushed remote that is
+                       not main or master.
   push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
