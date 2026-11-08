@@ -12731,6 +12731,16 @@ def named_line(cause, path, numbers):
     return "merge: #7 prose judge UNKNOWN (%s): %s:%s" % (cause, path, ",".join(str(n) for n in numbers))
 
 
+def named_by_file(cause, rows, names):
+    """The named lines of `cause` for the (path, line) `rows` of the files in `names`: one line per file that holds a row, in `names` order."""
+    lines = []
+    for p in names:
+        numbers = sorted(n for q, n in rows if q == p)
+        if numbers:
+            lines.append(named_line(cause, p, numbers))
+    return lines
+
+
 FAKE_TOOL_REPLY = ("I'll check the cited file before judging.\n\n\n<invoke name=\"Read\">\n"
                    "<parameter name=\"file_path\">/tmp/x/harness/a.mjs</parameter>\n</invoke>")  # the reply 7 of 20 real judge calls gave: tool-call text, no JSON
 
@@ -13236,6 +13246,105 @@ class ProseJudge(Env):
         self.assert_named(out, expected)
         self.assert_unknown_count(out, len(past), [(len(past), "past the call cap")])
         self.assertEqual(rc, 0, out)
+
+    # When the call pool raises, or decision_watch cannot be imported, no job's reply is read. Each line of each job is then named as a model
+    # error, and each line past the cap as past the call cap. The count line counts them. A plan-level line may print beside it.
+    def assert_count_line(self, out, k, causes):
+        """The merge's one count line: the line that says `lines not judged`, with K and the (count, cause) pairs in the fixed order."""
+        lines = [line for line in out.splitlines() if "lines not judged" in line]
+        self.assertEqual(len(lines), 1, "count lines: %d, want 1\n%s" % (len(lines), out))
+        found_k = re.search(r"(\d+) lines not judged", lines[0])
+        self.assertIsNotNone(found_k, "the count line has no `<K> lines not judged`: %r" % lines[0])
+        self.assertEqual(int(found_k.group(1)), k, "lines not judged: %s, want %d: %r" % (found_k.group(1), k, lines[0]))
+        found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), lines[0])]
+        self.assertEqual(found, causes, "causes in the count line: %r, want %r: %r" % (found, causes, lines[0]))
+
+    def raising_pool(self, sent):
+        """A stand-in for merge.prose_judge_calls: it records the prompts it is asked to send, then raises, as a broken pool would."""
+        def calls(decision_watch_module, prompts):
+            sent.append(list(prompts))
+            raise RuntimeError("the call pool broke")
+        return calls
+
+    def run_packed(self, calls=None, hide_decision_watch=False):
+        """The merge at the test cap, with merge.prose_judge_calls replaced by `calls` when given, and `import decision_watch` made to fail
+        when `hide_decision_watch`. prose_judge_pack is spied, so the case reads the lines the packed jobs hold. -> (those (path, line)
+        rows, rc, out)."""
+        packed, real_pack = [], merge.prose_judge_pack
+
+        def spy_pack(wt, picked):
+            jobs, past = real_pack(wt, picked)
+            packed.append(list(jobs))  # a copy: prose_judge_plan appends the past-cap item to the list it is given
+            return jobs, past
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(unittest.mock.patch.object(merge, "prose_judge_pack", spy_pack))
+            if calls is not None:
+                stack.enter_context(unittest.mock.patch.object(merge, "prose_judge_calls", calls))
+            if hide_decision_watch:
+                real = sys.modules.get("decision_watch")
+                sys.modules["decision_watch"] = None  # `import decision_watch` now raises ImportError
+                stack.callback(sys.modules.__setitem__, "decision_watch", real)
+            rc, out = self.run_capped()
+        self.assertEqual(len(packed), 1, "scope: the plan was packed %d times, want 1" % len(packed))
+        return {row for _, rows, _ in packed[0] for row in rows}, rc, out
+
+    def test_a_raised_call_pool_names_each_job_line_as_a_model_error(self):
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        sent = []
+        held, rc, out = self.run_packed(calls=self.raising_pool(sent))
+        self.assertEqual(len(sent), 1, "scope: the pool was asked %d times, want 1: the three lines of two files share one call" % len(sent))
+        self.assert_named(out, [named_line("model error", PROSE, [3, 5]), named_line("model error", OTHER_PROSE, [3])])
+        self.assert_count_line(out, 3, [(3, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_raised_call_pool_names_past_cap_lines_as_past_the_cap(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
+        self.setup_range({p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, 101)]) for p, x in zip(names, "abc")}, {BACKING: BACKING_TEXT})
+        sent = []
+        held, rc, out = self.run_packed(calls=self.raising_pool(sent))
+        every = {(p, n) for p in names for n in range(3, 103)}  # tagged_doc puts one cited line on each of lines 3 to 102
+        self.assertEqual(len(sent), 1, "scope: the pool was asked %d times, want 1" % len(sent))
+        self.assertTrue(held < every, "scope: the packed jobs hold %d of %d lines, want some past the cap" % (len(held), len(every)))
+        past = every - held
+        self.assert_named(out, named_by_file("model error", held, names) + named_by_file("past the call cap", past, names))
+        self.assert_count_line(out, len(every), [(len(held), "model error"), (len(past), "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_failed_decision_watch_import_names_each_job_line_as_a_model_error(self):
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(holds_every_line)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            held, rc, out = self.run_packed(hide_decision_watch=True)
+        self.assertEqual(stub.prompts, [], "scope: %d model calls, want 0: the import failed before any call" % len(stub.prompts))
+        self.assert_named(out, [named_line("model error", PROSE, [3, 5]), named_line("model error", OTHER_PROSE, [3])])
+        self.assert_count_line(out, 3, [(3, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_failed_decision_watch_import_names_past_cap_lines_as_past_the_cap(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
+        self.setup_range({p: tagged_doc(["%s-l%03d" % (x, n) for n in range(1, 101)]) for p, x in zip(names, "abc")}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(holds_every_line)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            held, rc, out = self.run_packed(hide_decision_watch=True)
+        every = {(p, n) for p in names for n in range(3, 103)}  # tagged_doc puts one cited line on each of lines 3 to 102
+        self.assertEqual(stub.prompts, [], "scope: %d model calls, want 0: the import failed before any call" % len(stub.prompts))
+        self.assertTrue(held < every, "scope: the packed jobs hold %d of %d lines, want some past the cap" % (len(held), len(every)))
+        past = every - held
+        self.assert_named(out, named_by_file("model error", held, names) + named_by_file("past the call cap", past, names))
+        self.assert_count_line(out, len(every), [(len(held), "model error"), (len(past), "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_control_character_in_a_named_path_is_stripped_from_the_named_line(self):
+        # A path holding ESC and CR prints with the control characters stripped, as plain_text strips finding lines. The plan is built by hand:
+        # a file name with these characters is not portable, and the naming reads the path the same way on any platform.
+        path = "docs/notes/a\x1bb\rc.md"
+        plan = [((path,), [(path, 3)], "prompt")]
+        with unittest.mock.patch.object(decision_watch, "invoke_model", JudgeStub(raises(RuntimeError("the call failed")))):
+            report = merge.prose_judge_run(plan, 7)
+        text = "\n".join(report)
+        self.assertEqual(sorted(named_unknown_lines(text)), ["merge: #7 prose judge UNKNOWN (model error): docs/notes/abc.md:3"],
+                         "the named line does not carry the path with its control characters stripped\n" + repr(text))
+        self.assertEqual(controls(text), [], "the report carries control characters from the path: %r" % controls(text))
 
     def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
         self.assert_interrupt_leaves_merge_whole("model", SystemExit(3))
