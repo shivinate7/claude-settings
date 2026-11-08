@@ -253,13 +253,19 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/shared_names.py"], existing=["hooks/shared_names.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
-    def test_git_reads_change_sets_the_same_flags_as_guard_py(self):
-        # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard
-        # and sweep mutation tests must run on it.
-        want = run(["hooks/guard.py"])
-        self.assertEqual(run(["hooks/git_reads.py"]), want)
-        self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
-                         run(["hooks/guard.py"], existing=["hooks/guard.py"]))
+    # Ruling (coordinator, 2026-11-07 20:08 CST): the $M flag covers every file merge/merge.py imports. merge.py imports
+    # hooks/git_reads.py by name, so a change to it sets the merge flag. The guard and sweep flags stay as guard.py's:
+    # guard_core.py and the janitor's sweep.py and session_end_sweep.py import it, so the guard and sweep suites run on it.
+    def test_git_reads_change_sets_the_guard_flags_and_the_merge_flag(self):
+        # Scope: guard.py alone keeps the merge flag off, so the flag this case reads is git_reads' own.
+        self.assertEqual(run(["hooks/guard.py"])["checks_windows_merge"], "false")
+        for edit in (False, True):
+            with self.subTest(edit=edit):
+                got = run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"] if edit else ())
+                want = run(["hooks/guard.py"], existing=["hooks/guard.py"] if edit else ())
+                self.assertEqual(got["checks_windows_merge"], "true",
+                                 f"git_reads sets no merge flag, though merge.py imports it: {got}")
+                self.assertEqual(dict(got, checks_windows_merge="false"), want, got)
 
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
