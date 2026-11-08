@@ -588,11 +588,12 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
   const slow = svgIcon("#11151b", "<!--slow-->");
   await page.evaluate((slow) => {
     const decode = HTMLImageElement.prototype.decode;
-    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400))); };
+    HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400)).then(() => { window.__slowDecodeDone = true; })); };
     state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
     state.meta = { identity: { name: "Compass" } }; applyIdentity();
   }, slow);
-  await page.waitForTimeout(700);
+  // The slow decode has finished, and the page has had its chance to apply it, once the fixture sets its flag.
+  await page.waitForFunction(() => window.__slowDecodeDone === true);
   const m = await markState(page);
   assert.deepEqual([m.icon, m.img, m.text, m.tile], [false, null, "C", ""]);
 });
@@ -961,7 +962,7 @@ test("a touch drag scrolls the picture and opens nothing, and a tap opens View, 
   const r2 = await page.locator(boxSel(it.id)).boundingBox();
   await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
   await touch("touchEnd", []);
-  await page.waitForTimeout(400);
+  await page.locator("#dsheet").waitFor({ state: "visible", timeout: 5000 }).catch(() => {});
   assert.equal(await page.locator("#dsheet").isVisible(), true, "the tap did not open View");
 });
 
@@ -5129,7 +5130,8 @@ test("a capped picture grows back when its card widens and stays inside when it 
   await page.waitForTimeout(300);
   const narrow = (await picBox(page))[0].w;
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.waitForTimeout(400);
+  // The picture grows back once its card widens: wait for that, or for 5 s, then measure.
+  await page.waitForFunction((n) => { const w = document.querySelector("#item-grow-pics label.opt .dfitwrap"); return !!w && w.getBoundingClientRect().width > n + 10; }, narrow, { timeout: 5000 }).catch(() => {});
   const wide = await picBox(page);
   assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
   await page.setViewportSize({ width: 1066, height: 900 });
@@ -5146,7 +5148,10 @@ test("a very tall mockup with no focus is never a thin strip", async (t) => {
 test("the SENT stamp is the same element, not rebuilt, as the Undo count ticks", async (t) => {
   const page = await sentPage(t, false); if (!page) return;
   await page.evaluate(() => { window.__stamp = document.querySelector("#sent .stamp"); });
-  await page.waitForTimeout(2300);
+  // Wait until the Undo count has ticked down by two, so the stamp has been seen across two ticks.
+  const countNow = () => page.evaluate(() => { const m = /\((\d+)\)/.exec(document.getElementById("undoBtn")?.textContent || ""); return m ? Number(m[1]) : null; });
+  const n0 = await countNow();
+  await page.waitForFunction((n) => { const b = document.getElementById("undoBtn"), m = b && /\((\d+)\)/.exec(b.textContent); return !!m && Number(m[1]) <= n - 2; }, n0, { timeout: 5000 }).catch(() => {});
   assert.equal(await page.evaluate(() => window.__stamp.isConnected && window.__stamp === document.querySelector("#sent .stamp")), true, "the stamp was rebuilt, so it settles again each second");
   assert.match(await page.locator("#undoBtn").textContent(), /Undo send \(\d\)/);
 });
