@@ -1330,6 +1330,89 @@ class AllRulesTests(unittest.TestCase):
         self.assertNotIn("git-env-set", out)
 
 
+# ------------------------------------------------------------------ the past-ruling-run summary
+#
+# A past-ruling model run writes one guard.log line, rule past-ruling-run, whose matched text reads
+# `ms=<int> chars=<int> cands=<int> result=<ok|refuse|timeout|error>` (lint/report_guard.py, through guard_core.record).
+# `--between START END --rule past-ruling-run` prints those rows, then a summary for the rule: the count, the median
+# and the max of ms, and the max of chars. This file fixes no layout for the summary. Each fact is checked as a label
+# and its number on one output line.
+RUN_RULE = "past-ruling-run"
+RUN_WINDOW = ["--between", "2026-11-08T00:00:00-06:00", "2026-11-09T00:00:00-06:00"]
+FULL_RUNS = 501  # an odd count, so the median is one row's ms
+
+
+def run_row(minute, ms, chars, result="ok", rule=RUN_RULE):
+    return "2026-11-08T10:%02d:00-06:00\tStop\tnoted\t%s\tms=%d chars=%d cands=1 result=%s\tsess-run" % (
+        minute % 60, rule, ms, chars, result)
+
+
+RUN_FIXTURE = [run_row(0, 100, 1000), run_row(1, 900, 9000, "timeout"), run_row(2, 200, 4000, "refuse")]
+OTHER_ROW = "2026-11-08T11:00:00-06:00\tBash\tdeny\tshared-tree\tgit stash"
+
+
+def has_fact(out, label, number):
+    """True when one output line holds `label`, then `number`, each as a whole word."""
+    return re.search(r"\b%s\b[^\n]*\b%s\b" % (label, number), out, re.IGNORECASE) is not None
+
+
+def missing_facts(out, facts):
+    """The names of the (name, label, number) facts the output does not hold. Every missing one is named."""
+    return [name for name, label, number in facts if not has_fact(out, label, number)]
+
+
+class PastRulingRunSummary(unittest.TestCase):
+    def report(self, lines, rule=RUN_RULE):
+        """(exit code, stdout, stderr) of the window read for `rule` over a guard.log holding `lines`."""
+        return run_cli(["--log", fresh_log(lines)] + RUN_WINDOW + ["--rule", rule])
+
+    def assert_facts(self, out, facts):
+        missing = missing_facts(out, facts)
+        self.assertFalse(missing, "the past-ruling-run summary lacks: %s" % "; ".join(missing))
+
+    def test_rule_filter_prints_only_the_run_rows(self):
+        # Control: the rows print on main already. The summary cases below are the new claim.
+        rc, out, err = self.report(RUN_FIXTURE + [OTHER_ROW])
+        self.assertEqual(rc, 0, err)
+        self.assertIn("ms=900 chars=9000", out)
+        self.assertNotIn("shared-tree", out, out)
+
+    def test_summary_gives_count_median_and_max_for_the_rule(self):
+        rc, out, err = self.report(RUN_FIXTURE + [OTHER_ROW])
+        self.assertEqual(rc, 0, err)
+        self.assert_facts(out, [("count 3", "count", 3), ("median ms 200", "median", 200),
+                                ("max ms 900", "max", 900), ("max chars 9000", "max", 9000)])
+
+    def test_summary_of_a_window_with_no_run_rows_counts_zero(self):
+        rc, out, err = self.report([OTHER_ROW])
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("Traceback", err)
+        self.assert_facts(out, [("count 0", "count", 0)])
+
+    def test_summary_of_a_full_size_log(self):
+        lines = [run_row(i, i, 240000 + i) for i in range(FULL_RUNS)]
+        rc, out, err = self.report(lines + [OTHER_ROW])
+        self.assertEqual(rc, 0, err)
+        self.assert_facts(out, [("count %d" % FULL_RUNS, "count", FULL_RUNS), ("median ms 250", "median", 250),
+                                ("max ms 500", "max", 500), ("max chars 240500", "max", 240500)])
+
+    def test_other_rules_get_no_summary(self):
+        # Control: the summary belongs to the run rule. Another rule's read keeps its rows and no summary.
+        rc, out, err = self.report(RUN_FIXTURE + [OTHER_ROW], rule="shared-tree")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("shared-tree", out)
+        self.assertNotIn("median", out.lower(), out)
+        self.assertNotIn("count", out.lower(), out)
+
+    def test_cloud_read_still_prints_the_run_rows(self):
+        # Control: only load-brake stands down in a cloud session. A run-rule read prints its rows there too.
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE": "true"}):
+            rc, out, err = self.report(RUN_FIXTURE)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("ms=900 chars=9000", out)
+        self.assertNotIn("n/a (cloud)", out)
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
