@@ -1,11 +1,11 @@
 {
-  "title": "banchi: find why T7 runs over 25 min in a cloud VM",
+  "title": "banchi: T7 prints a progress line for each check and refuses a non-loopback network call",
   "phase": "now",
   "status": "doing",
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL2iYsBGsEeEAggnRjE",
-  "why": "T7 ran over 25 min in a cloud VM and did not finish (15:01-15:26 CST Nov 7), against 2.6-4.2 min per CI shard (main run 87). The log showed \"capture server has failed to stay up\" 5 times and repeated price-service 403s.",
-  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane. Lane session_013NEJL2iYsBGsEeEAggnRjE has had it since 19:08 CST (coordinator, 19:17 CST).",
-  "updatedAt": "2026-11-07T19:22:00-06:00"
+  "why": "A cloud run of T7 takes 681-728 s (4 runs, lane banchi-t7-cloud-slow), against 3-4 min per CI shard, with no line to show which check is slow. The earlier \"over 25 min\" figure came from a runner script with no __main__ guard (lane banchi-t7-root-ipv6-skip's own mistake), not from T7.",
+  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane. Lane session_013NEJL2iYsBGsEeEAggnRjE has had it since 19:08 CST (coordinator, 19:17 CST). Rescoped by the coordinator, 20:33 CST Nov 7: a per-check progress line and a refusal of non-loopback network. The trap line goes in a banchi docs PR from lane banchi-t7-root-ipv6-skip. Revised 20:34 CST Nov 7.",
+  "updatedAt": "2026-11-07T20:34:00-06:00"
 }
