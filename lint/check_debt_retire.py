@@ -12,7 +12,7 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
             green and on the PR head or a commit above it. A run on a commit the head contains (a lane tip of a batch) is
-            deferred to merge: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
+            deferred to merge when it is in base..head: CI excuses it with a note, and the merge tool holds it on the head's own checks run. A cite also clears a check that could not run here (unknown);
             a red check is never cleared by a cite.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
@@ -156,9 +156,17 @@ def judge_head_run(head, url, head_run):
     return None
 
 
-def judge_run(wt, head, url, run_state, head_run=None, defer=False):
+def in_branch(wt, sha, head, base):
+    """True when `sha` is a lane tip the head holds: an ancestor of the head and, when a base is known, not an older commit of it. A cite on
+    a commit below the base is an old main run, never a lane tip, so it is not deferred. The base tip itself still is (the fixtures cite it)."""
+    def ancestor(a, b):
+        return _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode == 0
+    return ancestor(sha, head) and not (base is not None and ancestor(sha, base) and not ancestor(base, sha))
+
+
+def judge_run(wt, head, url, run_state, head_run=None, defer=False, base=None):
     """(kind, text) for a cited run, None when it is green on the head or a commit above it, or a Deferred when it is green on a
-    strict ancestor of the head and the mode defers. Merge mode (head_run given) holds that cite on the head's own checks run: None when
+    strict ancestor of the head, in base..head, and the mode defers. Merge mode (head_run given) holds that cite on the head's own checks run: None when
     it ended success, else (kind, text) that names the run. CI mode (defer, no head_run) returns the Deferred. With neither, it is red."""
     if run_state is None:
         return "unknown", "no reader for the cited run %s" % url
@@ -172,7 +180,7 @@ def judge_run(wt, head, url, run_state, head_run=None, defer=False):
     if rc == 0:
         return None
     if rc == 1:
-        if (head_run is not None or defer) and _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", str(sha), head], capture_output=True).returncode == 0:
+        if (head_run is not None or defer) and in_branch(wt, str(sha), head, base):
             return judge_head_run(head, url, head_run) if head_run is not None else Deferred(sha)
         return "red", "the cited run %s is on %s, not on the PR head %s or a commit above it" % (url, str(sha)[:9], head[:9])
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
@@ -219,14 +227,14 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
                 break
             got = got or one  # an unknown sticks: only a red outranks it, whatever the order
         if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
-            cite = judge_run(wt, head, cited[slug], run_state, head_run, defer)
+            cite = judge_run(wt, head, cited[slug], run_state, head_run, defer, base_ref)
             if cite is None or isinstance(cite, Deferred):
                 return cite
             got = cite
         if got:
             return Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text))
         return None
-    got = judge_run(wt, head, cited[slug], run_state, head_run, defer) if slug in cited else ("prose", None)
+    got = judge_run(wt, head, cited[slug], run_state, head_run, defer, base_ref) if slug in cited else ("prose", None)
     if got is None or isinstance(got, Deferred):
         return got
     if got[0] == "prose":

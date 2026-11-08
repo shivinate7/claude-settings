@@ -7,7 +7,7 @@ A PR closes a debt when it deletes the debt file, or renames it out of `docs/deb
 - The shared merge tool reads the debt's Retire text at base. It runs each runnable check that text names, on the PR head, in preview and in confirm.
 - A red check refuses the close. A check that cannot run refuses it too (decision `ci-unknown-is-red`, an unknown read is red).
 - A PR with no runnable check is refused. The way out, for no runnable check or one that cannot run: the PR body holds `Retire-run: <slug> -- <run URL>`, for a run that succeeded on the PR head or on a descendant of it. A cite never clears a red check.
-- A run on a lane tip that the batch head contains is deferred to merge. The merge needs the head's own green checks run (coordinator, 2026-11-07 20:03 CST).
+- A run on a lane tip that the batch's branch holds (base..head) is deferred to merge. A run on an older main commit is not. The merge needs the head's own green checks run (coordinator, 2026-11-07 20:03 CST).
 - A runnable check is a backticked path in the Retire text. The path is tracked at head and named like a test file: `test_*.py`, `*_test.py`, `*.test.mjs`, `test_*.mjs` or `test_*.sh`. Its extension sets the runner: `python3`, `node --test` or `bash`. No shell, no model call.
 
 Why: a docs-only PR skips review (decision `docs-only-prs-skip-review`, a docs-only PR gets no full review). So a debt can read as closed while its Retire check never ran. Audit 2026-11-06: 35 debt-delete commits since 2026-10-23, 9 of them markdown-only.

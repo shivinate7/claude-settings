@@ -835,9 +835,9 @@ class Host:
             raise Stop(f"writing the body of #{n} to GitHub failed: {out}")
 
     def head_checks_run(self, sha):
-        """-> (conclusion, html_url) of the latest `checks.yml` workflow run on the commit `sha`, or None when it has none. The conclusion is None
+        """-> (conclusion, html_url) of the latest `checks.yml` workflow run on the commit `sha` itself, or None when it has none. The conclusion is None
         while the run is pending. The latest is the newest created, a re-run included. A failed read is a Stop, never "no run"."""
-        runs = self.pages("actions/workflows/checks.yml/runs", "workflow_runs", {"head_sha": sha})
+        runs = [r for r in self.pages("actions/workflows/checks.yml/runs", "workflow_runs", {"head_sha": sha}) if r.get("head_sha") == sha]  # the filter is the API's, and each row is checked again
         if not runs:
             return None
         run = max(runs, key=lambda r: (r.get("created_at") or "", r.get("run_number") or 0))

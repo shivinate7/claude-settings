@@ -29,8 +29,8 @@ Blank lines and whitespace never count. The escape is a trailer in a commit mess
 path: `Drops-lines: <path> -- <reason>`. The PR body is read too: the same line in it
 excuses its path. A trailer or line with no reason excuses nothing. A deleted debt file is also excused by a
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
-(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. A green run on a lane tip the head
-contains is deferred to merge: here it excuses with a note, and the merge tool holds it on the head's own checks run. It needs a
+(check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. A green run on a lane tip the branch
+holds (base..head) is deferred to merge: here it excuses with a note, and the merge tool holds it on the head's own checks run. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
 the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
 body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, built
