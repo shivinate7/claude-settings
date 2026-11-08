@@ -1,0 +1,11 @@
+{
+  "title": "A commit message that cites a ruling names its home and time",
+  "phase": "guards",
+  "status": "todo",
+  "order": 667,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "A test-author's commit (5568b42ac on #2024) called a lane pick an \"owner ruling\", and a later agent refused work on the strength of it (lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8, 08:16 CST Nov 8). An unsourced ruling claim reads as the owner's word.",
+  "note": "Same class as triage's P44 (a record sentence counts as the owner's ruling only if git shows his words). Done check: a red test where a commit message that says \"owner ruling\" or \"owner's ruling\" with no home (record, page item or step) and no time is refused at commit or push. A check's verdict changes, so this is a build lane. Filed by triage 08:15 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:15:00-06:00"
+}
