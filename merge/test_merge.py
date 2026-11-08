@@ -14125,50 +14125,73 @@ class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
 class ReviewRoundCheckCost(ReviewRoundCheckEnv):
     """What the round-3 check reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
     runs the check alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
-    confirm case keeps its branches, so no open-PR read runs at all."""
+    confirm case keeps its branches, so no open-PR read runs at all. A refusal that names unnamed lane tips reads the open pull list once for all
+    of them, through open_heads, never once per tip."""
 
     def counted(self, host):
-        """Counts the check's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
-        comments, opens = [], []
-        real_comments, real_opens = host.review_comments, host.open_heads
+        """Counts the check's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads, pulls-list reads): each gains one
+        entry a call. A pulls-list read is any pages("pulls") call, so an open-PR read that a host method makes is counted too."""
+        comments, opens, pulls = [], [], []
+        real_comments, real_opens, real_pages = host.review_comments, host.open_heads, host.pages
         def review_comments(since):
             comments.append(since)
             return real_comments(since)
         def open_heads():
             opens.append(True)
             return real_opens()
-        host.review_comments, host.open_heads = review_comments, open_heads
-        return comments, opens
+        def pages(rel, key=None, fields=None):
+            if rel == "pulls":
+                pulls.append(fields)
+            return real_pages(rel, key=key, fields=fields)
+        host.review_comments, host.open_heads, host.pages = review_comments, open_heads, pages
+        return comments, opens, pulls
 
     def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0:\n" + out)
 
     def test_a_pull_request_with_no_lane_tips_reads_the_comment_list_once_and_no_open_prs(self):
         host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0 with no lane tips:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0 with no lane tips:\n" + out)
 
     def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        comments, opens = self.counted(host)
+        comments, opens, pulls = self.counted(host)
         rc, out = self.run_merge("7", "--confirm", host=host)
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(host, "merged", False), "the confirm did not reach the merge:\n" + out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
+        self.assertEqual(len(pulls), 0, f"the open pull list was read {len(pulls)} times, want 0:\n" + out)
+
+    def test_three_unnamed_lane_tips_read_the_open_prs_once_for_the_refusal_not_once_per_tip(self):
+        # no tip has a record, so each is unnamed and the refusal names each one by its open pull request: one read of the open list serves all three
+        tips = lane_batch(self, "agent/lane1", "agent/lane2", "agent/lane3", from_main=True)
+        host = self.batch_host(tips, [])
+        host.records_default = False  # no tip has a record
+        self.scope(tips, host)
+        comments, opens, pulls = self.counted(host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8, owed=self.UNREVIEWED)
+        for n in (9, 10):
+            self.assertIn(f"#{n} (tip ", out, f"the refusal does not name pull request #{n}:\n" + out)
+        self.assertEqual(len(pulls), 1, f"the open pull requests were listed {len(pulls)} times for three unnamed lane tips, want 1:\n" + out)
+        self.assertEqual(len(opens), 1, f"the open pull requests were read through open_heads {len(opens)} times, want 1:\n" + out)
 
 LANE_OLD_AT = "2026-10-01T00:00:00+0000"  # an older lane head's author and committer date, epoch LANE_OLD_EPOCH
 LANE_OLD_EPOCH = 1790812800
@@ -14245,7 +14268,9 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     commit, merges a reviewed lane tip and main, and adds no commit of its own is an integration head. Case 16 is red on the old code: confirm must
     fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip.
     Case 17 is red on f67f637d8 and green on 270ef35bc: an integration head with no commit of its own still owes round 3 for its own Guard or check yes
-    record. Case 5 is its green control."""
+    record. Case 5 is its green control.
+    Cases 18, 19 and 20 are red on the old code: the merge tool's own commits, a records rebuild and a claim, are no lane work, so a head that
+    ends on one is read through the commits under it. Case 21 is the green control that keeps the guard: a real commit under a generated one still refuses."""
 
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
 
@@ -14516,6 +14541,73 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7, owed="the integration pull request's own head owes round 3")
         self.assertIn(f"#7 (head {feat[:9]})", out, "the refusal does not name the own head:\n" + out)
+
+    def tool_commit(self, ref, trailer=None):
+        """Push the merge tool's own commit on top of origin/`ref`, made by merge.commit_claim, the tool's own function: its subject and Drops-lines
+        come from the tool. No trailer: the records rebuild. With `trailer` (a Record-claim line): the claim, a decision record it claims. A test repo
+        has no page the generator writes (rebuild_records is False there), so the rebuild commits a stand-in page at the tool's page path.
+        -> the new head of `ref`."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", ref, f"origin/{ref}")
+        if trailer:
+            put(os.path.join(o, "docs", "decisions", "claimed.md"), record("D-002", "claimed"))
+        else:
+            put(os.path.join(o, *merge.RECORDS_PAGE.split("/")), "# Records\n\nrebuilt\n")
+        merge.commit_claim(o, trailer)
+        sh(o, "git", "push", "-q", "origin", ref)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def own_subjects(self, lo, ref="feat"):
+        """The subjects of the non-merge commits from `lo` to origin's `ref`, newest first."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "log", "--no-merges", "--format=%s", f"{lo}..origin/{ref}").splitlines()
+
+    def test_integration_head_ending_on_the_records_rebuild_passes(self):  # case 18
+        # the integration head holds only the merge of a done lane tip. The records rebuild is its one commit, and the tool's own: no lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.tool_commit("feat")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Rebuild the records page"], "the head's commits are not the one rebuild")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_integration_head_ending_on_a_claim_commit_passes(self):  # case 19
+        # the same head, with the tool's claim commit on top instead: a claim is the tool's own commit, and no lane work
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.tool_commit("feat", trailer="Record-claim: D-002")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Claim record numbers"], "the head's commits are not the one claim")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_lone_lane_whose_reviewed_head_has_a_records_rebuild_on_top_passes(self):  # case 20
+        # the lone pull request's record names its head before the tool's records rebuild, which is the head's one commit of its own
+        reviewed = self.head("feat")
+        self.tool_commit("feat")
+        host = self.batch_host({}, [round_check_comment(1, 7, reviewed, guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the one record names the head before the rebuild
+        self.lone_scope(host)
+        self.assertEqual(self.own_subjects(reviewed), ["Rebuild the records page"], "the head's commits are not the one rebuild")
+        self.assertEqual(self.history_exit(reviewed, self.head("feat")), 0, "the reviewed head is not in the history of feat")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assert_allowed(rc, out, host)
+
+    def test_a_real_lane_commit_under_a_records_rebuild_still_refuses(self):  # case 21, green control
+        # the generated commit is on top, and a real commit of the integration head sits under it. The real commit is the lane's head: no tip reaches it
+        tips = lane_batch(self, "agent/lane1", from_main=True)
+        self.push_feat_commit()
+        self.tool_commit("feat")
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host.records_default = False  # the lane tip's record is the only one
+        self.scope(tips, host)
+        self.assertEqual(self.own_subjects(tips["agent/lane1"]), ["Rebuild the records page", "feat: next"], "the head's commits are not the case")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed=self.UNREVIEWED)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
