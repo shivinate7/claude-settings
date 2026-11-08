@@ -24,6 +24,12 @@
                           PR's issue comments since the PR opened.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
+  merge --reviewed --root DIR [--root DIR ...]
+                          the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
+                          then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
+                          `build next batch on the running head: ...` when a ready PR on that base has CI running. Each root's config is read
+                          from its base. Every block is built before any is printed: a failed read in any root prints nothing and exits 1.
+                          Cost: the gh calls of one --reviewed per root; no new process, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -867,12 +873,7 @@ class Host:
             names = self.required_names()
         blockers = []
         for d in others:
-            got = self.checks(d["number"], warn=False, sha=d["head"]["sha"])
-            _, pending, _ = self.classify(got, names or [], ignore)
-            hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
-                    for k in pending if (names is None or k in names) and got.get(k)]
-            running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
-            parts = (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
+            parts = self.busy_parts(d, names, ignore)
             if not parts:
                 continue
             if head is None:
@@ -881,6 +882,26 @@ class Host:
             if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
+
+    def busy_parts(self, d, names, ignore):
+        """-> why the head of the open pull request row `d` is busy: one text per pending required check and per workflow run not completed.
+        [] when it is settled. `names` is the required check names; None counts every reported check (see batch_running). The one home of
+        "this head has CI running"."""
+        got = self.checks(d["number"], warn=False, sha=d["head"]["sha"])
+        _, pending, _ = self.classify(got, names or [], ignore)
+        hits = [f"`{k}` is pending: " + next((l for b, l in got[k] if b == "pending"), "")
+                for k in pending if (names is None or k in names) and got.get(k)]
+        running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
+        return (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
+
+    def ready_busy(self, pulls, base):
+        """-> the numbers of the ready (not draft) pull requests of `pulls` on `base` whose head has CI running (busy_parts). `pulls` is the open
+        list the caller already read, so this reads no pull list. With no ready pull request on the base it reads nothing. A failed read raises Stop."""
+        ready = [d for d in pulls if d["base"]["ref"] == base and not d.get("draft")]
+        if not ready:
+            return []
+        names = self.required_names()
+        return [d["number"] for d in ready if self.busy_parts(d, names, self.ignore)]
 
     def holds_head(self, head, other):
         """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
@@ -3157,15 +3178,19 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def reviewed_lines(h):
-    """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
+REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
+REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
+
+def reviewed_read(h):
+    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
+    each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
-        return ["no open pull requests."]
+        return ["no open pull requests."], [], pulls
     records = h.review_comments(min(d["created_at"] for d in pulls))
-    lines, bare = [], []
+    lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
         if not bodies:
@@ -3173,9 +3198,51 @@ def reviewed_lines(h):
             continue
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
+        if state == "done":
+            done.append((n, d["base"]["ref"]))
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
+    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+
+def reviewed_lines(h):
+    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
+    gh calls scale with the number of roots; no new process, file or timer."""
+    return reviewed_read(h)[0]
+
+def reviewed_block(h):
+    """-> the lines of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
+    done pull requests on the host's base, ascending: `open batch now` when no ready pull request on that base has CI running (Host.ready_busy), else
+    `build next batch on the running head`. No done pull request, no batch line. Extra cost over reviewed_read: only when a done pull request exists and
+    a ready one is on the base, the branch protection read and each ready pull request's check runs, statuses and workflow runs."""
+    lines, done, pulls = reviewed_read(h)
+    out = [f"repo {h.repo}:", *lines]
+    nums = sorted(n for n, base in done if base == h.base)
+    if nums:
+        prefix = REVIEW_BATCH_BUILD if h.ready_busy(pulls, h.base) else REVIEW_BATCH_OPEN
+        out.append(f"{prefix}{h.repo} " + " ".join(f"#{n}" for n in nums))
+    return out
+
+def root_host(root, hosts, config):
+    """-> the Host of one --root, its merge config read from the root's base (load_config) and applied to a real Host only: a test host in `hosts`
+    under that exact string keeps its own checks. A real Host(cwd=root) is named by the repo of that checkout, one REST read as host_default_branch."""
+    if hosts is not None:
+        if root not in hosts:
+            raise Stop(f"no host is given for the root {root}")
+        h = hosts[root]
+        load_config(root, h.base, config)
+        return h
+    h = Host(cwd=root)
+    cfg = load_config(root, h.base, config)
+    c, out = h.api("")
+    try:
+        if c:
+            raise ValueError(out)
+        h.repo = json.loads(out)["full_name"]
+    except (ValueError, KeyError, TypeError) as e:
+        raise Stop(f"the repo of the root {root} cannot be read from gh: {e}")
+    h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
+    h.refuse_pinned_mismatch()
+    return h
 
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
@@ -3270,7 +3337,7 @@ def idle_lanes(live):
     say(*entries)
     return 1 if unread else 0
 
-def main(argv, host=None, lock=None):
+def main(argv, host=None, lock=None, hosts=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
@@ -3286,6 +3353,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
@@ -3299,6 +3367,8 @@ def main(argv, host=None, lock=None):
         p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
+    if a.root and not a.reviewed:
+        p.error("--root goes with --reviewed")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
@@ -3345,6 +3415,9 @@ def main(argv, host=None, lock=None):
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
+            return 0
+        if a.root:  # every block is built before any is printed, so a failed read in any root prints nothing
+            say(*[line for r in a.root for line in reviewed_block(root_host(r, hosts, a.config))])
             return 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
