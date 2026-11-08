@@ -7626,6 +7626,15 @@ sh("push-new-branch: a lane's local branch joined into the existing integration 
 # creates a branch at another branch's tip is refused by the new-branch rule, not the force rule.
 sh("push-new-branch: a forced refspec to a new branch at another branch's tip is refused by the new-branch rule",
    VCS + " push origin +HEAD~1:refs/heads/skc-forced-new", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
+# A chain that makes its own commit: the guard reads HEAD before `switch -c` moves it, and the fresh commit is at
+# no remote tip. HEAD is not judged (coordinator ruling 14:45 CST), so the chain allows, as main allows it.
+sh("push-new-branch: a fresh commit chained after a branch switch, pushed to a new branch, allows",
+   VCS + " switch -c bar && " + VCS + " commit --allow-empty -m x && " + VCS + " push origin HEAD:refs/heads/bar",
+   "allow", cwd=PUSHSELF)
+# origin/HEAD names trunk, so trunk is the remote's default branch and its tip holds no work, as main's tip holds
+# none. PUSHTRUNK holds no origin/main, so only the default-branch read can exempt this push.
+sh("push-new-branch: a new branch at the tip of origin/HEAD, which names trunk, allows",
+   VCS + " push origin refs/remotes/origin/HEAD:refs/heads/skc-trunk-new", "allow", cwd=PUSHTRUNK)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
