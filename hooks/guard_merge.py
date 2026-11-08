@@ -1185,7 +1185,7 @@ BRIEF_IDS_REASON = (
     "`session_`. Closed quoted (straight or curly) and parenthetical spans in the gap are skipped, and a role label inside one "
     "is no label. Outside them no other role's label may sit in the gap. The text before the gap's last colon is free, a "
     "field name for one; the text after it, or all of the gap when it holds no colon, holds only digits, spaces, punctuation, "
-    "markdown and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose before an id is no role id; an id holds a digit. "
+    "markdown and the words " + ", ".join("`" + word + "`" for word in ROLE_GAP_WORDS) + ", so prose with no colon before an id is no role id; an id holds a digit. "
     "(lane rulings 2026-11-08 10:03 and 10:15 CST, decision session-tiers, a lane holds one topic)"
 )
 
