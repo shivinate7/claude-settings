@@ -708,6 +708,25 @@ class CostPinTests(unittest.TestCase):
     def test_note_empty_file_reads_clean(self):
         self.note_control("")
 
+    def test_note_thousands_separator_in_the_total_is_a_claim(self):
+        text = self.note("- a: lost 406 of 8,000 lines.\n")
+        self.assert_found([note_row(text, "lost 406 of 8,000")], counts=True)
+
+    def test_note_thousands_separator_in_the_count_is_a_claim(self):
+        text = self.note("- a: lost 1,406 of 8,000 lines.\n")
+        self.assert_found([note_row(text, "lost 1,406 of 8,000")], counts=True)
+
+    def test_note_item_step_and_ruling_ids_are_not_counts(self):
+        # An id beside `of` is an id, as in a Cost sentence: NOT_COUNTS blanks it, so no `N of M` claim forms.
+        self.note_control("- a: item 3 of 40 is open.\n"
+                          "- a: step 2 of 12 is open.\n"
+                          "- a: ruling 4 of 12 is open.\n")
+
+    def test_note_claim_after_a_span_wrapped_over_a_line_flags_its_own_line(self):
+        # The span runs over the line break and its count word is inside code. The claim after the span is on line 2.
+        text = self.note("- a: it reads `list\n  of files` and is among 266 folder cites.\n")
+        self.assert_found([note_row(text, "is among 266")], counts=True)
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
