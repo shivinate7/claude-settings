@@ -3210,8 +3210,11 @@ sh("restore: --staged alone allows in the worktree", VCS + " restore --staged f.
 #   A. A reset that names no discard flag keeps the work tree, so it allows everywhere.
 #   B. A reset with --hard, --merge or --keep keeps today's verdict, path form included: deny in the
 #      shared checkout, ask in a linked worktree, allow and noted in an agent-owned worktree.
-#   C. A work-tree discard (checkout -- ., checkout -q -- .) takes the same three verdicts. The restore
-#      and checkout HEAD forms of C are in RULING_TREE_FORMS, below the agent-owned log rows.
+#   C. A work-tree discard (checkout -- ., checkout -q -- .) takes the same three verdicts. Its restore
+#      and checkout HEAD forms each have one home per tree. restore -- <path> and checkout HEAD -- .
+#      take their shared and hand-made verdicts from RULING_TREE_FORMS, below, and their agent-owned
+#      note from AGENT_NOTED_RULING, above. restore . takes its shared and hand-made verdicts from the
+#      per-file ASK and DENY blocks, above, and its agent-owned note from AGENT_NOTED_RULING.
 # The discard and path forms name f.txt, which _build_gitmain leaves tracked and dirty in all four trees.
 # A path the fixture lacks would read as an empty subject and pass for the wrong reason. reset -q and
 # reset -- . name no file: ruling A allows them whatever the subject, so they pin the flag-free verdict.
