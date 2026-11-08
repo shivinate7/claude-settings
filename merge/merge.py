@@ -2477,7 +2477,7 @@ PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes. They run at once, afte
 PROSE_JUDGE_TIMEOUT = 300  # seconds one judge call may run: a full PROSE_JUDGE_CALL_BYTES call takes about 195 s, past MODEL_TIMEOUT. Only this judge passes it; every other invoke_model caller keeps MODEL_TIMEOUT
 PROSE_JUDGE_CALL_BYTES = 24000  # UTF-8 bytes one prose judge prompt may hold, excerpts included; the lines are packed into at most PROSE_JUDGE_MAX_CALLS calls by this budget
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
-PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the one UNKNOWN count line, in print order; the count line carries no raw error text
+PROSE_JUDGE_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the buckets of the UNKNOWN lines, in print order. The count line and the named lines (one per file per cause) carry no raw error text
 TIMED_OUT, MODEL_ERROR, NO_VERDICT, PAST_CAP, SKIPPED = PROSE_JUDGE_CAUSES
 
 def prose_judge_lines(wt, sha, base_ref, changed):
@@ -2692,7 +2692,7 @@ def prose_judge_plan(wt, sha, base_ref, names, n):
     """Under the merge lock: read the tree and build every prompt, because the worktree goes when the lock does. -> a list in report order, each
     item a finished report line or a (paths, [(path, line)], prompt) job for prose_judge_run, which calls the model once the lock is released.
     The selected lines of all files are packed into at most PROSE_JUDGE_MAX_CALLS jobs (prose_judge_pack). A selection that failed is an UNKNOWN
-    line here. The lines that fit no job are one (PAST_CAP, count) item."""
+    line here. The lines that fit no job are one (PAST_CAP, [(path, line)]) item."""
     try:
         if names is None:
             return [f"merge: #{n} prose judge UNKNOWN: the changed files could not be read, so no line was judged."]
@@ -2701,7 +2701,8 @@ def prose_judge_plan(wt, sha, base_ref, names, n):
         picked = prose_judge_lines(wt, sha, base_ref, {x for x in names.split("\0") if x})
         plan, past = prose_judge_pack(wt, picked)
         if past:
-            plan.append((PAST_CAP, past))
+            packed = {row for job in plan for row in job[1]}  # prose_judge_pack returns only the count of the lines past the cap, so the lines are the selected ones no job took
+            plan.append((PAST_CAP, [(path, number) for path, by_line in sorted(picked.items()) for number in sorted(by_line) if (path, number) not in packed]))
         return plan
     except Exception as e:  # selection failed: unknown, and the merge has landed
         return [f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."]
@@ -2751,10 +2752,15 @@ def prose_judge_calls(decision_watch, prompts):
 def prose_judge_run(plan, n):
     """Report-only (outcomes-mechanize-rules), after the lock is released: one decision_watch.invoke_model call per job in `plan`, all at once (prose_judge_calls), looked up
     at call time. A verdict maps to its line by (path, line). -> the report lines: one per line the model calls stale or unbacked, at most PROSE_JUDGE_MAX_LINES, then one count line for
-    the rest; then one UNKNOWN count line for every line not judged, by cause (PROSE_JUDGE_CAUSES; it carries no raw error text). A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
+    the rest; then, for each line not judged, one named line per file per cause (path and line numbers, causes in PROSE_JUDGE_CAUSES order; they do not count against that cap), then one UNKNOWN count line by cause. Neither carries raw error text. A plan-level failure line names its exception type and message. Nothing here refuses a merge or writes a file."""
     findings = []
     plan_failures = []  # a plan-level UNKNOWN line stands alone, whole
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
+    unread = {c: {} for c in PROSE_JUDGE_CAUSES}  # cause -> path -> [line numbers]
+
+    def lose(cause, path, number):
+        counts[cause] += 1
+        unread[cause].setdefault(path, []).append(number)
     try:
         import decision_watch
         answers = prose_judge_calls(decision_watch, [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3])
@@ -2763,23 +2769,27 @@ def prose_judge_run(plan, n):
                 plan_failures.append(item)
                 continue
             if len(item) == 2:
-                counts[item[0]] += item[1]
+                for path, number in item[1]:
+                    lose(item[0], path, number)
                 continue
             paths, rows, prompt = item
             answer = next(answers)
             if answer is None:  # a model that cannot run is unknown, never a refusal
-                counts[MODEL_ERROR] += len(rows)
+                for path, number in rows:
+                    lose(MODEL_ERROR, path, number)
                 continue
             verdict, error = answer
             entries = readable_verdicts(verdict, keyed=True) if verdict is not None else None
             if entries is None:
-                counts[prose_judge_cause(verdict, error)] += len(rows)
+                cause = prose_judge_cause(verdict, error)
+                for path, number in rows:
+                    lose(cause, path, number)
                 continue
             said = {(e["path"], e["line"]): e for e in entries}
             for path, number in rows:
                 e = said.get((path, number))
                 if e is None:
-                    counts[SKIPPED] += 1
+                    lose(SKIPPED, path, number)
                 elif e["verdict"] != "holds":
                     findings.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
     except Exception as e:
@@ -2788,6 +2798,9 @@ def prose_judge_run(plan, n):
     if len(report) > PROSE_JUDGE_MAX_LINES:
         report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(findings) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
     report += plan_failures
+    for cause in PROSE_JUDGE_CAUSES:
+        for path in sorted(unread[cause]):
+            report.append(f"merge: #{n} prose judge UNKNOWN ({cause}): {path}:{','.join(str(x) for x in sorted(unread[cause][path]))}")
     total = sum(counts.values())
     if total:
         report.append(f"merge: #{n} prose judge UNKNOWN: {total} lines not judged ({', '.join(f'{counts[c]} {c}' for c in PROSE_JUDGE_CAUSES if counts[c])})")

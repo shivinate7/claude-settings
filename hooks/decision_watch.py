@@ -111,6 +111,8 @@ from _transcript import last_human_epoch, head_moved_since, is_last_human  # noq
 # invoke_model, which the caller reports as UNKNOWN, never ALLOW.
 MODEL = "haiku"
 MODEL_TIMEOUT = 120
+# `--tools ""` leaves the model asking for tools in its reply text, so the JSON never comes; this system-prompt note stops that where a note in the prompt text would skew the verdicts.
+NO_TOOLS_NOTE = "You have no tools and cannot read files. Never call a tool. Reply with the JSON only."
 GIT_TIMEOUT = 10
 MAX_DIFFED_FILES = 8
 
@@ -703,6 +705,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
                 "--tools", "",
                 "--safe-mode",
                 "--permission-mode", "plan",
+                "--append-system-prompt", NO_TOOLS_NOTE,
             ],
             input=prompt.encode("utf-8", "replace"), capture_output=True,  # bytes: text mode turns LF into CRLF on Windows
             timeout=timeout, cwd=root, env=env,
