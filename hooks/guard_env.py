@@ -867,7 +867,7 @@ def _first_positional(words, i: int, flags) -> int:
 
 
 def _shell_word(word: str) -> str:
-    """The text the shell hands a program for one word (`sh -c <word>`, `ruby -e <word>`). Pieces
+    r"""The text the shell hands a program for one word (`sh -c <word>`, `ruby -e <word>`). Pieces
     quoted apart join: `'it'"'"'s'` and `'it'\''s'` are both `it's`. In single quotes every
     character is text. In double quotes the shell drops the backslash of `\$`, `` \` ``, `\"` and
     `\\`, and a backslash and newline. Out of quotes a backslash escapes the next character. A quote
