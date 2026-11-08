@@ -10600,8 +10600,11 @@ rf_refuse("a finished background reviewer, named by its spawn name, is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
 rf_refuse("a finished foreground reviewer, named by its spawn name, is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("fg-reviewer-finished"))
-rf_refuse("a finished design-reviewer, named by its spawn name, is refused",
-          {"to": RF_DESIGN, "message": RF_MSG}, rf_path("bg-design-reviewer-finished"))
+# Owner ruling 409 a (2026-11-08 06:11 CST): a finished agent is resumed by a fresh agent of the same role, so a
+# finished design-reviewer's refusal names a fresh design-reviewer, not a fresh reviewer.
+rf_refuse("a finished design-reviewer, named by its spawn name, is refused, and the reason says fresh design-reviewer",
+          {"to": RF_DESIGN, "message": RF_MSG}, rf_path("bg-design-reviewer-finished"),
+          carries=("fresh design-reviewer", "prior report"))
 rf_refuse("a finished reviewer far up a long transcript is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("long-reviewer-finished"))
 rf_refuse("the latest spawn with the name wins: an older running builder, then a newer finished reviewer, is refused",
