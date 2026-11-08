@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzEteiJ3oyJR8P7PPn",
   "why": "Coordinator reading, process-only, 23:15 CST Nov 7: a fix check after a main merge judges the \"Guard or check\" question on main...head plus the conflict edits, not old..new (agents/reviewer.md line 73). The old reading held #1419 and hits every guard-no PR in lint sets b to d.",
-  "note": "Lane batch63-lint-a writes it into agents/reviewer.md as its own PR. A queue fix under the item 384 hold. Related: step merge-guard-flag-from-paths. Slug from the coordinator; title by triage.",
-  "updatedAt": "2026-11-07T23:17:00-06:00"
+  "note": "Lane batch63-lint-a writes it into agents/reviewer.md as its own PR. A queue fix under the item 384 hold. Related: step merge-guard-flag-from-paths. Slug from the coordinator; title by triage. 23:20 CST: PR #1787 (head 8396a504b) writes the reading into agents/reviewer.md and decision hold-unsafe-after-round-3. Round 1 running. Until it lands, this step carries the reading.",
+  "updatedAt": "2026-11-07T23:20:00-06:00"
 }
