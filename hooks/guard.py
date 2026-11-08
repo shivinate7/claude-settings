@@ -3453,8 +3453,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
-    # 3b'. Lane lint in the foreground. Incident: lane notes-fix-large-1, 2026-11-08 06:57 CST, two foreground
-    # `merge --lane-lint` runs were cut at the cloud's command limit with no verdict, and the lane lost both runs.
+    # 3b'. Lane lint in the foreground. Incident: lane notes-fix-large-1, two foreground `merge --lane-lint` runs
+    # were cut at the cloud's command limit with no verdict, and the lane lost both runs.
     # Known false alarm: a short lint, such as a docs-only lane's, is refused in the foreground too; the remedy
     # (run_in_background) costs one notice wait for it.
     matched = lane_lint_hit(split_segments(stripped), background)

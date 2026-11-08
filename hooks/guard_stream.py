@@ -254,7 +254,8 @@ LANE_LINT_MERGE_WORDS = ("merge", "merge.cmd", "merge.exe", "merge.py")
 LANE_LINT_FLAG = "--lane-lint"
 LANE_LINT_REASON = (
     "merge --lane-lint outlasts a foreground call, so the call is cut and its verdict never arrives. "
-    "Remedy: run the same command with run_in_background, keep stderr visible, and read the verdict from the completion notice."
+    "Remedy: run the same command with run_in_background, keep stderr visible, and read the verdict from the completion notice "
+    "(decision lanes-run-no-full-ci-job, a lane runs only the suites its change touches, and that run outlasts a foreground call)."
 )
 
 
