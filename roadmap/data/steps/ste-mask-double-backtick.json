@@ -1,11 +1,11 @@
 {
   "title": "The STE lint masks a double-backtick code span as one span",
   "why": "lint/ste_lint.py MASK_PATTERNS' inline-code entry (a run of non-backticks between single backticks) mis-pairs a double-backtick span, so the rest of the paragraph lints unmasked and some long sentences hide from STE001. Seen in docs/decisions/red-run-trailer-on-test-commits.md item 1a on #1745: a 32-word sentence went unreported. CI's ste-lint shares the pattern (lane notes-fix-large-3, 04:41 CST Nov 8).",
-  "note": "Fix: the inline-code mask pairs a run of N backticks with the next run of exactly N, as CommonMark does. Red case first: a paragraph with a double-backtick span and a sentence over the limit after it is reported. Control: a single-backtick span masks as today. Queue fix (owner 13:20 CST Nov 7). Filed 04:43 CST Nov 8; no lane yet, the coordinator assigns one.",
+  "note": "Fix: the inline-code mask pairs a run of N backticks with the next run of exactly N, as CommonMark does. Red case first: a paragraph with a double-backtick span and a sentence over the limit after it is reported. Control: a single-backtick span masks as today. Queue fix (owner 13:20 CST Nov 7). Filed 04:43 CST Nov 8; Lane notes-fix-large-3, which found it, builds it (coordinator, 04:42 CST Nov 8; owner item 386). Fix the mask in lint/ste_lint.py and in CI's ste-lint copy, from one home if the two share the pattern.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 605,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T04:42:00-06:00"
+  "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
+  "updatedAt": "2026-11-08T04:43:00-06:00"
 }
