@@ -84,9 +84,12 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             STALE004 only. A line is split into sentences with SENTENCE_END (code spans and comments blanked; an HTML
             comment mark inside a code span hides nothing), and a cite of a path the range removed or renamed is
             STALE001's. A name is a backticked identifier (`name`, `name()`, a call `name(args)` with balanced
-            parentheses; a dotted `A.b` counts each part) or a bare word holding an underscore, and counts only when the
-            cited .py at head binds it anywhere (`AnchorFacts`, read with `ast`: a def or class at any depth, or a Name
-            store). In one sentence a name is PLACED when it holds at some anchored .py cite of that sentence (a def or
+            parentheses) or a bare word holding an underscore. It is judged only when it looks like code: it holds an
+            underscore, or an uppercase letter after its first, or is a call, so `main` and `Holder` are not. A dotted
+            `a.b.c` gives its last part; a file name (`CLAUDE.md`) gives none. It counts only when the cited .py at head
+            binds it (`AnchorFacts`, read with `ast`: a def or class at any depth, or a module-level assignment,
+            spanning its whole statement; a local is no binding).
+            In one sentence a name is PLACED when it holds at some anchored .py cite of that sentence (a def or
             class span of it overlaps N-ANCHOR_SLACK..M+ANCHOR_SLACK, or a line there holds it as a whole word), each cite
             judged against its own file. A cite fails when (a) some name of its sentence is bound by its file, (b) no
             such name holds at this cite, and (c) at least one such name is placed at no cite of the sentence. The
@@ -1392,12 +1395,14 @@ def dead_name_cites(rng):
 
 ANCHOR_SLACK = 3  # STALE011: lines either side of a cited range that still count as the range
 NAME_SPAN = re.compile(r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(\(.*\))?\Z", re.S)  # a backticked `name`, `A.b`, or a call `name(args)`
+DATA_FILE = re.compile(r"\.(?:md|json|ya?ml|toml|txt|html?|css|csv|ini|cfg|lock)\Z", re.I)  # a file name that is no code
 BARE_NAME = re.compile(r"(?<![\w./@+~:-])(?=\w*_)[A-Za-z_]\w*(?![\w/@+~-]|\.\w)")  # a bare word holding an underscore
 
 
 class AnchorFacts:
-    """What STALE011 reads of one .py file: its lines and, for each name a def, a class or a Name store binds anywhere
-    (any depth, `ast.walk`), the (first, last) line spans of those bindings. A Name store is its own line."""
+    """What STALE011 reads of one .py file: its lines and, for each name a def or class binds at any depth or a
+    module-level assignment binds, the (first, last) line spans of those bindings. An assignment spans its whole
+    statement. A local variable binds nothing."""
 
     def __init__(self, text, tree):
         self.lines = text.split("\n")
@@ -1407,8 +1412,18 @@ class AnchorFacts:
         for node in ast.walk(tree):
             if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
                 self.spans.setdefault(node.name, []).append((node.lineno, node.end_lineno))
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                self.spans.setdefault(node.id, []).append((node.lineno, node.lineno))
+        self.bind_module_assignments(tree)
+
+    def bind_module_assignments(self, scope):
+        """Record each Assign, AnnAssign and AugAssign of the module level: under an if, try, for, while or with, but
+        never inside a def or class."""
+        for node in ast.iter_child_nodes(scope):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for name in {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}:
+                    self.spans.setdefault(name, []).append((node.lineno, node.end_lineno))
+            elif not isinstance(node, FUNCTIONS + (ast.ClassDef, ast.Lambda)):
+                self.bind_module_assignments(node)
 
     def holds(self, name, first, last):
         """True when a binding span of `name` overlaps first..last, or a line of it (clipped to the file) holds `name`
@@ -1447,11 +1462,17 @@ def line_anchors(line, resolve):
     return found
 
 
+def looks_like_code(name, call):
+    """True for a name written as a call, or holding an underscore, or an uppercase letter after its first character."""
+    return call or "_" in name or re.search("[A-Z]", name[1:]) is not None
+
+
 def call_name(body):
-    """The dotted name a backticked body offers, or None. `name`, `A.b`, `name()` and a call `name(args)` (parentheses
-    balanced, the first one closing at the end of the body) give their name; a source file name gives none."""
+    """The name a backticked body offers, or None. `name`, `name()`, a call `name(args)` (parentheses balanced, the
+    first one closing at the end of the body) and a dotted `a.b.c` (its last part only) are read; a file name with a
+    code or non-code extension gives none, and so does a plain word that is no call."""
     match = NAME_SPAN.match(body)
-    if match is None or SOURCE_SPAN.match(match.group(1)):
+    if match is None or SOURCE_SPAN.match(match.group(1)) or DATA_FILE.search(match.group(1)):
         return None
     args = match.group(2) or ""
     depth = 0
@@ -1459,18 +1480,19 @@ def call_name(body):
         depth += (char == "(") - (char == ")")
         if depth < 0 or (depth == 0 and position < len(args) - 1):
             return None
-    return match.group(1) if depth == 0 else None
+    name = match.group(1).rsplit(".", 1)[-1]
+    return name if depth == 0 and looks_like_code(name, bool(args)) else None
 
 
 def anchor_names(sentence, offset):
-    """[(start, end, name)] of each name a sentence offers, offsets in the line: a backticked identifier (`name`,
-    `name(args)`, a dotted `A.b` gives each part) and a bare word holding an underscore outside a code span."""
+    """[(start, end, name)] of each name a sentence offers, offsets in the line: a backticked name (`call_name`) and a
+    bare word holding an underscore outside a code span."""
     found = []
     for span in CODE_SPAN.finditer(sentence):
         ticks = len(span.group(1))
         name = call_name(sentence[span.start() + ticks:span.end() - ticks].strip())
         if name is not None:
-            found += [(offset + span.start(), offset + span.end(), part) for part in name.split(".")]
+            found.append((offset + span.start(), offset + span.end(), name))
     masked = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), sentence)
     found += [(offset + m.start(), offset + m.end(), m.group(0)) for m in BARE_NAME.finditer(masked)]
     return found
