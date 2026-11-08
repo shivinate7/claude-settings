@@ -603,10 +603,12 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
 
     Returns a row: file, status ("OK" or "UNKNOWN"), reason, made, killed, crashed, survived, rate
     (killed / made, None when UNKNOWN), killers {suite: mutants it killed}, silent [usable suites that
-    killed none], unusable {suite: why}. See the report-mode comment above for what counts as a kill.
+    killed none], unusable {suite: why}, unloaded [usable suites that stay green on a wholly broken copy
+    of the target: they never loaded it]. See the report-mode comment above for what counts as a kill.
     """
     row = {"file": target, "status": "UNKNOWN", "reason": "", "made": 0, "killed": 0, "crashed": 0,
-           "survived": 0, "rate": None, "killers": {}, "silent": [], "unusable": {}}
+           "survived": 0, "rate": None, "killers": {}, "silent": [], "unusable": {},
+           "unloaded": []}
     path = os.path.join(root, target)
     if not os.path.isfile(path):
         row["reason"] = "target file is missing"
@@ -649,6 +651,17 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
             row["reason"] = "no suite is green on the clean source"
             return row
         bound = timeout or max(60.0, 4 * slowest)
+        # A copy that raises on import: a suite that loads the target cannot stay green on it.
+        broken = os.path.join(work, "broken")
+        shutil.copytree(clean, broken, symlinks=True)
+        _write(os.path.join(broken, target), 'raise RuntimeError("wholly broken copy of the target")\n')
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            broken_kinds = list(pool.map(lambda rel: run_suite_file(broken, rel, bound)[0], usable))
+        unloaded = [rel for rel, kind in zip(usable, broken_kinds) if kind == "pass"]
+        row["unloaded"] = unloaded
+        if len(unloaded) == len(usable):  # no suite is shown to load the file, so a rate would score suites that never ran it
+            row["reason"] = "every usable suite stays green on a wholly broken copy of the file"
+            return row
 
         def one(item):
             number, (_label, text) = item
@@ -680,6 +693,7 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
     row["made"] = len(mutants)
     row["rate"] = row["killed"] / row["made"]
     row["silent"] = [rel for rel in usable if row["killers"][rel] == 0]
+    row["unloaded"] = unloaded
     row["status"] = "OK"
     return row
 
@@ -698,6 +712,8 @@ def format_report(rows, gold=None) -> str:
     for row in rows:
         for rel, why in sorted(row["unusable"].items()):
             lines.append("  unusable for %s: %s (%s)" % (row["file"], rel, why))
+        for rel in row.get("unloaded", []):
+            lines.append("  unloaded for %s: %s (green on a wholly broken copy of the file)" % (row["file"], rel))
     if gold is not None:
         lines.append("gold standard: %s" % gold)
     return "\n".join(lines)
@@ -1249,6 +1265,11 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         row["notes"].append("the budget cut %d of %d mutants: not_run" % (cut, len(mutants)))
     if row["not_run"] == row["made"]:
         row["reason"] = "no mutant ran (%d not run)" % row["not_run"]
+        return row
+    if parse_errors:
+        # a rate over the files that parsed would read as the whole pull request's
+        row["reason"] = "%d file(s) did not parse and were skipped (%s): no rate" % (
+            len(parse_errors), ", ".join(sorted(parse_errors)))
         return row
     row["status"] = "OK"
     return row
