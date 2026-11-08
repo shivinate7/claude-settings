@@ -120,6 +120,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  review-record-after-round
+                       deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `builder` or
+                       `test-author`, or a send_message, when the transcript's last Agent or Task spawn of a `reviewer`
+                       or `design-reviewer` has no later call that posted a review record (an add_issue_comment
+                       whose body, or a Bash command, holds the merge tool's REVIEW_MARKER, read through
+                       `merge_module`). No reviewer spawn, and a missing or unreadable transcript, allow. A merge tool
+                       that cannot load allows and is noted as `review-record-unread`. The reason names the
+                       merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
+                       call, no subprocess, no network. An override lifts it. (pr-review-record)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -397,7 +406,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_record_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -5247,6 +5256,14 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A builder, test-author or handoff while the last reviewer spawn has no review record (rule review-record-after-round).
+    record_reason, record_matched, record_unknown = review_record_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+    if record_unknown:
+        record(tool, "noted", "review-record-unread", tool)
+    if record_reason:
+        refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

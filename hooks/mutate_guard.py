@@ -2807,6 +2807,68 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # ---- review-record-after-round (decision pr-review-record): one mutant per arm. The anchors sit in
+    # hooks/guard_merge.py and hooks/guard.py.
+    ("review-record-after-round: a design-reviewer spawn is no round",
+     'RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")',
+     'RECORD_REVIEWER_ROLES = ("reviewer",)',
+     "guard", "a design-reviewer spawn counts like a reviewer"),
+    ("review-record-after-round: a test-author spawn is not judged",
+     'RECORD_TRIGGER_ROLES = ("builder", "test-author")',
+     'RECORD_TRIGGER_ROLES = ("builder",)',
+     "guard", "a test-author spawn after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a send_message handoff is not judged",
+     '        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS',
+     '        judged = (tool in RECORD_SPAWN_TOOLS',
+     "guard", "a send_message handoff after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a Task spawn is neither a round nor a trigger",
+     'RECORD_SPAWN_TOOLS = ("Agent", "Task")',
+     'RECORD_SPAWN_TOOLS = ("Agent",)',
+     "guard", "a reviewer spawned by Task, then a builder spawned by Task"),
+    ("review-record-after-round: the marker is a copy, not the merge tool's",
+     '        marker = merge_module().REVIEW_MARKER',
+     '        marker = "<!-- not-the-marker -->"',
+     "guard", "a builder spawn after a reviewer spawn and a comment with the record marker is allowed"),
+    ("review-record-after-round: a Bash call is never a post",
+     '    return name == "Bash" and isinstance(command, str) and _bash_posts_record(command, marker)',
+     '    return False',
+     "guard", "a gh api post whose body comes from a file after a reviewer spawn lets a builder spawn through"),
+    ("review-record-after-round: the built-in SendMessage is not judged",
+     '        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS',
+     '        judged = tool == BRIEF_TOOL or (tool in RECORD_SPAWN_TOOLS',
+     "guard", "a built-in SendMessage handoff after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a call that only names the marker is a post",
+     '    for segment in split_segments(command):\n        args = gh_call_of(segment)\n        if args and _gh_posts_record(args, marker):',
+     '    for segment in split_segments(command):\n        args = gh_call_of(segment)\n        if marker in segment or (args and _gh_posts_record(args, marker)):',
+     "guard", "a Bash read that names the record marker after a reviewer spawn is no record"),
+    ("review-record-after-round: an inline body without the marker is a post",
+     'any(marker in body for body in _flag_values(args, _GH_BODY_FLAGS))',
+     'bool(_flag_values(args, _GH_BODY_FLAGS))',
+     "guard", "a gh pr comment with an inline body that lacks the record marker is no record"),
+    ("review-record-after-round: a reviewer spawn that errored gates",
+     ' and use.get("id") not in failed)',
+     ')',
+     "guard", "a reviewer spawn whose result is an error does not gate"),
+    ("review-record-after-round: the design-reviewer note is dropped",
+     '    if uses[last]["input"].get("subagent_type") == "design-reviewer":',
+     '    if False:',
+     "guard", "the refusal names the design-reviewer line"),
+    ("review-record-after-round: a record before the reviewer spawn counts",
+     '    if any(_posts_record(use, marker) for use in uses[last + 1:]):',
+     '    if any(_posts_record(use, marker) for use in uses):',
+     "guard", "a record posted before the last reviewer spawn is stale"),
+    ("review-record-after-round: the first reviewer spawn decides, not the last",
+     '    last = max((i for i, use in enumerate(uses)',
+     '    last = min((i for i, use in enumerate(uses)',
+     "guard", "round two: the round-one record does not cover a second reviewer spawn"),
+    ("review-record-after-round: an agent's own call is judged",
+     '    if agent or not isinstance(tool_input, dict) or not transcript:',
+     '    if not isinstance(tool_input, dict) or not transcript:',
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
+    ("review-record-after-round: the caller never passes the agent_id",
+     'trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))',
+     'trust_transcript if isinstance(trust_transcript, str) else "", False)',
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
 ]
 
 
@@ -3520,10 +3582,10 @@ def run_mutant(sources, work: str, entry):
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
             shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), and guard_merge loads merge/merge.py (the
+        # home of the review record marker). The mutant's config folder holds no pointer to a clone, so this
+        # copy lays out lint/, merge/ and the alarm events beside hooks/.
+        mutate_shared.guard_beside(root)
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)

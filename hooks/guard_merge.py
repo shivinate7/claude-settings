@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -1140,6 +1141,134 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+# ---- the review record after a round (rule review-record-after-round, decision pr-review-record)
+RECORD_SPAWN_TOOLS = ("Agent", "Task")
+RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these is a round
+RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
+RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
+RECORD_REASON = (
+    "review-record-after-round: the last reviewer spawn in this session has no review record after it, so the "
+    "round is not on the pull request yet. Run `merge <pr> --review-record --head <reviewed sha>`, post the body "
+    "it prints with the GitHub comment tool (add_issue_comment), then retry. "
+    "(decision pr-review-record, a lane posts the record after each round)"
+)
+RECORD_DESIGN_NOTE = (
+    " The last reviewer spawn was a design-reviewer: add its line, `Round <n>: design-reviewer, <model>, <verdict>`, "
+    "to that round's record, with `merge <pr> --review-record --head <sha> --round <n>:design-reviewer:<model>:<verdict>`."
+)
+RECORD_DESIGN_REASON = RECORD_REASON + RECORD_DESIGN_NOTE
+
+
+def _transcript_reader():
+    """lint/_transcript.py, the one home of the transcript readers, found beside this file's folder."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript
+
+
+def _is_spawn_of(use, roles) -> bool:
+    given = use.get("input")
+    return use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict) and given.get("subagent_type") in roles
+
+
+_COMMENT_PATH = re.compile(r"(?:^|/)(?:issues|pulls)/[^/\s]+/comments/?$")
+_GH_BODY_FLAGS = ("-b", "--body")
+_GH_FILE_FLAGS = ("-F", "--body-file")
+_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+
+
+def _flag_values(args, flags):
+    """The values given for `flags` in `args`: `-b v`, `--body v`, `--body=v`, and a glued `-bv` of a short flag."""
+    found = []
+    for i, arg in enumerate(args):
+        for flag in flags:
+            if arg == flag and i + 1 < len(args):
+                found.append(args[i + 1])
+            elif flag.startswith("--") and arg.startswith(flag + "="):
+                found.append(arg[len(flag) + 1:])
+            elif not flag.startswith("--") and arg.startswith(flag) and len(arg) > len(flag):
+                found.append(arg[len(flag):])
+    return found
+
+
+def _gh_posts_record(args, marker) -> bool:
+    """True when the gh call (the tokens after `gh`) posts a PR or issue comment that holds the marker. An inline
+    body must carry the marker. A body read from a file or stdin counts on its shape, because the guard cannot read it."""
+    if args[:2] in (["pr", "comment"], ["issue", "comment"]):
+        return bool(_flag_values(args, _GH_FILE_FLAGS)) or any(marker in body for body in _flag_values(args, _GH_BODY_FLAGS))
+    if args[:1] != ["api"] or not any(_COMMENT_PATH.search(arg) for arg in args[1:]):
+        return False
+    if "--input" in args or any(a.startswith("--input=") for a in args):
+        return True   # the whole request body comes from a file
+    for field in _flag_values(args, _API_FIELD_FLAGS):
+        name, _, value = field.partition("=")
+        if name == "body":
+            return value.startswith("@") or marker in value
+    return False
+
+
+def _bash_posts_record(command, marker) -> bool:
+    """True when one segment of the command is a gh call that posts a review record comment. A segment that only
+    names the marker (a grep, an echo) is no post. Segments come from the guard's own quote-aware splitter."""
+    for segment in split_segments(command):
+        args = gh_call_of(segment)
+        if args and _gh_posts_record(args, marker):
+            return True
+    return False
+
+
+def _posts_record(use, marker) -> bool:
+    given = use.get("input")
+    if not isinstance(given, dict):
+        return False
+    name = use.get("name")
+    if name == RECORD_COMMENT_TOOL:
+        body = given.get("body")
+        return isinstance(body, str) and marker in body
+    command = given.get("command")
+    return name == "Bash" and isinstance(command, str) and _bash_posts_record(command, marker)
+
+
+def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+    """(reason, matched, unknown): the refusal when this builder or test-author spawn, or this send_message (the
+    remote tool or the built-in SendMessage), comes after the session's last reviewer spawn and no later call posted
+    a review record, else ("", "", unknown). A reviewer spawn whose result is an error never ran and gates nothing.
+    `unknown` is true when the merge tool (the home of the record marker) could not be loaded: the call is
+    allowed and the caller notes it. A call with an agent_id is an agent's and is not judged. A missing or
+    unreadable transcript allows. Cost: one transcript read per judged call, no subprocess, no network; the merge
+    tool is loaded once, and only when a reviewer spawn is found."""
+    if agent or not isinstance(tool_input, dict) or not transcript:
+        return "", "", False
+    try:
+        reader = _transcript_reader()
+        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS and tool_input.get("subagent_type") in RECORD_TRIGGER_ROLES)
+        if not judged:
+            return "", "", False
+        records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
+        failed = {res.get("tool_use_id") for rec in records for res in reader.tool_results(rec) if res.get("is_error") is True}
+        uses = [use for rec in records for use in reader.tool_uses(rec)]
+    except Exception:
+        return "", "", False
+    last = max((i for i, use in enumerate(uses) if _is_spawn_of(use, RECORD_REVIEWER_ROLES) and use.get("id") not in failed),
+               default=None)
+    if last is None:
+        return "", "", False
+    try:
+        marker = merge_module().REVIEW_MARKER
+    except Exception:
+        marker = None
+    if not isinstance(marker, str) or not marker:
+        return "", "", True
+    if any(_posts_record(use, marker) for use in uses[last + 1:]):
+        return "", "", False
+    matched = "%s after a reviewer spawn with no review record" % tool
+    if uses[last]["input"].get("subagent_type") == "design-reviewer":
+        return RECORD_DESIGN_REASON, matched, False
+    return RECORD_REASON, matched, False
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
