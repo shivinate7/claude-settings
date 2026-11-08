@@ -1,0 +1,11 @@
+{
+  "title": "A write to a handoff file that drops a section the precompact prompt requires is refused or asks",
+  "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 15:26 CST Nov 8, its own mistake: at 15:25 CST a python slice edit on its handoff cut off everything after \"## Where things stand\" (Work in flight, Next steps, Files and commands): the regex looked for a next \"- #\" line and none came. It caught it at once and rewrote the handoff from context. Today nothing checks the sections until compaction. Red case: a write that removes a required section is refused or asks.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 827,
+  "updatedAt": "2026-11-08T15:28:00-06:00"
+}
