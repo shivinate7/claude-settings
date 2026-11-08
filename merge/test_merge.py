@@ -9598,6 +9598,20 @@ class ClockedReadsWaitHost(FakeReadsWaitHost):
         self.clock[0] += s
         assert self.clock[0] < 3600, "the wait never reached its deadline"  # a wait that never ends fails here, not hangs
 
+class ProtectionReadWait(FakeReadsWaitHost):
+    """The wait's branch protection read answers `reply` (gh's code and output), so the real required_names and protection_names run
+    in the wait. Outside the wait the fake answers. `required` is protection mode, the default of a real Host, so the names are a gh read."""
+    def __init__(self, fake, reply):
+        super().__init__(fake, ["checks"], {"checks": [("pass", "")]})
+        self.required, self.reply = "protection", reply
+
+    def required_names(self):
+        return merge.Host.required_names(self) if self.in_wait else list(self.required_list)
+
+    def gh(self, args, cwd=None):
+        assert "protection" in " ".join(args), f"a gh read other than the protection read ran: {args}"  # the only gh read the first wait makes
+        return self.reply
+
 class ConfirmWaitCites(RecordsEnv):
     """The same cites through confirm: its first wait wraps a refusal as a red head. A head that moves during that wait is refused with
     its own cite and no failing-CI cite; a read that fails in that wait carries the read cite (decision no-merge-during-batch-ci).
@@ -9648,6 +9662,30 @@ class ConfirmWaitCites(RecordsEnv):
         self.assertIn("a read in the checks wait failed", out)  # control: the failed read in the checks wait is the refusal reached
         cites = out.count("no-merge-during-batch-ci")
         self.assertEqual(cites, 1, f"a failed read in the checks wait prints the read cite {cites} times: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_protection_read_that_fails_in_the_first_wait_cites_its_own_decision_once(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the first wait reads the protection before any push
+        host = ProtectionReadWait(self.host, (1, "gh: Must have admin rights to Repository. (HTTP 403)"))
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the head's own checks are not green", out)  # the scope: the refusal came out of the first wait
+        self.assertIn("cannot read the required checks of main", out)  # control: the protection read is the one that fails
+        cites = out.count("main-branch-protection")
+        self.assertEqual(cites, 1, f"a failed protection read in the first wait prints its decision cite {cites} times: {out}")
+        self.assertNotIn("git-never-merge-failing-ci", out, f"a failed protection read in the first wait cites the failing-CI rule: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_protection_404_in_the_first_wait_cites_its_own_decision_once(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the first wait reads the protection before any push
+        host = ProtectionReadWait(self.host, (1, "gh: Not Found (HTTP 404)"))  # a base with no branch protection names no required checks
+        rc, out = self.run_merge("7", "--confirm", host=host)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("the head's own checks are not green", out)  # the scope: the refusal came out of the first wait
+        self.assertIn("has no branch protection", out)  # control: the 404 is the refusal reached
+        cites = out.count("no-merge-during-batch-ci")
+        self.assertEqual(cites, 1, f"a protection 404 in the first wait prints its decision cite {cites} times: {out}")
+        self.assertNotIn("git-never-merge-failing-ci", out, f"a protection 404 in the first wait cites the failing-CI rule: {out}")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
 class PagesReadCite(unittest.TestCase):
