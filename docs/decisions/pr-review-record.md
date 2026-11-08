@@ -48,7 +48,7 @@ CI: read live by merge --reviewed
 - A done record counts only with a lane-lint PASS comment by the repo's owner at the live head. Without one `--reviewed` prints `no lint`, `lint fail` or `lint unknown` for the PR and names `merge --lane-lint <pr>` (record `lanes-run-no-full-ci-job`).
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run. A draft open over 12 hours whose newest record is missing, stale (as clean merges of main leave it), bad or for another PR
-  prints `send back: #N session_ID (reason)` instead, and the batch runner sends each back to its lane session. No new gh call.
+  prints `send back: #N session_ID (reason)` instead, and the batch runner sends each back to its lane session. A `no session` line goes to the coordinator, since no lane can receive it. No new gh call.
 - A body is not a record when the marker is missing, a field is malformed or out of place, or round numbers skip. Nor is it one when a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
 - The newest record for a head counts. A record for an old head is stale, unless clean merges of main keep it (The review a changed head owes).
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current. A clean merge of main is the push that keeps them.
