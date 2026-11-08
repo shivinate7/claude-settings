@@ -85,8 +85,7 @@ lists each open background shell and background agent that has been quiet longer
 For a shell, the signal is its output file, and each log its
 command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
-the shell or tell the owner. It repeats at every Stop while a job stays quiet. No dedupe exists yet (open
-debt `stall-message-repeats-every-stop`).
+the shell or tell the owner. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
 
 If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
 worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
@@ -114,22 +113,25 @@ parsing closes it. Its transcript is `<dir of the session file>/<file stem>/suba
 built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
 the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
 (`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
-A transcript found in neither place is listed as unknown, once. An agent is not listed while its last
-tool_use has no tool_result: that is one long call, not a stall. The check reads that from the end of the
+A transcript found in neither place is listed as unknown, once. An agent is not listed while any tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
 record. An empty transcript, or one that ends in text, is listed when quiet. A transcript that cannot be
 read is listed.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
 transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
-Limits: a session that is idle with no Stop sees nothing until its next Stop. An agent that SendMessage
-resumes after its completed notice reads as closed, so it is not listed.
+Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
+notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
+stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
+an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
+age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+(559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
 
-- Age: the default is 300 seconds, a builder's choice, not measured. `STALL_WATCH_QUIET` sets another
+- Age: the default is 300 seconds, a builder's choice, checked only by the gap measure in the limits above. `STALL_WATCH_QUIET` sets another
   number of seconds.
 - A job counts as finished when the transcript holds a completion notice with status completed, failed,
   killed or stopped (as a user record, or as an attachment record of type queued_command), or a
