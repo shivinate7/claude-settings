@@ -10107,6 +10107,11 @@ PFR_LINES = {
                              + pfr_call("toolu_rev2", pfr_report(pfr_verdict("PASS", 2), PFR_FINDING))
                              + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL"),
                                                                 (2, "reviewer", PFR_MODEL, "PASS")])),
+    "fail-after-recorded-rounds": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_post("toolu_c1", PFR_FAIL_RECORD)
+                                  + pfr_call("toolu_rev2", pfr_report(pfr_verdict("PASS", 2), PFR_FINDING))
+                                  + pfr_post("toolu_c2", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL"),
+                                                                      (2, "reviewer", PFR_MODEL, "PASS")]))
+                                  + pfr_call("toolu_rev3", pfr_report(pfr_verdict("FAIL", 3), PFR_FINDING)),
     "pass-finding-says-fail": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("PASS", 1), "Finding: the old guard would FAIL open on a missing file.",
         "- " + pfr_verdict("FAIL", 1) + " (an earlier reading, now fixed)"))
@@ -10222,6 +10227,9 @@ pfr_refuse("a PR opened by a Bash gh pr create, a reviewer FAIL with no record, 
            pfr_path("gh-pr-create-fail"))
 pfr_refuse("a FAIL round 1, then a record whose only FAIL line is round 2, then the push", PFR_PUSH,
            pfr_path("round-scoped-deny"))
+# Each record clears only the reports it holds, so a later FAIL with no record of its own stays refused.
+pfr_refuse("a round 3 FAIL after rounds 1 and 2 were recorded, with no record of its own, then the push", PFR_PUSH,
+           pfr_path("fail-after-recorded-rounds"))
 
 pfr_allow("a FAIL round 1, then a FAIL record posted, then the push", PFR_PUSH, pfr_path("fail-then-fail-record"))
 pfr_allow("a PARTIAL round 1, then a PARTIAL record posted, then the push", PFR_PUSH,
