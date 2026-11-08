@@ -750,14 +750,23 @@ def input_needed_section(text):
     return report_section(text, "Input Needed")
 
 
-# A cite of a page item: `item 214`, `page item 214`, a list `items 214, 381 and 383` (comma, "and", "&" or "or"), `page:214`.
-# `#214` is a PR number, so it is no cite.
+# A cite of a page item: `item 214`, `page item 214`, a list `items 214, 381 and 383` (comma, "and", "&" or "or"),
+# `page:214`. A colon or bold marks around the word (`Items:`, `**Items:**`, `**item**`) is still a cite. `#214` is a PR
+# number, so it is no cite.
 _ITEM_JOIN = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s*&\s*|\s+(?:and|or)\s+)"
-ITEM_CITE_RE = re.compile(r"\b(?:items?\s+(\d+(?:" + _ITEM_JOIN + r"\d+)*)|page:(\d+))(?!\d)", re.IGNORECASE)
-# A ref followed by an option letter or "pick"/"note" cites the owner's ruling on it, not an open question.
-RULING_AFTER_RE = re.compile(r"[\s:,;(\-]*(?:(?:pick|note)\b|\(?[a-z]\)?(?=\s*(?:$|[.,;:)\]])))", re.IGNORECASE)
-CLOSED_WORD_RE = re.compile(r"\bclosed\b", re.IGNORECASE)
-BASED_ON_RE = re.compile(r"(?:based on|departs from)\b", re.IGNORECASE)
+ITEM_CITE_RE = re.compile(
+    r"\b(?:items?(?:\*\*|__)?\s*:?(?:\*\*|__)?\s+(\d+(?:" + _ITEM_JOIN + r"\d+)*)|page:(\d+))(?!\d)", re.IGNORECASE)
+# A ref followed by an option letter, `pick <letter>`, or a `note` that ends its clause cites the owner's ruling on
+# it, not an open question. Letters may combine: a+c, a/c, a and c. A letter counts only before the end or a mark.
+_LETTER = r"\(?[a-z]\)?"
+_LETTERS = _LETTER + r"(?:\s*(?:\+|/|&|,|\band\b|\bor\b)\s*" + _LETTER + r")*(?=\s*(?:$|[.,;:)\]]))"
+_RULING_LEAD = r"[\s:,;(\-]*"
+RULING_AFTER_RE = re.compile(
+    _RULING_LEAD + r"(?:" + _LETTERS + r"|pick\s+" + _LETTERS + r"|note(?=\s*(?:$|[.,;:)\]\-\u2014])))", re.IGNORECASE)
+# "closed" counts only straight after the ref: `item 214 closed`, `item 214 is closed`, `item 214 (closed)`.
+CLOSED_AFTER_RE = re.compile(_RULING_LEAD + r"(?:(?:is|are|now)\s+)?\(?closed\b", re.IGNORECASE)
+# Only the question-form labels exempt a line: `Based on (` and `Departs from:`, after a list marker and bold.
+QUESTION_LABEL_RE = re.compile(r"(?:based on\s*\(|departs from(?:\*\*|__)?\s*:)", re.IGNORECASE)
 LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 CLOSED_ITEM_UNKNOWN = ("Closed-item guard: UNKNOWN, the waiting copy could not be read, so the items Input Needed cites "
                        "were not checked against the page.")
@@ -765,16 +774,15 @@ CLOSED_ITEM_UNKNOWN = ("Closed-item guard: UNKNOWN, the waiting copy could not b
 
 def cited_items(section):
     """The page item numbers (ints) that the Input Needed lines in `section` cite as waiting on the owner. A line
-    is skipped when it starts (after a list marker and bold) with "Based on" or "Departs from", or says "closed";
-    a ref followed by an option letter, "pick" or "note" is a ruling cite and is skipped."""
+    that starts (after a list marker and bold) with `Based on (` or `Departs from:` is skipped. A ref is skipped
+    when a ruling cite (option letters, `pick <letter>`, `note` ending its clause) or "closed" follows it directly."""
     found = set()
     for line in section.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1)
-        head = LIST_MARKER_RE.sub("", body, count=1).lstrip("*_ ")
-        if BASED_ON_RE.match(head) or CLOSED_WORD_RE.search(body):
+        if QUESTION_LABEL_RE.match(LIST_MARKER_RE.sub("", body, count=1).lstrip("*_ ")):
             continue
         for m in ITEM_CITE_RE.finditer(body):
-            if RULING_AFTER_RE.match(body, m.end()):
+            if RULING_AFTER_RE.match(body, m.end()) or CLOSED_AFTER_RE.match(body, m.end()):
                 continue
             found.update(int(n) for n in re.findall(r"\d+", m.group(1) or m.group(2)))
     return found
@@ -790,7 +798,7 @@ def closed_item_problem(text, cwd):
     Cost: one `git grep` per Stop (feedback_guard.waiting_statuses), only when Input Needed cites an item that
     is no ruling cite; a report with no cite reads nothing and imports nothing. No new process kept, file, log or
     timer (rule `outcomes-mechanize-rules`). The copy is read as of the last fetch of origin, so a stale copy can
-    only miss a closed item, never name an open one closed. Errors in the reader fail open (the caller's try)."""
+    only miss a closed item, never name an open one closed. Any error in the check, the reader's included, is UNKNOWN and no block (the caller's try)."""
     cited = cited_items(input_needed_section(text))
     if not cited:
         return "", ""
@@ -2231,8 +2239,8 @@ def main():
             closed, closed_note = closed_item_problem(text, hook.get("cwd"))
             relay.append(closed)
             note = " ".join(filter(None, [note, closed_note]))
-        except Exception:
-            pass
+        except Exception:  # a check that could not run is UNKNOWN, never a block
+            note = " ".join(filter(None, [note, CLOSED_ITEM_UNKNOWN]))
     if last_human_idx is None or not turn_landed(after):
         # An unlanded turn is judged on the question check and the Departs from check alone. An error in
         # either fails open on its own: the Departs from check never drops the question refusal.
