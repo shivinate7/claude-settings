@@ -23294,9 +23294,9 @@ for _module in FAILCLOSED_MODULES:
 _check = fail_closed_case("git_reads")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
-# guard_kill.py imports proc_env.py inside a try, for its session-tag read, so FAILCLOSED_MODULES does not hold
-# it either. A copy without it refuses as guard-crash, never judges the call with the read missing (decision
-# install-hooks-whole).
+# guard_kill.py imports proc_env.py at its top level, for its session-tag read. proc_env.py is no guard_*
+# sibling, so FAILCLOSED_MODULES does not hold it either. A copy without it refuses as guard-crash, never
+# judges the call with the read missing (decision install-hooks-whole).
 _check = fail_closed_case("proc_env")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env (guard_kill's session-tag read) "
@@ -23520,8 +23520,8 @@ def _fix_with(folder, good, names):
     return fix
 
 
-def _reload_run(folder, name, fix=None, command=None):
-    """One Bash call through the copy's guard.py. fix, when given, runs once, RELOAD_DELAY_S after the
+def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S):
+    """One Bash call through the copy's guard.py. fix, when given, runs once, delay seconds after the
     guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
     only if the guard waited."""
     cfg = os.path.join(ROOT, "reload-cfg", name)
@@ -23539,7 +23539,7 @@ def _reload_run(folder, name, fix=None, command=None):
     def land():
         fix()
         fixed.set()
-    timer = threading.Timer(RELOAD_DELAY_S, land) if fix else None
+    timer = threading.Timer(delay, land) if fix else None
     if timer:
         timer.daemon = True
         timer.start()
@@ -23615,6 +23615,55 @@ RELOAD_CHECKS = (
 )
 for _label, _check in RELOAD_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# A flat module (no INSTALL_ID line) is an older copy, or missing, when the guard first loads it. Its whole file
+# lands LATE_LAND_S after the guard starts, and the guard waits and reloads. A module that loaded stays in
+# sys.modules until the retry pops it. The reread_check and proc_env cases cache a stale copy, and the
+# precompact_handoff case caches reread_check with ph None, so these cases need those two pops.
+LATE_LAND_S = 1.5
+
+
+def _source_text(module):
+    with open(os.path.join(os.path.dirname(GUARD), module), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def late_land_case(module, older_text):
+    """`module` is in the copy as older_text, or missing for None. Its source file lands whole LATE_LAND_S
+    after the guard starts. The guard waits, reloads it, and allows the call."""
+    def check():
+        name = "late-" + module[:-3]
+        folder, _good = _reload_copy(name, INSTALL_ID)
+        target = os.path.join(folder, module)
+        if older_text is None:
+            os.remove(target)
+        else:
+            _put_whole(target, older_text)
+        run, fixed = _reload_run(folder, name, _fix_with(folder, {module: _source_text(module)}, [module]),
+                                 delay=LATE_LAND_S)
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before %s landed, so it never waited to reload: %r"
+                           % (decision, module, reason[:90]))
+        if decision != "allow" or run.returncode != 0:
+            return False, ("%s landed late, but the call is %r, exit %d, want allow: %r"
+                           % (module, decision, run.returncode, reason[:90]))
+        return True, "%s landed late, the guard waited and reloaded it, and the call is allowed, exit 0" % module
+    return check
+
+
+LATE_LAND_CHECKS = (
+    ("late-land: reread_check.py, an older copy with no ph name, lands late: the call is allowed",
+     late_land_case("reread_check.py", '"""An older copy: no ph name yet."""\n')),
+    ("late-land: precompact_handoff.py missing until it lands late: reread_check reloads ph, the call is allowed",
+     late_land_case("precompact_handoff.py", None)),
+    ("late-land: proc_env.py, an older copy with no holds_session_tag name, lands late: the call is allowed",
+     late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n')),
+)
+for _label, _check in LATE_LAND_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)  # builds only its copy and reads no lazy fixture
 
 
 def reload_crash_stamp_case():
