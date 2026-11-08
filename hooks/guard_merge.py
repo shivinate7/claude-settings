@@ -1220,7 +1220,7 @@ def stamp_hit(tool: str, tool_input):
 # reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
 # a lone apostrophe, which is where an incident's literal sat. It reads the key `updatedAt`, bare or quoted, with
 # an optional `]` after it. Then `:`, `=` or jq's `|=`, then a single- or double-quoted value, closed by the
-# same quote. It skips `==` and `>`.
+# same quote. It skips `==`, `!=` and `>`.
 _ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
 _ISO_FULL = re.compile(_ISO_INSTANT)
 _UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?(["'])""" + _ISO_INSTANT + r"\\?\1")
