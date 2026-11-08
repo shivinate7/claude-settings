@@ -171,9 +171,9 @@ def report(done):
     return "\n".join(["> **Done** " + done, "> **Deviations** none", "> **Input Needed** none", "> **Next** wait"])
 
 
-def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None):
-    """A review record comment, in merge/merge.py's own form: Kind normal, Guard or check no, Net value not owed."""
-    return merge_mod.review_body(n, head, "normal", "no", rounds, "not owed", fix)
+def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None, guard="no", net="not owed"):
+    """A review record comment, in merge/merge.py's own form: Kind normal, with Guard or check no and Net value not owed unless given."""
+    return merge_mod.review_body(n, head, "normal", guard, rounds, net, fix)
 
 
 def setUpModule():
@@ -370,6 +370,39 @@ class ReviewRecordTests(unittest.TestCase):
         # Catches: a fix check PASS passing a record with no round recorded. The fix re-reviews a round, so it needs
         # one. The fix names an earlier head, so its diff is not empty.
         self.assert_record_blocks_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
+
+    def assert_open_guard_record_blocks_with_its_why(self, body):
+        """A PASS claim on a record that merge reads open is refused. The reason carries review_state's why for the live head, and it
+        does not tell the lane to post a record, since the record is posted already."""
+        state, why = merge_mod.review_state(merge_mod.parse_review(body), LIVE)
+        self.assertEqual(state, "open", "fixture: merge/merge.py does not call this record open")
+        self.serve(comments=[body])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        self.assertIn(why, out["reason"], f"the refusal does not carry review_state's why {why!r}: {out['reason']}")
+        self.assertNotIn("has no review record", out["reason"], "the refusal says there is no review record, but the record is posted")
+        self.assertNotIn("--review-record", out["reason"], "the refusal tells the lane to post a record that is already posted")
+        self.assertNotIn("post the record", out["reason"], "the refusal tells the lane to post a record that is already posted")
+
+    def test_guard_yes_record_below_the_final_round_blocks_with_its_why(self):
+        # Catches: a PASS claim refused with the no-record remedy, which tells the lane to post a record already on the PR.
+        # Each record reads open: below the final round, or at it with no net value.
+        cases = ([(1, "reviewer", "sonnet", "PASS")],
+                 [(1, "reviewer", "sonnet", "PASS"), (2, "reviewer", "sonnet", "PASS")],
+                 [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")])
+        for rounds in cases:
+            with self.subTest(rounds=rounds):
+                self.assert_open_guard_record_blocks_with_its_why(record(rounds=rounds, guard="yes", net="not owed"))
+
+    def test_no_record_keeps_the_no_record_remedy(self):
+        # control: with no record for the live head, the refusal keeps the remedy that posts one
+        self.serve()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        self.assertIn("has no review record", out["reason"], out)
+        self.assertIn("merge 12 --review-record", out["reason"], out)
 
     def test_lane_pass_naming_no_pr_blocks_and_asks_for_the_pr(self):
         # Catches: a claim with no pull request on its line passing, or refused without asking for one. The live
