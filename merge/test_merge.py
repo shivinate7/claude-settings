@@ -13871,6 +13871,18 @@ class ReviewedList(ReviewEnv):
         repeated = sorted({rel for rel in host_e.gh_calls if host_e.gh_calls.count(rel) > 1})
         self.assertEqual(repeated, [], "the edited record's run reads a route more than once")
 
+    def test_an_older_unedited_record_under_an_edited_record_reads_bad(self):
+        # Ruling (orchestrator, 2026-11-08 17:38 CST): the newest record decides. A newest record that was hand-edited reads bad, and an older
+        # unedited record below it does not count. The edited text is unknown, so a fallback could pass on an older verdict. The older record
+        # here passes, so a fallback would read the pull request done.
+        older = review_comment(1, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE)
+        edited = review_comment(2, 7, record_text(rounds=REVIEW_PASS), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older, edited])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the older unedited record counted under the hand-edited newest record")
+        self.assertIn("hand-edited", line, "the hand-edited newest record is not named hand-edited on pull request 7's line:\n" + out)
+
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
         # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
