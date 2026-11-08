@@ -4833,6 +4833,22 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(run.stdout.strip(), "", run.stdout)
                 self.assertEqual(self.config_files(), before, "the Stop wrote a file with no refusal pending")
 
+    def test_s_a_blank_reason_is_never_matched(self):
+        # Catches: a reason of spaces only counts as a reason, so a second refusal with that blank reason passes
+        # on the strength of an earlier raise. A blank reason identifies nothing, as an empty one does.
+        raises = (("refusal was right", self.raising_reply), ("Input Needed", self.input_needed_reply))
+        for raise_label, make_reply in raises:
+            with self.subTest(raised=raise_label):
+                self.use_fresh_config()
+                rows = [(self.BASH, "   ")]
+                self.raise_refusal(rows, make_reply(rows))
+                self.write_rows(rows)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a refusal with a blank reason passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % self.BASH, out["reason"], "the block does not name the blank-reason refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "the blank-reason refusal left the file")
+
 
 # building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a
 # mistake the agent made names the guard for it. Every case is one landing turn read through main().
