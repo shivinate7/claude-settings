@@ -113,19 +113,26 @@ parsing closes it. Its transcript is `<dir of the session file>/<file stem>/suba
 built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
 the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
 (`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
-A transcript found in neither place is listed as unknown, once. An agent is not listed while any tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
+A transcript found in neither place is listed as unknown, once. An agent is not listed as quiet while a tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
 record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
-read is listed.
+read is listed. An open call with `run_in_background` true is not busy: a quiet agent with one is listed as quiet.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
-transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
+transcript's end for each agent that is quiet. No new process, timer or file. Case
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
 stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
-an agent resumed after it closed). An agent stuck inside one tool call is never listed: an open call has no
-age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+an agent resumed after it closed). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
+
+An agent whose newest open foreground call is older than `OPEN_CALL_CAP`, 900 s, is listed, and its row says
+it is stuck in one tool call and names the tool (coordinator ruling, 2026-11-07 18:38 CST). Reason: Bash's
+maximum is 600 s, so an older call is no long job but a hang, and an agent in one hung call never showed
+as quiet. The age is the newest open call's assistant-record timestamp. A missing or unreadable timestamp
+means not listed, since a false alarm is worse. The row is listed once, at the first Stop after the call's
+time plus the cap, against the previous Stop; the quiet row keeps its own crossing. Cost: unchanged, one
+`stat` per running agent and one bounded tail read per quiet agent, from the same `open_call` read.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
