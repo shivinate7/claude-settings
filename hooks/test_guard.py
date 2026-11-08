@@ -7788,6 +7788,62 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+# THE SPLIT FLAGS IN QUOTED TEXT. `rm -r -f .` and `del -Recurse -Force C:/` in an echo are text, as
+# `rm -rf .` already is. A shell that runs the same text still refuses it.
+sh("delete: an echo of rm with split flags at the working folder calls nothing",
+   'echo "rm -r -f ."', "allow", cwd=NOGIT)
+sh("delete: an echo of the PowerShell delete at a drive root calls nothing",
+   'echo "del -Recurse -Force C:/"', "allow", cwd=NOGIT)
+sh("delete: sh -c of rm with split flags at the working folder still denies",
+   'sh -c "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: bash -c of rm with split flags at the working folder still denies",
+   'bash -c "rm -r -f ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: eval of rm at the working folder still denies",
+   'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
+   'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
+   'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE SPLIT-FLAG DELETE IN A WRAPPER'S STRING. parallel, script -qc, watch and runuser each run their quoted
+# text as a shell command, so `rm -r -f .` inside the quotes deletes the working folder, as bash -c's does.
+for _name, _command in (
+    ("parallel", 'parallel "rm -r -f ." ::: a'),
+    ("script -qc", 'script -qc "rm -r -f ." /dev/null'),
+    ("watch", 'watch "rm -r -f ."'),
+    ("runuser -c", 'runuser -c "rm -r -f ." u'),
+):
+    sh("delete: the split-flag rm at the working folder behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A single-quoted substitution is text, as the echo of the split-flag rm above is. It runs nothing.
+sh("delete: an echo of a single-quoted $(rm -r -f .) calls nothing",
+   "echo '$(rm -r -f .)'", "allow", cwd=NOGIT)
+# A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
+# command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
+# line break or a lone apostrophe around the substitution does not hide it.
+sh("delete: a live $(rm -r -f .) inside double quotes denies",
+   '''echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(Remove-Item -Recurse -Force C:/) inside double quotes denies",
+   '''echo "$(Remove-Item -Recurse -Force C:/)"''', "deny", "destructive-delete", tool="PowerShell",
+   cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a # inside double quotes denies",
+   '''echo "# $(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) on a second line of a double quote denies",
+   'echo "first line\n$(rm -r -f .)\nlast line"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a lone apostrophe denies",
+   '''echo don't && echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+# THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
+# alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
+# every file under the working folder, and a chained delete still denies.
+sh("delete: git rm -rf --cached . touches the index only, and is allowed",
+   VCS + " rm -rf --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -r -f --cached . touches the index only, and is allowed",
+   VCS + " rm -r -f --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -rf . with no --cached still denies", VCS + " rm -rf .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -r -f . with no --cached still denies", VCS + " rm -r -f .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -rf --cached . chained with rm -rf . still denies",
+   VCS + " rm -rf --cached . && rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 
 # Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
@@ -12209,6 +12265,45 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
    "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE AMPERSAND REDIRECT. `&>` and `&>>` send both streams to a file, so a copy into a frozen path with
+# one of them writes the frozen file. The `&` is a redirect, never a copy source. The forms that already
+# refuse stay refused, and a copy FROM a frozen file with `&>` is still a read.
+sh("frozen amp: cp onto a frozen hook with &> /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &>/dev/null, no space, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &>/dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen settings file with &>> /dev/null stays denied",
+   "cp /tmp/x.json " + CFG_SETTINGS + " &>> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> /dev/null, then a chained echo, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null && echo done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with > /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " > /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
+   "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
+# THE DESTINATION AFTER A NULL REDIRECT. `cp SRC &> /dev/null DEST` writes DEST whatever the redirect says, so
+# a frozen DEST named after the null redirect is judged, as one named before it is.
+sh("frozen amp: cp /tmp/x.py &> /dev/null onto a frozen hook named last stays denied",
+   "cp /tmp/x.py &> /dev/null " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp /tmp/x.json &> /dev/null onto a frozen settings file named last stays denied",
+   "cp /tmp/x.json &> /dev/null " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE FROZEN SOURCE WITH A FILE REDIRECT. `cp FROZEN /tmp/x &> /tmp/build.log` reads the frozen file and writes
+# scratch, so it is allowed: the `&` of `&>` is no copy source. A frozen destination with the same redirect
+# still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
+# THE LONE >& REDIRECT. `>&` sends both streams to a file, as `&>` does. A copy FROM a frozen hook with `>&` to a
+# build log reads the frozen file and writes scratch, so it is allowed. A copy onto a frozen hook with the same
+# redirect still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x >& /tmp/l", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -13644,6 +13739,78 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
+# tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
+# join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
+# or to a relative folder is a repo test path, and still refuses.
+sh("builder join: a temp folder from mkdtemp joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os, tempfile\ntmpdir = tempfile.mkdtemp()\n"
+   "open(os.path.join(tmpdir, 'tests', 'test_x.py'), 'w').write('x')\nEOF", "allow", **B)
+sh("builder join: a temp folder from mkdtemp in python -c joined to tests is allowed",
+   "python3 -c \"import os, tempfile; t = tempfile.mkdtemp(); "
+   "open(os.path.join(t, 'tests', 'test_x.py'), 'w').write('x')\"", "allow", **B)
+sh("builder join: a literal folder outside the repository joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('/tmp/elsewhere', 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "allow", **B)
+sh("builder join: a relative folder joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: a relative folder held in a variable and joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nrepo = '.'\nopen(os.path.join(repo, 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from Path.cwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nfrom pathlib import Path\n(Path.cwd() / 'tests' / 'test_x.py').write_text('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+# THE HEAD OF A JOIN IN python -c. An unknown head drops out of the join, so only a head from a temp source
+# (tempfile.mkdtemp, mkstemp, gettempdir, TemporaryDirectory) is safe. A head the script takes from
+# sys.argv, from subprocess output, from Path(__file__) or from os.path.dirname() names a folder in the repo,
+# so the join to hooks/test_x.py still refuses.
+sh("builder join: a repo head from sys.argv[1] joined to hooks in python -c still refuses",
+   '''python3 -c "import os, sys; repo = sys.argv[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')" .''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from subprocess output joined to hooks in python -c still refuses",
+   '''python3 -c "import os, subprocess; repo = subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode().strip(); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from Path(__file__).resolve().parents joined to hooks in python -c still refuses",
+   '''python3 -c "import os; from pathlib import Path; repo = Path(__file__).resolve().parents[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from os.path.dirname joined to hooks in python -c still refuses",
+   '''python3 -c "import os; repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.mkdtemp(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from gettempdir joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.gettempdir(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from mkstemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; fd, tmp = tempfile.mkstemp(); os.close(fd); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# THE dir= ARGUMENT OF mkdtemp. `dir='.'` and `dir=os.getcwd()` put the temp folder in the working folder, so a
+# join to tests from it is a repo test path and refuses. Only the system temp folder is no repo folder. The inline
+# join from the same call refuses too. A bare mkdtemp() inline stays allowed, as its held form does.
+sh("builder join: a temp folder from mkdtemp(dir='.') held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir='.'); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir=os.getcwd()) held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir=os.getcwd()); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir='.') joined inline to tests still refuses",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(dir='.'), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# A TemporaryDirectory held in a variable and joined through its .name is still a system temp folder: allowed.
+sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
+   '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
+   "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -14478,6 +14645,61 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
+# merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
+# (MAIN_MIRROR_NAME, LIVE_PIN_SUFFIX). Each copy is read as text, never imported, so the check loads no guard.
+# A change to one side alone would leave the frozen check guarding a folder that no install builds.
+FAMILY = "frozen"
+_MIRROR_SHELL = re.compile(r'^MAIN_MIRROR="\$HOME/([^"/$]+)"[ \t\r]*$', re.M)
+_PIN_SHELL = re.compile(r'^pin="\$clone([^"/$]*)"[ \t\r]*$', re.M)
+
+
+def _module_literal(text, name):
+    """The value of the top-level assignment `name = <literal>` in a Python module's text, or None."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+    """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
+    the text of one file."""
+    problems = []
+    mirror = _MIRROR_SHELL.findall(install_sh)
+    pin = _PIN_SHELL.findall(install_from_main)
+    name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
+    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if len(mirror) != 1:
+        problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
+    elif name != mirror[0]:
+        problems.append("MAIN_MIRROR_NAME is %r but install.sh MAIN_MIRROR is $HOME/%s" % (name, mirror[0]))
+    if len(pin) != 1:
+        problems.append('install_from_main.sh does not set pin="$clone<suffix>" exactly once')
+    elif suffix != pin[0]:
+        problems.append("LIVE_PIN_SUFFIX is %r but install_from_main.sh pin suffix is %r" % (suffix, pin[0]))
+    return problems
+
+
+def _mirror_names_tie():
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    def read(*parts):
+        with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
+                                    read("hooks", "guard_frozen.py"))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
+
+
+LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
+                         _mirror_names_tie))
 
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
