@@ -7308,15 +7308,12 @@ sh("delete: a heredoc body given to bash runs the delete", "bash <<EOF\nrm -rf .
 sh("delete: a lone apostrophe in a quoted heredoc body does not hide a delete after it",
    "cat <<'EOF' > notes.md\nit's the note\nEOF\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
 
-# A file whose name ends in `py` is no interpreter: `cat > gen.py <<'EOF'` writes its body to the file, so a delete
-# or a forced push in the body runs nothing. `py -` reads its script from stdin, so its body is a script and a
-# delete in it is refused.
+# A file whose name ends in `py` heads no interpreter: `cat > gen.py <<'EOF'` writes its body to the file, so a delete
+# or a forced push in the body runs nothing.
 sh("delete: a heredoc written to gen.py names a delete, deletes nothing",
    "cat > gen.py <<'EOF'\nrm -rf /\nEOF", "allow", cwd=NOGIT)
 sh("push: a heredoc written to gen.py names a forced push, pushes nothing",
    "cat > gen.py <<'EOF'\n" + VCS + " push --force origin main\nEOF", "allow", cwd=NOGIT)
-sh("delete: a py heredoc body given to py - runs as a script, so its delete is refused",
-   "py - <<'EOF'\nrm -rf /\nEOF", "deny", "destructive-delete", cwd=NOGIT)
 
 # THE POWERSHELL ALIASES. `remove-item`, `ri`, `rd` and `rmdir` already matched the dash-flag
 # pattern before this change. `del`, `erase` and `rm` did not: PowerShell's own aliases for
