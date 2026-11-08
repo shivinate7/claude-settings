@@ -12,6 +12,7 @@ import sys
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    _checkout_root_by_stat, _git_common_dir,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -1256,6 +1257,59 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
     if uses[last]["input"].get("subagent_type") == "design-reviewer":
         return RECORD_DESIGN_REASON, matched, False
     return RECORD_REASON, matched, False
+
+
+# ---- a reviewer brief names its pull request (rule review-needs-pr, decision pr-review-record)
+NEEDS_PR_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these must name the pull request it reviews
+NEEDS_PR_NAMED = re.compile(
+    r"(?:\bPR|\bpull\s+request)\s*#\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+", re.IGNORECASE)
+NEEDS_PR_REMOTE_URL = re.compile(r"(?:^|[/@])github\.com[:/]", re.IGNORECASE)
+NEEDS_PR_REASON = (
+    "review-needs-pr: this reviewer brief names no pull request. Open the draft pull request first and name it in "
+    "the reviewer brief (`PR #<n>`), so each round's review record can post. "
+    "(decision pr-review-record, a lane posts the record after each round)"
+)
+
+
+def _has_github_remote(folder: str) -> bool:
+    """True when the config of the checkout holding FOLDER has a remote whose url names github.com (https or
+    scp form). A linked worktree reads the common config. No checkout, no config or an unreadable one is False.
+    Cost: a stat walk and one config file read, no subprocess, no network."""
+    try:
+        root = _checkout_root_by_stat(os.path.realpath(folder))
+        common = _git_common_dir(root) if root else ""
+        if not common:
+            return False
+        with open(os.path.join(common, "config"), encoding="utf-8") as handle:
+            lines = handle.read(1 << 20).splitlines()
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    in_remote = False
+    for line in lines:
+        line = line.strip()
+        if line.startswith("["):
+            in_remote = re.match(r"\[remote\s+\"", line, re.IGNORECASE) is not None
+        elif in_remote:
+            found = re.match(r"url\s*=\s*(.+)$", line, re.IGNORECASE)
+            if found and NEEDS_PR_REMOTE_URL.search(found.group(1).strip().strip('"')):
+                return True
+    return False
+
+
+def review_needs_pr_hit(tool: str, tool_input, cwd: str, agent: bool = False):
+    """(reason, matched): the refusal when an orchestrator's Agent or Task spawn of a reviewer or design-reviewer
+    names no pull request in its brief, in a repo with a github.com remote, else ("", ""). A call with an agent_id
+    is an agent's and is not judged. No cwd, or a repo with no readable github remote, allows."""
+    if agent or tool not in RECORD_SPAWN_TOOLS or not isinstance(tool_input, dict) or not cwd:
+        return "", ""
+    if tool_input.get("subagent_type") not in NEEDS_PR_ROLES:
+        return "", ""
+    prompt = tool_input.get("prompt")
+    if isinstance(prompt, str) and NEEDS_PR_NAMED.search(prompt):
+        return "", ""
+    if not _has_github_remote(cwd):
+        return "", ""
+    return NEEDS_PR_REASON, "%s of a %s with no pull request in the brief" % (tool, tool_input.get("subagent_type"))
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

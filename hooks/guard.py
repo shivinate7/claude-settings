@@ -127,6 +127,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that cannot load allows and is noted as `review-record-unread`. The reason names the
                        merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
                        call, no subprocess, no network. An override lifts it. (pr-review-record)
+  review-needs-pr      deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `reviewer` or
+                       `design-reviewer` whose brief names no pull request (`PR #<n>`, `pull request #<n>`, or a
+                       github.com pull URL; an issue URL or a bare `#12` does not count), when the repo holding the
+                       payload's cwd has a remote naming github.com. A repo with no github remote, no cwd, and a
+                       config that is missing or unreadable, allow. Config file reads only (a linked worktree reads
+                       the common config): no subprocess, no network. An override lifts it. (pr-review-record)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -363,6 +369,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _checkout_root_by_stat, _git_common_dir,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -390,7 +397,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_record_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_needs_pr_hit, review_record_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4250,42 +4257,6 @@ def _owning_checkout(path: str, roots) -> str:
     return max(owners, key=len) if owners else ""
 
 
-def _checkout_root_by_stat(folder: str) -> str:
-    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
-    worktree's file), found by stat alone, else ''. No git is spawned."""
-    while folder:
-        if os.path.exists(os.path.join(folder, ".git")):
-            return folder
-        parent = os.path.dirname(folder)
-        if parent == folder:
-            return ""
-        folder = parent
-    return ""
-
-
-def _git_common_dir(root: str) -> str:
-    """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
-    dot = os.path.join(root, ".git")
-    try:
-        if os.path.isdir(dot):
-            return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
-            return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
-        try:
-            with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
-                git_dir = os.path.join(git_dir, handle.readline(4096).strip())
-        except OSError:
-            pass  # no commondir: a submodule's or a bare-style git dir is its own common dir
-        return os.path.realpath(git_dir)
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-
 def _clone_origin(common: str) -> str:
     """The `[remote "origin"]` url in COMMON's config file, else '' (no file, no origin, no url)."""
     try:
@@ -4904,6 +4875,11 @@ def judge(payload) -> None:
         record(tool, "noted", "review-record-unread", tool)
     if record_reason:
         refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
+
+    # A reviewer brief that names no pull request, in a repo with a github remote (rule review-needs-pr).
+    needs_reason, needs_matched = review_needs_pr_hit(tool, tool_input, cwd, bool(payload.get("agent_id")))
+    if needs_reason:
+        refuse(tool, "deny", "review-needs-pr", needs_reason, needs_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
