@@ -79,15 +79,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
                        (rm-on-a-variable-needs-a-guard)
-  rm-after-cd          deny. A recursive delete of a relative target after a cd.
-                       (rm-after-cd-names-absolute-path)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
-  linked-node-modules  deny. An `npm install`, `ci`, `update` or `uninstall` whose `node_modules` is a link
-                       into another checkout, or a recursive delete into such a link. A bare delete of
-                       the link itself passes. (guard-linked-node-modules)
+  linked-node-modules  deny. An npm subcommand off the read-only list (NPM_READ_ONLY) in a folder whose
+                       `node_modules` is a symlink or junction, or a recursive delete into such a link.
+                       A bare delete of the link itself passes, unless it ends in a slash.
+                       (guard-linked-node-modules)
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
                        (rm-path-wrapper)
+  rm-after-cd          deny. A recursive delete of a relative target after a cd.
+                       (rm-after-cd-names-absolute-path)
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
