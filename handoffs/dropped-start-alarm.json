@@ -2,11 +2,11 @@
     {
         "id": "lane-dropped-start-alarm",
         "kind": "status",
-        "status": "with-batch-runner",
-        "title": "PR #1121, the opt-in dropped-start case for the CI alarm, sits with the batch runner",
+        "status": "merged",
+        "title": "PR #1121, the opt-in dropped-start case for the CI alarm, merged 2026-11-04 00:26 CST",
         "owner": "session_013NEJKyjovszSALiJjquc3r",
         "pr": 1121,
-        "head": "6a8362f",
+        "head": "f0c7956",
         "checks": "merge --lane-lint 1121 PASS; actions/ci-alarm/test_action.sh PASS; round 3 review MERGE, net safety value zero",
         "child_removals": [
             "banchi row 28: .github/workflows/dropped-start-alarm.yml, removed after banchi pins actions/ci-alarm with dropped-start: 'true'"
