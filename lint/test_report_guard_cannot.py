@@ -758,6 +758,68 @@ class CannotClaimTests(unittest.TestCase):
         self.assertIn("cannot-claim guard: UNKNOWN", run.stderr, "no UNKNOWN note on stderr: %r" % run.stderr[-300:])
         self.assertFalse(run.stdout.strip(), "an unread refusals file refused the claim: %s" % run.stdout)
 
+    # ---- a blocker skips only the acts it blocks, in its own clause; a script named for an act is a try of it
+
+    def test_cc_red_a_blocker_does_not_cross_a_comma_to_skip_another_claim(self):
+        # Catches: a because clause read across ", and", so a blocker on CI skipped an open claim that CI does not block. CI
+        # blocks a merge; the open claim sits in the clause after the comma and must still be judged.
+        line = "I can't merge PR 12 because CI is red, and I could not open the lane PR."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_blocker_for_a_merge_does_not_skip_an_open_claim(self):
+        # Catches: CI red, read as a blocker of an open claim. A red check blocks a merge, not an open.
+        for line in ("I can't open the PR because CI is red.",
+                     "I could not open the PR because the MCP server failed to connect, and CI is red."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_blocker_on_ci_still_skips_a_merge_claim(self):
+        # Control: CI red blocks a merge, so a merge claim whose clause carries it is no claim, and it passes.
+        line = "I can't merge PR 12 because CI is red."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_passes(out, "a merge claim whose blocker is CI")
+
+    def test_cc_green_a_main_protection_blocker_skips_a_push_claim(self):
+        # Control: a protected main blocks a push, so a push to main that the branch rule forbids is no claim, and it passes.
+        line = "I can't push to main because main is protected."
+        out = self.stop([trg.human("push to main"), trg.assistant_text(line)])
+        self.assert_passes(out, "a push claim whose blocker is that main is protected")
+
+    def test_cc_red_a_hyphenated_preposition_word_does_not_hide_the_pr(self):
+        # Catches: "in", "per" and "on" read as prepositions inside a hyphenated word, so the PR after it was not reached
+        # and the open claim passed as no claim.
+        for line in ("I can't open the in-progress PR.", "I can't open the per-lane PR.", "I can't open the on-hold PR."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+                self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_failed_script_named_for_an_act_is_a_try_of_it(self):
+        # Catches: a script named for an act read as no try, so its failure backed no claim of that act. An interpreter
+        # with a version suffix (python3.12) and a make call with -C dir are read as the script or target they run.
+        for command, line in (
+                ("scripts/pr-open.sh", "I can't open the PR: `pr-open.sh` returned exit code 1."),
+                ("./tools/gh-pr-create.sh --title t", "I cannot open the PR: `gh-pr-create.sh` returned exit code 1."),
+                ("python3.12 scripts/push.py", "I couldn't push: `push.py` returned exit code 1."),
+                ("make -C dir push", "I couldn't push: `make -C dir push` returned exit code 1.")):
+            with self.subTest(command=command):
+                out = self.stop([trg.human("push or open the PR"), *failed_bash(command, "tu_s"), landed_reply(line)])
+                self.assert_passes(out, "a failed `%s` backs its claim" % command)
+
+    def test_cc_red_a_bare_npm_push_is_no_try_of_push(self):
+        # Catches: "npm push" read as a script named push, so its failure backed a push claim. npm has no push command;
+        # a run script whose name holds push (npm run push-docs) is still a try.
+        line = "I couldn't push: `npm push` returned exit code 1."
+        out = self.stop([trg.human("push the docs"), *failed_bash("npm push", "tu_np"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_failed_python_script_names_no_act_and_backs_no_push(self):
+        # Control: the script python3.12 x.py names no act, so its failure backs no claim of a push, and the claim blocks.
+        line = "I couldn't push: `python3.12 x.py` returned exit code 1."
+        out = self.stop([trg.human("push the branch"), *failed_bash("python3.12 x.py", "tu_x"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
     # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
     # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
 
@@ -838,13 +900,13 @@ class CannotClaimTests(unittest.TestCase):
         # so the line is no hand-off. The turn holds no try, so only the blocker skip can clear it.
         line = "I can't merge the PR because CI is red."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
-        self.assert_passes(out, "a claim whose clause carries a gate (because CI)")
+        self.assert_passes(out, "a claim whose clause carries a blocker (because CI)")
 
     def test_cc_red_blocker_while_the_batch_run_is_no_claim(self):
         # Catches: a claim whose clause carries a blocker (while the batch run) read as a claim with no try.
         line = "I cannot merge it while the batch run is in progress."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
-        self.assert_passes(out, "a claim whose clause carries a gate (while the batch run)")
+        self.assert_passes(out, "a claim whose clause carries a blocker (while the batch run)")
 
     def test_cc_red_blocker_rule_id_after_the_act_is_no_claim(self):
         # Catches: a claim that names its hyphenated rule id in parentheses after the act, read as a claim with no try.
@@ -853,7 +915,7 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(out, "a claim that names its rule id after the act")
 
     def test_cc_green_connect_failure_because_clause_still_blocks(self):
-        # Control: a connect failure is no gate, so the because clause does not skip the claim. The
+        # Control: a connect failure is no blocker, so the because clause does not skip the claim. The
         # notice is no try, so the line blocks as no try.
         line = "I can't open the PR because the MCP server failed to connect."
         out = self.stop([trg.human("open a PR for the branch"), notice("github: failed to connect"),
@@ -868,7 +930,7 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_plain_cannot_merge_with_no_try_or_cite_still_blocks(self):
-        # Control: with no gate, no try and no cite, the claim blocks.
+        # Control: with no blocker, no try and no cite, the claim blocks.
         line = "I cannot merge the PR."
         out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
@@ -960,37 +1022,38 @@ class CannotClaimTests(unittest.TestCase):
         self.assertIn(HEAD, out.get("reason", ""), "the block for the 160 KB sentence is not the cannot-claim guard")
         self.assertIn(NO_TRY, out.get("reason", ""), "the 160 KB sentence has the wrong variant")
 
-    # ---- a gate word followed by a tool or connector noun is an outage, not a gate. Only a, an, the, new, draft and
-    # GitHub may sit between the verb and PR. A lock in index.lock is a file, not the lock gate. A gate in the same
-    # sentence skips the claim, before or after it. A make or npm script that pushes is a try of push. A red line is a
-    # claim the check must read.
+    # ---- a blocker word followed by a tool or connector noun is an outage, not a blocker. A lock in index.lock is a file,
+    # not the lock blocker. A blocker in the same sentence skips the claim, before or after it. Up to four words may sit
+    # between the verb and PR, none of them a preposition word (in, on, per); a hyphenated word such as in-progress is no
+    # preposition. A make target or an npm run script whose name holds push is a try of push; a bare npm push is not,
+    # since npm has no push. A red line is a claim the check must read.
 
     def test_cc_red_f1_outage_checks_tool_failed_to_connect_blocks(self):
-        # Catches: the gate word "checks" followed by a tool noun read as a gate, so an outage reason passes as no claim.
+        # Catches: the blocker word "checks" followed by a tool noun read as a blocker, so an outage reason passes as no claim.
         line = "I can't open the PR because the checks tool failed to connect."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_f1_outage_review_tool_timed_out_blocks(self):
-        # Catches: the gate word "review" followed by a tool noun read as a gate, so a timed-out tool passes as no claim.
+        # Catches: the blocker word "review" followed by a tool noun read as a blocker, so a timed-out tool passes as no claim.
         line = "I can't open the PR because the review tool timed out."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_f1_outage_batch_tool_timed_out_blocks(self):
-        # Catches: the gate words "the batch" followed by a tool noun read as a gate, so a timed-out tool passes as no claim.
+        # Catches: the blocker words "the batch" followed by a tool noun read as a blocker, so a timed-out tool passes as no claim.
         line = "I can't open the PR because the batch tool timed out."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_f1_outage_connector_on_hold_blocks(self):
-        # Catches: the gate word "hold" in "is on hold" read as a gate after a connector noun, so the outage passes.
+        # Catches: the blocker word "hold" in "is on hold" read as a blocker after a connector noun, so the outage passes.
         line = "I can't open the PR because the connector is on hold."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_f1_outage_connector_lock_expired_blocks(self):
-        # Catches: the gate word "lock" after a connector noun read as a gate, so an expired connector lock passes.
+        # Catches: the blocker word "lock" after a connector noun read as a blocker, so an expired connector lock passes.
         line = "I can't open the PR because the connector lock expired."
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
@@ -1028,7 +1091,7 @@ class CannotClaimTests(unittest.TestCase):
         for line in ("Because CI is red, I can't merge the PR.", "I can't merge the PR; CI is red."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("merge the PR"), trg.assistant_text(line)])
-                self.assert_passes(out, "a gate in the same sentence: %r" % line)
+                self.assert_passes(out, "a blocker in the same sentence: %r" % line)
 
     def test_cc_red_f5_failed_make_push_is_a_try_of_push(self):
         # Catches: a make target that pushes read as no try of push. The first plain argument, push, names the act.
