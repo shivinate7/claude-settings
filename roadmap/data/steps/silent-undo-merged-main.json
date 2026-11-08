@@ -1,11 +1,11 @@
 {
   "title": "The silent-undo check does not read main's commits that a merge from main brought into a branch",
   "why": "On #1706, after origin/main was merged in, `check_silent_undo.py --upstream origin/<branch> --head HEAD --strict` went red on main's own commits (67a684a61), so every merge from main reads red and lanes learn to push past the check.",
-  "note": "Filed 10:03 CST Nov 8 from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb); lane silent-undo-checks-pr-base (#1869) declined it at 10:03 CST: an explicit --upstream keeps its verdict, and origin/<branch> does not hold a newer local head, so it is used when named. Open pick for the building lane (it can be undone): skip commits reachable from the default branch whatever --upstream names, or refuse a named upstream that lacks main's tip, with a note. Red case: the #1706 run. Merge after: #1869. 10:25 CST Nov 8 (coordinator 10:18 CST): e036b8fa7 and f89467ac3 dropped from the why; lane silent-undo-checks-pr-base (session_013NEJL1Umc5vUUPV286bXnV) showed they are parents of no merge on main or #1706 and flag in no run. Its red cases are at 475760456.",
+  "note": "Filed 10:03 CST Nov 8 from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb); lane silent-undo-checks-pr-base (#1869) declined it at 10:03 CST: an explicit --upstream keeps its verdict, and origin/<branch> does not hold a newer local head, so it is used when named. Open pick for the building lane (it can be undone): skip commits reachable from the default branch whatever --upstream names, or refuse a named upstream that lacks main's tip, with a note. Red case: the #1706 run. Merge after: #1869. 10:25 CST Nov 8 (coordinator 10:18 CST): e036b8fa7 and f89467ac3 dropped from the why; lane silent-undo-checks-pr-base (session_013NEJL1Umc5vUUPV286bXnV) showed they are parents of no merge on main or #1706 and flag in no run. Its red cases are at 475760456. Coordinator 14:03 CST Nov 8: #2189 waits on #1957 for its second fix check (owner item 426 a).",
   "phase": "now",
   "owner": "coordinator",
   "lane": "",
   "status": "todo",
   "order": 716,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-08T14:04:00-06:00"
 }

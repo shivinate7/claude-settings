@@ -1,0 +1,11 @@
+{
+  "title": "The report guard reads a review record that has a Fix check line or a trailing note as a record for its head",
+  "why": "Lane silent-undo-checks-pr-base (session_013NEJL1Umc5vUUPV286bXnV), relayed by the coordinator 14:03 CST Nov 8: the report guard's review-record check said #2189 had no record for its live head, while a record existed at d35865d42, then the live head (PR comment 6726184510). Suspected cause: a record with a Fix check line or a trailing note is misread. One false alarm, so a guard fix, not a note. Reproduce first.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 815,
+  "updatedAt": "2026-11-08T14:04:00-06:00"
+}
