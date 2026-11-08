@@ -48,7 +48,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `git-main-only-by-pr` | Move main only by pull request, merged only when I name the act, or under a repo grant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-merge-failing-ci` | Never merge failing CI. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-no-merge-during-batch-ci` | While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me. | [`CLAUDE.md`](../CLAUDE.md) |
-| `git-ci-wait-checks-in` | A session that waits on CI sets a timed check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
+| `git-ci-wait-checks-in` | A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-ci-done-comment-wakes` | A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`). | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-never-discard-output` | Keep git write output. | [`CLAUDE.md`](../CLAUDE.md) |
 | `git-remedy-never-names-target` | A refusal's printed remedy never names the forbidden target. | [`CLAUDE.md`](../CLAUDE.md) |
