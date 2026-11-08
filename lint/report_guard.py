@@ -596,7 +596,8 @@ def spawn_window(records, upto=None):
     `upto` stops the search at that index, for a re-check bound to an earlier anchor."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import shared_names
-    owner = last_owner_index(records if upto is None else records[:upto + 1], shared_names._PEER_FRAME_TAGS)
+    owner = last_owner_index(records if upto is None else records[:upto + 1], shared_names._PEER_FRAME_TAGS,
+                             wake_starts=turn_landed)
     return records if owner is None else records[owner + 1:]
 
 
