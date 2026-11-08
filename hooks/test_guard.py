@@ -11171,6 +11171,10 @@ RR_TRANSCRIPTS = {
     "reviewer-error": rr_session(rr_spawn_error("r1", "reviewer")),
     "sidechain-spawn": rr_session(rr_sidechain(rr_spawn("r1", "reviewer"))),
     "sidechain-record": rr_session(rr_spawn("r1", "reviewer"), rr_sidechain(rr_comment("c1", rr_record()))),
+    "reviewer-capital": rr_session(rr_spawn("r1", "Reviewer")),
+    "reviewer-padded": rr_session(rr_spawn("r1", " reviewer ")),
+    "reviewer-capital-record": rr_session(rr_spawn("r1", "Reviewer"), rr_comment("c1", rr_record())),
+    "design-reviewer-capital": rr_session(rr_spawn("d1", "Design-reviewer")),
 }
 
 
@@ -11268,6 +11272,28 @@ rr_refuse("a record marker comment inside a sidechain record is not the lane's p
 # The refusal names the design-reviewer line of the round's record, which takes the form `Round <n>: design-reviewer, ...`.
 rr_refuse("a builder spawn after a design-reviewer spawn with no record: the refusal names the design-reviewer line",
           "Agent", RR_BUILDER, rr_path("design-reviewer"), carries=RR_CARRIES + ("design-reviewer",))
+# A role with a capital letter or a surrounding space is the same role, as role_key reads it (guard.py). The
+# lowercase cases above are the controls: they take the same path with the role spelled as the table has it.
+rr_refuse("a reviewer spawned as Reviewer, then a builder spawn with no record, is refused",
+          "Agent", RR_BUILDER, rr_path("reviewer-capital"))
+rr_refuse("a reviewer spawned with a surrounding space, then a builder spawn with no record, is refused",
+          "Agent", RR_BUILDER, rr_path("reviewer-padded"))
+rr_refuse("a design-reviewer spawned as Design-reviewer, then a builder spawn with no record, is refused",
+          "Agent", RR_BUILDER, rr_path("design-reviewer-capital"), carries=RR_CARRIES + ("design-reviewer",))
+rr_refuse("an unrecorded reviewer, then a Builder spawn, is refused",
+          "Agent", dict(RR_BUILDER, subagent_type="Builder"), rr_path("reviewer"))
+rr_refuse("an unrecorded reviewer, then a Test-author spawn, is refused",
+          "Agent", dict(RR_TEST_AUTHOR, subagent_type="Test-author"), rr_path("reviewer"))
+rr_refuse("an unrecorded reviewer, then a ' builder ' spawn with a surrounding space, is refused",
+          "Agent", dict(RR_BUILDER, subagent_type=" builder "), rr_path("reviewer"))
+rr_allow("a reviewer spawned as Reviewer, then a record, lets a builder spawn through",
+         "Agent", RR_BUILDER, rr_path("reviewer-capital-record"))
+# The remedy names every flag merge takes with --review-record. RR_CARRIES already holds --review-record and --head.
+RR_REMEDY_FLAGS = ("--kind", "--guard", "--round")
+rr_refuse("the reviewer remedy names --kind, --guard and --round, the flags merge takes with --review-record",
+          "Agent", RR_BUILDER, rr_path("reviewer"), carries=RR_CARRIES + RR_REMEDY_FLAGS)
+rr_refuse("the design-reviewer remedy names --kind, --guard and --round, the flags merge takes with --review-record",
+          "Agent", RR_BUILDER, rr_path("design-reviewer"), carries=RR_CARRIES + ("design-reviewer",) + RR_REMEDY_FLAGS)
 
 
 def rr_cost_case():
@@ -11305,6 +11331,33 @@ def review_send_matcher_case():
 
 
 RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher routes every send tool to the guard"
+RR_SPAN_FLAGS = ("--review-record", "--head") + RR_REMEDY_FLAGS
+RR_MERGE_COMMAND = re.compile(r"`(merge [^`]*)`")
+
+
+def rr_remedy_case():
+    """The design-reviewer refusal prints merge commands, and each one must run. Every backticked merge command in
+    the reason holds each flag of RR_SPAN_FLAGS. The whole-reason check above passes when one command has a flag
+    that another lacks, so this check reads each command on its own. The deny is asserted first, so the check
+    passes only when the rule reached its remedy."""
+    got, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "network": True}, RR_BUILDER,
+                               own_env=ROLE_ENV, transcript=rr_session(rr_spawn("d1", "design-reviewer")))
+    if got == "error":
+        return False, reason
+    if got != "deny" or RR_RULE not in reason:
+        return False, "%s, want a deny that names %s: %s" % (got, RR_RULE, reason[:80])
+    commands = RR_MERGE_COMMAND.findall(reason)
+    if not commands:
+        return False, "the reason prints no backticked merge command: %s" % reason[:80]
+    for command in commands:
+        for flag in RR_SPAN_FLAGS:
+            if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(flag), command):
+                return False, "the merge command %r lacks %s" % (command[:70], flag)
+    return True, "every merge command the reason prints names %s" % ", ".join(RR_SPAN_FLAGS)
+
+
+RR_REMEDY_LABEL = ("review-record-after-round: every merge command the design-reviewer refusal prints names "
+                   "--review-record, --head, --kind, --guard and --round")
 
 
 # The pull request a reviewer brief names (rule review-needs-pr, decision pr-review-record). A reviewer or
@@ -15576,6 +15629,9 @@ FIXTURELESS_CHECKS.add(rr_cost_case)
 LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
 LOG_FAMILY[RR_SEND_MATCHER_LABEL] = "review-record-after-round"
 FIXTURELESS_CHECKS.add(review_send_matcher_case)
+LOG_CHECKS_EXTRA.append((RR_REMEDY_LABEL, rr_remedy_case))
+LOG_FAMILY[RR_REMEDY_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(rr_remedy_case)
 # The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
 # registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
 for _constant in REMEDY_CONSTANTS:
