@@ -3623,11 +3623,11 @@ class IdleLanes(UpkeepFixture):
         pull = {"number": 67, "title": "lane c1", "branch": "lane/c1", "head": self.off_main_sha(), "draft": False}
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")], pulls=[dict(pull)])
         entries = self.reported()
-        self.assert_held(self.line_for(entries, "session_b"), "session_b")
+        self.assertFalse(self.named(entries, "session_b"), "a no-body open pull did not hold session_b: %r" % (entries,))
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")], pulls=[dict(pull, body=None)])
         entries = self.reported()
         self.assertEqual(self.line_for(entries, "session_b"), "session_b (c2; topic -)", entries)
-        self.assert_held(self.line_for(entries, "session_a"), "session_a")
+        self.assertFalse(self.named(entries, "session_a"), "an open pull on lane/c1 did not hold session_a: %r" % (entries,))
 
 
 class SharedTagNames(unittest.TestCase):
