@@ -215,6 +215,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 LT_PATH =os.environ.get("LOCAL_TIME_UNDER_TEST") or os.path.join(HERE, "local_time.py")
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
 PRECOMPACT_PATH = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
@@ -2754,6 +2755,18 @@ def case_page_note_get_saves_one_block():
           [m["text"] for m in parsed] == [label_of(3, "it-4f2a", PAGE_NOTE)], parsed)
 
 
+# Owner item 440: the Mac db_get of answers/<id> is the cloud get of answers, so it saves the same block. The response
+# is the cloud one: item 440 names the input of each Mac tool, not its response, so this shape is assumed.
+def case_mac_page_note_get_saves_one_block():
+    cfg, sid = new_cfg(), "pn-mac-save"
+    tool, mac_input = mac_of_cloud("ArtifactData", tool_input("get"))
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]), inp=mac_input, tool_name=tool)
+    check("page note Mac get: the mode ran", ran_page_note(p), p.desc())
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("page note Mac get: one block, text is the label and the note, as the cloud get saves it",
+          len(blocks) == 1 and blocks[0]["text"] == label_of(3, "it-4f2a", PAGE_NOTE), blocks)
+
+
 def case_page_note_same_get_twice_saves_once():
     cfg, sid = new_cfg(), "pn-dedup"
     first = response_of([("a-7k2", answer_data())])
@@ -3742,6 +3755,7 @@ CASES = (
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_page_note_get_saves_one_block,
+    case_mac_page_note_get_saves_one_block,
     case_page_note_same_get_twice_saves_once,
     case_page_note_other_calls_save_nothing,
     case_page_note_blank_and_accepted_notes_save_nothing,

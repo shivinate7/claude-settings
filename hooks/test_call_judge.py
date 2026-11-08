@@ -78,6 +78,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
+from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RUNS = [0]
@@ -1550,6 +1551,58 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ Mac-shaped waiting-page calls (owner item 440)
+# A Mac call is a twin of a cloud call: the same data, in the Mac shape that test_mac_artifact_shapes builds from the
+# cloud input. The item writes and the str_replace must reach the judge as the cloud ones do. The reads and the
+# negatives exit before the judge, as the cloud ones do. On main no Mac name reaches this hook, so those exit
+# early there too: they are green controls, and they guard a build that maps too much.
+def mac_page_input(cloud_action, data=None, collection=PAGE_ITEMS, doc_id="p1", op=None, cwd=PAGE_REPO, **extra):
+    """The Mac twin of page_input: the same ArtifactData call, in the Mac shape of owner item 440."""
+    payload = json.loads(page_input(cloud_action, data, collection=collection, doc_id=doc_id, cwd=cwd, **extra))
+    payload["tool_name"], payload["tool_input"] = mac_of_cloud("ArtifactData", payload["tool_input"], op=op)
+    return json.dumps(payload)
+
+
+def case_mac_item_writes_reach_the_judge():
+    # Each cloud write and its Mac twin reach the judge: question_form is imported, and the model is called as often.
+    item = good_page_item()
+    for label, cloud, op in (("set", "set", "set"), ("merge", "update", "merge"), ("update", "update", "update")):
+        cloud_run = run_hook(page_input(cloud, item), answer=ALLOW)
+        mac_run = run_hook(mac_page_input(cloud, item, op=op), answer=ALLOW)
+        check("page Mac %s: the cloud %s reaches the judge path" % (label, cloud),
+              "question_form" in cloud_run.imports and len(cloud_run.calls) >= 1, detail(cloud_run))
+        check("page Mac %s: the Mac write reaches the judge path as the cloud %s does" % (label, cloud),
+              "question_form" in mac_run.imports and len(mac_run.calls) == len(cloud_run.calls), detail(mac_run))
+
+
+def case_mac_str_replace_reaches_the_judge():
+    # The cloud str_replace on context is denied by the judge, rule question-judge, one model call. Its Mac twin is too.
+    fragment = "The change lands this week. " + PAGE_NEW
+    args = dict(field="context", old_str=PAGE_OLD, new_str=fragment)
+    cloud_run = run_hook(page_input("str_replace", None, **args), answer=PAGE_FLAG)
+    mac_run = run_hook(mac_page_input("str_replace", None, **args), answer=PAGE_FLAG)
+    check("page Mac str_replace: the cloud str_replace on context is denied by the judge, one call",
+          (cloud_run.deny() or {}).get("permissionDecision") == "deny" and len(cloud_run.calls) == 1, detail(cloud_run))
+    check("page Mac str_replace: the Mac str_replace is denied by the judge, rule question-judge, one call",
+          (mac_run.deny() or {}).get("permissionDecision") == "deny"
+          and mac_run.reason().startswith("question-judge: ") and len(mac_run.calls) == 1, detail(mac_run))
+
+
+def case_mac_reads_and_other_collections_skip_the_judge():
+    # Controls and negatives: a Mac get exits before the judge, as a cloud get does. A Mac write to receipts/ or meta/
+    # is no item write, so it exits too. Green on main, where no Mac name reaches this hook.
+    item = good_page_item()
+    for label, inp in (
+        ("an items get", mac_page_input("get", None, doc_id="p1", cwd=CI_REPO)),
+        ("a receipts write", mac_page_input("set", item, collection="receipts", doc_id="r1", cwd=CI_REPO)),
+        ("a meta write", mac_page_input("set", item, collection="meta", doc_id="page", cwd=CI_REPO)),
+    ):
+        r = run_hook(inp, answer=PAGE_FLAG)
+        check("page Mac import: %s does not import question_form in the hook" % label,
+              r.code == 0 and r.out == "" and r.calls == [] and "question_form" not in r.imports, detail(r))
+        check("page Mac import: %s runs no git process" % label, r.git == 0, detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1573,7 +1626,9 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_mac_item_writes_reach_the_judge, case_mac_str_replace_reaches_the_judge,
+                 case_mac_reads_and_other_collections_skip_the_judge):
         try:
             case()
         except Exception as exc:

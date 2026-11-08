@@ -70,6 +70,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+from test_mac_artifact_shapes import mac_of_cloud  # noqa: E402  the Mac input shapes of owner item 440
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -16468,6 +16469,20 @@ wp_publish("an untouched page titled Queue with empty blocks is refused, as main
 wp_publish("a page with live designData and an empty roadmap is allowed", "allow", WP_DESIGN_LIVE)
 wp_publish("a page with an empty designData and a live roadmap is allowed", "allow", WP_ROADMAP_LIVE)
 wp_publish("a page the writer's --write builds is allowed", "allow", WP_WRITER)
+
+
+def wp_publish_mac(name, expected, page, rule=None, url=PQ_URL):
+    """The Mac twin of wp_publish (owner item 440): a publish_files of `page`, judged by the same guard copy. A url of
+    None is a first publish, in form 1; a url is a republish, in form 2 with the artifact's slug."""
+    cloud = {"file_path": page} if url is None else {"file_path": page, "url": url}
+    tool, shape = mac_of_cloud("Artifact", cloud)
+    add("page-stale, Mac: " + name, expected, rule, tool=tool, cwd=PQ_REPO, guard=WP_GUARD, **shape)
+
+
+wp_publish_mac("a behind page with no action is refused", "deny", WP_BEHIND, rule="page-stale")
+wp_publish_mac("main's page republished to the waiting page is refused: its designData and roadmap are empty",
+               "deny", WP_CURRENT, rule="page-stale")
+wp_publish_mac("main's page as a first publish, with no url, is allowed", "allow", WP_CURRENT, url=None)
 wp_publish("a behind page published to another url is allowed", "allow", WP_BEHIND, url=WP_OTHER_URL)
 wp_publish("a read of the waiting page with a behind file is allowed", "allow", WP_BEHIND, action="read")
 wp_publish("a behind file uploaded as an asset is allowed", "allow", WP_BEHIND, asset=True)
@@ -16630,9 +16645,14 @@ def pd_plain():
                       departs=True)
 
 
-def pd_body(repo, data, action="set"):
-    return {"tool_name": "ArtifactData", "cwd": repo,
-            "tool_input": {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}}
+def pd_body(repo, data, action="set", mac=None):
+    """The guard's payload for one write of item PD_DOC. `mac` is the Mac op of the same write (owner item 440):
+    the payload then carries the Mac tool and its shape, built from the cloud input, so the twin carries the same data."""
+    cloud = {"url": PQ_URL, "action": action, "collection": "items", "doc_id": PD_DOC, "data": data}
+    if mac is None:
+        return {"tool_name": "ArtifactData", "cwd": repo, "tool_input": cloud}
+    tool, shape = mac_of_cloud("ArtifactData", cloud, op=mac)
+    return {"tool_name": tool, "cwd": repo, "tool_input": shape}
 
 
 def pd_run(name, body):
@@ -16906,7 +16926,7 @@ def mh_design(**over):
     return {key: value for key, value in entry.items() if value is not None}
 
 
-def mh_judged(name, data, action="set", windows=False):
+def mh_judged(name, data, action="set", windows=False, mac=None):
     """(decision, reason, checker calls, guard.log rows) for one ArtifactData write of the fixture's waiting page,
     judged in this process. `windows` makes Path.home a Windows owner's home, the way a Windows computer reads it."""
     import pathlib
@@ -16918,17 +16938,17 @@ def mh_judged(name, data, action="set", windows=False):
         stack.enter_context(mock.patch.dict(os.environ, {"HOME": MH_WIN_HOME if windows else home}))
         if windows:  # Path.home and HOME both name the owner's home, so a judge that reads either one sees it
             stack.enter_context(mock.patch.object(pathlib.Path, "home", return_value=pathlib.PureWindowsPath(MH_WIN_OWNER)))
-        calls, out, rows = pd_judged(pd_body(repo, data, action), name, seam=lambda page_file, item: (0, ""))
+        calls, out, rows = pd_judged(pd_body(repo, data, action, mac), name, seam=lambda page_file, item: (0, ""))
     decision, reason = read_decision(out)
     return decision, reason, calls, rows
 
 
-def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=()):
+def mh_case(label, name, data, want, checker, action="set", windows=False, says=(), not_says=(), mac=None):
     """One check of rule mockup-home. A deny names the rule and the file field, starts no checker, and logs a deny row
     for the rule. An allow prints nothing and starts `checker` checker calls. A deny's reason holds each `says` text
     and no `not_says` text."""
     def check():
-        decision, reason, calls, rows = mh_judged(name, data, action, windows)
+        decision, reason, calls, rows = mh_judged(name, data, action, windows, mac)
         if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
             return False, "want %s, got %s: %s" % (want, decision, reason[:160])
         if want == "deny":
@@ -16987,6 +17007,50 @@ mh_case("a design whose file is a folder is denied, since a folder holds no mock
         "mh-folder", pd_item(designs=[mh_design(file="docs/design/item48/")]), "deny", checker=0)
 mh_case("a Windows-form design path inside the design folder is allowed, as it is today",
         "mh-win-design", pd_item(designs=[mh_design(file="docs\\design\\a.html")]), "allow", checker=1)
+
+# Owner item 440: the Mac twins of the denied writes above. Each carries the cloud case's data and verdict. A Mac merge
+# twins the cloud update (CLOUD_ACTION_OF_OP), so the same file rule judges it.
+mh_case("Mac set: a design with a file under the machine home is denied, as the cloud set is",
+        "mh-mac-set", pd_item(designs=[mh_design(file=MH_MACHINE)]), "deny", checker=0, mac="set")
+mh_case("Mac merge: an update that carries designs with no file is denied, as the cloud update is",
+        "mh-mac-merge", {"designs": [mh_design(file=None)]}, "deny", checker=0, action="update", mac="merge")
+mh_case("Mac update: an update that carries designs with no file is denied, as the cloud update is",
+        "mh-mac-update", {"designs": [mh_design(file=None)]}, "deny", checker=0, action="update", mac="update")
+
+
+# Owner item 440: the Mac twins of a picture write. The checker is a seam that misses, so the judge refuses in process
+# with the page's sentence, and no node runs. Each Mac write is checked against its cloud write in the same case.
+PD_SEAM_MISS = "The page shows nothing the focus names."
+
+
+def pd_miss_verdict(tag, action, mac=None):
+    """(decision, reason, checker calls) for one picture write of item PD_DOC, when the checker misses."""
+    calls, out, _ = pd_judged(pd_body(pd_repo(tag, PD_PAGE), pd_item(), action, mac=mac), tag,
+                              seam=lambda page_file, item: (1, PD_SEAM_MISS))
+    decision, reason = read_decision(out)
+    return decision, reason, calls
+
+
+def pd_miss_case(label, action, mac):
+    """The Mac write `mac` of the cloud action `action` is denied by page-item-design, as the cloud write is."""
+    def check():
+        cloud = pd_miss_verdict("pdmiss-cloud-" + label, action)
+        twin = pd_miss_verdict("pdmiss-mac-" + label, action, mac)
+        if cloud[0] != "deny" or not cloud[1].startswith("page-item-design:"):
+            return False, "the cloud control is not denied by page-item-design: %s" % cloud[1][:160]
+        if twin[0] != "deny":
+            return False, "want deny, got %s: %s" % (twin[0], twin[1][:160])
+        if not twin[1].startswith("page-item-design:"):
+            return False, "the Mac write is not denied by page-item-design: %s" % twin[1][:160]
+        if twin[2] != cloud[2]:
+            return False, "the checker was called %d time(s), the cloud write %d" % (twin[2], cloud[2])
+        return True, "denied by page-item-design, as the cloud write is"
+    LOG_CHECKS_EXTRA.append(("page-item-design, Mac %s: the checker's miss denies it as the cloud write is" % mac, check))
+
+
+pd_miss_case("set", "set", "set")
+pd_miss_case("merge", "update", "merge")
+pd_miss_case("update", "update", "update")
 
 
 # --------------------------------------------------------------------------- a pick never widens a shared tool
@@ -19144,6 +19208,13 @@ rw("a str_replace that adds the phrase in capitals is denied", "deny", None, act
    field="context", old_str="Options are open.", new_str="Options BEING REWORKED.")
 rw("a str_replace that takes the phrase out of context is allowed", "allow", None, action="str_replace",
    field="context", old_str=RW_TEXT, new_str="Options are ready.")
+# Owner item 440: the Mac twin of the cloud str_replace above. page-item-design and mockup-home judge set and update
+# only, so this rule (rework-off-page) is the one that reads a str_replace's `context`. The Mac shape carries the same text.
+RW_TWIN_CLOUD = {"url": PQ_URL, "action": "str_replace", "collection": "items", "doc_id": RW_DOC,
+                 "field": "context", "old_str": "Options are open.", "new_str": RW_TEXT}
+RW_TWIN_TOOL, RW_TWIN_SHAPE = mac_of_cloud("ArtifactData", RW_TWIN_CLOUD)
+add("rework off page, Mac: a db_str_replace that adds the phrase to context is denied, as the cloud str_replace is",
+    "deny", "rework-off-page", tool=RW_TWIN_TOOL, cwd=PQ_REPO, **RW_TWIN_SHAPE)
 
 # Item text other than context: title, why and an option's own text. The same write with status closed is allowed.
 RW_QUIET = "The options are open."
