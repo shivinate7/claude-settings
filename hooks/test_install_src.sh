@@ -70,6 +70,20 @@ landed_dirs() {
   sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$REPO_ROOT/landed-dirs.txt" | grep -v '^$'
 }
 
+# tracked_in ROOT DIR MODE: the files git lists under DIR in the checkout ROOT, one per line, as paths relative to
+# DIR. MODE direct keeps only the files directly in DIR, which is what land_dir lands; MODE all keeps every file
+# below DIR, which is what the mirror holds and what land_skills_dir copies.
+tracked_in() {
+  ti_dir=${2%/}
+  ti_all=$(git -C "$1" ls-files -- "$ti_dir/") || return 1
+  printf '%s\n' "$ti_all" | while IFS= read -r ti_p; do
+    [ -n "$ti_p" ] || continue
+    ti_rel=${ti_p#"$ti_dir"/}
+    if [ "$3" = direct ]; then case $ti_rel in */*) continue ;; esac; fi
+    printf '%s\n' "$ti_rel"
+  done
+}
+
 # One run folder per test run (test-temp-standard): lint/_test_temp.py makes it under the repo's one temp
 # root and sweeps sibling run folders older than a day. Every temp path in this file sits under it.
 work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_temp; print(_test_temp.run_folder())' "$REPO_ROOT/lint") || work=""
@@ -341,12 +355,12 @@ case7() {
 }
 
 # ---- Case 8: fallback mirror lands every tracked file under every landed directory, no hand list
-# Guards against a hand-maintained per-file fetch list drifting behind git: every file
-# `git ls-files` reports under a directory landed-dirs.txt names must land both in the fetched
-# mirror ($h/claude-settings/<path>) and in the config dir land_dir() copies it into for cloud
-# installs ($cfg/<path>, since --cloud always copies rather than symlinks). The directory list
-# itself comes from landed-dirs.txt (see landed_dirs() above), not a hand-kept "hooks lint"
-# pair here, so this case cannot go blind to a directory the manifest adds.
+# Guards against a hand-maintained fetch list drifting behind git. The directory list comes from landed-dirs.txt
+# (landed_dirs() above). Two claims, one per side. The fetched mirror holds every tracked file under each landed
+# directory, subfolders included, since it is a full clone or the full tarball. The config dir holds what land_dir()
+# lands: the plain files directly in each landed folder, so a subfolder such as actions/code-check/tools is not
+# expected there. skills is the exception: land_skills_dir copies each skill folder whole, so its files below the
+# top level are expected there too.
 case8() {
   name="case8: fallback mirror lands every tracked file under every landed directory"
   h=$(new_home); cfg="$h/.claude-cfg"; scratch="$work/case8-scratch"
@@ -361,11 +375,17 @@ case8() {
   rc=$?
 
   missing=""
-  # landed_dirs prints one directory per line; each becomes its own ls-files argument, so the split is meant.
+  # landed_dirs prints one directory per line; the loop reads each one as a single word.
   # shellcheck disable=SC2046
-  for path in $(git -C "$REPO_ROOT" ls-files $(landed_dirs)); do
-    [ -f "$h/claude-settings/$path" ] || missing="$missing mirror:$path"
-    [ -f "$cfg/$path" ] || missing="$missing landed:$path"
+  for dir in $(landed_dirs); do
+    for rel in $(tracked_in "$REPO_ROOT" "$dir" all); do
+      [ -f "$h/claude-settings/$dir/$rel" ] || missing="$missing mirror:$dir/$rel"
+    done
+    landing=direct
+    [ "$dir" = skills ] && landing=all
+    for rel in $(tracked_in "$REPO_ROOT" "$dir" "$landing"); do
+      [ -f "$cfg/$dir/$rel" ] || missing="$missing landed:$dir/$rel"
+    done
   done
 
   if [ $rc -ne 0 ]; then
@@ -2924,11 +2944,6 @@ code_check_fixture() {
   cp "$INSTALL_SH" "$cc_co/install.sh"
   ( cd "$cc_co" && git add -A && git commit -q -m code-check )
 }
-# The plain files git lists directly under actions/code-check in checkout $1. land_dir lands plain files only,
-# so the subfolder tools/ is not among them.
-cc_direct_files() {
-  git -C "$1" ls-files -- actions/code-check/ | sed -n 's#^actions/code-check/\([^/]*\)$#\1#p'
-}
 # Imports the lint at argv[1] from its installed folder, with no bytecode written, and checks its STANDARD file exists.
 cc_standard_py='import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("check_comment_narration", sys.argv[1])
@@ -2949,7 +2964,7 @@ cloud_code_check1() {
   name="cloud_code_check1: a cloud install lands each file git lists directly under actions/code-check, and the installed lint's STANDARD file exists"
   h=$(new_home); co="$work/cloud_code_check1-checkout"
   code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
-  want=$(cc_direct_files "$co")
+  want=$(tracked_in "$co" actions/code-check direct)
   if [ -z "$want" ]; then
     bad "$name" "fixture precondition failed: git lists no file directly under actions/code-check"
   else
@@ -2974,7 +2989,7 @@ local_code_check1() {
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   h=$(new_home); co="$work/local_code_check1-checkout"
   code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
-  want=$(cc_direct_files "$co")
+  want=$(tracked_in "$co" actions/code-check direct)
   if [ -z "$want" ]; then
     bad "$name" "fixture precondition failed: git lists no file directly under actions/code-check"
   else
