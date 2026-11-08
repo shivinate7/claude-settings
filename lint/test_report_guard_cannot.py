@@ -2333,6 +2333,76 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    # ---- follow-up 5 (Q1-Q5). Each red case fails on the current code, and each green case is a keep line the fix must
+    # still pass. The lines are the spec's; a case names its try state (no try, or one failed push in the turn).
+
+    def test_cc_red_q1_a_builder_in_this_session_is_no_claim(self):
+        # Catches: "this session" read as the writer wherever it sits in the clause. Here it is the builder's place, not the
+        # subject, so the line says nothing about this session and passes with no try.
+        line = "The builder in this session is unable to push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_passes(out, "a builder in this session, as the subject: %r" % line)
+
+    def test_cc_green_q1_this_session_as_the_subject_still_blocks(self):
+        # Control: "this session" is the subject here, so the claim blocks with no try.
+        line = "This session is not able to merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_q2_a_check_word_in_the_claim_phrase_names_no_check(self):
+        # Catches: "blocked" inside the claim phrase ("blocked from") read as the check that names the failed push. The
+        # phrase is the claim itself, so after a failed push the line names no check.
+        line = "I am blocked from pushing."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_q2_a_blocked_push_that_names_its_exit_passes(self):
+        # Control: "blocked" in a sentence with no claim phrase is no claim, so the line passes after a failed push.
+        line = "The push was blocked: `push` exited 1."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_passes(out, "the control: a blocked push, named by its exit, is no claim")
+
+    def test_cc_red_q3_a_speech_word_about_a_person_names_no_check(self):
+        # Catches: "said" after the claim read as a check whatever its subject. The owner is a person, not a tool, hook,
+        # check or command, so the owner's word names no check after a failed push.
+        line = "I cannot push, as the owner said."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_q3_a_speech_word_about_a_hook_passes(self):
+        # Control: a hook said it, so the speech word names its check and the line passes after a failed push.
+        line = "I cannot push, as the hook said."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_passes(out, "the control: a failed push, named by the hook that said so")
+
+    def test_cc_red_q4_a_reason_before_but_names_no_check(self):
+        # Catches: a clause before "but" read as a reason. "but" is a contrast, so "The branch is protected but I cannot
+        # push" gives no reason, and after a failed push with no check named the line blocks.
+        line = "The branch is protected but I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_q4_a_reason_before_a_semicolon_or_colon_passes(self):
+        # Control: ";" and ":" join a reason before the claim, so both lines pass after a failed push.
+        for line in ("The branch is protected; I cannot push.", "The branch is protected: I cannot push."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"),
+                                 landed_reply(line)])
+                self.assert_passes(out, "a failed push, with its reason before a semicolon or colon: %s" % line)
+
+    def test_cc_red_q5_a_negator_does_not_reach_across_a_new_subject(self):
+        # Catches: "Don't" read as negating the claim across "worry I", a new subject. Negation reaches across a subject
+        # only after a speech verb, so the line is a claim with no try and blocks.
+        line = "Don't worry I am unable to push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_q5_a_negator_across_a_speech_verb_still_negates(self):
+        # Control: "did not say" reaches across "I" to the claim, after a speech verb, so the line is no claim.
+        line = "I did not say I am not authorized to push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_passes(out, "the control: a negator across a speech verb and a new subject negates the claim")
+
 
 if __name__ == "__main__":
     unittest.main()
