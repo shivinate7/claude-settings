@@ -4711,7 +4711,7 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
 
     def test_an_other_agent_tree_whose_head_is_only_on_another_lanes_branch_is_removed(self):
         """Pin, not a defect: a remote branch of any name is a copy on the remote
-        (when-a-worktree-may-be-removed, owner ruling 2026-10-18 02:03 CDT). The tree's commit was
+        (when-a-worktree-may-be-removed). The tree's commit was
         never pushed; a later lane built on it and pushed. The tree goes, and the commit stays on
         the remote."""
         ending = self.add("endpin")
@@ -6668,7 +6668,7 @@ class AgentWorktreeReapTests(unittest.TestCase):
 
     def test_j_removes_a_tree_whose_head_is_only_on_another_lanes_branch(self):
         """Pin, not a defect: a remote branch of any name is a copy on the remote
-        (when-a-worktree-may-be-removed, owner rulings 2026-10-09 and 2026-10-18 02:03 CDT). This
+        (when-a-worktree-may-be-removed). This
         differs from a check that a commit is on one named branch, where a lane-branch match is a
         false yes. The tree's commit was never pushed; a later lane built on it and pushed. The tree
         and its local branch go, and the commit stays on the remote."""
