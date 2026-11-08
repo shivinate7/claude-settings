@@ -2071,6 +2071,59 @@ test("watchdog, CI on Windows: no Job Object fails the run with a line starting 
   });
 });
 
+// The sweep seam. STAMP_SUITE_SWEEP_FAULT makes the sweep report a fault the clean fixture cannot
+// produce, so only the knob can make the run red. Each case runs the real watchdog. Red today: the
+// knob is not read yet, so the run exits 0.
+function faultedCleanRun(extra, dir) {
+  const pidFile = join(dir, "pids");
+  const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "clean", ...extra };
+  delete env[CHILD];
+  let r, found;
+  try {
+    r = watchdogRun(env, dir);
+  } finally {
+    found = leftovers(pidFile);
+  }
+  return { r, found };
+}
+
+test("watchdog: a sweep that reports a pid still alive after its kill fails the run (STAMP_SUITE_SWEEP_FAULT=alive)", () =>
+  withTempDir((dir) => {
+    const { r, found } = faultedCleanRun({ STAMP_SUITE_SWEEP_FAULT: "alive" }, dir);
+    assert.equal(found.pids.length, 2, r.out); // scope: the clean fixture ran
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 1, r.out);
+  }));
+
+test("watchdog, CI: a sweep that cannot read fails the run by name (STAMP_SUITE_SWEEP_FAULT=unknown)", () =>
+  withTempDir((dir) => {
+    const { r, found } = faultedCleanRun({ GITHUB_ACTIONS: "true", STAMP_SUITE_SWEEP_FAULT: "unknown" }, dir);
+    assert.equal(found.pids.length, 2, r.out); // scope: the clean fixture ran
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^unknown - leftover sweep could not read/m, r.out);
+  }));
+
+// Windows only: the go file is written on the Job Object path alone, so the knob means nothing on Linux.
+// STAMP_SUITE_GO_FAIL=1 makes that write fail. Windows red: unmeasured.
+test("watchdog, Windows: a go file that cannot be written fails the run before any test (STAMP_SUITE_GO_FAIL=1)", () => {
+  if (POSIX) return;
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "60", [HANG]: pidFile, [HANG_KIND]: "clean", STAMP_SUITE_GO_FAIL: "1" };
+    delete env[CHILD];
+    let r;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      leftovers(pidFile); // reaps anything the run left, so nothing outlives the test
+    }
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^FAIL - go file/m, r.out);
+    assert.doesNotMatch(r.out, /^ok - /m, r.out); // no test ran
+  });
+});
+
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
