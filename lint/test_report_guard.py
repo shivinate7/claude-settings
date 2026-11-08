@@ -1110,7 +1110,8 @@ class DoneNamesModelsTests(unittest.TestCase):
                    "reviewer sonnet rounds 2 and 3)\n> **Next** Unstarted: none")
 
     def test_dm_false_alarm_earlier_round_pin_named_passes(self):
-        # Round 1 ran before the owner's second message, on its file pin, haiku. Rounds 2 and 3 ran after it.
+        # The earlier reviewer runs before the owner's second message, on its file pin, haiku. The later
+        # reviewers run after it, on sonnet, and each is named at its own model.
         records = self.turn_records(earlier=[self.ROUND1_NO_MODEL],
                                     window=[self.BUILDER, self.REVIEWER_R2, self.REVIEWER_R3])
         out = self.stop(records, self.ROUNDS_DONE)
@@ -1370,8 +1371,8 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertIsNone(self.stop(self.GOOD, True))
 
     def earlier_round_records(self, reply):
-        """A turn whose round 1 reviewer ran before the owner's second message, on its file pin (haiku), and whose
-        round 2 reviewer ran after it, on sonnet. `reply` is the turn's last text."""
+        """A turn whose reviewer ran before the owner's second message, on its file pin (haiku), and whose
+        second reviewer ran after it, on sonnet. `reply` is the turn's last text."""
         round1 = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}  # no model field: its file pin, haiku
         round2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
         records = [human("do the task")] + keyed_spawn(round1, 0) + [human("the owner's next message")]
@@ -1380,8 +1381,8 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         return records
 
     def test_rw_earlier_round_pin_named_passes(self):
-        # The rewrite is judged against every spawn in the transcript, as the stop path is: Done names round 1 at its
-        # pin, haiku, which ran before the window, and round 2 at sonnet, which ran in it.
+        # The rewrite is judged against every spawn in the transcript, as the stop path is: Done names the earlier
+        # reviewer at its pin, haiku, which ran before the window, and the later one at sonnet, which ran in it.
         block = self.run_hook(self.earlier_round_records("All done."), False)
         self.assertIn("does not end with the report", block["reason"])
         reply = ("> **Done** BUILT the guard, PR #5 (reviewer haiku round 1, reviewer sonnet round 2)\n"
