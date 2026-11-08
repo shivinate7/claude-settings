@@ -81,7 +81,8 @@ guard rule, so the watcher does the waiting and the session is told once.
 ## The Stop-time check
 
 When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
-lists each open background shell whose output file has been quiet longer than the age. Each log its
+lists each open background shell and background agent that has been quiet longer than the age.
+For a shell, the signal is its output file, and each log its
 command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
 the shell or tell the owner. It repeats at every Stop while a job stays quiet. No dedupe exists yet (open
@@ -106,6 +107,23 @@ is gone now is not listed. With no summary, or a summary with no readable timest
 every quiet job is listed. The state is the transcript: no file is written and no process is started.
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop.
+
+A background agent is a job too. Its launch record is a `toolUseResult` with `isAsync` true, status
+`async_launched` and an `agentId`. `scan_jobs` reads it beside the shells, and the same notice and TaskStop
+parsing closes it. Its transcript is `<dir of the session file>/<file stem>/subagents/agent-<id>.jsonl`,
+built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
+the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
+(`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
+A transcript found in neither place is listed as unknown, once. An agent is not listed while its last
+tool_use has no tool_result: that is one long call, not a stall. The check reads that from the end of the
+transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
+record. An empty transcript, or one that ends in text, is listed when quiet. A transcript that cannot be
+read is listed.
+Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
+transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
+`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
+Limits: a session that is idle with no Stop sees nothing until its next Stop. An agent that SendMessage
+resumes after its completed notice reads as closed, so it is not listed.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
