@@ -327,6 +327,33 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
     return not problems, "; ".join(problems) or "both prefixes read the shared tags"
 
 
+def case_cloud_twin_judges_the_valid_op_beside_a_non_dict():
+    """cloud_twin of a Mac db_write whose ops hold a non-dict entry beside a valid items/<id> op. The call is the cloud
+    write of that item, not a call passed through unmapped: the cloud page_item_hit skips non-dict writes, so the valid
+    op has to arrive as a dict write."""
+    shared = _shared()
+    tool_input = {"slug": "abc123", "ops": ["not-a-dict", {"op": "set", "path": "items/x1", "data": {"title": "T"}}]}
+    tool, twin = shared.cloud_twin(shared.MAC_PREFIX + "db_write", tool_input)
+    if tool != shared.DATA_TOOL:
+        return False, "cloud_twin(db_write) returned %r, not %r: the call passed through unmapped" % (tool, shared.DATA_TOOL)
+    writes = twin.get("writes", [twin])
+    hits = [w for w in writes if isinstance(w, dict)
+            and (w.get("collection"), w.get("doc_id"), w.get("action")) == ("items", "x1", "set")]
+    return bool(hits), "no cloud set of items/x1 among the writes %r" % (writes,)
+
+
+def case_cloud_twin_publish_picks_the_html_file():
+    """cloud_twin of a Mac publish_files whose first file is an asset (style.css) and whose second is page.html, with no
+    index.html. The page is the .html file, so the cloud Artifact call names page.html as its file_path."""
+    shared = _shared()
+    tool_input = {"files": [{"as": "style.css", "path": "style.css"}, {"as": "page.html", "path": "page.html"}],
+                  "title": "T", "icon": "i"}
+    tool, twin = shared.cloud_twin(shared.MAC_PREFIX + "publish_files", tool_input)
+    if tool != shared.PAGE_TOOL:
+        return False, "cloud_twin(publish_files) returned %r, not %r" % (tool, shared.PAGE_TOOL)
+    return twin.get("file_path") == "page.html", "file_path is %r, not page.html" % (twin.get("file_path"),)
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -352,6 +379,10 @@ CASES = [
      case_one_home_for_lane_heads),
     ("(l) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
      case_guard_merge_binds_tag_prefixes_to_shared_names),
+    ("(m) cloud_twin judges a Mac db_write's valid items op beside a non-dict op, not passed through",
+     case_cloud_twin_judges_the_valid_op_beside_a_non_dict),
+    ("(n) cloud_twin of a Mac publish_files with no index.html picks the .html file, not the asset",
+     case_cloud_twin_publish_picks_the_html_file),
 ]
 
 
