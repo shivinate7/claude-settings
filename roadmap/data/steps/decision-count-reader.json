@@ -1,11 +1,11 @@
 {
   "title": "Case and mutant counts in decision brief-claim-has-probe have a checked reader, or leave the record",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 681,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKzjkypcToggneCjJN8",
   "why": "docs/decisions/brief-claim-has-probe.md:34 states case and mutant counts (now 69 deny, 36 allow, 106 runs, 81 mutants) with no checked reader, so it went stale from 64/36/100/75 (rule verification-checked-reader-for-numbers). Found on #2037 (lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8, 08:55 CST Nov 8).",
-  "note": "Two ways: a check compares the line with the output of `MUTATE_ONLY=\"brief-claim:\" python3 hooks/test_guard.py` and the mutant count, or the line drops the numbers. The lane picks the smaller fix that keeps the record true; a reader that already checks published numbers is extended, not copied. Done check: either a red test where a stale count fails, or the line holds no count. Filed by triage 08:55 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:55:00-06:00"
+  "note": "Two ways: a check compares the line with the output of `MUTATE_ONLY=\"brief-claim:\" python3 hooks/test_guard.py` and the mutant count, or the line drops the numbers. The lane picks the smaller fix that keeps the record true; a reader that already checks published numbers is extended, not copied. Done check: either a red test where a stale count fails, or the line holds no count. Filed by triage 08:55 CST Nov 8. Sent by the coordinator 08:55 CST Nov 8 to lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), which found it on #2037.",
+  "updatedAt": "2026-11-08T08:56:00-06:00"
 }
