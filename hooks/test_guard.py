@@ -11541,6 +11541,15 @@ for _name, _command in (
     ("bash -c sed -Ei on the frozen settings", 'bash -c "sed -Ei s/a/b/ ' + CFG_SETTINGS + '"'),
 ):
     sh("frozen: %s is refused" % _name, _command, "deny", "frozen-path", cwd=NOGIT)
+# A sed whose last word is a value flag ends its walk at that word. The frozen write in the next command is
+# still refused, and a sed -n read of the same file stays allowed.
+sh("frozen: echo onto the frozen settings alone is refused", "echo x > " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=NOGIT)
+for _flag in ("-e", "-f", "-l", "--expression"):
+    sh("frozen: sed -n ending in %s, then echo onto the frozen settings, is refused" % _flag,
+       "sed -n " + _flag + "; echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -n -e p, a read of the frozen settings, is allowed", "sed -n -e p " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -13571,6 +13580,34 @@ sh("builder-test: scanner, a # in a quoted no-i sed script ahead of a no-i sed w
 sh("builder-test: scanner, a # in a quoted no-i sed script on src/x.py, is allowed",
    "sed -n 's/#x/y/' src/x.py", "allow", **BR)
 
+# A sed whose last word is a flag that takes a value has no value after it. The walk ends at that word, and
+# the write in the segment before it is still refused.
+for _flag in ("-e", "-f", "-l", "--expression"):
+    sh("builder-test: shell write, echo onto tests/test_a.py ahead of sed -n ending in %s, is refused" % _flag,
+       "echo x > tests/test_a.py ; sed -n " + _flag, "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell, sed -n -e p on src/x.py, is allowed", "sed -n -e p src/x.py", "allow", **BR)
+# A redirect word ahead of a sed script is a redirect, not the script: the file it names is written. A
+# redirect after the script is judged as before, and a redirect to a product file stays allowed.
+sh("builder-test: shell write, sed > tests/test_a.py ahead of its script, is refused",
+   "sed > tests/test_a.py p src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed -n >tests/test_a.py glued ahead of its script, is refused",
+   "sed -n >tests/test_a.py p src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed -n p with > tests/test_a.py after its script, is refused",
+   "sed -n p src/app.py > tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed > src/out.txt ahead of its script, is allowed",
+   "sed > src/out.txt p src/app.py", "allow", **BR)
+# The e command runs the rest of its line as a command. A read command (cat) that names a test reads it, so
+# the call is allowed. A write command (touch) that names a test is still refused.
+sh("builder-test: shell, sed e command runs cat on tests/x, no -i, on src/app.py, is allowed",
+   "sed 'e cat tests/x' src/app.py", "allow", **BR)
+sh("builder-test: shell write, sed e command runs touch on tests/x, no -i, on src/app.py, is refused",
+   "sed 'e touch tests/x' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+# Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
+sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
+   "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
+sh("builder-test: shell write, sed w command on its own line names tests/x, no -i, on src/x.py, is refused",
+   "sed -n '1p\nw tests/x' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
     ("cat of tests/x.py", "cat tests/x.py"),
@@ -13765,6 +13802,14 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
+# A listing that drops the tests folder names product files only: the pathspec `:!tests`, and the -not -path
+# that drops tests/, leave xargs no test to feed sed -i. The same listing with no exclusion is refused.
+sh("builder-test: shell write, git ls-files :!tests piped to xargs, sed -i, is allowed",
+   "git ls-files ':!tests' | xargs sed -i s/a/b/", "allow", **DR)
+sh("builder-test: shell write, find . excluding tests by -not -path, piped to xargs, sed -i, is allowed",
+   "find . -name '*.py' -not -path './tests/*' | xargs sed -i s/a/b/", "allow", **DR)
+sh("builder-test: shell write, find . for *.py with no exclusion, piped to xargs, sed -i, is refused",
+   "find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
