@@ -52,11 +52,15 @@
 # @<40-hex sha>` runs that harness from a tree exported at the sha, so the child is judged by the code it pins, not the local
 # copy. The tree is `git archive <sha>` of the whole repo, from the clone beside this file, else the pointer checkout
 # (hooks/guard_pointer.pointer_checkout); never a worktree on it. A sha the clone lacks is fetched once (`git fetch origin <sha>`,
-# read-only); a failed fetch, or a tree without the harness file, makes the step unknown (exit 2), never a pass. The ste-lint step
+# with GIT_TERMINAL_PROMPT=0; it writes objects and FETCH_HEAD into that clone); a failed fetch, or a tree without the harness file, makes the step unknown (exit 2), never a pass. The ste-lint step
 # stays local under --pinned: the exported tree has no .git, so its bin/ste-changed could not see drift, and a stale ste-lint pin
 # must keep exiting 3 with its remedy. A non-sha ref (@main) and a local uses: keep
 # the local copy under --pinned, as does a run without it; --lint ignores --pinned. Cost: at most one fetch and one archive per
 # distinct sha per run, into a fresh temp dir that is deleted when the run ends. The pin's sha pattern: hooks/action_pin.py.
+# Symlink members are not extracted: the harness reads none, and a host that refuses os.symlink would fail the export.
+# Limits: the uses: owner is not checked, since the fetch reads the clone's origin. An uppercase or quoted 40-hex pin does
+# not match the sha pattern, so it runs the local copy. A SIGKILL from merge's timeout skips the cleanup and leaves the
+# export in TMPDIR: one export per run, about 24 MB at worst.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -264,7 +268,8 @@ def pin_tree(sha):
     if not src:
         PIN_TREES[sha] = (None, "no claude-settings clone beside ci-job or at the pointer checkout")
     elif git("cat-file", "-e", sha + "^{commit}", cwd=src) is None and _nowindow.run(
-            ["git", "fetch", "-q", "origin", sha], cwd=src, capture_output=True, text=True).returncode != 0:
+            ["git", "fetch", "-q", "origin", sha], cwd=src, capture_output=True, text=True,
+            env=dict(os.environ, GIT_TERMINAL_PROMPT="0")).returncode != 0:  # a credential prompt must fail, not hang the run
         PIN_TREES[sha] = (None, "commit %s is not in %s and could not be fetched" % (sha[:7], src))
     else:
         tree = tempfile.mkdtemp(prefix="ci-job-pin-%s-" % sha[:7])
@@ -273,12 +278,14 @@ def pin_tree(sha):
             with _nowindow.Popen(["git", "archive", "--format=tar", sha], cwd=src, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL) as proc, tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
                 for member in tar:  # the stream is read once; a member is extracted as it passes
+                    if member.issym():
+                        continue  # the harness reads no symlink, and a host that refuses os.symlink would fail the whole export
                     tar.extract(member, tree, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
-            ok = proc.returncode == 0
-        except (OSError, tarfile.TarError):
-            ok = False
-        if not ok:
-            PIN_TREES[sha] = (tree, "git archive of %s in %s failed" % (sha[:7], src))
+            error = None if proc.returncode == 0 else "git archive exited %d" % proc.returncode
+        except (OSError, tarfile.TarError) as exc:
+            error = "%s: %s" % (type(exc).__name__, exc)
+        if error:
+            PIN_TREES[sha] = (tree, "git archive of %s in %s failed (%s)" % (sha[:7], src, error))
     return PIN_TREES[sha]
 
 
