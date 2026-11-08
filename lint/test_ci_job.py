@@ -8,6 +8,8 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
+unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -26,6 +28,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -88,6 +92,18 @@ class Job(unittest.TestCase):
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
+
+    def seen_after(self, *steps, args=(), env=None):
+        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job. ci-job relays
+        no step output, so a step writes the value it sees to seen.txt."""
+        path = os.path.join(self.root, "seen.txt")
+        if os.path.exists(path):
+            os.remove(path)
+        rc, lines, out = self.run_job(*steps, args=args, env=env)
+        if not os.path.exists(path):
+            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
+        with open(path, encoding="utf-8") as f:
+            return self.verdicts(lines), f.read(), out
 
 
 class Steps(Job):
@@ -386,7 +402,7 @@ class LintBase(Job):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def lane_adds_narration(self, origin=True):
-        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py", "actions/code-check/standard.json"):
+        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py", "lint/code_check_standard.json"):
             os.makedirs(os.path.join(self.root, os.path.dirname(rel)), exist_ok=True)
             shutil.copy(os.path.join(HERE, "..", rel), os.path.join(self.root, rel))
         self.git("add", ".")
@@ -424,6 +440,14 @@ class LintBase(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
 
+    def test_a_pull_request_lint_step_with_no_base_and_no_origin_main_reads_unknown_not_skipped(self):
+        self.lane_adds_narration(origin=False)
+        _, lines, out = plan_lint(self.root, workflow(self.NARRATION), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), ["Comment narration check"], out)  # the scope: a pull-request run would run this lint step
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual(by_step(lines).get("Comment narration check"), "unknown", out)  # the exit code is no proof: the no-base line gives 2 too
+        self.assertEqual(rc, 2, out)
+
 
 class GithubBaseRef(Job):
     """A pull-request run sets GITHUB_BASE_REF in each step's env, as the Actions runner does: the base without its
@@ -431,17 +455,6 @@ class GithubBaseRef(Job):
     ci-job relays no step output, so each step writes the value it sees to seen.txt. `<unset>` is no ref name."""
 
     SEEN = "printf '%s' \"${GITHUB_BASE_REF-<unset>}\" > seen.txt"
-
-    def seen_after(self, *steps, args=(), env=None):
-        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job."""
-        path = os.path.join(self.root, "seen.txt")
-        if os.path.exists(path):
-            os.remove(path)
-        rc, lines, out = self.run_job(*steps, args=args, env=env)
-        if not os.path.exists(path):
-            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
-        with open(path, encoding="utf-8") as f:
-            return self.verdicts(lines), f.read(), out
 
     def test_a_pull_request_run_sets_github_base_ref_to_the_base_without_its_remote(self):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"))
@@ -472,6 +485,18 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+
+class PinNoteEnv(Job):
+    """ci-job sets the pin note's variable on its ste-lint step only (decision action-pins-follow-sessions). A caller that
+    exports it must not reach any other step: ci-job strips it from each step's env. The step writes what it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"${" + PIN_NOTE_ENV + "-<unset>}\" > seen.txt"
+
+    def test_a_caller_export_of_the_pin_note_variable_never_reaches_another_step(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
 
 
 def mapped(parent, body):
@@ -587,6 +612,46 @@ def run_as_yaml_reads_it(step):
             body.pop()
         return "literal", "\n".join(body) + "\n"
     return None, None
+
+
+class RunHeaderComments(Job):
+    """A comment after a run: block header (`run: | # why`) is no part of the script. run_body reads the body, and
+    bin/ci-job runs that body, so the step passes or fails on its own lines. A `#` inside a body is script text."""
+
+    def raw_step(self, header, *body):
+        return "      - name: hdr\n        run: %s\n" % header + "".join("          %s\n" % ln for ln in body) + "\n"
+
+    def test_run_body_drops_the_comment_after_a_literal_header(self):
+        self.assertEqual(run_body(self.raw_step("| # why", "true")), "true\n",
+                         "run: | # why: the comment after the header was read as the script")
+
+    def test_a_literal_header_comment_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # why: the step's body is a passing command, but the header comment failed it\n" + out)
+
+    def test_a_folded_header_comment_does_not_pass_a_failing_body(self):
+        # On main the comment makes the shell read `>- # why` as a redirect: no body runs, and the step PASSes.
+        rc, lines, out = self.run_job(self.raw_step(">- # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: >- # why: the header comment hid a body that exits 3, so the step did not FAIL\n" + out)
+
+    def test_a_lone_quote_in_a_header_comment_is_text_and_the_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # don't stop", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
+
+    # Controls: each passes on main and must still hold.
+    def test_a_failing_body_under_a_header_comment_still_fails(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: | # why: a body that exits 3 must still FAIL under a header comment\n" + out)
+
+    def test_a_hash_inside_a_block_body_is_script_text(self):
+        rc, lines, out = self.run_job(self.raw_step("|", "echo '# kept' > kept.txt",
+                                                    "test \"$(cat kept.txt)\" = '# kept'"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: |: a # inside a body line was cut as a comment\n" + out)
 
 
 class RunBodiesOfWorkflows(unittest.TestCase):
@@ -824,7 +889,7 @@ class InstallSteps(Job):
             step("Install deps", "npm ci"),
             step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
             args=("--lint",), env=env)
-        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertEqual(by_step(lines).get("Lint check"), "unknown", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
                          "the install ran though no lint step after it runs\n" + out)
 
@@ -873,6 +938,21 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+    NO_LINT = (DEGEN[0], DEGEN[1], DEGEN[3], DEGEN[4])  # DEGEN without its one lint step
+
+    def test_a_lint_run_that_picks_no_lint_step_is_unknown_and_exits_two(self):
+        _, lines, out = plan_lint(self.root, workflow(*self.NO_LINT), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), [], out)  # the scope: the job holds no lint step for --lint to pick
+        rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
 
 
 class Progress(Job):
@@ -975,11 +1055,15 @@ class LintTools(Job):
 
     def setUp(self):
         super().setUp()
-        # CI's checkout has actions/code-check and the root ruff.toml that sets its ruff rules. A local uses: runs the
-        # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
+        # CI's checkout has actions/code-check, the table it reads from lint/, and the root ruff.toml that sets its ruff
+        # rules. A local uses: runs the repo under test's own copy. The base carries all three (lane commits them), so
+        # the diff under test has none of them.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
                         os.path.join(self.root, "actions", "code-check"))
         shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
+        os.makedirs(os.path.join(self.root, "lint"))
+        shutil.copyfile(os.path.join(CHECKOUT, "lint", "code_check_standard.json"),
+                        os.path.join(self.root, "lint", "code_check_standard.json"))
         shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
 
     def git(self, *a):
@@ -1109,10 +1193,10 @@ class LintTools(Job):
 @functools.lru_cache(maxsize=None)
 def pipx_runs_pinned_ruff():
     """True when pipx can run code_check's pinned ruff. The probe is `pipx run ruff==<pin> --version`, the pin read from
-    standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
+    code_check_standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
     if not shutil.which("pipx"):
         return False
-    with open(os.path.join(CHECKOUT, "actions", "code-check", "standard.json"), encoding="utf-8") as f:
+    with open(os.path.join(CHECKOUT, "lint", "code_check_standard.json"), encoding="utf-8") as f:
         pin = json.load(f)["tools"]["ruff"]
     try:
         return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,

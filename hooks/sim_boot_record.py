@@ -29,6 +29,11 @@ import tempfile
 import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
+    from shared_names import config_dir  # the one home of the config dir
+except ImportError:  # a copy by need: this hook exits 0 in every case, and lands before its sibling in an install
+    def config_dir():
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
@@ -144,7 +149,7 @@ def retry(udid):
 
 
 def state_dir():
-    return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "state")
+    return os.path.join(config_dir(), "state")
 
 
 def write_record(state, udid, rec, at):
