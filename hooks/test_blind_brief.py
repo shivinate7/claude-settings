@@ -286,9 +286,10 @@ class BriefFaults(unittest.TestCase):
                 found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
                 self.assertIn(("token-font", "Job"), found)
 
-    def test_colour_word_before_a_part_number_hash_is_no_colour(self):
-        # "ink cartridge #1234" names a part. A 4-digit hash after "ink cartridge" is an id, not a hex colour.
-        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")), [])
+    def test_colour_word_before_a_part_number_hash_is_refused(self):
+        # "ink" is a colour word, and "cartridge" is not an id word. Main refuses the 4-digit hash after them as a colour.
+        found = pairs(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")))
+        self.assertIn(("token-colour", "Job"), found)
 
     def test_colour_word_with_a_word_or_two_before_a_four_digit_hash_is_refused(self):
         # A colour word with a word or two before a 4-digit hash names a hex colour: "Brand blue #1234",
