@@ -1325,16 +1325,19 @@ def _workflow_resume_hit(reader, tool, transcript, target, isolation_pin):
     found = reader.workflow_agent(transcript, target)
     if found is None:
         return "", "", "", ""
-    state, agent_type = found
+    state, agent_type, meta_worktree = found
     if state == reader.RUNNING:
         return "", "", "", ""
-    if state == reader.FINISHED and agent_type:
-        if agent_type not in RECORD_REVIEWER_ROLES and not _resume_worktree({}, agent_type, isolation_pin):
+    # The meta's spawnedWithWorktree is the agent's effective isolation: a Workflow spawn has no Agent input, so it
+    # counts beside the role file's pin.
+    worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))
+    if state == reader.FINISHED and (agent_type or worktree):
+        if agent_type not in RECORD_REVIEWER_ROLES and not worktree:
             return "", "", "", ""
         model = RESUME_MODEL_CLAUSE if agent_type in RECORD_REVIEWER_ROLES else ""
-        return ("deny", RESUME_REASON % {"role": agent_type, "model": model},
-                "%s to a finished %s" % (tool, agent_type), "")
-    if agent_type and agent_type not in RECORD_REVIEWER_ROLES and not _resume_worktree({}, agent_type, isolation_pin):
+        return ("deny", RESUME_REASON % {"role": agent_type or "agent", "model": model},
+                "%s to a finished %s" % (tool, agent_type or "agent"), "")
+    if agent_type and agent_type not in RECORD_REVIEWER_ROLES and not worktree:
         return "", "", "", ""
     role = agent_type or "agent"
     return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""
@@ -1354,7 +1357,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
     A call with an agent_id is judged as the main session's is, against the parent's transcript (its `transcript_path`).
     A name no spawn in the transcript holds is then looked up as a Workflow agent (_transcript.workflow_agent: the
     agentId or the label in the run's journal beside the transcript). Its role is its meta agentType and its isolation
-    is the role file's pin. It is refused when finished and a reviewer, a design-reviewer, or a role that pins a worktree
+    is the role file's pin, or a worktree when its meta has spawnedWithWorktree true. It is refused when finished and a reviewer, a design-reviewer, or a role that pins a worktree
     or remote; a running one passes; a finished one with no meta file, or of unknown state, asks.
     `note` is the guard.log rule the caller writes as a `noted` line, or "": RESUME_UNREAD_NOTE when a send that would
     be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape

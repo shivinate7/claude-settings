@@ -145,7 +145,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        name with no spawn or Workflow agent, a running spawn, and a finished spawn with no worktree that is not a
                        reviewer pass. A name no spawn holds is looked up as a Workflow agent (`_transcript.workflow_agent`:
                        its agentId or label in the run journal under the transcript's own `subagents/workflows/`), whose
-                       role is its meta agentType: finished and a reviewer, or a role that pins a worktree, is refused;
+                       role is its meta agentType: finished and a reviewer, a role that pins a worktree, or a meta with
+                       spawnedWithWorktree true, is refused;
                        finished with no meta file asks. A missing or unreadable
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
                        fresh agent of the same role (named in it) and pass it the prior report. One transcript read per judged send, shared with

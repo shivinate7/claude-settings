@@ -2456,7 +2456,7 @@ MUTATIONS = [
      'best = (FINISHED, _journal_agent_type(run_dir, agent_id))',
      "transcript", "a main-session send to a running Workflow reviewer (a started line, no result) passes"),
     ("resume-finished-reviewer: a Workflow journal that cannot be read names no agent, so its send is allowed",
-     '        return UNKNOWN, None\n',
+     '        return UNKNOWN, None, False\n',
      '        return None\n',
      "transcript", "a Workflow agent whose journal cannot be read asks"),
     ("resume-finished-reviewer: a state the read cannot place is let through",
