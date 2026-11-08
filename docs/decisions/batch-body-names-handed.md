@@ -67,7 +67,7 @@ Departs from: the batch bodies so far, which took a left-out line with no reason
 ## Cost
 
 - Per run with a `Lanes:` line: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record.
-- Each compare is one `gh api` call. Against the base: one per open PR on the base that reads done. Against the integration head: one per handed PR, and one per Lanes-named open PR. A handed PR named on `Lanes:` but not in the head is compared twice.
+- Each compare is one `gh api` call. Against the base: one per open PR on the base that reads done, other than the integration PR. Against the integration head: one per handed PR, and one per Lanes-named open PR not in the batch. A handed PR named on `Lanes:` but not in the head is compared twice.
 - A body with no `Lanes:` line: one `git` process, `git log`, in the worktree. No gh call.
 - No long-lived process, no file and no timer.
 
