@@ -430,10 +430,11 @@ WRAPPER_VALUE_FLAGS.update({
     # parallel(1), at cgit.git.savannah.gnu.org/cgit/parallel.git (master, read 2026-11-08), and checked against
     # `options_completion_hash` in src/parallel beside it (`$Global::version = 20261022`): each spec with `=s`, `=i` or
     # `=f` takes a value, under every name it lists. Getopt::Long also reads a unique prefix of a long name (`--memsus`)
-    # and a value after `=`; only the full names are here. `--replace`/`-i`, `--eof`/`-e` and `--max-lines`/`-l` take
-    # an optional value (`:s`, `:f`), which Getopt::Long reads from the next word when it is no option. They are no
-    # entry: the walk then reads that word as the command, so a verb stays seen. `eatmydata` is a shell script that
-    # takes no flag but a bare `--`.
+    # and a value after `=`; only the full names are here. The optional values were measured on perl Getopt::Long 2.54
+    # with `bundling,require_order`, as src/parallel sets it. A `:s` spec takes the next word (`--replace XX rm P` gives
+    # `XX` and leaves `rm P`), so `--replace`/`-i` and `--eof`/`-e` are entries. A `:f` spec takes it only when it is a
+    # number (`-l rm P` gives 0 and leaves `rm P`), which no entry can say: `--max-lines`/`-l` are no entry, and
+    # `-l 2 rm P` reads `2` as the command. `eatmydata` is a shell script that takes no flag but a bare `--`.
     "numactl": {"-i", "--interleave", "-p", "--preferred", "-P", "--preferred-many", "-m", "--membind",
                 "-N", "--cpunodebind", "-c", "--cpubind", "-C", "--physcpubind", "-w", "--weighted-interleave",
                 "-S", "--shm", "-f", "--file", "-M", "--shmmode", "-I", "--shmid", "-o", "--offset",
@@ -445,7 +446,8 @@ WRAPPER_VALUE_FLAGS.update({
                  "--combine-executable", "--compress-program", "--compressprogram", "--use-compress-program",
                  "--usecompressprogram", "--decompress-program", "--decompressprogram", "--use-decompress-program",
                  "--usedecompressprogram", "--ctag-string", "--ctagstring", "--debug", "-D", "--delay",
-                 "--delimiter", "-d", "--dirnamereplace", "--dnr", "-E", "--env", "--extensionreplace", "--er",
+                 "--delimiter", "-d", "--dirnamereplace", "--dnr", "-E", "--eof", "-e", "--env",
+                 "--extensionreplace", "--er", "--replace", "-i",
                  "--filter", "--group-by", "--groupby", "--halt-on-error", "--haltonerror", "--halt", "--header",
                  "-I", "--joblog", "--jl", "--jobs", "-j", "--max-procs", "--maxprocs", "-P", "-L", "--limit",
                  "--linkinputsource", "--xapplyinputsource", "--load", "--match", "--memfree", "--memsuspend",
