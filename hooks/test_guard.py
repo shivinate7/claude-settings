@@ -8036,6 +8036,20 @@ sh("env: interpreter heredoc: allow, a quoted node body with a template literal 
 sh("env: interpreter heredoc: allow, a quoted python body with a comment opener in a string",
    'python3 <<\'PY\'\nx = "/* not a comment"\ny = "# nor this, and don\'t"\nPY', "allow", cwd=NOGIT)
 
+# A comment line in a quoted python body does not end the body: each line after it is still code, and
+# each case below names the file by its quoted constant in one of those lines.
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a copy",
+   "python3 <<'PY'\n# note\n" + 'shutil.copy("a", "' + ENV + '")' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a rename",
+   "python3 <<'PY'\n# note\n" + 'os.rename("tmp", "' + ENV + '")' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a name bound to it, then a read",
+   "python3 <<'PY'\n# note\n" + 'ENV_FILE = "' + ENV + '"' + "\nprint(open(ENV_FILE).read())\nPY",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a subprocess call",
+   "python3 <<'PY'\n# note\n" + 'subprocess.run(["cat", "' + ENV + '"])' + "\nPY", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter heredoc: deny, a quoted python body with a comment line, then a list element",
+   "python3 <<'PY'\n# note\n" + 'paths = [".gitignore", "' + ENV + '"]' + "\nPY", "deny", "env-file", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
