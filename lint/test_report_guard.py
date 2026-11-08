@@ -1382,6 +1382,23 @@ class DoneNamesModelsTests(unittest.TestCase):
                            "(and `reviewer opus`)\n> **Next** Unstarted: none", [BUILDER_SONNET, REVIEWER_SONNET])
         assert_no_model_block(self, out)
 
+    # A reviewer with no `model` field runs agents/reviewer.md's pin, haiku. Its result reports the run as
+    # toolUseResult.resolvedModel, claude-haiku-5-5. CLAUDE_CODE_SUBAGENT_MODEL is sonnet, so only the result
+    # or the pin can name haiku. The sonnet control shows the spawn is read as haiku and not as the env's model.
+    def test_dm_pin_resolved_haiku_reviewer_named_haiku_passes(self):
+        spawn = ({"subagent_type": "reviewer", "prompt": "Round 1 of 3"}, "claude-haiku-5-5")
+        assert_no_model_block(self, self.verdict(NAMED_REPORT % "reviewer haiku", [spawn], env_model="sonnet"))
+        out = self.verdict(NAMED_REPORT % "reviewer sonnet", [spawn], env_model="sonnet")
+        assert_blocks(self, out, "'reviewer sonnet' matches no reviewer spawn, which ran haiku")
+
+    # An older transcript has no resolvedModel. The reviewer with no `model` field still runs the agent
+    # file's pin, haiku, and that pin is read before the env's sonnet. The sonnet control shows the pin wins.
+    def test_dm_pin_file_pin_reviewer_named_haiku_passes(self):
+        assert_no_model_block(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_PINNED],
+                                                 env_model="sonnet"))
+        out = self.verdict(NAMED_REPORT % "reviewer sonnet", [REVIEWER_PINNED], env_model="sonnet")
+        assert_blocks(self, out, "'reviewer sonnet' matches no reviewer spawn, which ran haiku")
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
