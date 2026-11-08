@@ -4086,13 +4086,15 @@ guardset3() {
 # copies the guard set, or the shipped guard cannot import. guard_merge.py imports own_session.py at load,
 # guard_stream.py imports merge_options.py. The modules come from the imports of guard.py and of each
 # guard_*.py outside a try block, at module level or in a def body (a def body runs on each call), read
-# with the Python parser, so a new import needs no edit here. A try block is optional or has a fallback,
-# so its import is not named: guard_kill's _nowindow falls back in one.
+# with the Python parser, so a new import needs no edit here. The try-block imports are guardset5's.
 # The check reads the list line only (the loop or the case line), never the comments above it.
-guard_set_modules() {  # prints each flat module a guard file imports outside a try block, one per line
-  python3 -I - "$REPO_ROOT" <<'PY'
+guard_set_modules() {  # $1 "try" prints each flat module a guard file imports in a try block; else outside one. One per line
+  python3 -I - "$REPO_ROOT" "${1:-outside}" <<'PY'
 import ast, glob, os, sys
 hooks = os.path.join(sys.argv[1], "hooks")
+mode = sys.argv[2]
+if mode not in ("outside", "try"):
+    sys.exit("guard_set_modules: mode %r, want outside or try" % mode)
 flat = set(os.listdir(hooks))
 found = set()
 def visit(stmts, out):
@@ -4111,7 +4113,17 @@ for path in glob.glob(os.path.join(hooks, "guard_*.py")) + [os.path.join(hooks, 
     with open(path, encoding="utf-8") as fh:
         tree = ast.parse(fh.read(), path)
     names = []
-    visit(tree.body, names)
+    if mode == "try":
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Try):
+                for stmt in node.body:
+                    for sub in ast.walk(stmt):
+                        if isinstance(sub, ast.Import):
+                            names.extend(a.name for a in sub.names)
+                        elif isinstance(sub, ast.ImportFrom) and sub.level == 0 and sub.module:
+                            names.append(sub.module)
+    else:
+        visit(tree.body, names)
     for name in names:
         mod = name.split(".")[0] + ".py"
         if mod in flat and mod != "guard.py" and not mod.startswith("guard_"):
@@ -4130,21 +4142,40 @@ listed_in() {  # $1 file, $2 sed address of the one list line, $3 label, $4 modu
   fi
 }
 
-guardset4() {
-  name="guardset4: each module a guard file imports at load is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+guard_set_lists_hold() {  # $1 the check's name, $2... the modules: each is in the four guard-set lists
+  name=$1; shift
   nmiss=0
-  mods=$(guard_set_modules); mrc=$?
-  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
-    bad "$name" "the guard files' load-time imports read to no module list (exit $mrc)"
-    return
-  fi
-  for m in $mods; do
+  for m in "$@"; do
     listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop" "$m"
     listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop" "$m"
     listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop" "$m"
     listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|/p' "ci-scope.sh case" "$m"
   done
   if [ "$nmiss" -eq 0 ]; then ok "$name"; fi
+}
+
+guardset4() {
+  name="guardset4: each module a guard file imports at load is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard files' load-time imports read to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
+}
+
+# guardset5: a flat module a guard file imports inside a try block is in each guard-set list too. The try
+# falls back when its import fails, and no guard-crash follows, so a module the set leaves out fails open,
+# silently (decision install-hooks-whole: the guard set lands whole). The modules come from the try bodies of
+# guard.py and of each guard_*.py, read with the Python parser, so a new try import needs no edit here.
+guardset5() {
+  name="guardset5: each module a guard file imports in a try block is in each guard-set list: install.sh, the install.ps1 copy and set loops, and ci-scope.sh"
+  mods=$(guard_set_modules try); mrc=$?
+  if [ "$mrc" -ne 0 ] || [ -z "$mods" ]; then
+    bad "$name" "the guard files' try-block imports read to no module list (exit $mrc)"
+    return
+  fi
+  guard_set_lists_hold "$name" $mods
 }
 
 guardset2() {
@@ -5292,6 +5323,7 @@ run guardset1
 run guardset2
 run guardset3
 run guardset4
+run guardset5
 run win_sh1
 run win_sh2
 run win_sh3

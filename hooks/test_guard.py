@@ -132,7 +132,7 @@ FAMILIES = {
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
-    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the copy without reread_check.py (refused, never allowed), and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -23187,6 +23187,7 @@ FAILCLOSED_REMEDY = ("install.sh", "install.ps1")
 FAILCLOSED_CALL = "ls"                # harmless: a refusal can only come from the missing module
 FAILCLOSED_CONTROL = "pkill -f node"  # an intact copy denies it, so its exit code is the deny's
 FAILCLOSED_CHECKS = []
+GUARD_CRASH = "guard-crash"           # the reason word of the wait-then-refuse refusal (decision install-hooks-whole)
 
 
 def _guard_copy(name, drop):
@@ -23254,9 +23255,9 @@ def fail_closed_case(module):
         folder = _guard_copy(module, drop)
         run = _run_copy(folder, FAILCLOSED_CALL, module)
         decision, reason = _decision(run)
+        if decision != "deny":   # one cause per message: a call that was not refused has no reason to judge
+            return False, "the call is %r with %s missing, want deny" % (decision, drop)
         problems = []
-        if decision != "deny":
-            problems.append("the call is %r with %s missing, want deny" % (decision, drop))
         if run.returncode != control.returncode:
             problems.append("exit %d, the other denies exit %d" % (run.returncode, control.returncode))
         if not any(step in reason for step in FAILCLOSED_REMEDY):
@@ -23284,6 +23285,13 @@ for _module in FAILCLOSED_MODULES:
 _check = fail_closed_case("git_reads")
 FAILCLOSED_CHECKS.append(_check)
 LOG_CHECKS_EXTRA.append(("audit-high fail-closed: a copy missing git_reads refuses a Bash call", _check))
+# guard_kill.py imports proc_env.py inside a try, for its session-tag read, so FAILCLOSED_MODULES does not hold
+# it either. A copy without it refuses as guard-crash, never judges the call with the read missing (decision
+# install-hooks-whole).
+_check = fail_closed_case("proc_env")
+FAILCLOSED_CHECKS.append(_check)
+LOG_CHECKS_EXTRA.append(("install-hooks-whole fail-closed: a copy missing proc_env (guard_kill's session-tag read) "
+                         "refuses a Bash call as guard-crash", _check))
 for _label, _check in (
     ("audit-high fail-closed: an intact copy allows a plain Bash call", _intact_allows_a_plain_call),
 ):
@@ -25653,10 +25661,12 @@ def hu_cost_check():
 
 
 def hu_copy_check():
-    """With reread_check.py missing beside guard.py, the guard fails open: a call that an intact copy refuses
-    for the unread handoff is allowed. The intact copy is the control, so the fixture is shown to bite.
-    `echo hi` is allowed by every rule, so a copy that crashes and allows everything passes it too. So the
-    dropped copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the model floor refuses."""
+    """install-hooks-whole (decision install-hooks-whole): with reread_check.py missing beside guard.py, the
+    guard never allows a call. A failed import of reread_check takes the same wait-then-refuse path as a
+    missing sibling: the guard loads again for about 5 s, then refuses each call as guard-crash. The intact
+    copy is the control, so the fixture is shown to bite. `echo hi` is allowed by every rule, so the dropped
+    copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the intact copy refuses
+    for the model floor. The dropped copy refuses that spawn as guard-crash too, never by a rule it cannot run."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
@@ -25667,16 +25677,16 @@ def hu_copy_check():
         return False, "the intact copy, the control: %s" % why
     run = _hu_copy_run(dropped, cfg)
     decision, reason = _decision(run)
-    if run.returncode != 0 or decision != "allow" or reason:
-        return False, "without reread_check.py the call is %r (exit %d), want a silent allow" % (
-            decision, run.returncode)
+    if run.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
+        return False, "without reread_check.py the call is %r as %r (exit %d), want deny as guard-crash" % (
+            decision, reason[:70], run.returncode)
     spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
-    why = ov_want(*_decision(spawn), "deny", "agent-model-floor")
-    if why:
-        return False, "without reread_check.py a Haiku spawn is not refused: %s (exit %d)" % (
-            why, spawn.returncode)
-    return True, ("reread_check.py missing: the call is allowed, exit 0, and a Haiku spawn is refused by the "
-                  "model floor; the intact copy refuses the call")
+    decision, reason = _decision(spawn)
+    if spawn.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
+        return False, "without reread_check.py a Haiku spawn is %r as %r (exit %d), want deny as guard-crash" % (
+            decision, reason[:70], spawn.returncode)
+    return True, ("reread_check.py missing: the call is refused as guard-crash, exit 0, and so is a Haiku "
+                  "spawn; the intact copy refuses the call for the unread handoff")
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
@@ -25793,7 +25803,7 @@ for _label, _check in (
      hu_cycle_check),
     ("handoff-unread: unread_handoff makes one existence check, on the flag, with no write or process start",
      hu_cost_check),
-    ("handoff-unread: a guard copy without reread_check.py fails open, and the intact copy refuses",
+    ("handoff-unread: install-hooks-whole: a guard copy without reread_check.py refuses as guard-crash, never allows",
      hu_copy_check),
     ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
      hu_override_check),
