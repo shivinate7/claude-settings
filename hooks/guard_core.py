@@ -1055,7 +1055,10 @@ def shell_abs(path: str, base):
 
 
 def _runs_false(tokens):
-    """True when the tokenized segment's command word is `false`."""
+    """True when the tokenized segment's command word is `false`. A `!` first word negates it:
+    `! false` succeeds, so a negated command is not known to fail."""
+    if tokens and tokens[0] == "!":
+        return False
     index = resolve_command(tokens) if tokens else None
     return index is not None and basename(tokens[index]) == "false"
 
@@ -1070,8 +1073,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` that does not run the way the shell does: a `cd` to a folder that
-    does not exist, and a `cd` in the chain after `false &&`, leave the shell where it was, and `cd -` still goes to the folder before the last `cd` that
-    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+    does not exist, and a `cd` in the chain after `false &&`, leave the shell where it was, and
+    `cd -` still goes to the folder before the last `cd` that worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
