@@ -503,7 +503,7 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -793,6 +793,7 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
@@ -810,14 +811,17 @@ def task_check_hit(op: str, data) -> str:
 
 
 def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
+    """The matched text when a str_replace on `context` removes the Why yours line or its label. It carries
+    no `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it judges a
+    context edit that touches the line, whatever the item's kind. An edit that removes only the reason
+    after the label passes: the stored line is unseen, so old_str is no different from any prose."""
     if entry.get("field") != "context":
         return ""
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
         return "context edit that removes the Why yours line"
+    if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
+        return "context edit that removes the Why yours label"
     return ""
 
 
