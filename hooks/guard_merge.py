@@ -11,6 +11,7 @@ import re
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, expand_folder_word, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    strip_heredoc_bodies,
 )
 import guard_ste  # the ste-lint reads and run that bin/ste-changed shares (hooks/guard_ste.py)
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1269,11 +1270,16 @@ def _push_calls(segments, ends, number: int, cwd: str):
     inner = inner_commands(tokens) if tokens else []
     if inner:
         inner_cwd = push_target(segments, ends, number, cwd)[0] or cwd
+        from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
-            inner_ends = []
-            inner_segments = split_segments(text, inner_ends)
-            for place in range(len(inner_segments)):
-                yield from _push_calls(inner_segments, inner_ends, place, inner_cwd)
+            # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
+            # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
+            stripped = strip_heredoc_bodies(text)
+            for each in (stripped, *substitution_commands(text, stripped)):
+                each_ends = []
+                each_segments = split_segments(each, each_ends)
+                for place in range(len(each_segments)):
+                    yield from _push_calls(each_segments, each_ends, place, inner_cwd)
 
 
 _TOPLEVELS = {}   # where -> the finished `git rev-parse --show-toplevel`, for the life of one hook process

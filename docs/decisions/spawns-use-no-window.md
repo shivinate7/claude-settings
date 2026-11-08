@@ -8,9 +8,9 @@ Outcome protected: the owner's screen stays still while hooks and tools run.
 
 ## The design
 
-- `hooks/_nowindow.py` is the one home. It wraps `subprocess` run, Popen, call, check_call and check_output. On Windows it adds `CREATE_NO_WINDOW` to the caller's creationflags. On other platforms it adds nothing.
+- `hooks/_nowindow.py` is the one home. It wraps `subprocess` run, Popen, call, check_call and check_output. On Windows it adds `CREATE_NO_WINDOW` to the caller's creationflags, and it replaces a console or unreadable stdin with an empty one when the caller gives no stdin and no input. A pipe or a file passes through. A no-window child cannot use an inherited console stdin, and its own subprocess calls failed with WinError 6 on the owner's PC. On other platforms it adds nothing.
 - Each Node spawn passes `windowsHide: true`.
-- `lint/test_no_window_spawn.py` fails on any product spawn that goes around the helper. A site that needs a console carries a `# nowindow:` marker with its reason. Today that is `bin/merge`, `bin/ste-changed`, `merge/launch.py` and the afterMerge call in `merge/merge.py`. Each one prints straight to the terminal, and the flag would hide that output.
+- `lint/test_no_window_spawn.py` fails on any product spawn that goes around the helper. A site that needs a console carries a `# nowindow:` marker with its reason. Today that is `bin/merge`, `bin/ste-changed`, `merge/launch.py` and the afterMerge call in `merge/merge.py`. Each one prints straight to the terminal, and the flag could hide that output. Since the wrapper sets stdin, Python hands its child the caller's stdout and stderr; whether that output then shows is unmeasured, so these sites keep their marker.
 - A hook that cannot import the helper falls back to plain `subprocess`. A missing helper must never stop a guard. The popups return, but the guard still judges.
 
 ## Safety holes, named
