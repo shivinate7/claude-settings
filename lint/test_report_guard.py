@@ -166,13 +166,32 @@ NO_PROCESS_CODE = (
 )
 
 
-def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False):
+# A guard run with one of its module-level functions replaced by a stub that writes `marker` and then raises.
+# The guard is loaded under another name, so its `main` does not run on import, and main calls the stub.
+RAISE_IN_CODE = (
+    "import importlib.util, os, sys\n"
+    "guard, name, marker = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+    "sys.path.insert(0, os.path.dirname(guard))\n"
+    "spec = importlib.util.spec_from_file_location('report_guard_under_test', guard)\n"
+    "module = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(module)\n"
+    "def stub(*args, **kwargs):\n"
+    "    open(marker, 'w').close()\n"
+    "    raise RuntimeError('forced failure in the check')\n"
+    "setattr(module, name, stub)\n"
+    "module.main()\n"
+)
+
+
+def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False, raises_in=None, marker=None):
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     argv = [sys.executable, guard]
     if block:
         argv = [sys.executable, "-c", BLOCK_IMPORTS_CODE, guard, json.dumps(list(block))]
     if refuse_process:
         argv = [sys.executable, "-c", NO_PROCESS_CODE, guard]
+    if raises_in:
+        argv = [sys.executable, "-c", RAISE_IN_CODE, guard, raises_in, marker]
     run = subprocess.run(
         argv,
         input=stdin_text,
@@ -4244,6 +4263,24 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
 
+    def test_an_red_answered_check_error_is_named_on_stderr(self):
+        # Catches: main() swallows an error from the answered check with no line on stderr, so a broken
+        # check goes unseen. The stub writes a marker before it raises, so a check that never ran reads
+        # differently from one that ran and failed. The stub's own message does not use the word.
+        marker = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "answered-called")
+        run = run_guard(REPORT_GUARD, self.hook("Answered: no permission rule can lift it."),
+                        raises_in="answered_problem", marker=marker)
+        self.assertTrue(os.path.exists(marker), "scope: the answered check was never called. stderr: " + run.stderr[-300:])
+        named = [line for line in run.stderr.splitlines() if "answered" in line.lower()]
+        self.assertTrue(named, "no stderr line names the answered check. stderr: " + run.stderr[-300:])
+
+    def test_an_green_answered_check_that_runs_is_silent_on_stderr(self):
+        # Control: with no error, the same reply is blocked and stderr says nothing about the check.
+        run = run_guard(REPORT_GUARD, self.hook("Answered: no permission rule can lift it."))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("answered", run.stderr.lower(), "the check printed on stderr with no error: " + run.stderr[-300:])
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block", run.stdout)
+
     # Red: each case below fails until the verdict exists.
 
     def test_an_red_synthetic_f188_replay_blocks(self):
@@ -4548,6 +4585,16 @@ class PendingRefusalTests(unittest.TestCase):
         except FileNotFoundError:
             return []
 
+    def write_route_rows(self, rows, sid=SID):
+        """Refusal rows as hooks/refusal_note.py writes them: (tool, route_flag or None) per row."""
+        os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
+        with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
+            for tool, flag in rows:
+                row = {"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool, "reason": "refused"}
+                if flag is not None:
+                    row["route_flag"] = flag
+                handle.write(json.dumps(row) + "\n")
+
     def stop(self, reply, landed=False, active=False, sid=SID, cwd=None):
         records = [human("do the task")]
         if landed:
@@ -4564,6 +4611,27 @@ class PendingRefusalTests(unittest.TestCase):
     def blocked(run):
         """The block decision the guard printed, or None when the Stop passed."""
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    ROUTE_FLAG = "route row rt-7 contradicted: it says this call works on local, and the classifier refused it"
+
+    def test_r_a_route_flag_on_a_refusal_row_is_shown_by_stop(self):
+        # Catches: the Stop read drops the route_flag of a refusal row, so a refused call that a route row says
+        # works reaches the owner with no flag. The flag rides in systemMessage; the decision is not judged here.
+        self.write_route_rows([("Bash", self.ROUTE_FLAG)])
+        self.assertEqual(self.pending_tools(), ["Bash"], "scope: the refusal row with its route_flag was not written")
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn(self.ROUTE_FLAG, out.get("systemMessage", ""),
+                      "Stop did not show the route_flag of the refusal row: %r" % run.stdout[-300:])
+
+    def test_r_green_a_refusal_row_with_no_route_flag_shows_no_flag(self):
+        # Control: a refusal row without a route_flag adds no flag to what Stop shows.
+        self.write_route_rows([("Bash", None)])
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertNotIn("contradicted", out.get("systemMessage", ""), "Stop showed a flag with no route_flag: %r" % run.stdout[-300:])
 
     def test_d_pending_refusal_not_named_under_input_needed_blocks(self):
         rows = (("unlanded prose reply", False, self.PROSE),
