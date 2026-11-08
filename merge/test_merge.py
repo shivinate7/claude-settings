@@ -11655,9 +11655,9 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z"):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", body=""):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads, created_at, which the review list reads, and body, which a send-back line reads."""
+    return {"number": number, "draft": draft, "created_at": created_at, "body": body, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
 
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
@@ -13446,6 +13446,121 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+
+# `merge --reviewed` sends back a draft open more than 12 hours whose record is missing, stale or bad: its line is `send back: #<n> <session> (<reason>)`,
+# and it leaves the `no record:` line and its own state line. Each case reads at an injected clock (read_at), so the age is exact. A case's first
+# assertion is the old behaviour, so the old code fails it for the named cause: the constant is read only after that assertion.
+SEND_BACK_NOW = 1794153600  # 2026-11-08T16:00:00Z, the clock every send-back case reads at
+SEND_BACK_HOUR = 3600  # seconds
+LANE_ID = "01SendBackLaneQm7x"  # the lane session a pull request body names as https://claude.ai/code/session_<id>
+LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/session_{LANE_ID}\n"
+
+def utc_before(seconds):
+    """The ISO time `seconds` before the send-back clock, as the pull list's created_at gives it."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(SEND_BACK_NOW - seconds))
+
+def aged_pull(n, sha, seconds, draft=True, body=LANE_BODY):
+    """An open pull request opened `seconds` before the send-back clock."""
+    return batch_pull(n, sha, draft=draft, created_at=utc_before(seconds), body=body)
+
+def read_at(host, now):
+    """-> reviewed_read's lines at the clock `now` (epoch seconds). A reviewed_read with no clock parameter is the read before the age rule, which
+    gives the same lines at any clock, so it runs without one."""
+    if "now" in inspect.signature(merge.reviewed_read).parameters:
+        return merge.reviewed_read(host, now=now)[0]
+    return merge.reviewed_read(host)[0]
+
+def assert_off_the_list(test, lines, n):
+    """Pull request n is on the read (scope first), and no line still lists it as before: neither its state line nor the `no record:` line."""
+    out = "\n".join(lines)
+    test.assertRegex(out, rf"#{n}\b", "the read names no #%d:\n%s" % (n, out))
+    still = [l for l in lines if l.startswith(f"#{n} ") or (l.startswith("no record:") and re.search(rf"#{n}\b", l))]
+    test.assertEqual(still, [], "#%d still prints its old line:\n%s" % (n, out))
+
+def send_back_line(test, lines, n, reason, sid=LANE_ID):
+    """The one send back line of pull request n: it names `sid` (the bare session id, or `no session`), then `reason` (a regex) in brackets."""
+    hits = [l for l in lines if l.startswith(f"{merge.REVIEW_SEND_BACK}#{n} ")]
+    test.assertEqual(len(hits), 1, "want one send back line for #%d:\n%s" % (n, "\n".join(lines)))
+    test.assertRegex(hits[0], rf"^{re.escape(merge.REVIEW_SEND_BACK)}#{n} (?:session_)?{re.escape(sid)} \({reason}\)$")
+    return hits[0]
+
+class ReviewedSendBack(ReviewEnv):
+    """`merge --reviewed` over scripted reads at SEND_BACK_NOW. The cases send a draft back, and the controls keep the lines a draft under 12 hours,
+    a done draft, a ready pull request and a draft at exactly 12 hours already print."""
+
+    def read(self, pulls, comments=(), now=SEND_BACK_NOW):
+        return read_at(PullsHost(pulls, {}, comments=list(comments)), now)
+
+    def test_a_draft_over_12_hours_with_no_record_is_sent_back(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)])
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, "no record")
+
+    def test_a_draft_over_12_hours_with_a_stale_record_is_sent_back(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, f"stale: the record is for head {REVIEW_OLD_HEAD[:9]}")
+
+    def test_a_record_with_prose_after_its_ci_line_is_sent_back_naming_the_ci_line(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + "A note after the CI line.\n")]
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, r"bad: .*(last line|CI line)")
+
+    def test_other_malformed_records_are_sent_back_as_bad(self):
+        forms = {"the PR number is another pull request's": record_text(n=8, rounds=REVIEW_PASS),
+                 "a round verdict is not PASS, FAIL or PARTIAL": record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",)),
+                 "the net value is not in the list": record_text(net="sometimes"),
+                 "the head is not 40 hex": record_text(head=REVIEW_HEAD[:39])}
+        for form, text in forms.items():
+            with self.subTest(form=form):
+                lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], [review_comment(1, 7, text)])
+                assert_off_the_list(self, lines, 7)
+                send_back_line(self, lines, 7, "bad: .+")
+
+    def test_a_draft_whose_body_names_no_session_says_no_session(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR, body="Change summary.\n")])
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, "no record", sid="no session")
+
+    def test_the_last_session_url_in_the_body_names_the_lane(self):
+        body = f"Change summary.\n\nhttps://claude.ai/code/session_01OldLaneSession0000\n\nhttps://claude.ai/code/session_{LANE_ID}\n"
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR, body=body)])
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, "no record")
+        self.assertNotIn("01OldLaneSession0000", "\n".join(lines))
+
+    def test_a_draft_one_second_over_12_hours_is_sent_back(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 12 * SEND_BACK_HOUR + 1)])
+        assert_off_the_list(self, lines, 7)
+        send_back_line(self, lines, 7, "no record")
+
+    def test_only_the_old_drafts_leave_the_list(self):
+        pulls = [aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR), aged_pull(8, REVIEW_HEAD, 11 * SEND_BACK_HOUR),
+                 aged_pull(9, REVIEW_HEAD, 13 * SEND_BACK_HOUR)]
+        comments = [review_comment(1, 9, record_text(n=9, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))]
+        lines = self.read(pulls, comments)
+        assert_off_the_list(self, lines, 7)
+        assert_off_the_list(self, lines, 9)
+        self.assertIn("no record: #8", lines)
+        send_back_line(self, lines, 7, "no record")
+        send_back_line(self, lines, 9, f"stale: the record is for head {REVIEW_OLD_HEAD[:9]}")
+
+    def test_a_draft_11_hours_old_with_no_record_stays_on_no_record(self):
+        self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 11 * SEND_BACK_HOUR)]), ["no record: #7"])
+
+    def test_a_draft_13_hours_old_with_a_done_record_keeps_its_state_line(self):
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))])
+        self.assertEqual(len(lines), 1, "\n".join(lines))
+        self.assertRegex(lines[0], rf"^#7 feat7 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
+
+    def test_a_ready_pr_13_hours_old_with_no_record_stays_on_no_record(self):
+        self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR, draft=False)]), ["no record: #7"])
+
+    def test_a_draft_exactly_12_hours_old_is_not_sent_back(self):
+        self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 12 * SEND_BACK_HOUR)]), ["no record: #7"])
 
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
