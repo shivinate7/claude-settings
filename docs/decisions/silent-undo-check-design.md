@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads two things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads three things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -13,6 +13,14 @@
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
   commit added on the branch alone is the branch's.
+- **Revived line.** A merge commit puts back a line that one parent deleted, in a file with `merge=union`
+  (decision `notes-merge-union`). Union merge keeps the line when the other parent adds next to it, with
+  no conflict. The read covers every merge of upstream..head: a lane's own merge, a merge of main into a
+  lane, and the batch's merge of each lane. It reads the union rule as of the merge's first parent. A line
+  counts when the merge base of the two parents has it, one parent holds fewer copies, and the merge holds
+  more. A lane fast-forwarded into the batch is read through the merge that follows. A row main re-added
+  after the deletion is in no merge base, so it is no finding. No gap is known beyond what the test cases
+  pin. Cost: a few git reads per merge, no process, no log.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses

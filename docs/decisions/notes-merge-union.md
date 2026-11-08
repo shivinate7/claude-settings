@@ -14,9 +14,9 @@ The rule takes effect only once it is on main. A lane branched before it merges 
 
 Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
 versions stay. A note that one lane deletes or reverts can come back when another lane appends. The
-integration-branch read of `lint/check_silent_undo.py` (the "revived" read) catches the revival. A line
-in the merge base, gone from a lane head, and back in the integration head fails. A Drops-lines
-trailer excuses it. `lint/test_notes_union_merge.py` pins the rewrite case.
+"revived" read of `lint/check_silent_undo.py` catches the revival at each merge. A line fails when the merge base of the two parents has it,
+one parent holds fewer copies, and the merge holds more. It covers a
+lane's own merges and the batch's merge of each lane. A Drops-lines trailer excuses it. `lint/test_notes_union_merge.py` pins the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
