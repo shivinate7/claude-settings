@@ -10100,9 +10100,12 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 # =========================================================================== 5i. the review record after a round
 #
 # Rule review-record-after-round, decision pr-review-record. A lane's own builder or test-author spawn, or its
-# send_message, is refused when the session's last reviewer or design-reviewer spawn has no review record after it.
-# A review record is a comment on the pull request that holds the record marker (an add_issue_comment call), or a
-# Bash call whose command holds it. The marker is read from the merge tool, so no case copies it. The rule reads the
+# send_message (the remote tool or the built-in SendMessage), is refused when the session's last reviewer or
+# design-reviewer spawn has no review record after it. A reviewer spawn whose result is an error never ran, so it
+# gates nothing, and a call inside a sidechain record is not the lane's. A review record is a comment on the pull
+# request that holds the record marker: an add_issue_comment call, or a Bash call that posts one (gh api or
+# gh pr comment) whose body either holds the marker or comes from a file. A Bash call that only names the marker,
+# such as a read, is no record. The marker is read from the merge tool, so no case copies it. The rule reads the
 # transcript for those calls only: an agent's own call, an Explore or Plan spawn and a session with no reviewer spawn
 # are not judged. A missing or unreadable transcript is allowed.
 FAMILY = "review-record-after-round"
@@ -10150,6 +10153,17 @@ def rr_bash(tool_id, command):
     return [role_use(tool_id, "Bash", {"command": command}), role_result(tool_id, "")]
 
 
+def rr_spawn_error(tool_id, subagent_type):
+    """A spawn of `subagent_type` that another guard refused: the call's result is an error, and it never ran."""
+    return [rr_spawn(tool_id, subagent_type)[0],
+            role_result_block(tool_id, is_error=True, content=[{"type": "text", "text": "Refused before it ran."}])]
+
+
+def rr_sidechain(lines):
+    """`lines` as a nested agent's own records: each one marked isSidechain."""
+    return [json.dumps(dict(json.loads(line), isSidechain=True)) for line in lines]
+
+
 def rr_record(rnd=1):
     """A review record for RR_HEAD, round `rnd`, in the form the merge tool writes."""
     return "\n".join([RR_MARK, "PR: #12", "Head: " + RR_HEAD, "Kind: normal", "Guard or check: no",
@@ -10171,6 +10185,15 @@ RR_TRANSCRIPTS = {
     "round-two": rr_session(rr_spawn("r1", "reviewer"), rr_comment("c1", rr_record()), rr_spawn("r2", "reviewer")),
     "long": rr_session(rr_spawn("r1", "reviewer"), RR_FILLER),
     "owner-turn": rr_session(rr_spawn("r1", "reviewer"), [RR_HUMAN]),
+    "bash-read": rr_session(rr_spawn("r1", "reviewer"), rr_bash("g1", "grep -c '" + RR_MARK + "' comments.json")),
+    "bash-file-post": rr_session(rr_spawn("r1", "reviewer"),
+                                 rr_bash("p1", "gh api repos/o/r/issues/5/comments -F body=@record.md")),
+    "bash-file-pr-comment": rr_session(rr_spawn("r1", "reviewer"),
+                                       rr_bash("p2", "gh pr comment 5 --body-file record.md")),
+    "bash-inline-unmarked": rr_session(rr_spawn("r1", "reviewer"), rr_bash("p3", "gh pr comment 5 --body 'Looks good'")),
+    "reviewer-error": rr_session(rr_spawn_error("r1", "reviewer")),
+    "sidechain-spawn": rr_session(rr_sidechain(rr_spawn("r1", "reviewer"))),
+    "sidechain-record": rr_session(rr_spawn("r1", "reviewer"), rr_sidechain(rr_comment("c1", rr_record()))),
 }
 
 
@@ -10191,10 +10214,10 @@ def write_rr_transcripts():
 lazy_fixture([rr_path(name) for name in RR_TRANSCRIPTS] + [rr_path("unreadable")], write_rr_transcripts)
 
 
-def rr_refuse(name, tool, tool_input, transcript, agent_id=None):
-    """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision."""
+def rr_refuse(name, tool, tool_input, transcript, agent_id=None, carries=RR_CARRIES):
+    """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision, and `carries`."""
     add("review-record-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
-        carries=RR_CARRIES, agent_id=agent_id, env=ROLE_ENV, **tool_input)
+        carries=carries, agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 def rr_allow(name, tool, tool_input, transcript, agent_id=None):
@@ -10240,6 +10263,34 @@ rr_allow("an Explore spawn after a reviewer spawn is not judged", "Agent", RR_EX
 rr_allow("a Plan spawn after a reviewer spawn is not judged", "Agent", RR_PLAN, rr_path("reviewer"))
 rr_allow("a missing transcript file is allowed, never refused", "Agent", RR_BUILDER, rr_path("missing"))
 rr_allow("an unreadable transcript (a folder) is allowed, never refused", "Agent", RR_BUILDER, rr_path("unreadable"))
+# The built-in SendMessage is judged like the remote send_message: the same handoff, the same record.
+import _transcript  # noqa: E402  the one home of the send-tool names (lint/_transcript.py SEND_TOOLS)
+RR_BUILTIN_SEND = next(name for name in _transcript.SEND_TOOLS if name != SEND_MESSAGE)
+RR_BUILTIN_HANDOFF = {"to": "builder-pr12", "message": "Handoff: PR #12 is ready for the batch."}
+rr_refuse("a built-in SendMessage handoff after a reviewer spawn with no review record is refused",
+          RR_BUILTIN_SEND, RR_BUILTIN_HANDOFF, rr_path("reviewer"))
+rr_allow("a built-in SendMessage handoff after a reviewer spawn and a comment with the record marker is allowed",
+         RR_BUILTIN_SEND, RR_BUILTIN_HANDOFF, rr_path("record"))
+# A Bash call is a post only when it posts. A read that names the marker is no record. A post whose body comes from a
+# file counts on its command, since the guard cannot read the file. An inline post without the marker is no record.
+rr_refuse("a Bash read that names the record marker after a reviewer spawn is no record: a builder spawn is refused",
+          "Agent", RR_BUILDER, rr_path("bash-read"))
+rr_allow("a gh api post whose body comes from a file after a reviewer spawn lets a builder spawn through",
+         "Agent", RR_BUILDER, rr_path("bash-file-post"))
+rr_allow("a gh pr comment whose body comes from a file after a reviewer spawn lets a builder spawn through",
+         "Agent", RR_BUILDER, rr_path("bash-file-pr-comment"))
+rr_refuse("a gh pr comment with an inline body that lacks the record marker is no record: a builder spawn is refused",
+          "Agent", RR_BUILDER, rr_path("bash-inline-unmarked"))
+# A reviewer spawn that another guard refused never ran, and a call inside a sidechain record is not the lane's.
+rr_allow("a reviewer spawn whose result is an error does not gate: a builder spawn after it is allowed",
+         "Agent", RR_BUILDER, rr_path("reviewer-error"))
+rr_allow("a reviewer spawn inside a sidechain record does not gate: a builder spawn after it is allowed",
+         "Agent", RR_BUILDER, rr_path("sidechain-spawn"))
+rr_refuse("a record marker comment inside a sidechain record is not the lane's post: a builder spawn is refused",
+          "Agent", RR_BUILDER, rr_path("sidechain-record"))
+# The refusal names the design-reviewer line of the round's record, which takes the form `Round <n>: design-reviewer, ...`.
+rr_refuse("a builder spawn after a design-reviewer spawn with no record: the refusal names the design-reviewer line",
+          "Agent", RR_BUILDER, rr_path("design-reviewer"), carries=RR_CARRIES + ("design-reviewer",))
 
 
 def rr_cost_case():
