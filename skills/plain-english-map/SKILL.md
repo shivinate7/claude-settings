@@ -1,6 +1,6 @@
 ---
 name: plain-english-map
-description: Use only in a repository that has `map.config.json` at its root. Use when a change adds, moves or deletes a tracked code file, a migration table or a screen key, when a MAP check fails, or when the user says "update the map" or "plain-english map", and before answering how code in this repo works. Keeps the plain-English map in `docs/map/` in sync with the code, and builds the map page.
+description: Use only in a repository that has `map.config.json` at its root. Use when a change adds, moves or deletes a tracked code file or a file that a decision or debt record names, a migration table or a screen key, when a MAP check fails, or when the user says "update the map" or "plain-english map", and before answering how code in this repo works. Keeps the plain-English map in `docs/map/` in sync with the code, and builds the map page.
 ---
 
 `docs/map/` is the plain-English map of the code. A check holds it in sync. This skill says how to
@@ -30,6 +30,7 @@ the version it reads in `MAP_FORMAT_VERSION`, in `scripts/lib/map-config.mjs`. A
 - **Newer map.** Every command refuses, and the message says to update the skill. No command writes a downgrade.
 
 To change the map format: raise `MAP_FORMAT_VERSION`, and add one step to the list in `scripts/map-upgrade.mjs`.
+Version 5 to 6 changes no file: version 6 lets a decision or debt record name any file, adds the debts line, and extends MAP1 and MAP10. It makes an older copy of the skill refuse the map.
 Version 4 to 5 changes no file: version 5 adds the tested-by line and MAP11. It makes an older copy of the skill refuse the map.
 Version 3 to 4 changes no file: version 4 adds the two decision keys, the decisions line and MAP10. It makes an older copy of the skill refuse the map.
 Version 2 to 3 changes no file: version 3 adds the fact line, the `## Homes` section and MAP9, and it makes an older copy of the skill refuse the map.
@@ -67,6 +68,11 @@ With no match it prints `no map line for <arg>` and exits 1.
   The sentence shows each number of the cite, and names each item of a set or a list. A number outside backticks anywhere else in the map fails MAP9.
 - **A decisions line.** Indented under a map line: `  - Decisions: ` + each id in backticks, joined by `, `. An id names a record, a `.md` file directly in `decisionsDir`,
   when the file name without `.md` is the id or starts with the id and `-`. A run of digits compares by value: `D7` names `D007-x.md`.
+- **A non-code map line.** A decision record or a debt record (a `.md` file directly in `decisionsDir` or in the debts folder, except `notes.md` and `README.md`) names a file by a backticked token that equals a tracked path exactly.
+  A bare name, a prefix or a suffix names nothing. A tracked non-code file that a record names needs a map line under `## Code files`, like a code file (MAP1, still filtered by `mapPaths`).
+  A record, a `docs/map/` page and `map.config.json` need none, and a code file needs no ids. Its decisions line carries the id of each naming decision record: the leading match of `decisionIdPattern` on the record's file name.
+  A record whose file name has no such id adds none. Its debts line is `  - Debts: ` + the slug (the file name without `.md`) of each debt record that names it, in backticks, joined by `, `. A slug that names no debt record fails.
+  The debts folder is the `debts` kind of `lint/layout.json` in the claude-settings root: no config key sets it. The skill reads the file in its own process and starts no `python3`.
 - **A tested-by line.** Indented under a map line directly in `## Code files`, with no deeper heading between: `  - Tested by: ` + each test path from the repository root in backticks, joined by `, `.
   The line is optional: a map line with no tested-by line passes. MAP11 checks each test the line names.
 - **A home.** Under `## Homes`: `- ` + the capability in words + ` — ` + backtick `FILE:SYMBOL`. Read this section before you build, and extend the home.
@@ -77,19 +83,23 @@ With no match it prints `no map line for <arg>` and exits 1.
 ## Files
 
 - `scripts/map-check.mjs` reads the map and the code, and holds the bodies of the 11 MAP checks. Run it from a repository root, and it runs the 11 checks there. It prints one line for each check, and exits non-zero on a FAIL.
-- MAP10 runs only when both decision keys are set, and otherwise it passes with a skip note. It fails in two cases.
-  A mapped file's comments cite an id that names a record, and the file's decisions line lacks it. Or an id on a decisions line names no record. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
+- MAP1 fails for a tracked code file with no map line, and for a tracked non-code file that a decision or debt record names and that has no map line.
+- MAP10 runs when both decision keys are set or the debts folder exists, and otherwise it passes with a skip note. It fails in these cases.
+  A mapped code file's comments cite an id that names a record, and the file's decisions line lacks it. Or an id on a decisions line names no record.
+  A mapped non-code file lacks the id of a decision record that names it, or the slug of a debt record that names it.
+  Or a debts line lists a slug that names no debt record. The non-code file's bytes are never read.
+  With no decision keys, only the debts part runs. Comments are read through `scripts/lib/source-text.mjs`: JS and TS by `blankComments`, Python by `blankPython`, shell by `blankShell`. A string is no cite, a Python triple-quoted string included. A file of any other extension is read as JS.
 - MAP11 fails when a test on a tested-by line is not a tracked file, or does not load the map line's file. A test loads a file in one of two ways.
   It imports the file (a type-only import does not count), or one `__init__.py` or `index.*` that it imports re-exports the file. Or a string in its code, never in a comment or a docstring, is the file's path, from the test's folder or the repository root.
   JS and TS are read by the TypeScript parser, and Python by `ast` in `py-facts.py`. A test in any other language, or a run with no `python3`, is an unknown read, and MAP11 fails: an unknown read is never a pass.
   A tested-by line under a table line, a screen line or a home fails.
-- `scripts/map-fix.mjs` adds the ids that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line right under the map line when there is none. A second `--write` changes no byte.
+- `scripts/map-fix.mjs` adds the ids and slugs that MAP10 finds missing, and never removes or reorders one. With no flag it prints each file and id it would add and writes nothing. With `--write` it adds them, and creates the decisions line (and the debts line after it) right under the map line when there is none. A second `--write` changes no byte.
 - `scripts/map-picture.mjs` builds the picture data and the page, and it is the page command. It reads no decision records, so the rulings tab is empty.
-- `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`.
+- `scripts/map-show.mjs` is the show command. It prints the map for one file, area, folder or decision id (`--full` adds the record line for an id), through the readers of `map-check.mjs`. A non-code file prints its map line, and its decisions line and debts line when it has them, only when a record names it. A decision id also lists the non-code files that a record names and whose decisions line holds it.
 - `scripts/map-stale.mjs` is the stale command. It runs 1 `git rev-parse`, 1 `git blame` for each map page and 1 `git log` for all files, never a `git log` for each file. A shallow clone, no repository or no git prints an unknown line, never "nothing stale".
 - `scripts/map-upgrade.mjs` is the upgrade command, and holds the list of upgrade steps.
 - `scripts/lib/map-config.mjs` reads and checks `map.config.json`. It is the one home of the validator.
-- `scripts/lib/` also holds `decisions.mjs` (which record an id names, and which ids a file cites), `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
+- `scripts/lib/` also holds `decisions.mjs` (which record an id names, which ids a file cites, and which files a record names), `import-reader.mjs`, `lazy-typescript.mjs` and `source-text.mjs`.
 - `scripts/lib/fact-readers.mjs` reads the value of each fact line: JSON, TypeScript and JavaScript by their parsers, Python through `py-facts.py` (one `python3` start for a run), and any other language by a line regex. It also answers MAP11's `loads` read: the files a test imports (no type-only import) and the files a string in its code equals. MAP9 and MAP11 share the one call of a run. Each fails when a reader cannot run: an unknown read is never a pass.
 - `scripts/lib/lazy-typescript.mjs` loads the `typescript` package from the `node_modules` of claude-settings, which `install.sh` and `install.ps1` fill with `npm ci`. Through the install link, the host installs nothing. A copy of the skill outside the clone finds no `typescript`: the error says to run the skill from its install link, or to install `typescript` in the host.
 - `assets/page.html` is the page template.
