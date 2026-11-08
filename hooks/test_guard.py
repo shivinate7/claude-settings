@@ -532,7 +532,7 @@ PTRAHEAD = os.path.join(ROOT, "ptraheadmain")
 PTRNOORIGINCFG = os.path.join(ROOT, "ptrnoorigincfg")
 PTRNOORIGIN = os.path.join(ROOT, "ptrnooriginmain")
 
-# SAME-BRANCH FIXTURES, for the held-branch cases (rule CURRENT_BRANCH_RULE) in the shared-tree section.
+# SAME-BRANCH FIXTURES, for the held-branch cases (rule HELD_BRANCH_RULE) in the shared-tree section.
 # Every tree is clean, so the shared-tree rule passes each case, and a deny can only come from the
 # rule under test.
 SBCUR = os.path.join(ROOT, "samebranch-cur")      # on `lane-x`, with origin/lane-x one commit ahead
@@ -2778,21 +2778,24 @@ sh("checkout: a forced new branch at a commit", VCS + " checkout -B tmp 380d5fc"
    cwd=NOGIT)
 sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", "allow", cwd=NOGIT)
 
-# THE HELD-BRANCH RULE, rule id CURRENT_BRANCH_RULE. A `checkout -B <name>` or `switch -C <name>` is
+# THE HELD-BRANCH RULE, rule id HELD_BRANCH_RULE. A `checkout -B <name>` or `switch -C <name>` is
 # refused when a worktree OTHER than the command's own holds <name>: the primary of the clone, or a
 # linked worktree beside it. The command's own checkout is allowed. Coordinator ruling 04:50 CST Nov 8,
 # see decision checkout-b-held-branch: an own-worktree reset is clean on git 2.43.0. Which checkout runs
 # the command is the one `-C <path>` names, else the cwd.
 # A refusal names the rule and a remedy in words only. It never echoes the held branch, and never
 # offers the forcing flag git has for this case.
-CURRENT_BRANCH_RULE = "checkout-b-current-branch"
+HELD_BRANCH_RULE = "checkout-b-held-branch"
+# The id before the ruling narrowed the rule. The refusal prints its rule id first, but the rule check
+# also passes on the decision citation inside the reason, so only `lacks` pins the id.
+OLD_HELD_BRANCH_RULE = "checkout-b-current-branch"
 REMEDY_IN_WORDS = (("new branch", "new name", "reset"),)
 
 
 def held_refuse(name, command, cwd, held_text):
     """One deny case. `held_text` is the text the refusal must not carry: the held branch, or its -B form."""
-    sh("same branch: " + name, command, "deny", CURRENT_BRANCH_RULE, cwd=cwd,
-       lacks=(held_text, "--ignore-other-worktrees"), carries=REMEDY_IN_WORDS)
+    sh("same branch: " + name, command, "deny", HELD_BRANCH_RULE, cwd=cwd,
+       lacks=(held_text, "--ignore-other-worktrees", OLD_HELD_BRANCH_RULE), carries=REMEDY_IN_WORDS)
 
 
 # THE OWN CHECKOUT HOLDS THE BRANCH: ALLOWED. Each case is the own-tree form the rule no longer refuses.
@@ -2853,19 +2856,19 @@ held_refuse("-C names a linked worktree, checkout form, from another clone, is r
 # A SIBLING HOLDER, RUN FROM A SUBFOLDER. The call runs in `sub/`, so the checkout that holds the
 # branch is the top of the tree above it. A guard that takes the run folder for the own tree finds
 # no own tree there, and the refusal is lost.
-held_refuse("same branch: from a subfolder, a linked worktree: checkout -B of the branch the primary holds is refused",
+held_refuse("from a subfolder, a linked worktree: checkout -B of the branch the primary holds is refused",
             "cd sub && " + VCS + " checkout -B lane-p origin/main", SBLINK, "lane-p")
-held_refuse("same branch: from a subfolder, a linked worktree: switch -C of the branch the primary holds is refused",
+held_refuse("from a subfolder, a linked worktree: switch -C of the branch the primary holds is refused",
             "cd sub && " + VCS + " switch -C lane-p origin/main", SBLINK, "lane-p")
-held_refuse("same branch: from a subfolder, the primary: checkout -B of the branch the linked worktree holds is refused",
+held_refuse("from a subfolder, the primary: checkout -B of the branch the linked worktree holds is refused",
             "cd sub && " + VCS + " checkout -B lane-q origin/main", SBPRIME, "lane-q")
 # A SYMLINKED PATH TO A LINKED WORKTREE. The call runs in SBSYM, a link to the worktree that git lists
 # under the link path. The own tree is found only when the list's path and the tree's own answer are
 # compared as the same folder, so a plain string compare finds no own tree and lets the reset through.
 if LINKS_MADE:
-    held_refuse("same branch: through a symlink, a linked worktree: checkout -B of the branch the primary holds is refused",
+    held_refuse("through a symlink, a linked worktree: checkout -B of the branch the primary holds is refused",
                 VCS + " checkout -B lane-p origin/main", SBSYM, "lane-p")
-    held_refuse("same branch: through a symlink, a linked worktree: switch -C of the branch the primary holds is refused",
+    held_refuse("through a symlink, a linked worktree: switch -C of the branch the primary holds is refused",
                 VCS + " switch -C lane-p origin/main", SBSYM, "lane-p")
     sh("same branch: through a symlink, a linked worktree: checkout -B of the branch it is on is allowed",
        VCS + " checkout -B lane-s origin/main", "allow", cwd=SBSYM)
