@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzc39M5wFtru1uU5u4",
   "why": "Agent roles could call the claude-code-remote session tools (send, interrupt, create sessions), which belong to orchestrators; a stray interrupt_session from a record-writer on 2026-11-01 is one case.",
-  "note": "Deny mcp__claude-code-remote__* through disallowedTools in agents/*.md for reviewer, test-author, builder, record-writer, designer, design-reviewer, Explore and Plan, plus a lint check that keeps it. Finding B (round-2 reviewer on Sonnet) is no defect. Topic agent-roles. Absorbs step explore-no-create-session (coordinator, 17:32 CST): an Explore agent in lane replay-profile-parts made a stray session through create_session; that incident is this lane's red test.",
-  "updatedAt": "2026-11-07T17:32:00-06:00"
+  "note": "Deny mcp__claude-code-remote__* through disallowedTools in agents/*.md for reviewer, test-author, builder, record-writer, designer, design-reviewer, Explore and Plan, plus a lint check that keeps it. Finding B (round-2 reviewer on Sonnet) is no defect. Topic agent-roles. Absorbs step explore-no-create-session (coordinator, 17:32 CST): an Explore agent in lane replay-profile-parts made a stray session through create_session; that incident is this lane's red test. 18:19 CST Nov 7: #1674 (agents-no-remote-tools: the guard refuses an agent's outward claude-code-remote calls, all 20 tools) is with runner 8, stacked on #1566.",
+  "updatedAt": "2026-11-07T18:20:00-06:00"
 }
