@@ -1,11 +1,11 @@
 {
   "title": "The refusals-reach-the-owner guard fires once per refusal, and stays quiet once the session has raised it",
   "why": "Coordinator 12:56 CST Nov 8, sighting, possible false alarm: the guard re-fired on every reply in lane habit-is-not-a-guard after the lane had already raised the auto-mode force-push refusal (#2183, about 12:50 CST). A guard that fires when nothing is wrong teaches the reader to scroll past it. Fix: the guard marks a refusal raised once a reply names it, and does not fire again for that refusal.",
-  "note": "",
+  "note": "Coordinator 13:57 CST Nov 8: #2245 re-handed after round 3. Open check for a Mac session: run `jq -r .reason ~/.claude/state/refusals/*.jsonl | sort | uniq -c | sort -rn | head` to see whether the classifier's reason text is generic. If it is, #2245's once-per-reason becomes once-per-tool per session, and its note becomes a debt.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "status": "ready",
   "order": 796,
-  "updatedAt": "2026-11-08T13:37:00-06:00"
+  "updatedAt": "2026-11-08T13:58:00-06:00"
 }

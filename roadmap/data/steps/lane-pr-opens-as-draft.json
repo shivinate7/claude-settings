@@ -1,0 +1,11 @@
+{
+  "title": "A lane session opens its PR as a draft: the guard refuses a ready PR from mcp__github__create_pull_request or `gh pr create`",
+  "why": "Coordinator 13:58 CST Nov 8: #2251 opened ready at 13:42 CST because lane handoff-keeps-owner-waits passed no draft field to mcp__github__create_pull_request. Its CI run then blocked batch 65's merge at 13:56 CST. Fix: refuse create_pull_request, and `gh pr create`, from a cs-build:lane session unless draft is true. The draft-PR guard steps (draft-pr-guard-heredoc, draft-pr-guard-text-false-alarm) touch the same guard; check whether it already reads the MCP tool.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 814,
+  "updatedAt": "2026-11-08T13:58:00-06:00"
+}

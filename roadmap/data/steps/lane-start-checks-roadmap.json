@@ -1,11 +1,11 @@
 {
   "title": "A coordinator's lane start asks when an open roadmap step already covers the same ruling or topic, and names it",
   "why": "Coordinator 12:18 CST Nov 8, its own mistake: it started lane builder-diff-vs-merged-main (session_013NEJL3tzwg72Zt2vUzJUey) for item 437 a, a duplicate of step builder-diff-merge-commit (lane session_013NEJKzVTWMbokJ3KFanBBC); archived at a cost of $0.50, no commits. Fix: create_session for a lane refuses or asks when an open step covers the same ruling or topic, and names that step.",
-  "note": "Coordinator 12:22 CST Nov 8, second lane-start mistake: a lane for lanes-sonnet-trial was started with no source_url, so it had no repo (archived, $0.29, nothing written). Same guard: a create_session tagged cs-build:lane with no source_url refuses.",
+  "note": "Coordinator 12:22 CST Nov 8, second lane-start mistake: a lane for lanes-sonnet-trial was started with no source_url, so it had no repo (archived, $0.29, nothing written). Same guard: a create_session tagged cs-build:lane with no source_url refuses. Coordinator 13:58 CST Nov 8: #2250 (lane lane-model-sonnet, session_013NEJKziVLcE1RT5jq36KVX) covers the source_url half. The roadmap-duplicate half stays open.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 781,
-  "updatedAt": "2026-11-08T12:26:00-06:00"
+  "updatedAt": "2026-11-08T13:58:00-06:00"
 }
