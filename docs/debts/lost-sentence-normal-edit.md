@@ -1,6 +1,6 @@
 # A normal note edit is refused as a lost sentence
 
-**What.** The lost-sentence check refuses normal note edits until a `Drops-lines` trailer names the note's slug as `- <slug>`. Refused normal edits include a renumbered `file.py:NNN` cite, a swapped Decision tag, and a corrected time or count. Example: `Until: 2026-11-22.` changed to `2026-12-06.`. A split note that does not name the old slug is refused too. Likely in normal work: 41 of 1489 notes carry a file:line cite, and each such edit costs one trailer line.
+**What.** The lost-sentence check refuses normal note edits until a `Drops-lines` trailer names the note's slug as `- <slug>`. The refusal says how: it prints this trailer form. Refused normal edits include a renumbered `file.py:NNN` cite, a changed Decision id (a label-only swap passes), and a corrected time or count. Example: `Until: 2026-11-22.` changed to `2026-12-06.`. A split is refused only when a part keeps the old slug or names it. A split with no such part passes (debt `lost-sentence-rename-unpaired`, a renamed note's lost sentence passes). Likely in normal work: 41 of 1488 notes carry a file:line cite, and each such edit costs one trailer line.
 
 **Where.** `lint/check_silent_undo.py`, `dropped_clauses` (flags the edit) and `lost_sentence_problem` (the refusal text).
 
