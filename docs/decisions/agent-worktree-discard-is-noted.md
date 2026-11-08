@@ -5,9 +5,9 @@
 Owner rulings: 2026-10-03 (the agent-owned worktree), 2026-10-11 ("Allow per-file", the untracked
 link), 2026-10-17 11:40 CDT (the per-file allow outside `.claude/worktrees/` stands).
 
-The shared-tree rule refuses a discarding git command in the shared checkout, and asks in a
-hand-made worktree: `git reset --hard`, and `git checkout -- <path>` or `git restore`, except a
-named file.
+The shared-tree rule refuses a discarding git command in the shared checkout. In a hand-made
+worktree it asks for `git reset --hard`. It asks for `git checkout -- <path>` or `git restore` too,
+except a named file. The shared checkout refuses named files.
 
 ### Agent-owned worktree
 
@@ -76,7 +76,9 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 
 Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
 `hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
-holds only over uncommitted work: a clean tree allows (`hooks/test_guard.py:2411` and `:2610`).
+holds only over uncommitted work. A clean tree allows, as the rows
+`subject: a hard reset in a clean tree takes nothing` and `subject: restoring the whole clean tree
+changes nothing` show.
 
 - `git reset [-q] [HEAD] [--] [<path>]`, no discard flag: allow | allow | allow. It only unstages and
   keeps the work tree. In the shared checkout it can drop another agent's staged choice. The allow
@@ -84,13 +86,13 @@ holds only over uncommitted work: a clean tree allows (`hooks/test_guard.py:2411
   - Unstage caveat: an unstage never touches the work tree. If the work tree still holds the staged
     lines, nothing is lost. If the work tree changed a line after it was staged, the staged version
     is in no ref, index or file after the unstage. It survives only as an unreachable blob until gc.
-    The allow stays. Round 2 measured it: after add, edit and unstage, the work tree keeps the newer
+    The allow stays. Measured: after add, edit and unstage, the work tree keeps the newer
     bytes, and `git fsck --lost-found` recovers the staged bytes. Asking on every unstage would be a
     false alarm, since any agent's `git add` or `git commit` already changes the shared index. The
     `MM` state also comes from add-then-edit.
 - `git restore --staged <path>` and `git restore --staged .`: allow | allow | allow. Each is an
   unstage, so the caveat above applies.
-- `git restore -- <path>`: deny | allow (named-file allow) | allow.
+- `git restore -- <path>`: deny | allow (named-file allow) | allow, noted.
 - `git reset --hard|--merge|--keep` with a path (`… -- <path>`): deny | ask | allow, noted. Git refuses
   this form itself ("Cannot do <mode> reset with paths"), so these pinned verdicts cost nothing and
   guard nothing.
