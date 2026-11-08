@@ -46,6 +46,7 @@ import functools
 import json
 import os
 import re
+import shlex
 import sys
 from html.parser import HTMLParser
 
@@ -488,12 +489,27 @@ ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/
 PS_NONSTANDARD_VERBS = ("ForEach",)
 SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS + PS_NONSTANDARD_VERBS) + r")-[A-Z][A-Za-z]+")
 # What may come before a cmdlet path in a segment: `&`, `VAR=value`, and command wrappers with their flags and values
-# (`sudo -u bob`, `nice -n 5`, `timeout 5`). guard_core's wrapper walk reads them, the one home of which flags take a
-# value. Its token reader strips the backslashes of a raw path, so the walk takes the segment's raw words.
+# (`sudo -u bob`, `nice -n 5`, `timeout 5`) and the loop keywords `LOOP_KEYWORDS` names (`then`, `do`, `else`, `elif`,
+# `while`, `until`, `if`, `{`, `(`, `$(`). guard_core's wrapper walk reads them, the one home of which flags take a
+# value. Its token reader strips the backslashes of a raw path, so the walk takes the segment's raw words. The words
+# come from guard_core's own non-POSIX reading (`_quoted_opens`): quotes and backslashes stay, a quoted flag value
+# (`-f "%E s"`) is one word, and each word is a raw slice of the segment. An unbalanced quote falls back to blanks.
+def _raw_words(segment):
+    """(offset, word) for each word of `segment`, as raw slices of it."""
+    try:
+        raw = shlex.split(segment, posix=False)
+    except ValueError:
+        return [(m.start(), m.group()) for m in re.finditer(r"\S+", segment)]
+    words, at = [], 0
+    for word in raw:
+        at = segment.index(word, at)
+        words.append((at, word))
+        at += len(word)
+    return words
 def _cmdlet_prefix(segment) -> int:
     """The offset in `segment` where the word behind the wrapper prefix starts."""
     import guard_core
-    words = [(m.start(), m.group()) for m in re.finditer(r"\S+", segment)]
+    words = _raw_words(segment)
     tokens = tuple(word for _, word in words)
     at = 0
     while at < len(tokens):
