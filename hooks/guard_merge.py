@@ -1145,6 +1145,7 @@ RECORD_DESIGN_NOTE = (
     " The last reviewer spawn was a design-reviewer: add its line, `Round <n>: design-reviewer, <model>, <verdict>`, "
     "to that round's record, with `merge <pr> --review-record --head <sha> --round <n>:design-reviewer:<model>:<verdict>`."
 )
+RECORD_DESIGN_REASON = RECORD_REASON + RECORD_DESIGN_NOTE
 
 
 def _transcript_reader():
@@ -1251,10 +1252,10 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
         return "", "", True
     if any(_posts_record(use, marker) for use in uses[last + 1:]):
         return "", "", False
-    reason = RECORD_REASON
+    matched = "%s after a reviewer spawn with no review record" % tool
     if uses[last]["input"].get("subagent_type") == "design-reviewer":
-        reason += RECORD_DESIGN_NOTE
-    return reason, "%s after a reviewer spawn with no review record" % tool, False
+        return RECORD_DESIGN_REASON, matched, False
+    return RECORD_REASON, matched, False
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
