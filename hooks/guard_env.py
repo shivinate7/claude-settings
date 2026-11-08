@@ -8,8 +8,8 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _interpreter_header, _split_heredocs,
-    _without_message_values, is_powershell, norm, split_segments,
+    NODE_WORDS, POWERSHELL_CALL, PYTHON_WORDS, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE,
+    _interpreter_header, _split_heredocs, _without_message_values, is_powershell, norm, split_segments,
 )
 
 
@@ -431,22 +431,36 @@ def _plain_escaped_quotes(cmd: str) -> str:
             lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body))
 
 
-_PYTHON_HEADER = _interpreter_header("python[\\d.]*")
-_NODE_HEADER = _interpreter_header("node")
+_PYTHON_HEADER = _interpreter_header(PYTHON_WORDS)
+_NODE_HEADER = _interpreter_header(NODE_WORDS)
 # A `//` line of a template literal ends at its line end, or sooner at the backtick or `${` that goes back to code.
 _TEMPLATE_PROSE_END = re.compile(r"\n|`|\$\{|\Z")
 
 
+def _is_prose_string(body: str, start: int, end: int) -> bool:
+    """True when the python triple-quoted string body[start:end] is prose and not a value code can use."""
+    text = body[start:end]
+    if " " in text or "\n" in text:
+        return True
+    line_start = body.rfind("\n", 0, start) + 1
+    line_end = body.find("\n", end)
+    line_end = len(body) if line_end < 0 else line_end
+    return not body[line_start:start].strip() and not body[end:line_end].strip()
+
+
 def _blank_code_prose(body: str, python: bool) -> str:
-    """Cut the comments, and a python triple-quoted string, out of a python or node body.
+    """Cut the comments, and the prose triple-quoted strings, out of a python or node body.
 
     The word reader below reads a body as shell words. A comment or a docstring that names an env file
     in prose then reads as a bare word, and an odd apostrophe in it flips the quote state for the code
     after it. This reads the body with the language's own rules: a quote opens a string up to its
-    mate (a newline ends a single-line one), and a comment is found only outside a string. Code and
-    its strings stay as written, so a read of an env file there is still judged. A node template
-    literal is left whole except for a line that starts with `//`, which the prose case needs and which
-    the reader can only read as shell words.
+    mate (a newline ends a single-line one), and a comment is found only outside a string.
+    A python triple-quoted string is cut only when it is prose: it stands alone on its line, as a
+    docstring does, or it holds a space or a newline. One with neither, such as `p = '''.env'''`, may
+    be a path that code goes on to open, so it stays as written. Every other string stays as
+    written, so a read of an env file there is still judged. A node template literal is left whole
+    except for a line that starts with `//`, which the prose case needs and which the reader can
+    only read as shell words.
     """
     out, i, n = [], 0, len(body)
     while i < n:
@@ -466,8 +480,11 @@ def _blank_code_prose(body: str, python: bool) -> str:
         elif python and body[i:i + 3] in ("'''", '"""'):
             end = body.find(body[i:i + 3], i + 3)
             end = n if end < 0 else end + 3
-            out.append("\n" * body.count("\n", i, end))
-            out.append('""')
+            if _is_prose_string(body, i, end):
+                out.append("\n" * body.count("\n", i, end))
+                out.append('""')
+            else:
+                out.append(body[i:end])
             i = end
         elif char in "'\"" or (char == "`" and not python):
             j = i + 1
