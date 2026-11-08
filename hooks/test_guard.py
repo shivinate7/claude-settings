@@ -640,6 +640,12 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+# Archive-tip repos (rule archive-remote-tip). Each holds `zq-amend`: origin/zq-amend is the remote tip, and
+# the local branch was amended past it, so it no longer holds that tip. The four differ only in their refs.
+ARCHAMEND = os.path.join(ROOT, "archamend")    # no archive ref at all: the empty state
+ARCHSUB = os.path.join(ROOT, "archsub")        # an archive ref that misses the tip, and a non-archive ref that holds it
+ARCHMANY = os.path.join(ROOT, "archmany")      # three archive refs, only the last of which holds the tip
+ARCHMERGED = os.path.join(ROOT, "archmerged")  # the remote tip is already on origin/main
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1975,6 +1981,70 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
 
+    # The archive-tip repos. The remote tip X1 is origin/zq-amend. The local branch was amended to X2, a sibling
+    # of X1, so an archive push of the branch, or a remote delete, loses X1 unless X1 is archived first. zq-fix
+    # is a child of X1, so it holds the tip. Each check reads the ref shape a case needs, before any case runs.
+    def archive_commit(where, name, text, message, amend=False):
+        write(os.path.join(where, name), text)
+        run_vcs(where, "add", "-A")
+        args = ["commit", "-q", "-m", message] + (["--amend"] if amend else [])
+        if run_vcs(where, *IDENT, *args).returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: commit %r in %r failed" % (message, where))
+        return run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+
+    def archive_must(where, args, want, what):
+        if run_vcs(where, *args).returncode != want:
+            sys.exit("fixture setup failed in build_fixtures: %s in %r: git %s did not exit %d"
+                     % (what, where, " ".join(args), want))
+
+    for where, refs in (
+            (ARCHAMEND, ()),
+            (ARCHSUB, (("refs/remotes/origin/archive/zq-old", "base", False),
+                       ("refs/remotes/origin/old-archive/zq-amend", "tip", True))),
+            (ARCHMANY, (("refs/remotes/origin/archive/zq-a", "base", False),
+                        ("refs/remotes/origin/archive/zq-aa", "base", False),
+                        ("refs/remotes/origin/archive/zq-b", "fix", True)))):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
+        base = run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", base)
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        run_vcs(where, "checkout", "-q", "-b", "zq-amend")
+        tip = archive_commit(where, "tip.txt", "tip\n", "zq-amend tip")
+        run_vcs(where, "update-ref", "refs/remotes/origin/zq-amend", tip)
+        run_vcs(where, "checkout", "-q", "-b", "zq-fix")
+        fix = archive_commit(where, "fix.txt", "fix\n", "zq-fix, on the tip")
+        run_vcs(where, "checkout", "-q", "zq-amend")
+        amended = archive_commit(where, "tip.txt", "amended tip\n", "zq-amend, amended", amend=True)
+        if amended == tip:
+            sys.exit("fixture setup failed in build_fixtures: the amend in %r left the tip unchanged" % where)
+        for ref, target, _holds in refs:
+            run_vcs(where, "update-ref", ref, {"base": base, "tip": tip, "fix": fix}[target])
+        archive_must(where, ["merge-base", "--is-ancestor", tip, "refs/remotes/origin/main"], 1,
+                     "the tip is on origin/main")
+        archive_must(where, ["merge-base", "--is-ancestor", tip, "zq-amend"], 1,
+                     "the amended branch lost the tip")
+        archive_must(where, ["merge-base", "--is-ancestor", tip, "zq-fix"], 0, "zq-fix holds the tip")
+        for ref, _target, holds in refs:
+            archive_must(where, ["merge-base", "--is-ancestor", tip, ref], 0 if holds else 1,
+                         "%s holds the tip" % ref)
+
+    # The remote tip is already on origin/main: an ancestor of the default base, not of the source.
+    make_repo(ARCHMERGED, {"base.txt": "base\n"})
+    run_vcs(ARCHMERGED, "remote", "add", "origin", slash(BRANCHREMOTE))
+    side_base = run_vcs(ARCHMERGED, "rev-parse", "HEAD").stdout.strip()
+    merged = archive_commit(ARCHMERGED, "merged.txt", "merged\n", "zq-merged, on main")
+    head = archive_commit(ARCHMERGED, "after.txt", "after\n", "main, after the merge")
+    run_vcs(ARCHMERGED, "update-ref", "refs/remotes/origin/main", head)
+    run_vcs(ARCHMERGED, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(ARCHMERGED, "update-ref", "refs/remotes/origin/zq-merged", merged)
+    run_vcs(ARCHMERGED, "checkout", "-q", "-b", "zq-side", side_base)
+    archive_commit(ARCHMERGED, "side.txt", "side\n", "zq-side, off the base")
+    archive_must(ARCHMERGED, ["merge-base", "--is-ancestor", merged, "refs/remotes/origin/main"], 0,
+                 "zq-merged is on origin/main")
+    archive_must(ARCHMERGED, ["merge-base", "--is-ancestor", merged, "zq-side"], 1,
+                 "zq-side does not hold zq-merged")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2277,7 +2347,8 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
+              ARCHAMEND, ARCHSUB, ARCHMANY, ARCHMERGED],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7620,6 +7691,103 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
+
+# ----------------------------------------------------------- archive-remote-tip
+# Rule archive-remote-tip. A remote delete, and an archive push (`<src>:archive/<name>` or
+# `<src>:refs/heads/archive/<name>`), refuse unless the remote-tracking tip of <name> is an ancestor of
+# <src>, of the default base, or of an archive ref. A lane that amends a branch, then pushes it to the
+# archive name, loses the old remote tip. The allows are controls: green on origin/main by design.
+ARCH_RULE = "archive-remote-tip"
+ARCH_PREFIX = "archive tip: "
+ARCH_UNKNOWN = (("unknown", "unreadable"),)   # an ask says the read is unknown, in either word
+
+
+def archive_tip(name, command, expected, cwd, silent=False, env_path=None, carries=()):
+    """One archive-tip case. A refusal names ARCH_RULE, and its remedy names placeholders only: no real
+    remote, no real branch, no forced push. An ask names ARCH_RULE and says the read is unknown."""
+    if expected == "deny":
+        sh(ARCH_PREFIX + name, command, "deny", rule=ARCH_RULE, cwd=cwd, env_path=env_path,
+           carries=("<remote>", "<branch>"), lacks=("zq-amend", "git push origin", "--force"))
+    else:
+        sh(ARCH_PREFIX + name, command, expected, rule=ARCH_RULE if expected == "ask" else None,
+           cwd=cwd, env_path=env_path, silent=silent, carries=carries)
+
+
+# REFUSE. The remote tip of zq-amend is in neither origin/main, the amended branch, nor any archive ref.
+archive_tip("the amended branch's remote tip, deleted with --delete, is refused",
+            VCS + " push origin --delete zq-amend", "deny", ARCHAMEND)
+archive_tip("the amended branch's remote tip, deleted with -d, is refused",
+            VCS + " push origin -d zq-amend", "deny", ARCHAMEND)
+archive_tip("the amended branch's remote tip, deleted with :name, is refused",
+            VCS + " push origin :zq-amend", "deny", ARCHAMEND)
+archive_tip("an archive push of the amended local branch is refused",
+            VCS + " push origin zq-amend:archive/zq-amend", "deny", ARCHAMEND)
+archive_tip("an archive push to refs/heads/archive from the amended branch is refused",
+            VCS + " push origin zq-amend:refs/heads/archive/zq-amend", "deny", ARCHAMEND)
+archive_tip("an archive push from HEAD, the amended branch, is refused",
+            VCS + " push origin HEAD:archive/zq-amend", "deny", ARCHAMEND)
+# Falsifier: the source is an ANCESTOR of the tip. A reversed ancestry test would allow it.
+archive_tip("an archive push from main, an ancestor of the tip, is refused",
+            VCS + " push origin main:archive/zq-amend", "deny", ARCHAMEND)
+archive_tip("a delete hidden in bash -c is refused",
+            "bash -c '" + VCS + " push origin --delete zq-amend'", "deny", ARCHAMEND)
+archive_tip("a lone quote before the delete does not hide it",
+            'echo "it\'s"; ' + VCS + " push origin --delete zq-amend", "deny", ARCHAMEND)
+archive_tip("a comment opener inside a string does not hide the delete",
+            'echo "a # b"; ' + VCS + " push origin --delete zq-amend", "deny", ARCHAMEND)
+# Falsifier: an archive ref exists but misses the tip, and a non-archive ref holds it. Only archive/ counts.
+archive_tip("a delete, with an archive ref that misses the tip and old-archive/ that holds it, is refused",
+            VCS + " push origin --delete zq-amend", "deny", ARCHSUB)
+archive_tip("an archive push, with the same two refs, is refused",
+            VCS + " push origin zq-amend:archive/zq-amend", "deny", ARCHSUB)
+
+# ASK. A source that does not resolve, and a git that cannot answer, are unknown, never an allow.
+archive_tip("an archive push from a source that does not resolve asks, unknown",
+            VCS + " push origin nosuchref:archive/zq-amend", "ask", ARCHAMEND, carries=ARCH_UNKNOWN)
+if os.name != "nt":
+    archive_tip("an archive push with a git that cannot answer asks, unknown",
+                VCS + " push origin zq-amend:archive/zq-amend", "ask", ARCHAMEND, env_path=GITBLIND,
+                carries=ARCH_UNKNOWN)
+else:
+    skip_case(ARCH_PREFIX + "an archive push with a git that cannot answer asks, unknown", NO_STAND_IN)
+
+# A forced push of the amended branch keeps its own refusal, the force-push rule, and this rule stays out.
+sh(ARCH_PREFIX + "a forced archive push keeps the force-push refusal, not this rule",
+   VCS + " push --force origin zq-amend:archive/zq-amend", "deny", rule="force-push", cwd=ARCHAMEND,
+   lacks=(ARCH_RULE,))
+
+# ALLOW. Each control reaches one arm: the source holds the tip, the name has no tip, or the tip is archived.
+archive_tip("an archive push of the remote tip itself, as the source, is silent",
+            VCS + " push origin refs/remotes/origin/zq-amend:archive/zq-amend", "allow", ARCHAMEND, silent=True)
+archive_tip("an archive push from a source that holds the tip, zq-fix, is silent",
+            VCS + " push origin zq-fix:archive/zq-amend", "allow", ARCHAMEND, silent=True)
+archive_tip("an archive push to a name with no remote-tracking ref is silent",
+            VCS + " push origin zq-amend:archive/zq-never", "allow", ARCHAMEND, silent=True)
+archive_tip("an ordinary branch push is silent", VCS + " push origin zq-amend", "allow", ARCHAMEND, silent=True)
+archive_tip("a branch named archive- with no slash is ordinary, silent",
+            VCS + " push origin zq-amend:archive-zq-amend", "allow", ARCHAMEND, silent=True)
+archive_tip("an echo that names a delete is silent",
+            'echo "' + VCS + ' push origin --delete zq-amend"', "allow", ARCHAMEND, silent=True)
+archive_tip("a commit message that names a delete is silent",
+            VCS + ' commit -m "git push origin :zq-amend"', "allow", ARCHAMEND, silent=True)
+archive_tip("a heredoc body that names a delete is silent",
+            "cat <<'EOF'\n" + VCS + " push origin --delete zq-amend\nEOF", "allow", ARCHAMEND, silent=True)
+archive_tip("a comment that names a delete is silent",
+            "# " + VCS + " push origin --delete zq-amend", "allow", ARCHAMEND, silent=True)
+# Full-size state: three archive refs, and only the last holds the tip. A guard that reads the first one refuses.
+archive_tip("a delete, with the holding archive ref last of three, is silent",
+            VCS + " push origin --delete zq-amend", "allow", ARCHMANY, silent=True)
+archive_tip("an archive push, with the holding archive ref last of three, is silent",
+            VCS + " push origin zq-amend:archive/zq-amend", "allow", ARCHMANY, silent=True)
+# The remote tip is an ancestor of origin/main, and no archive ref exists: only the default-base arm allows it.
+archive_tip("a delete of a remote tip already on the default base is silent",
+            VCS + " push origin --delete zq-merged", "allow", ARCHMERGED, silent=True)
+archive_tip("a colon delete of a remote tip already on the default base is silent",
+            VCS + " push origin :zq-merged", "allow", ARCHMERGED, silent=True)
+archive_tip("a -d delete of a remote tip already on the default base is silent",
+            VCS + " push origin -d zq-merged", "allow", ARCHMERGED, silent=True)
+archive_tip("an archive push of a source without the tip, to a tip on the default base, is silent",
+            VCS + " push origin zq-side:archive/zq-merged", "allow", ARCHMERGED, silent=True)
 
 sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", cwd=NOGIT)
 
