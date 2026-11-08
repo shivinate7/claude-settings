@@ -118,8 +118,9 @@ tool in backticks that hooks/refusal_note.py recorded for this session, or `(mea
 line with a choice, login or safety-kept phrase needs no cite, and "blocked until" or "not available until" is a
 dependency, not a capability. A "works" row, a dead id, an undated measurement and no cite block,
 with a remedy that names no act. A rows file, a refusals file or an outcome that did not read is a systemMessage with
-the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: every run imports hooks/shared_names.py at load (stdlib only); a reply with no such line opens no file and imports nothing more; one with it reads
-the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. It
+the word UNKNOWN, never a block, and never clears a "works" row or a dead id. Cost: a reply with no such line opens nothing new and imports nothing; one with it reads
+the session's refusals file, and the rows file (hooks/route_match.py read_rows) when a line carries a route cite. Neither count
+includes the import every run makes at load, hooks/shared_names.py (stdlib only). It
 runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 """
 import datetime
