@@ -1,11 +1,11 @@
 {
   "title": "Lane lints in parallel finish under the 1200 s cap",
   "why": "More than about 3 lane lints at once hit the 1200 s cap (lane batch63-lint-b, coordinator 00:29 CST Nov 8). Steps merge-builds-batches and runner-repos-in-parallel do not cover it: they build batches and run repos in parallel, and set no lint concurrency.",
-  "note": "Fix: lane lint takes a slot from a small shared limit and waits for one, so a run's cap counts its own work, not the queue; red case first with four parallel lints. The count of about 3 is unmeasured. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:31 CST Nov 8.",
+  "note": "Fix: lane lint takes a slot from a small shared limit and waits for one, so a run's cap counts its own work, not the queue; red case first with four parallel lints. The count of about 3 is unmeasured. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:31 CST Nov 8. Lane session_013NEJKzstsLQzGsUXajpze5 started (coordinator, 00:31 CST Nov 8). The lane measures first and picks no guessed number.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 551,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T00:28:00-06:00"
+  "lane": "session_013NEJKzstsLQzGsUXajpze5",
+  "updatedAt": "2026-11-08T00:29:00-06:00"
 }
