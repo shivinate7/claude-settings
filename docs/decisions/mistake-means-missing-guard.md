@@ -29,7 +29,7 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 - A negator clears the admission only when at most three words sit between it and the fault word. "Nothing I did broke the build" passes. "I did not run the check and broke the build" blocks.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
 - A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. These words match in any case. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
-- A guard line, one that labels its guard (`Guard:` or `guard —`), names a PR or commit ref, `step:<slug>` or a debt between the label and the end of its line, in any section. The check reads it with or without an admission.
+- A guard line labels its guard, as `Guard:` or `guard —`, in any section. Between the label and the end of its line it names a PR or commit ref, `step:<slug>` or a debt. The check reads it with or without an admission.
 - The word debt counts only in a clause with no negator, so "a debt is not needed" names no debt.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.
 - The check reads only landed turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
