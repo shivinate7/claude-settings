@@ -3755,6 +3755,41 @@ for _name, _command in (
 # ALLOW control: a hash at a word start is a real comment, so the `$( )` after it is text.
 sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + VCS + " reset --hard)",
    "allow", cwd=NOGIT)
+# THE INNER cd ROOT. The text inside `$( )` is judged in the folder its own cd names, not the session's folder.
+# SUBJCLEAN is the session folder (clean), SUBJDIRTY holds real uncommitted work in f.txt. Each plain cd form
+# is the scope control: it already denies. Inside the substitution the same checkout is judged against the
+# clean session folder, so `checkout` and `restore` of the dirty file are allowed: a safety hole. A reset in a
+# clean checkout, named by a cd in a dirty session folder, is refused: a false alarm.
+sh("substitution: shared tree, the plain cd into the dirty checkout denies",
+   "cd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, the plain cd into the dirty checkout, a checkout of its file, denies",
+   "cd " + slash(SUBJDIRTY) + " && " + VCS + " checkout -- f.txt", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, a checkout of a dirty file after a cd into that checkout, in a dollar paren, denies",
+   "echo $(cd " + slash(SUBJDIRTY) + " && " + VCS + " checkout -- f.txt)", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, a restore of a dirty file after a cd into that checkout, in a dollar paren, denies",
+   "echo $(cd " + slash(SUBJDIRTY) + " && " + VCS + " restore f.txt)", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, a reset in a clean checkout named by a cd in a dollar paren is allowed",
+   "echo $(cd " + slash(SUBJCLEAN) + " && " + VCS + " reset --hard HEAD)", "allow", cwd=SUBJDIRTY)
+# ALLOW control: the same checkout held in single quotes runs nothing.
+sh("substitution: shared tree, a checkout after a cd held in single quotes is text",
+   "echo '$(cd " + slash(SUBJDIRTY) + " && " + VCS + " checkout -- f.txt)'", "allow", cwd=SUBJCLEAN)
+# PATHS FROM A SUBSTITUTION, IN A DIRTY CHECKOUT. The paths a checkout or restore names are unknown when a
+# dollar paren supplies them, so the call discards whatever the paths match. Each form is refused.
+sh("substitution: shared tree, a checkout of paths from a dollar paren in a dirty checkout denies",
+   VCS + " checkout -- $(" + VCS + " diff --name-only)", "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("substitution: shared tree, a checkout with no -- and paths from a dollar paren in a dirty checkout denies",
+   VCS + " checkout $(" + VCS + " diff --name-only)", "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("substitution: shared tree, a restore of paths from a dollar paren in a dirty checkout denies",
+   VCS + " restore $(echo f.txt)", "deny", "shared-tree", cwd=SUBJDIRTY)
+# AN OUTER cd CARRIES INTO A SUBSTITUTION TEXT. The folder an outer `cd` names is the folder the text inside
+# `$( )` or backticks runs in, so the verdict reads that folder: dirty refused from a clean session, clean allowed
+# from a dirty session.
+sh("substitution: shared tree, an outer cd into a dirty checkout, then a reset in a dollar paren, denies",
+   "cd " + slash(SUBJDIRTY) + " && out=$(" + VCS + " reset --hard HEAD)", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, an outer cd into a dirty checkout, then a reset in backticks, denies",
+   "cd " + slash(SUBJDIRTY) + " && out=`" + VCS + " reset --hard HEAD`", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, an outer cd into a clean checkout, then a checkout in a dollar paren, is allowed",
+   "cd " + slash(SUBJCLEAN) + " && out=$(" + VCS + " checkout -- f.txt)", "allow", cwd=SUBJDIRTY)
 
 
 # ============================================================ 1. branch delete / worktree remove/prune
@@ -5604,6 +5639,28 @@ sh("rm-var: a hash inside a word is no comment, the delete after a cd is refused
    "cd /tmp/w; rm -rf fix#3", "deny", "rm-after-cd", cwd=NOGIT)
 sh("rm-var: an apostrophe in a comment after the rm does not hide it",
    "cd /tmp/w; rm -rf out # the driver's shape", "deny", "rm-after-cd", cwd=NOGIT)
+# A DELETE AFTER A CD INSIDE A SUBSTITUTION. rm_after_cd_hits reads the command's own text only, so a `cd` and a
+# recursive delete the shell runs inside `$( )` or backticks are not read. The same pair in the command's own
+# text is refused (the cases above).
+sh("rm-var: a cd then a relative delete inside a dollar paren assignment is refused",
+   "x=$(cd x && rm -rf y)", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd then a relative delete inside a dollar paren in an echo is refused",
+   "echo $(cd x && rm -rf y)", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd then a relative delete inside double quotes is refused",
+   'echo "$(cd x && rm -rf y)"', "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd then a relative delete inside backticks is refused",
+   "echo `cd x && rm -rf y`", "deny", "rm-after-cd", cwd=NOGIT)
+# False alarms: the same pair held in single quotes, or in a quoted heredoc body, is text.
+sh("rm-var: a cd then a relative delete in single quotes is text",
+   "echo '$(cd x && rm -rf y)'", "allow", cwd=NOGIT)
+sh("rm-var: a cd then a relative delete in a quoted heredoc body is text",
+   "cat <<'EOF'\n$(cd x && rm -rf y)\nEOF", "allow", cwd=NOGIT)
+# AN OUTER cd INTO A FOLDER THAT IS NOT GIT, THEN A DELETE IN A SUBSTITUTION. The plain form is refused; the same
+# delete inside `$( )` runs in that folder too, so it is refused as well.
+sh("rm-var: the plain cd into a folder that is not git, then rm -rf y, is refused",
+   "cd /tmp/w && rm -rf y", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd into a folder that is not git, then a delete inside a dollar paren, is refused",
+   "cd /tmp/w && echo $(rm -rf y)", "deny", "rm-after-cd", cwd=NOGIT)
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
@@ -6162,6 +6219,23 @@ for _name, _command in (
     ("a lone apostrophe in a trailing comment", "tail -n 5 app.log # don't"),
 ):
     sh("stream: scanner: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
+# A FOLLOW INSIDE A SUBSTITUTION, glued to its word. A substitution the shell runs is a command of its own
+# (judge_shell reads each text), but live_stream_hit reads only the words that open a command, so a glued
+# `x=$(`, `"$(`, `a$(` or backtick hides the follow. The plain `echo $(tail -f ...)` form is already denied.
+for _name, _command in (
+    ("an assignment from a dollar paren", "x=$(tail -f app.log)"),
+    ("a dollar paren in double quotes", 'echo "$(tail -f app.log)"'),
+    ("a dollar paren after a letter", "echo a$(tail -f app.log)"),
+    ("a backtick in an echo", "echo `tail -f app.log`"),
+    ("an assignment from a backtick", "x=`tail -f app.log`"),
+):
+    sh("stream: a follow inside a substitution, %s, denies" % _name, _command, "deny", "live-stream",
+       cwd=NOGIT)
+# ALLOW: the same glued shape around a bounded command, or quoted so the shell runs nothing.
+sh("stream: a glued dollar paren around a bounded tail is no follow", "x=$(tail -n 5 app.log)", "allow",
+   cwd=NOGIT)
+sh("stream: a glued dollar paren in single quotes is text", "echo 'x=$(tail -f app.log)'", "allow",
+   cwd=NOGIT)
 
 
 # =========================================================================== 2c. shell traps
@@ -6912,6 +6986,13 @@ for _name, _command in (
     ("a leading bang", "! wsl --shutdown"),
     ("a dollar paren", "$(wsl --shutdown)"),
     ("a dollar paren inside echo", "echo $(wsl --shutdown)"),
+    # A substitution glued to its word (`x=$(`, `"$(`, `a$(`) is still a command the shell runs; the
+    # launcher is read only when it opens a word, so each glued form is missed. (guard_wsl._judge)
+    ("a glued dollar paren in an assignment", "x=$(wsl --shutdown)"),
+    ("a glued dollar paren in double quotes", 'echo "$(wsl --shutdown)"'),
+    ("a glued dollar paren after a letter", "echo a$(wsl --shutdown)"),
+    ("a backtick in an echo", "echo `wsl --shutdown`"),
+    ("a glued backtick in an assignment", "x=`wsl --shutdown`"),
     ("a glued subshell", "(wsl --shutdown)"),
     ("cmd /c", "cmd /c wsl --shutdown"),
     ("bash -c with the call in quotes", 'bash -c "wsl --shutdown"'),
@@ -6961,6 +7042,9 @@ for _name, _command in (
     ("exec", "exec wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
     ("a glued subshell", "(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
     ("a dollar paren", "echo $(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    # False alarms: a glued substitution that names an allowed test, or a refused call held in single quotes.
+    ("a glued dollar paren on an allowed test", "x=$(wsl -e node --test mods/plain-diff/plain-diff.test.mjs)"),
+    ("a glued dollar paren in single quotes", "echo 'x=$(wsl --shutdown)'"),
     ("cmd /c", "cmd /c wsl -e node --test mods/plain-diff/plain-diff.test.mjs"),
     ("bash -c with the allowed call in quotes",
      'bash -c "wsl -e node --test mods/plain-diff/plain-diff.test.mjs"'),
@@ -8631,6 +8715,19 @@ nm_case("linked-nm: npm ci in a subshell, run in the linked folder, is refused",
         "(npm ci)", "deny", NMLINKED)
 nm_case("linked-nm: npm ci in a command substitution, run in the linked folder, is refused",
         "echo $(npm ci)", "deny", NMLINKED)
+# A SUBSTITUTION GLUED TO ITS WORD. _command_hit reads a substitution only when its token opens with `$(` or a
+# backtick, so a `$(` after a quote or a letter hides the install and the recursive delete. Each is refused
+# in the plain `echo $(...)` form above. The assignment form `x=$(npm ci)` is already refused.
+nm_case("linked-nm: npm ci in a double-quoted substitution, run in the linked folder, is refused",
+        'echo "$(npm ci)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci in a substitution after a letter, run in the linked folder, is refused",
+        "echo a$(npm ci)", "deny", NMLINKED)
+nm_case("linked-nm: npm ci in a backtick after a letter, run in the linked folder, is refused",
+        "echo a`npm ci`", "deny", NMLINKED)
+nm_case("linked-nm: a recursive delete in a double-quoted substitution, in a linked folder, is refused",
+        'echo "$(rm -rf node_modules/x)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci in single quotes, in a linked folder, is allowed",
+        "echo '$(npm ci)'", "allow", NMLINKED)
 
 # THE ALIASES. npm resolves each of these to an install, an update or a removal of the same tree.
 NM_ALIASES = ("npm clean-install", "npm install-clean", "npm ic", "npm cit",
@@ -10832,6 +10929,22 @@ record_refuse("a lane's push to roadmap with a trailing background & is refused"
               VCS + " push origin roadmap&", LANE_TRANSCRIPT)
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
+# A PUSH INSIDE A SUBSTITUTION GLUED TO ITS WORD. _push_calls reads the segment's own git calls and wrapped
+# scripts, never a substitution's text, so a `$(` after a quote, a letter or an assignment hides the push. The
+# plain `echo $(git push origin roadmap)` form is already refused.
+record_refuse("a lane's push to roadmap in a dollar paren assignment is refused",
+              "x=$(" + VCS + " push origin roadmap)", LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap in a double-quoted dollar paren is refused",
+              'echo "$(' + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap in a dollar paren after a letter is refused",
+              "echo a$(" + VCS + " push origin roadmap)", LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap in a backtick assignment is refused",
+              "x=`" + VCS + " push origin roadmap`", LANE_TRANSCRIPT)
+# False alarms: a glued push to another branch is allowed, and a push to roadmap held in single quotes is text.
+record_allow("a lane's push to lane/foo in a dollar paren assignment is allowed",
+             "x=$(" + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
+record_allow("a push to roadmap in a dollar paren held in single quotes is text",
+             "echo '$(" + VCS + " push origin roadmap)'", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
 record_refuse("a comment opener inside a string does not hide a push to roadmap",
               'echo "# note" && ' + VCS + " push origin roadmap", LANE_TRANSCRIPT)

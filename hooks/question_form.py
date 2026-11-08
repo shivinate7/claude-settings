@@ -615,6 +615,17 @@ def _chain_command(word, args) -> bool:
             or (args >= 1 and bool(CHAIN_COMMAND.fullmatch(word))))
 
 
+def _script_texts(guard_core, script):
+    """`script` and, for a bash script, each text the shell runs inside it as a substitution (`$( )`,
+    backtick, `<( )`): each is a command of its own, however it is glued to its word. The one home of
+    the cut is guard_env.substitution_commands."""
+    texts = [script]
+    if isinstance(script, guard_core.PosixScript):
+        import guard_env
+        texts += [guard_core.PosixScript(text) for text in guard_env.substitution_commands(script, script)]
+    return texts
+
+
 def _shell_line(span, run) -> bool:
     """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
     _relative_run. The segments, their prefixes and their command words come from guard_core, the one
@@ -622,9 +633,10 @@ def _shell_line(span, run) -> bool:
     starts with `|` (a table row) or `//` is text and is left out."""
     import guard_core   # loads only for a step that holds a code span
     kept = [line for line in span.splitlines() if not line.strip().startswith(("|", "//"))]
-    segments = guard_core.split_segments(guard_core.PosixScript("\n".join(kept)))
+    script = guard_core.PosixScript("\n".join(kept))
     spaced = bool(re.search(r"\s", "\n".join(kept).strip()))   # `foo|bar` is an alternation, not a pipe
-    chained = len(segments) >= 2 and spaced
+    chained = len(guard_core.split_segments(script)) >= 2 and spaced   # a substitution's text is no link in the chain
+    segments = [segment for text in _script_texts(guard_core, script) for segment in guard_core.split_segments(text)]
     for segment in segments:
         tokens = guard_core.segment_tokens(segment)
         if tokens is not None:
@@ -702,7 +714,8 @@ def _switch_login(args) -> str:
 
 def _shell_reading(guard_core, script):
     """[(segment, its tokens or None when the reader cannot parse it)] for one script type."""
-    return [(segment, guard_core.segment_tokens(segment)) for segment in guard_core.split_segments(script)]
+    return [(segment, guard_core.segment_tokens(segment))
+            for text in _script_texts(guard_core, script) for segment in guard_core.split_segments(text)]
 
 
 def _gh_calls(guard_core, reading):
