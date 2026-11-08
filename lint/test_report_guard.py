@@ -1171,6 +1171,63 @@ class DoneNamesModelsTests(unittest.TestCase):
             [self.BUILDER, self.REVIEWER_R2])
         self.assertIsNone(out, (out or {}).get("reason"))
 
+    @staticmethod
+    def run_of(spawn):
+        return [tool_use_msg("Agent", spawn), tool_result_msg()]
+
+    def test_dm_false_alarm_done_names_reviewer_spawned_before_the_window_passes(self):
+        # Catches: a Done pair backed only by a spawn before the window (the round 1 haiku reviewer, pinned by
+        # agents/reviewer.md) was refused against the window's round 2 sonnet reviewer, as "'reviewer haiku'
+        # matches no reviewer spawn, which ran sonnet". The session's spawns back the name.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: the guard, commits 25179dc7b (test-author haiku) and ecd0838c6 (builder sonnet). "
+            "Reviewer haiku failed round 1.\n>\n"
+            "> **Next:**\n> - Reviewer round 2 (sonnet) is running.\n> - Unstarted: none.",
+            [self.REVIEWER_R2],
+            lead=[human("do the task"), *self.run_of(self.TEST_AUTHOR), *self.run_of(self.BUILDER),
+                  *self.run_of(self.REVIEWER_R1), peer_brief("Round 2: fix the finding.")])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_coordinator_done_names_fix_check_haiku_before_the_window_passes(self):
+        # Catches: a Done that names the haiku fix check, which ran before the window, was refused while the
+        # round 2 sonnet reviewer ran inside it.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Round 2 review running (reviewer sonnet).",
+            [self.REVIEWER_R2],
+            lead=[human("do the task"), *self.run_of(self.FIX_CHECK), human("Run round 2.")])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_no_agent_other_item_with_a_commit_skips_the_next_gate(self):
+        # Catches: an OTHER item that cites a commit and says (no agent) owes no model, so the Next gate skips it
+        # and Next's reviewer pair can excuse the reviewer. The same item without the mark blocks (next case).
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #5 (builder sonnet)\n> - OTHER: pushed branch x at abc1234 (no agent).\n>\n"
+            "> **Next:**\n> - Review running (reviewer sonnet).\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_other_item_with_a_commit_without_no_agent_blocks_the_next_excuse(self):
+        # Catches: the (no agent) mark is the only way an OTHER item with a commit leaves the Next gate. Without it,
+        # the item names no builder, test-author or record-writer pair, so Next cannot excuse the reviewer.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #5 (builder sonnet)\n> - OTHER: pushed branch x at abc1234.\n>\n"
+            "> **Next:**\n> - Review running (reviewer sonnet).\n> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: an OTHER item with a commit and no (no agent) mark let Next excuse")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_pair_no_session_spawn_ran_blocks_across_an_owner_message(self):
+        # Catches: the widened mismatch check, which reads every spawn in the session, must still refuse a name no
+        # reviewer spawn ran. The haiku spawn sits before the owner message; no spawn ran opus.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+            [self.REVIEWER_R2],
+            lead=[human("do the task"), *self.run_of(self.REVIEWER_R1), human("also check the docs")])
+        self.assertIsNotNone(out, "the report passed: an opus name that no reviewer spawn in the session ran was not blocked")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("matches no reviewer spawn", out["reason"])
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
