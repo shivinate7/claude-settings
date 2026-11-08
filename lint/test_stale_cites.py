@@ -4044,6 +4044,26 @@ class NameCiteTests(StaleCase):
         self.assertNotIn("link", top_folders(rng))  # scope: a symlink is no tracked top folder
         self.assert_passes(rng)
 
+    def test_a_top_folder_present_only_at_head_is_read_at_head_for_its_cites(self):
+        """`newdir` is a top folder only at head. Its cite of a name the new file does not bind is a finding, and its
+        cite of the bound name is silent. A check that read the base tree's folders would skip both (decision
+        record-cites-live-code)."""
+        newdir = "def real():\n    return 1\n"
+        rows = [
+            ("- (newdir/x.py missing)", True),
+            ("- (newdir/x.py real)", False),
+        ]
+        rng, flagged = self.route_range(rows, head_extra={"newdir/x.py": newdir})
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds the cites on a Markdown line
+        self.assertIn("newdir", top_folders(rng))  # scope: newdir is a tracked top folder at head
+        self.assertNotIn("newdir", top_folders(rng, rng.base))  # scope: newdir is no top folder at base
+        self.assertEqual(binding_kind(newdir, "real"), "def")  # scope: the new file binds the bound cite's name
+        self.assertIsNone(binding_kind(newdir, "missing"))  # scope: the new file does not bind the flagged name
+        _, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        self.assertEqual(found, sorted((NOTES, n, "STALE010") for n in flagged),
+                         "a top folder present only at head was not read at head for its cites\n%s" % out)
+
 
 if __name__ == "__main__":
     unittest.main()
