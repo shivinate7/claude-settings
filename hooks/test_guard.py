@@ -12678,6 +12678,64 @@ sh("frozen-scan-crash: pin, python -c that runs less with no write flag on a fro
    "subprocess.run([\"less\", \"%s/.claude/hooks/x.py\" % h])'",
    "allow", cwd=NOGIT, env=TILDE_ENV)
 
+# --------------------------------------------------------------------------- frozen-scan-crash: residuals
+#
+# Two gaps the crash fallback and the depth cap leave open. The fallback reads a crashed script as plain text
+# and finds a frozen path only in a word that holds a `/`, so a write whose path is joined with no slash
+# (`os.path.join`, `Path / part / part`) is allowed after a crash. The depth cap reads a `+` chain of ten
+# string terms with its first term as `_`, so a chain that builds a frozen path is allowed. The controls pin
+# the cause: the same join write is denied with the reader armed and no trigger, a nine-term chain of the same
+# path is denied, a join to a folder that is not frozen stays allowed after the crash, and the reads of the
+# same paths stay allowed. Each name carries frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs them.
+
+add("frozen-scan-crash: residual, python -c that writes a frozen hook joined by os.path.join after the reader crashes on the whole script is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "open(os.path.join(h, \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: residual, python -c that writes a frozen hook built with Path / parts after the reader crashes on the whole script is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "from pathlib import Path\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "open(Path(h) / \".claude\" / \"hooks\" / \"x.py\", \"w\")'")
+add("frozen-scan-crash: control, python -c that writes a frozen hook joined by os.path.join with the reader armed and no trigger is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ARMED,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "open(os.path.join(h, \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: control, python -c that writes a frozen hook built with Path / parts with the reader armed and no trigger is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ARMED,
+    command="python3 -c 'import os\n"
+            "from pathlib import Path\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "open(Path(h) / \".claude\" / \"hooks\" / \"x.py\", \"w\")'")
+add("frozen-scan-crash: control, python -c that writes a folder that is not frozen, joined by os.path.join after the reader crashes, is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "open(os.path.join(h, \"notes\", \"x.txt\"), \"w\")'")
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook joined by os.path.join is allowed",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "print(open(os.path.join(h, \".claude\", \"hooks\", \"x.py\")).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook built with Path / parts is allowed",
+   "python3 -c 'import os\n"
+   "from pathlib import Path\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "print(open(Path(h) / \".claude\" / \"hooks\" / \"x.py\").read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that writes a frozen hook through a ten-term + chain is denied",
+   "python3 -c 'open(\"~\" + \"/\" + \".claude\" + \"/\" + \"hooks\" + \"/\" + \"x\" + \".\" + \"p\" + \"y\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: control, python -c that writes a frozen hook through a nine-term + chain is denied",
+   "python3 -c 'open(\"~\" + \"/\" + \".claude\" + \"/\" + \"hooks\" + \"/\" + \"x\" + \".\" + \"py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook through a ten-term + chain is allowed",
+   "python3 -c 'print(open(\"~\" + \"/\" + \".claude\" + \"/\" + \"hooks\" + \"/\" + \"x\" + \".\" + \"p\" + \"y\").read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
