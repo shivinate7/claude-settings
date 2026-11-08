@@ -28,8 +28,8 @@
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
                           Every Round line below the record's top round must already stand, with the same round, role, model and verdict, in an
                           earlier record on this PR (or the --fix-base-record source), or it refuses (exit 2). So does a top round that is all
-                          PASS when an earlier record whose top round has a FAIL line has the same Head. A plain record with a top round of 2
-                          or more makes one more comment-list read; a fix check makes none.
+                          PASS when an earlier record whose top round has a FAIL line has the same Head. A plain record makes one more
+                          comment-list read; a fix check makes none.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3355,7 +3355,7 @@ def own_round_problem(earlier, rec):
     `earlier`; the first line that does not is named. Rule 2: a record whose top round is all PASS is refused when a record of `earlier`
     whose top round has a FAIL line has the same Head, since no fix commit came between the two. A fix check names a different Head, so it stays
     allowed. Cost: none beyond the comment list the caller already read. The --fix-check path adds no read. The plain path adds one `review_comments`
-    read, and only for a record whose top round is 2 or more."""
+    read on every call."""
     top = max((i for i, *_ in rec["rounds"]), default=0)
     held = {line for e in earlier for line in e["rounds"]}
     for line in rec["rounds"]:
@@ -3737,11 +3737,8 @@ def main(argv, host=None, lock=None):
                     print(f"merge: --fix-check: {problem}. " + (remedy + " " if remedy else "") + REVIEW_CITE, file=sys.stderr)
                     return 2
             else:
-                new = parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value))
-                problem = None
-                if max((i for i, *_ in new["rounds"]), default=0) >= 2:  # a record that ends at round 1 has no lower round and no earlier round to repeat, so it reads no comment
-                    recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
-                    problem = own_round_problem([r for r in map(parse_review, recs) if r and r["n"] == a.pr], new)
+                recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                problem = own_round_problem([r for r in map(parse_review, recs) if r and r["n"] == a.pr], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value)))
                 if problem:
                     print(f"merge: {problem[0]}. {problem[1]} " + REVIEW_CITE, file=sys.stderr)
                     return 2
