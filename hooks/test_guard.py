@@ -14871,6 +14871,72 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent octopus merge with no t
                          "builder-diff line", clean_builder_case("bd-octopus-clean")))
 
 
+def _unrelated_merge(w):
+    """Cut at main. The builder merges a branch of unrelated history (`--allow-unrelated-histories`). Git commits a
+    two-parent merge (reflog `merge unrel: Merge made by ...`) that merge-tree cannot measure, so the guard skips its
+    entry and logs it unread. The branch adds a file main never had, so the merge itself is clean."""
+    unrel = w + "-unrel"
+    make_repo(unrel, {"src/other.py": "v = 2\n"})
+    _must(w + "-main", "fetch", "-q", unrel, "HEAD:refs/heads/unrel")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "--allow-unrelated-histories", "unrel")
+    _check_merge(w)
+    parents = run_vcs(w, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
+    if len(parents) != 3:
+        sys.exit("fixture setup failed: HEAD in %r has %d parents, want two" % (w, len(parents) - 1))
+    answer = run_vcs(w, "merge-tree", "--write-tree", "--no-messages", "-z", parents[1], parents[2])
+    if answer.returncode in (0, 1):
+        sys.exit("fixture setup failed: merge-tree measured the unrelated merge in %r, so the case never reaches "
+                 "the unmeasurable arm" % w)
+
+
+def _unrelated_then_test_edit(w):
+    """_unrelated_merge, then the builder commits a test edit on top. The merge entry is skipped and logged unread,
+    and the test commit after it is still judged."""
+    _unrelated_merge(w)
+    write(os.path.join(w, TEST_A), BASE_FILES[TEST_A] + "def test_edit():\n    assert 2\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test edit")
+
+
+def unread_merge_check(label, merge_rev, clean):
+    """The builder's guard.log holds a role-diff-unread line that names the merge entry at `merge_rev`, written at
+    commit, push or stop. `clean` also needs the silent allows of a builder with no test change."""
+    def case():
+        repo = os.path.join(DIFFROOT, label)
+        out, rows = _diff_log_run(os.path.join(ROOT, "difflog-" + label), repo, "builder", "bld1")
+        want = "merge entry " + run_vcs(repo, "rev-parse", merge_rev).stdout.strip()[:12]
+        if clean and (out or any(len(r) > 3 and r[3] == BDIFF for r in rows)):
+            return False, "expected silent allows and no builder-diff line, got %r" % out[:60]
+        hits = [r for r in rows if len(r) > 4 and r[3] == "role-diff-unread" and r[4] == want]
+        if not hits:
+            return False, "no role-diff-unread line names %r; the log holds %r" % (want, [r[3:5] for r in rows][:6])
+        return True, "logs role-diff-unread for %r" % want
+    return case
+
+
+# The octopus-then-test-edit case also logs its skipped merge entry, which its deny cases do not read.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a three-parent octopus merge, then a test edit, logs role-diff-unread for "
+                         "the merge entry", unread_merge_check("bd-octopus-test", "HEAD", clean=False)))
+
+# A two-parent merge git made that merge-tree cannot measure: its entry is skipped and logged unread, and the test
+# commit after it is still judged. The same merge with no test edit is allowed, and logs the same unread line.
+_bd_unrel_test = diff_repo("bd-unrel-test", _unrelated_then_test_edit)
+sh("builder-refuse: a two-parent merge of unrelated history that merge-tree cannot measure, then a test commit, "
+   "is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_unrel_test, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a two-parent merge of unrelated history that merge-tree cannot measure, then a test commit, "
+   "is denied at push", PUSH, "deny", rule=BDIFF, cwd=_bd_unrel_test, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a two-parent merge of unrelated history that merge-tree cannot measure, then a test commit, "
+    "is blocked at the first stop", "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_unrel_test,
+    agent_id="bld1", agent_type="builder")
+LOG_CHECKS_EXTRA.append(("builder-refuse: a two-parent merge of unrelated history that merge-tree cannot measure, then a "
+                         "test commit, logs role-diff-unread for the merge entry",
+                         unread_merge_check("bd-unrel-test", "HEAD~1", clean=False)))
+_bd_unrel_clean = diff_repo("bd-unrel-clean", _unrelated_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a two-parent merge of unrelated history that merge-tree cannot measure, with no "
+                         "test edit, is allowed and logs role-diff-unread for the merge entry",
+                         unread_merge_check("bd-unrel-clean", "HEAD", clean=True)))
+
+
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
 sh("builder-refuse: a new test file is denied at commit, and the reason says to delete it and names no path",
