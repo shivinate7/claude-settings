@@ -44,18 +44,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COST_START = re.compile(r"^\s*(?:(?:[-*]|\d+[.)])\s+)?(?:\*\*)?Cost(?![A-Za-z])")
 COST_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(?:\*\*)?Cost(?![A-Za-z])")
 LIST_ITEM = re.compile(r"^(\s*)(?:[-*]|\d+[.)])\s")
-HEADING = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
-# a sentence that starts `Cost:` after the stop of an earlier sentence on the same line
-MID_COST = re.compile(r"[.!?][)*\"']*\s+(?P<cost>(?:\*\*)?Cost:)")
+HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 FENCE = re.compile(r"^\s*(?:```|~~~)")
 EXEMPT = re.compile(r"\b(?:not pinned|unpinned|unmeasured|no test)", re.IGNORECASE)
 PLACEHOLDER = re.compile(r"<[^<>]*>")
 # A bare `tool.call` or `e.g.` has a dot and no file, so only these extensions mark a file.
 EXTENSIONS = ("md py mjs js ts tsx json jsonl sh ps1 cmd bat html css yml yaml toml txt log csv tmpl sql cfg ini "
-              "lock xml swift").split()
+              "lock xml swift jsx").split()
 EXTENSION = re.compile(r"^.+\.(?:%s)$" % "|".join(EXTENSIONS), re.IGNORECASE)
 LINE_SUFFIX = re.compile(r"(?::\d+)+$")
-TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\.spec\.(?:ts|js))$")
+TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\.spec\.(?:js|jsx|ts|tsx|mjs))$")
 CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 
@@ -88,18 +86,37 @@ def paragraphs(lines):
         elif current is not None and not outdented:
             current.append((number, text))
         else:
-            mid = MID_COST.search(text)
-            current = [(number, text[mid.start("cost"):])] if mid else None
+            current = mid_line_start(number, text)
             if current:
                 base = indent_of(text)
                 found.append(current)
     return found
 
 
+def unpadded(code):
+    """A code span's text with one space off each end when both ends hold one and the span is not all spaces."""
+    if len(code) >= 2 and code[0] == code[-1] == " " and code.strip():
+        return code[1:-1]
+    return code
+
+
 def abbreviation(text):
     """True when the characters so far end in `e.g.` or `i.e.`, which end no sentence."""
     tail = "".join(text[-5:]).lower()
     return tail[-4:] in ("e.g.", "i.e.") and (len(tail) < 5 or not tail[0].isalnum())
+
+
+def mid_line_start(number, text):
+    """[(number, text from the sentence)] for the first sentence after the first, in one line, that starts like a
+    Cost line, else None. The sentence split is read_paragraph's, so a stop inside a code span or after `e.g.` ends
+    nothing."""
+    sentences, _ = read_paragraph([(number, text)])
+    offset = 0
+    for k, (sentence, _spans) in enumerate(sentences):
+        if k and COST_START.match(sentence):
+            return [(number, text[offset:].lstrip())]
+        offset += len(sentence)
+    return None
 
 
 def read_paragraph(paragraph):
@@ -118,7 +135,7 @@ def read_paragraph(paragraph):
                 n += 1
             text.extend("`" * n)
             if inside and n == width:
-                spans.append(("".join(ch for _, ch in chars[opened:i]), chars[opened][0]))
+                spans.append((unpadded("".join(ch for _, ch in chars[opened:i])), chars[opened][0]))
                 inside = False
             elif not inside:
                 inside, opened, width = True, i + n, n
