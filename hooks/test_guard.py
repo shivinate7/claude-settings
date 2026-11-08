@@ -15281,6 +15281,14 @@ sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a te
    r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
    'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# The message after -m keeps its place in the words a git commit is read by, so a pathspec after it is read at its
+# own place: a path named rm or mv is no git rm or git mv. A real git rm after the commit is still refused.
+sh("builder-test: git commit with a message, then a pathspec named rm before a test, is allowed",
+   'git commit -m "docs" rm tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then a pathspec named mv before a test, is allowed",
+   'git commit -m "docs" mv tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then && and a git rm of a test, is refused",
+   'git commit -m "docs" && git rm tests/test_x.py', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
