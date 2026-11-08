@@ -1,11 +1,11 @@
 {
   "title": "wait-pid waits while the pid is alive",
   "why": "Possible false alarm (lane draft-pr-guard-text-false-alarm, via coordinator 11:25 CST Nov 8): `wait-pid` returned at once on a live pid. Reproduce first; step wait-for-pid-form (done) built the tool.",
-  "note": "",
+  "note": "Fix: none — wait-pid works by full path (waited 8 s on a live child, rc 0); the cloud container lacks ~/.claude/bin on PATH, so bare `wait-pid` gave rc 127. Duplicate of step cloud-bin-on-path (lane, 11:23 CST Nov 8).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF)",
-  "status": "todo",
+  "status": "done",
   "order": 755,
-  "updatedAt": "2026-11-08T11:22:00-06:00"
+  "updatedAt": "2026-11-08T11:24:00-06:00"
 }
