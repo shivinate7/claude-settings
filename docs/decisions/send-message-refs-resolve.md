@@ -16,16 +16,16 @@ Home: hooks/guard.py
 
 The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any session, main or agent. The text is `tool_input.message`. Rule `message-ref-missing` (deny). An owner override lifts it.
 
-- **Commit sha.** The token rule of `agent-report-shas-resolve`, resolved in the repo of the payload's `cwd`.
-- **Pull request.** `PR #N`, `PR N`, `PRs #N and #M`, and a `github.com/<owner>/<repo>/pull/N` URL of this repo. A bare `#N` with no `PR` word is skipped: it may be an issue or an item.
+- **Commit sha.** The token rule of `agent-report-shas-resolve`, resolved in the repo of the payload's `cwd`. A `github.com/<owner>/<repo>/commit/<sha>` URL of this repo is judged too.
+- **Pull request.** `PR #N`, `PR N`, `pull request #N`, `#N (PR)`, in any case, and every number of a list such as `PRs 7 and 8` or `PRs #7, #8 and #9`. Also a `github.com/<owner>/<repo>/pull/N` URL of this repo, with or without a scheme and with any tail such as `/files`. A bare `#N` with no `PR` word is skipped: it may be an issue or an item. A merged or closed PR keeps its `refs/pull/N/head` (measured: #1 and #1764 of this repo), so it passes.
 - **PR comment.** A `github.com/<owner>/<repo>/(pull|issues)/N#issuecomment-<id>` URL of this repo.
 
 ## Which repo
 
-"This repo" is the `owner/repo` of the `cwd` checkout's `origin`. Two kinds of text are skipped, because they name another repo:
+"This repo" is the `owner/repo` of the `cwd` checkout's `origin`. Text that names another repo is skipped:
 
 - A URL to another repo.
-- A sha on a line that names another `owner/repo`.
+- A sha or PR number on a line that names another repo. A line names another repo when it holds an `owner/repo` that is not this repo, followed by `#`, `@` or `:` (such as `acme/widgets#5` or `acme/widgets: PR #5`). An `owner/repo` with no such mark is a branch or a path (`lane/env-file-scope`, `origin/main`, `hooks/guard_merge`) and does not count. `origin/` and `upstream/` never count.
 
 With no origin, only shas are judged.
 
@@ -33,14 +33,16 @@ With no origin, only shas are judged.
 
 - No git repo, no origin, or git fails: allowed.
 - `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries `additionalContext` that names each ref it could not check, so the sender reads it in the tool result. The answer holds no `permissionDecision`, since an explicit allow would skip a permission prompt that main shows. No log is written.
-- Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or a 404 from `gh api`.
+- Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or `gh api` exiting non-zero with `HTTP 404` on stderr. Any other gh failure leaves the link unchecked.
+- At most 5 comment links are read per send. The rest are named as unchecked.
 - A shallow clone with a missing sha: allowed, logged `report-sha-shallow`.
 
 ## Cost
 
-Per send: at most one `git cat-file`, one `git ls-remote`, and one `gh` read per comment link. A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+Per send: one `git config --get remote.origin.url` when the text names a PR, comment or commit URL; at most one `git cat-file` (10 s timeout), one `rev-parse --is-shallow-repository` on a miss, one `git ls-remote` (5 s), and one `gh` read per comment link up to 5 (5 s each). The worst case is about 45 s. A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
 - An issue number, a branch name and a record path are not judged.
+- A fork's `origin` lacks the upstream's `refs/pull`, so a PR of the upstream reads as missing. Fix: none — the owner's repos are not worked from forks. Until: 2026-11-21.
 - A ref that exists but is the wrong one passes.
