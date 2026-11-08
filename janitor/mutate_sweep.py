@@ -45,7 +45,6 @@ Run:
 Only some mutants (label fragments, comma-separated; every anchor is still checked):
     MUTATE_ONLY="deadline,oldest first" python3 janitor/mutate_sweep.py
 """
-import ast
 import os
 import re
 import shutil
@@ -1456,7 +1455,8 @@ def mutation_parts(entry):
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
-    """Lay out <scaffold>/hooks/guard*.py, <scaffold>/janitor/{sweep.py,test_sweep.py,
+    """Lay out <scaffold>/hooks/guard*.py, <scaffold>/lint/ (every lint module and layout.json),
+    <scaffold>/janitor/{sweep.py,test_sweep.py,
     session_end_sweep.py,test_session_end_sweep.py} and <scaffold>/settings.json so that running
     either suite from <scaffold>/janitor resolves `import guard`, `import sweep` and
     `import session_end_sweep` to the copies placed here (see the module docstring, "WHY A
@@ -1469,18 +1469,13 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
-    # Each lint/ module the real test_sweep.py imports (an ast read of its plain `import X` lines, so
-    # a new import needs no edit here); a missing one kills the suite on import. Never mutated.
-    with open(SUITE, encoding="utf-8") as handle:
-        suite_tree = ast.parse(handle.read(), filename=SUITE)
-    for node in ast.walk(suite_tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                module = os.path.join(REPO_ROOT, "lint", alias.name.split(".")[0] + ".py")
-                if os.path.isfile(module):
-                    shutil.copy(module, lint_dir)
-    # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
-    # lazily is not covered. The loop
+    # The scaffold carries every lint module (each lint/*.py but a test_ one) and lint/layout.json,
+    # so a new import of any form needs no edit here. This also covers hooks/guard.py
+    # `_layout_module`'s lazy read of lint/ at run time. Never mutated.
+    for name in sorted(os.listdir(os.path.join(REPO_ROOT, "lint"))):
+        if (name.endswith(".py") and not name.startswith("test_")) or name == "layout.json":
+            shutil.copy(os.path.join(REPO_ROOT, "lint", name), lint_dir)
+    # Every hooks module, so a new hooks module cannot be left out. The loop
     # below replaces the guard family and git_reads.py with the target's text (mutated or real).
     mutate_shared.guard_tree(hooks_dir)
     shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
