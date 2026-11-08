@@ -1505,3 +1505,6 @@
 - quoted-fix-in-prose-misparses: a note that quotes a `Fix:` after its real one is parsed from the last mark, so the quote can hide the real field (lint/check_record_slugs.py parse_fix). Fix: none — rare and harmless Until: 2026-11-21
 - cite-uppercase-hex-unread: the cite rule reads only lowercase hex as a commit, so an uppercase sha after a none reason passes (lint/check_record_slugs.py COMMIT). Fix: none — rare and harmless. Until: 2026-11-21
 - cite-check-output-anywhere: check output anywhere after the reason clears the cite rule, even when it sits before the cost or the commit (lint/check_record_slugs.py cite_problem). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-cost-unit-gaps: the cost reader misses "two-minute", "twenty seconds", "five times", "2h", "5m", and the units weeks, months, rows, files and requests (lint/check_record_slugs.py COST). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-long-comma-test-not-red: the long-comma test passes on the old regex as well, because P5 forbids a clock, so the speed fix is proven only by a scratch probe (lint/test_check_record_slugs.py). Fix: none — rare and harmless. Until: 2026-11-21
+- cite-digit-only-sha-unread: the commit reader misses a sha made only of digits (lint/check_record_slugs.py COMMIT). Fix: none — rare and harmless. Until: 2026-11-21

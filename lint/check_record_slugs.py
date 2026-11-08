@@ -24,7 +24,7 @@ Four more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13
   Cite: a `Fix: none` line the branch adds or edits, whose text after the reason names a commit (a 7 to 40 digit
     lowercase hex word with a digit and a letter a-f) or a cost (a number with a time, size or count unit, in any case;
     a spelled number one to ten with a time unit; Nx; linear or quadratic, with -ly or -ally; O(...)), carries check output
-    after the reason: a backticked command, then a colon, comma, semicolon, dash, em dash or arrow, then a verdict word
+    after the reason: a backticked command, then a colon, comma, semicolon, dash, double dash, en or em dash, or arrow, then a verdict word
     (pass, fail, ok, red, green), which may follow a count ("12 passed"). Read with the Until check; each refused note
     prints one FAIL line with its slug.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
@@ -341,7 +341,7 @@ COST = re.compile(
     r"(?<![\w.,])\d[\d,]*(?:\.\d+)?(?:[ \t-]?(?:" + "|".join(TIME_UNITS + SIZE_UNITS + COUNT_UNITS) + r")|x)(?!\w)"
     + r"|(?<!\w)(?:" + SPELLED + r")[ \t]+(?:" + "|".join(TIME_UNITS) + r")(?!\w)"
     + r"|(?<!\w)(?:quadratic(?:ally)?|linear(?:ly)?)(?!\w)|(?<!\w)(?-i:O)\(", re.I)
-CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|[:,;\u2014\u2192-])?[ \t]*(?:\d+[ \t]+)?(?:pass|passed|fail|failed|ok|red|green)(?!\w)",
+CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|=>|--|[:,;\u2013\u2014\u2192-])?[ \t]*(?:\d+[ \t]+)?(?:pass|passed|fail|failed|ok|red|green)(?!\w)",
                           re.I)
 
 
