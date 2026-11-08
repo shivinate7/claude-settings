@@ -29,8 +29,11 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 - A negator clears the admission only when at most three words sit between it and the fault word. "Nothing I did broke the build" passes. "I did not run the check and broke the build" blocks.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
 - A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. These words match in any case. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
-- A guard line labels its guard, as `Guard:` or `guard —`, in any section. Between the label and the end of its line it names a PR or commit ref, `step:<slug>` or a debt. The check reads it with or without an admission.
-- The word debt counts only in a clause with no negator, so "a debt is not needed" names no debt.
+- A guard line labels its guard in any section. The label opens a sentence: `Guard` or `Guards`, then `:`, `—`, `–`, ` - ` or ` -- `, bold or italic or plain. "The push guard - refuses it" holds no label.
+- From the label to the end of its line, a guard line names a PR or commit ref, `step:<slug>` or a debt. The check reads it with or without an admission. Backticked refs count.
+- A guard line's ref is `PR #N` or `/pull/N`, a bare `#N` or `PR N` of two or more digits, or a sha of 7 to 40 hex digits with a letter and a digit. "See item #1" is no ref.
+- A negator clears the word debt within three words before it or two words after it. So "a debt is not needed" names no debt, and "Debt check-gap filed (not urgent)" names one.
+- The refusal names the section that holds the guard line. It never quotes the line.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.
 - The check reads only landed turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
 - The report guard refuses once per turn. A correction after the refusal is not checked again, as for every other report check.
