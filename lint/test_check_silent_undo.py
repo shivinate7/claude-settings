@@ -1383,6 +1383,34 @@ class History(unittest.TestCase):
         n, hits = C.history(r.dir, "main", 60)
         self.assertTrue(any("app.txt" in h and "whole file" in h for h in hits), hits)
 
+    def run_history(self, repo, event=None):
+        """`--history` as CI runs it: CI=1, and GITHUB_EVENT_PATH names `event` when one is given. -> (exit code, printed text)."""
+        env = {k: v for k, v in os.environ.items() if k not in ("CI", "PR_BODY", "CI_JOB_PR_BODY_FILE", "GITHUB_EVENT_PATH")}
+        env["CI"] = "1"
+        if event is not None:
+            env["GITHUB_EVENT_PATH"] = event
+        done = subprocess.run([sys.executable, os.path.join(HERE, "check_silent_undo.py"), "--history", "--repo", repo],
+                              capture_output=True, text=True, env=env, timeout=120)
+        return done.returncode, done.stdout + done.stderr
+
+    def push_event(self):
+        """The event file CI writes for a push: it holds no pull request. Its path is in this run's folder."""
+        fd, path = tempfile.mkstemp(prefix="event-", suffix=".json", dir=RUN)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"ref": "refs/heads/main", "before": "0" * 40, "commits": []}, f)
+        return path
+
+    def test_history_on_a_push_event_exits_0(self):
+        """--history reads no pull request body, so a push event, which holds none, must not refuse the run."""
+        rc, text = self.run_history(base_repo().dir, self.push_event())
+        self.assertEqual(rc, 0, "--history on a push event exited %s: it read the pull request body, which it does not use:\n%s" % (rc, text))
+        self.assertIn("commit(s) read", text, text)
+
+    def test_history_with_no_event_file_exits_0(self):  # control: the history read is green with no event file
+        rc, text = self.run_history(base_repo().dir)
+        self.assertEqual(rc, 0, text)
+        self.assertIn("commit(s) read", text, text)
+
 
 class MergeTool(unittest.TestCase):
     def test_merge_tool_refuses_a_stale_branch(self):
