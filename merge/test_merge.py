@@ -13775,6 +13775,36 @@ class ProseJudge(Env):
         self.assertNotIn("lines not judged", out, "a count line printed beside a plan-level failure\n" + out)
         self.assertEqual(rc, 0, out)
 
+    # A failed pack is a plan-level failure, and the selected lines it drops are still named: one named line per file, cause "could not run".
+    # No count line follows, since the count line covers the call-level causes only.
+    def test_a_failed_pack_names_every_selected_line_as_could_not_run(self):
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(holds_every_line)
+        with unittest.mock.patch.object(merge, "prose_judge_pack", side_effect=RuntimeError("pack broke")) as pack, \
+                unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(pack.call_count, 1, "scope: the pack ran %d times, want 1" % pack.call_count)
+        picked = {(p, n) for p, by_line in pack.call_args.args[1].items() for n in by_line}
+        self.assertEqual(picked, {(PROSE, 3), (PROSE, 5), (OTHER_PROSE, 3)}, "scope: the selection is not the three cited lines\n" + out)
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: the pack failed before any call" % len(stub.prompts))
+        self.assertEqual(prose_unknown_lines(out), ["merge: #7 prose judge UNKNOWN: it could not run (RuntimeError: pack broke)."],
+                         "the plan-level line does not print once\n" + out)
+        self.assert_named(out, [named_line("could not run", PROSE, [3, 5]), named_line("could not run", OTHER_PROSE, [3])])
+        self.assertNotIn("lines not judged", out, "a count line printed beside a failed pack, which the count line does not cover\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_failed_pack_with_no_selected_line_names_no_line(self):
+        # The control: the prose cites a file the range does not change, so the selection is empty and the failed pack has no line to name.
+        self.setup_range({PROSE: "# Cloud notes\n\nCloud sessions cannot push to main (read src/other.py:4).\n"}, {BACKING: BACKING_TEXT})
+        with unittest.mock.patch.object(merge, "prose_judge_pack", side_effect=RuntimeError("pack broke")) as pack:
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(pack.call_count, 1, "scope: the pack ran %d times, want 1" % pack.call_count)
+        self.assertEqual(pack.call_args.args[1], {}, "scope: the selection is not empty: %r" % (pack.call_args.args[1],))
+        self.assertEqual(prose_unknown_lines(out), ["merge: #7 prose judge UNKNOWN: it could not run (RuntimeError: pack broke)."],
+                         "the plan-level line does not print once\n" + out)
+        self.assertEqual(named_unknown_lines(out), [], "a named line prints with no selected line\n" + out)
+        self.assertEqual(rc, 0, out)
+
     def test_a_named_path_line_with_no_cite_sends_its_excerpt_in_one_call(self):
         # The line is added by the range and cites nothing. It names hooks/x.py and run_all in backticks, so the one call carries
         # the lines of hooks/x.py around run_all, read at head.
