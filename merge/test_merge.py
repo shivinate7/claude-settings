@@ -15317,22 +15317,21 @@ class HandedLaneCheck(RecordsEnv):
                             "the clone's origin/main is current, so the fixture does not reach the defect")
         self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
 
-    def remove_clone_main_ref(self):
-        """Delete self.co's origin/main, so the default-ref read of the check cannot resolve. A release-base run fetches only the base and the
-        head (open_worktree, load_config), so the ref stays missing through the run."""
-        sh(self.co, "git", "update-ref", "-d", "refs/remotes/origin/main")
-        gone = subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/main"], cwd=self.co, capture_output=True, text=True)
-        self.assertNotEqual(gone.returncode, 0, "origin/main still resolves in the clone, so the default-ref read does not fail")
+    def remove_origin_main(self):
+        """Delete main on the remote, so the default-branch fetch of the no-Lanes check (`git fetch origin main`) finds no such ref and fails.
+        The clone keeps its own origin/main: the failure is the fetch's, not a missing local ref."""
+        sh(self.bare, "git", "update-ref", "-d", "refs/heads/main")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/main"), "", "origin still has main, so the default-branch fetch does not fail")
 
     def failed_default_ref_fixture(self):
-        """A release-base ready pull request whose head merges lane-a's tip, which is on neither main nor release, with the clone's origin/main
-        missing: the default-ref read of the no-Lanes check cannot answer."""
+        """A release-base ready pull request whose head merges lane-a's tip, which is on neither main nor release, with origin's main deleted:
+        the default-branch fetch of the no-Lanes check cannot answer."""
         self.release_base()  # the pull request is into release; main moves one commit past the cut
         lane_batch(self, "lane-a")  # the lane is cut from origin's main and merged into the head; the fixture below clears the Lanes line
         self.fixture("", handed=[], base="release", draft=False)
         self.assertTrue(any(self.tips["lane-a"] in parents[1:] for parents in self.merge_parents_unfetched("release")), "the head does not merge lane-a")
         self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
-        self.remove_clone_main_ref()
+        self.remove_origin_main()
 
     def test_handed_lane_no_lanes_release_head_merging_a_main_tip_the_clone_lacks_is_not_a_lane(self):
         self.release_base()  # the pull request is into release, cut from main, and main moves one commit past the cut
@@ -15348,7 +15347,7 @@ class HandedLaneCheck(RecordsEnv):
         self.failed_default_ref_fixture()
         refs = self.refs()
         rc, out = self.run_merge("7", "--confirm")
-        self.assertIn("git merge-base failed against origin/main", out, f"the failed default-ref read's stop is not printed:\n{out}")
+        self.assertIn("git fetch origin main failed", out, f"the failed default-branch fetch's stop is not printed:\n{out}")
         self.assert_refused_untouched(rc, out, refs)
 
     def test_handed_lane_no_lanes_failed_default_ref_read_with_the_flag_goes_on_with_one_line(self):
