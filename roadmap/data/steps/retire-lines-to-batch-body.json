@@ -1,0 +1,11 @@
+{
+  "title": "The integration-PR builder copies each lane's Retire-run and Drops-lines lines into the batch body",
+  "order": 262.1,
+  "why": "CI reads only the integration PR's body, and a body edit does not re-run CI, so a lane's lines that stay on its own PR are never read.",
+  "note": "Stacked on #1712 (silent-undo-ci-body). Filed from the coordinator, 19:26 CST Nov 7.",
+  "phase": "now",
+  "status": "doing",
+  "owner": "coordinator",
+  "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
+  "updatedAt": "2026-11-07T19:26:00-06:00"
+}
