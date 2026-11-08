@@ -5,6 +5,11 @@
   "id": "qmax-cache-write-colour",
   "kind": "decision",
   "lane": "qmax-stale-claims-fix",
+  "lastAnswer": {
+    "at": "2026-11-08T03:26:50.383Z",
+    "choice": "c",
+    "note": ""
+  },
   "n": 374,
   "options": [
     {
@@ -29,8 +34,10 @@
   "owner": "lane qmax-stale-claims-fix (session_013NEJL1hgEeFfeHssbMASim)",
   "rank": 2,
   "ref": "q_max D-173; q_max src/components/screens/JobsScreen.tsx",
+  "replied": "2026-11-08T03:29:00Z",
+  "reply": "Routed: both stay as they are until a Jobs screen redesign. No lane starts for item 4 of qmax-stale-claims-fix; the coordinator and that lane are told. The D-173 entry stays false on main until then. Triage, 21:29 CST.",
   "short": "q_max Jobs: colour the cache write, or drop the rule",
-  "status": "open",
+  "status": "closed",
   "title": "Should q_max's Jobs screen show the cache write in the warn colour, as D-173 says?",
   "why": "Lane qmax-stale-claims-fix found the code and the record disagree. Fixing either side changes a display choice, so it needs your word."
 }

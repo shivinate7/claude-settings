@@ -4,6 +4,11 @@
   "home": "process-held-end-to-end",
   "id": "merge-unreviewed-head",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T03:26:50.383Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 382,
   "options": [
     {
@@ -24,8 +29,10 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "step process-held-end-to-end; PRs #1711 and #1735; decision pr-review-record (Q1, pick a); step review-record-provenance",
+  "replied": "2026-11-08T03:29:00Z",
+  "reply": "Routed: you granted the refusal. merge --confirm will refuse a lane tip whose review record is not done for that exact head. The coordinator gets your pick now and starts the lane under step process-held-end-to-end; the pick changes decision pr-review-record Q1 in that lane's PR. Triage, 21:29 CST.",
   "short": "Merge refuses an unreviewed head",
-  "status": "open",
+  "status": "closed",
   "title": "Should the merge tool refuse a lane tip whose exact head no reviewer passed?",
   "why": "The coordinator recommends a: it closes the one gap in the path that the lane measured, and a bad record is a smaller harm than an unreviewed merge."
 }

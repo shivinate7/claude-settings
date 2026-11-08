@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T03:26:47.442Z",
+  "id": "ask-mw79tmz6x2",
+  "reply": "Agreed. Rule speak-cite-id-plus-gloss already says to give each id a short name, but no check holds it for page item numbers. Filed step item-cite-carries-name: a handoff or report that cites an item number also gives its short name or slug, checked by the handoff writer and the report guard. Triage, 21:31 CST.",
+  "status": "answered",
+  "text": "Feedback issue from a triage session on a repo basically showing the problem of using just numeric ID with no actual tagging: The handoff doesn\u2019t say which of items 46 and 47 is which. Triage filed them from my step 8 questions (the search pill clear button, and the stale head-vocabulary record), and I didn\u2019t read the numbering."
+}

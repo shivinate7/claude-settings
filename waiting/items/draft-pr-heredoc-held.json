@@ -4,6 +4,11 @@
   "home": "draft-pr-guard-heredoc",
   "id": "draft-pr-heredoc-held",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T03:26:50.383Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 381,
   "options": [
     {
@@ -24,8 +29,10 @@
   "owner": "lane draft-pr-guard-heredoc (session_013NEJL43F31tNPDKT4u3HJv)",
   "pick": "a",
   "ref": "step draft-pr-guard-heredoc; decision hold-unsafe-after-round-3 (net-value hold after round 3); PR #1642; archived branch archive/draft-pr-guard-heredoc",
+  "replied": "2026-11-08T03:29:00Z",
+  "reply": "Routed: the held change gets a new lane at round 1. It fixes the detached-launch hole first, then runs full review rounds, and closes debt heredoc-written-run-false-alarm. The coordinator starts it; the roadmap step is draft-pr-guard-heredoc. Triage, 21:29 CST.",
   "short": "Held draft-PR heredoc fix",
-  "status": "open",
+  "status": "closed",
   "title": "What happens to the held draft-PR heredoc fix?",
   "why": "The coordinator and the lane recommend a: it removes the false alarm with no new hole, and the debt stays filed."
 }

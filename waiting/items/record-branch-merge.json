@@ -4,6 +4,11 @@
   "home": "step-names-its-gap",
   "id": "record-branch-merge",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T03:26:50.383Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 383,
   "options": [
     {
@@ -24,8 +29,10 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "a",
   "ref": "PR #1750 (gap-key refusal in the roadmap build), base roadmap, head a2e93875e; decisions session-tiers and standing-merge-grant",
+  "replied": "2026-11-08T03:29:00Z",
+  "reply": "Routed: triage may merge a reviewed, green PR into the roadmap branch. The grant lands in claude-settings' .claude/CLAUDE.md standing grants through the coordinator's next PR; #1750 merges under it once its checks are green. Triage, 21:29 CST.",
   "short": "Merges into the roadmap branch",
-  "status": "open",
+  "status": "closed",
   "title": "Who merges a reviewed, green PR into the roadmap branch?",
   "why": "The coordinator recommends a: triage is already the only writer of the roadmap branch, and the PR still needs a passed review and green checks."
 }

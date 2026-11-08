@@ -38,6 +38,11 @@
   "home": "notes-fix-page",
   "id": "narrow-cells",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T03:26:50.383Z",
+    "choice": "a",
+    "note": ""
+  },
   "look": true,
   "n": 380,
   "options": [
@@ -61,8 +66,10 @@
   "owner": "lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), branch nfp-narrow-paused-cell",
   "pick": "a",
   "ref": "PR #1635 design review (narrow bars); mockups docs/design/roadmap-narrow-cells.html and status-narrow-cells.html on branch nfp-narrow-paused-cell at d3117a007",
+  "replied": "2026-11-08T03:29:00Z",
+  "reply": "Routed to lane notes-fix-page: a narrow bar draws one run per state, each at least 4 px wide; wider bars keep one cell per step. The lane already builds a on branch nfp-narrow-paused-cell. Triage, 21:29 CST.",
   "short": "Narrow bar cells",
-  "status": "open",
+  "status": "closed",
   "title": "How should a narrow phase bar show each step's state?",
   "why": "The lane and triage recommend a: it is the only option where every state shows at every size, and it can be undone."
 }
