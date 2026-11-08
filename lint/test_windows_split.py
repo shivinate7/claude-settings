@@ -283,7 +283,7 @@ def windows_jobs(text):
 SLICE = "python merge/test_merge.py [windows-slice]"
 SLICE_ENV = {"MERGE_TESTS": "windows-slice"}
 # The same pattern for the guard suite (GUARD_TESTS=windows-slice, cut F). Its own Windows job,
-# checks-windows-guard, runs the full suite off pull_request and the slice on it.
+# checks-windows-guard, runs shard 1 of the full suite (the shards past it are its shard jobs) and the slice on pull_request.
 GUARD_CMD = "python hooks/test_guard.py"
 GUARD_SLICE = "python hooks/test_guard.py [windows-slice]"
 GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
@@ -1752,17 +1752,23 @@ def scope_flags(guard="true", full="true", code="true"):
 
 class GuardShardSteps(unittest.TestCase):
     """The guard suite's Windows steps in checks.yml, evaluated with the scope outputs set. checks-windows-guard holds shard 1
-    and the slice; checks-windows-guard-2 holds shard 2. On a pull_request the full shards run when guard_windows_full is on
-    and the slice runs when it is off. On push the shards run and the slice does not."""
+    and the slice; each checks-windows-guard-<i> holds shard i, up to the shard count n that the workflow's job names give.
+    On a pull_request the full shards run when guard_windows_full is on and the slice runs when it is off. On push the
+    shards run and the slice does not."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
         self.jobs = all_jobs(self.text)
-        self.shard1 = self.only("checks-windows-guard", GUARD_CMD, "1/2")
-        self.slice = self.only("checks-windows-guard", GUARD_SLICE)
-        self.shard2 = self.only("checks-windows-guard-2", GUARD_CMD, "2/2")
-        self.shard2_job_if = self.jobs["checks-windows-guard-2"]["if"]
+        # n comes from the workflow's own job names, not from a literal. Under 2 the loops below check no shard past the first.
+        family = [name for name in self.jobs if name == GUARD_JOB or shard_base(name) == GUARD_JOB]
+        self.n = len(family)
+        self.assertGreaterEqual(self.n, 2, f"the {GUARD_JOB} family is {family}: no shard past the first to check")
+        self.job_of = {i: GUARD_JOB if i == 1 else f"{GUARD_JOB}-{i}" for i in range(1, self.n + 1)}
+        self.shard = {i: self.only(self.job_of[i], GUARD_CMD, f"{i}/{self.n}") for i in range(1, self.n + 1)}
+        self.slice = self.only(GUARD_JOB, GUARD_SLICE)
+        self.past_first = range(2, self.n + 1)
+        self.shard_job_if = {i: self.jobs[self.job_of[i]]["if"] for i in self.past_first}
 
     def only(self, job, cmd, shard=None):
         """The one step of `job` that runs `cmd`, with GUARD_SHARD set to `shard` when one is given."""
@@ -1777,6 +1783,13 @@ class GuardShardSteps(unittest.TestCase):
                 got = if_runs(expr, event, flags)
                 self.assertEqual(got, want, f"{label} runs {got} on {event} with {FULL_FLAG} {flags[FULL_FLAG]}, want {want}")
 
+    def shard_rows(self, want, job_ifs=True):
+        """A row per full shard step, and per shard job past the first when `job_ifs`, each expected to run `want`."""
+        rows = [(f"shard {i} of {self.n}", self.shard[i].get("if"), want) for i in range(1, self.n + 1)]
+        if job_ifs:
+            rows += [(f"{self.job_of[i]} job", self.shard_job_if[i], want) for i in self.past_first]
+        return rows
+
     def test_the_scope_job_exports_both_split_flags(self):
         # The steps read the flags from needs.scope, so the scope job must export each one.
         block = job_block(self.text, "scope")
@@ -1784,40 +1797,32 @@ class GuardShardSteps(unittest.TestCase):
             with self.subTest(output=name):
                 self.assertRegex(block, rf"(?m)^      {name}:\s*\S", f"the scope job has no output {name}: the guard steps cannot read it")
 
-    def test_a_pr_with_the_full_flag_on_runs_both_full_shards_and_skips_the_slice(self):
-        self.check_rows("pull_request", scope_flags(full="true"), [
-            ("shard 1 of 2", self.shard1.get("if"), True),
-            ("checks-windows-guard-2 job", self.shard2_job_if, True),
-            ("shard 2 of 2", self.shard2.get("if"), True),
-            ("slice", self.slice.get("if"), False),
-        ])
+    def test_a_pr_with_the_full_flag_on_runs_every_full_shard_and_skips_the_slice(self):
+        self.check_rows("pull_request", scope_flags(full="true"),
+                        self.shard_rows(True) + [("slice", self.slice.get("if"), False)])
 
     def test_a_pr_with_the_full_flag_off_runs_the_slice_and_no_full_shard(self):
-        self.check_rows("pull_request", scope_flags(full="false"), [
-            ("slice", self.slice.get("if"), True),
-            ("shard 1 of 2", self.shard1.get("if"), False),
-            ("shard 2 of 2", self.shard2.get("if"), False),
-        ])
+        self.check_rows("pull_request", scope_flags(full="false"),
+                        [("slice", self.slice.get("if"), True)] + self.shard_rows(False, job_ifs=False))
 
-    def test_a_push_runs_both_full_shards_and_skips_the_slice(self):
-        self.check_rows("push", scope_flags(full="true"), [
-            ("shard 1 of 2", self.shard1.get("if"), True),
-            ("checks-windows-guard-2 job", self.shard2_job_if, True),
-            ("shard 2 of 2", self.shard2.get("if"), True),
-            ("slice", self.slice.get("if"), False),
-        ])
+    def test_a_push_runs_every_full_shard_and_skips_the_slice(self):
+        self.check_rows("push", scope_flags(full="true"), self.shard_rows(True) + [("slice", self.slice.get("if"), False)])
 
-    def test_a_draft_pr_skips_guard_shard_2_through_needs_scope(self):
-        # checks-windows-guard-2 has no job-level if, so a draft pull_request skips it because scope skips it.
-        self.assertEqual(self.jobs["checks-windows-guard-2"]["needs"], "scope", "checks-windows-guard-2 does not need scope")
+    def test_a_draft_pr_skips_every_shard_past_the_first_through_needs_scope(self):
+        # A shard past the first has no job-level if, so a draft pull_request skips it because scope skips it.
         scope_if = self.jobs["scope"]["if"]
         self.assertFalse(if_runs(scope_if, "pull_request", {}, draft=True), f"scope runs on a draft pull_request: {scope_if!r}")
         self.assertTrue(if_runs(scope_if, "pull_request", {}, draft=False), f"scope skips a ready pull_request: {scope_if!r}")
+        for i in self.past_first:
+            with self.subTest(job=self.job_of[i]):
+                self.assertEqual(self.jobs[self.job_of[i]]["needs"], "scope", f"{self.job_of[i]} does not need scope")
 
-    def test_guard_shard_2_has_no_job_level_if(self):
-        # all-jobs-passed needs it on a ready pull_request, and its steps decide there: the job itself carries no if.
-        self.assertIsNone(self.shard2_job_if,
-                          f"checks-windows-guard-2 keeps a job-level if {self.shard2_job_if!r}: it must have none")
+    def test_every_shard_past_the_first_has_no_job_level_if(self):
+        # all-jobs-passed needs each one on a ready pull_request, and its steps decide there: the job itself carries no if.
+        for i in self.past_first:
+            with self.subTest(job=self.job_of[i]):
+                self.assertIsNone(self.shard_job_if[i],
+                                  f"{self.job_of[i]} keeps a job-level if {self.shard_job_if[i]!r}: it must have none")
 
 
 class GuardShardJobIf(unittest.TestCase):
@@ -1837,6 +1842,14 @@ class GuardShardJobIf(unittest.TestCase):
             flag_if = "${{ needs.scope.outputs.guard == 'true' }}"
             self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": flag_if, "steps": []}),
                             "checks-windows-guard-2 with a flag in its job-level if is accepted")
+
+    def test_a_guard_shard_takes_no_job_level_if_at_every_shard_past_the_first(self):
+        for name in ("checks-windows-guard-2", "checks-windows-guard-3"):
+            with self.subTest(job=name):
+                self.assertEqual(job_check_problems(name, {"needs": "scope", "if": None, "steps": []}), [],
+                                 f"{name} with no job-level if is refused")
+                self.assertTrue(job_check_problems(name, {"needs": "scope", "if": self.DRAFT, "steps": []}),
+                                f"{name} with the draft guard as its job-level if is accepted")
 
 
 def merge_flags(merge="true", full="true", code="true"):
