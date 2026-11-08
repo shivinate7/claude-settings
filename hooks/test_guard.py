@@ -5685,6 +5685,25 @@ sh("check-tail: python3 -X dev runs the merge script piped to tail in the foregr
 # Control: a uv run of another script that names --lane-lint is not the merge script, so it is allowed.
 sh("check-tail: uv run of another script naming --lane-lint piped to tail is allowed",
    "uv run lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+# An unquoted substitution in the script operand splits into several words, so the first word after the
+# interpreter is not the script. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: an unquoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   "python3 $(git rev-parse --show-toplevel)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: an unquoted $(dirname $0) script path piped to head in the foreground is refused",
+   "python3 $(dirname $0)/merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a backtick script path piped to tail in the foreground is refused",
+   "python3 `git rev-parse --show-toplevel`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# Pins: a quoted substitution and one with no space are one word already, so these pass on the current guard.
+sh("check-tail: a quoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   'python3 "$(git rev-parse --show-toplevel)/merge/merge.py" --lane-lint 7 | tail -3', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a $(pwd) script path with no space piped to tail in the foreground is refused",
+   "python3 $(pwd)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
+sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
+   "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
 
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
