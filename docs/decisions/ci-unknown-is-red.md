@@ -11,9 +11,9 @@ Homes with this shape:
 - `lint/check_record_slugs.py`, `lint/check_silent_undo.py`, `lint/check_ruling_kind.py`.
 - `lint/check_glossary.py`, `lint/check_artifact_cites.py` (an absent records folder is zero records, which is an answer), `lint/ste_lint.py` (an unparseable config).
 - `lint/stale_cites.py`, for a file it cannot read.
-
-One exception holds today: `lint/stale_cites.py` does not fetch a base that a shallow clone lacks. It prints `stale-cites: unknown, ...` and exits 0, CI or not (`stale-cites-at-merge`, owner-lane call, 2026-11-01). Whether item 276 a ends that exception is open with the coordinator.
 - `actions/code-check/code_check.py` and `actions/ci-alarm` (`alarm.sh`, `dropped.sh`, `issue.sh`).
+
+Item 276 a ends the shallow-base exit 0 of `stale-cites-at-merge` (owner-lane call, 2026-11-01). Until lane ste-lint-run-exit-codes (#2262) lands, `lint/stale_cites.py` still prints `stale-cites: unknown, ...` and exits 0 on a base that a shallow clone lacks. That lane makes the ste-lint action fetch the base's history first, and the check is red in CI only when that fetch fails.
 
 Stricter, red locally too: `lint/check_comment_narration.py` (exit 2), `hooks/mutate_guard.py --known-defects`, and the other lints, which exit 1 or 2 on a failed read. `ci-scope.sh` fails safe by running the harness. `actions/stamp` keys on `GITHUB_ACTIONS`, not `CI`.
 
