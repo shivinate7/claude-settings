@@ -373,7 +373,7 @@ def case_precompact_builds_its_digest_without_shared_names():
         done.returncode, os.path.isfile(digest), done.stderr[-160:])
 
 
-# The four hook modules that may hold a config dir copy (debt config-dir-copies). HOOKS_UNDER_TEST, when set,
+# The four hook modules that may hold a config dir copy, and only in an import fallback. HOOKS_UNDER_TEST, when set,
 # names a fixture copy of hooks/, so the scan can be shown red on a copy outside the fallback.
 CONFIG_DIR_MODULES = ("daily_note.py", "override.py", "precompact_handoff.py", "sim_boot_record.py")
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
@@ -444,7 +444,7 @@ def _unguarded_copies(path):
 def case_config_dir_copies_sit_only_in_the_import_fallback():
     """A config dir copy in these four modules sits only in the `except ImportError` branch of a shared_names import:
     the install may land a hook before shared_names.py, and the fallback keeps it running. Any other copy is a second
-    home (debt config-dir-copies). A source scan with the ast parser; the function's name does not matter."""
+    home for the config dir. A source scan with the ast parser; the function's name does not matter."""
     problems = []
     for module in CONFIG_DIR_MODULES:
         for line in _unguarded_copies(os.path.join(HOOKS_UNDER_TEST, module)):
@@ -522,9 +522,9 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
 
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
-    ("(a) shared_names.py imports only the standard library", case_stdlib_only),
+    ("(a2) shared_names.py imports only the standard library", case_stdlib_only),
     ("(b) shared_names holds today's watched names and config_dir", case_values_pinned),
-    ("(b) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
+    ("(b3) shared_names.config_dir answers as the guard's does", case_config_dir_answers_as_guard),
     ("(b2) shared_names holds the gh login pair: shivinate7 default, ssemwal-cdc fallback", case_gh_logins_pinned),
     ("(c) the guard's names are shared_names' own objects", case_guard_reexports_same_objects),
     ("(d) config_watch.py holds no literal watched name", case_config_watch_has_no_literal_copy),
