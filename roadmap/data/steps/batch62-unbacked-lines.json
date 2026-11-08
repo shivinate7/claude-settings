@@ -1,0 +1,11 @@
+{
+  "title": "Lines the batch 62 prose judge flagged cite their backing, or go",
+  "phase": "next",
+  "status": "todo",
+  "order": 262,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "The merge-time prose judge on batch 62 (#1764, d70ebd14d) flagged lines that cite no run or decision: docs/debts/notes.md line 1459, and docs/debts/windows-shards-outgrow-caps.md lines 3, 5 and 6.",
+  "note": "Fix: cite the backing or cut the claim. Docs-only. Waits under the owner's 21:42 CST hold (item 384). Slug from the coordinator; title written by triage. Filed from the coordinator, 22:08 CST Nov 7.",
+  "updatedAt": "2026-11-07T22:10:00-06:00"
+}
