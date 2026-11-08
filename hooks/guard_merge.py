@@ -1018,19 +1018,30 @@ def _head_landed(module, repo: str, row) -> bool:
         raise RuntimeError("the compare read failed: " + str(e))
 
 
-def archive_hit(tool: str, tool_input, transcript: str):
+def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     """Return (matched, reason) when this archive call must be refused, else None. A target whose newest
     get_session record in this session's transcript has no cs-build:lane tag passes. A lane is refused
     while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
     head commit is already in its base (compare: behind or identical). Fails closed:
-    any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    any error in the reads is a refusal, because the guard-wide crash path fails open.
+    A call from an agent (`agent_id`) reads the agent's own transcript first; its newest record of the target wins.
+    With no record there, or an unreadable, empty or absent file, the main transcript decides. The agent file alone
+    never allows. Cost: at most one extra transcript read per archive call from an agent."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
-    try:  # cost: one transcript read per archive call
-        tags = _own_get_session_tags(transcript, target) if transcript and isinstance(target, str) and target else None
-    except Exception:
-        tags = None
+    tags = None
+    if transcript and isinstance(target, str) and target:
+        agent_file = own_session.agent_transcript_path(transcript, agent_id) if agent_id else None
+        for path in (agent_file, transcript):  # cost: one transcript read per archive call, two from an agent
+            if not path:
+                continue
+            try:
+                tags = _own_get_session_tags(path, target)
+            except Exception:
+                tags = None
+            if tags is not None:
+                break
     if tags is None:
         return "archive with no record of the target", ARCHIVE_NO_RECORD_REASON
     if ARCHIVE_LANE_TAG not in tags:
