@@ -32,6 +32,7 @@ and lint/test_report_guard.py (one home each). Run with:
 import itertools
 import json
 import os
+import shutil
 import sys
 import unittest
 from unittest import mock
@@ -63,6 +64,8 @@ DRAFT_64 = ("merge: #64 stays a draft (no reason given). Mark it ready after its
 WELL_FORMED = "\n".join(["> **Done** OTHER merge landed as 9f3c1a7e2", "> **Deviations** none",
                          "> **Input Needed** none", "> **Next** wait"])
 CORRECTION_TAILS = ("Post only the corrected lines", "Never send the report again")
+REPO_ROOT = os.path.dirname(HERE)  # the checkout under test: its merge/ is the one the global rules pointer names
+INSTALL_IGNORE = shutil.ignore_patterns("test_*", "_test_*", "__pycache__")
 
 
 def setUpModule():
@@ -116,6 +119,15 @@ def completion(use_id, task_id, output_file):
               % (task_id, use_id, output_file))
     return {"type": "attachment", "isSidechain": False,
             "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
+def install_copy(folder):
+    """A copy of lint/ and hooks/ as an install holds them, under folder/installed. No merge/ sits beside them, and the
+    copies are real files, not links, so their own real paths reach no checkout."""
+    root = os.path.join(folder, "installed")
+    for name in ("lint", "hooks"):
+        shutil.copytree(os.path.join(REPO_ROOT, name), os.path.join(root, name), ignore=INSTALL_IGNORE)
+    return root
 
 
 _MESSAGE_IDS = itertools.count(1)
@@ -509,6 +521,63 @@ class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
         self.held_on_merge(out)
         for tail in CORRECTION_TAILS:
             self.assertIn(tail, out["reason"], "the report has a defect of its own, but the tail %r is gone" % tail)
+
+
+class InstalledCopyHoldTests(trs.StalledFixture, unittest.TestCase):
+    """The hold run from an installed copy of lint/ and hooks/, with no merge/ beside it. The merge tool is reachable only
+    through the global rules pointer, the way guard_merge.merge_module() finds it. Helpers come from IdleLaneHoldTests, as
+    the stalled suite borrows setUp, so the cases are not copied."""
+
+    runner = IdleLaneHoldTests.runner
+    runner_stop = IdleLaneHoldTests.runner_stop
+    held_on_merge = IdleLaneHoldTests.held_on_merge
+
+    def setUp(self):
+        super().setUp()
+        self.installed = install_copy(self.run_dir)
+        with open(os.path.join(self.cfg, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % REPO_ROOT)  # the pointer line the global rules file carries
+
+    def installed_stop(self, records, env_id=RUNNER_ENV):
+        """Stop on `records` through the installed report_guard. A run that failed open says so on stderr, and that fails."""
+        path = trg.write_transcript(records, self.run_dir)
+        hook = {"hook_event_name": "Stop", "session_id": trs.OWNER_SESSION, "transcript_path": path,
+                "stop_hook_active": False, "cwd": self.repo}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home, CLAUDE_CODE_REMOTE_SESSION_ID=env_id)
+        run = trg.run_guard(os.path.join(self.installed, "lint", "report_guard.py"), hook, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("failed open", run.stderr,
+                         "the installed hold failed open: %s" % run.stderr.strip()[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def held_installed(self, records):
+        """The installed copy holds the transcript. Precondition: no merge/ sits beside the copy, and the pointer's
+        checkout holds the merge tool, so the hold can only read it through the pointer."""
+        self.assertFalse(os.path.exists(os.path.join(self.installed, "merge")),
+                         "the installed copy has a merge/ beside it, so the pointer is not what the hold reads")
+        self.assertTrue(os.path.isfile(os.path.join(REPO_ROOT, "merge", "merge.py")),
+                        "the pointer's checkout has no merge/merge.py to read")
+        self.held_on_merge(self.installed_stop(records))
+
+    def test_idle_install_plain_merge_is_held_by_the_installed_copy(self):
+        # Catches: the merge constants are read from merge/ beside report_guard, so an installed copy fails open and never holds.
+        self.held_installed([human("wake"), *self.runner(), *bash_call(MERGE_CMD, MERGED_64),
+                             assistant_text(WELL_FORMED)])
+
+    def test_idle_install_subshell_merge_after_a_cd_is_held_by_the_installed_copy(self):
+        # Catches: a merge run in a subshell after a cd is read as no merge run, so the installed copy never holds it.
+        self.held_installed([human("wake"), *self.runner(),
+                             *bash_call("(cd repo && merge 64 --confirm)", MERGED_64), assistant_text(WELL_FORMED)])
+
+    def test_idle_install_time_prefixed_merge_is_held_by_the_installed_copy(self):
+        # Catches: a merge run that `time` prefixes is read as no merge run, so the installed copy never holds it.
+        self.held_installed([human("wake"), *self.runner(),
+                             *bash_call("time merge 64 --confirm", MERGED_64), assistant_text(WELL_FORMED)])
+
+    def test_idle_install_env_prefixed_merge_is_held_by_the_installed_copy(self):
+        # Catches: a merge run that `env X=1` prefixes is read as no merge run, so the installed copy never holds it.
+        self.held_installed([human("wake"), *self.runner(),
+                             *bash_call("env X=1 merge 64 --confirm", MERGED_64), assistant_text(WELL_FORMED)])
 
 
 if __name__ == "__main__":
