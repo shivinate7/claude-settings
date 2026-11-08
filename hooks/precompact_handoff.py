@@ -1202,7 +1202,8 @@ def owner_waits_gap(payload):
         unnamed = [label for ident, label in refused[-OWNER_NAMED_MAX:] if not section or ident not in section]
         if unnamed:
             problems.append("The section does not name these refused acts: %s. Name each, with what it "
-                            "unblocks, or the act that replaced it." % "; ".join(unnamed))
+                            "unblocks, or the act that replaced it. Name each by the whole first line of its command, or "
+                            "its path or url; a label with `...` is cut short." % "; ".join(unnamed))
         if not problems:
             return ""
         return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
