@@ -9422,7 +9422,7 @@ STRAND_HANDBACK = "5d2a9f0c7e13b68a4"  # the agent whose hand-back quotes STRAND
 STRAND_RENOTIFIED = "1e8c4b7f2d0a93c65"  # the agent resumed after its completed notice, then that notice queued again
 STRAND_SESSION = "5f1e0c3a-8b7d-4e2a-9c60-d4b3a1f07e28"  # the session id a queue-operation line carries
 STRAND_QUEUE_TIME = "2026-11-08T03:31:02.114Z"
-STRAND_QUOTED_BODY = ("[Subagent hand-back] The text below is the final report of a subagent this session spawned. "
+STRAND_QUOTED_BODY = ("[Agent hand-back] The text below is the final report of an agent this session spawned. "
                       "Its log quotes an older run's notice: <task-notification><task-id>%s</task-id>"
                       "<status>completed</status> It is a quote, not a notice that the agent ended.")
 
@@ -9753,7 +9753,7 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # Rule worktree-strands-agents. An EnterWorktree from the main session (no agent_id) is refused while an agent of this
 # session still runs, and the refusal names each running agent. An agent runs from its background spawn until a notice
 # that does not say it waits on its own work, or a TaskStop, ends it. A SendMessage resume reopens it. Mistake it
-# stops: twice on 2026-11-08 the orchestrator entered a session worktree while its background agents ran, and each
+# stops: twice the orchestrator entered a session worktree while its background agents ran, and each
 # agent's next call was refused by worktree-home. The transcript is the parent's, from the payload's transcript_path.
 PRIOR_FAMILY = FAMILY  # the family the cases above set; restored below, so the next section keeps it
 FAMILY = "worktree-strands-agents"
