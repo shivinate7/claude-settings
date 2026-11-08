@@ -136,7 +136,7 @@
 - install-sh-renames-no-retry: five mv calls outside put_file run once, so a Windows reader holding the file fails them (install.sh)
 - install-sh-retries-every-error: mv_retry retries any mv error where install.ps1 retries only codes 5 and 32; a real failure costs about 2.4 s (install.sh)
 - install-sh-retry-untested: no case makes mv fail then succeed, or fail 25 times (hooks/test_install_src.sh)
-- install-skill-copy-nests-dir: in Install-Dir's in-place refresh, `Get-ChildItem -LiteralPath $Src -Force | Copy-Item -Destination $Dest -Recurse -Force` may nest a source subfolder inside an existing one of the same name; the prune then removes the nested copy and keeps the old file, and the run still reports "copied" (install.ps1). Unverified. Fix: none — needs a Windows run. Until: 2026-11-21
+- install-skill-copy-nests-dir: the in-place refresh in Install-Dir may nest a source subfolder inside an existing one of the same name. The prune then removes the nested copy and keeps the old file, and the run still reports "copied" (install.ps1). Unverified. Fix: none — needs a Windows run. Until: 2026-11-21
 - install-skill-fail-exits-0: a failed skill folder copy is not retried and exits 0 (install.ps1). Fix: step:install-skill-fail-exit
 - install-skill-fail-log-kept: the log can say settings.json=kept after a recovery (install.ps1). Fix: none — rare and harmless. Until: 2026-11-21
 - install-skill-recover-untested: no case covers a skill folder that recovers on retry; deleting the retry loop in Resolve-Failures keeps skillfail1 green (install-no-gap.test.ps1). Fix: step:install-skill-recover-test
@@ -1459,6 +1459,7 @@
 - report-checks-block-once: after a report check blocks, the stop_hook_active turn is not read again, so a correction that still admits a mistake with no guard passes. The same holds for the Done-format and Departs checks (lint/report_guard.py `main`). Decision: mistake-means-missing-guard.
 - quoted-re-lone-opener: `QUOTED_RE` in lint/report_guard.py can pair a lone apostrophe such as 'til with a later quote, so text between them is read as quoted. Decision: mistake-means-missing-guard.
 - mistake-check-plain-fault-words: the mistake check in lint/report_guard.py refuses plain uses of a fault word that admit nothing, such as "I broke the batch into three lanes" or "I changed the test that was wrong". Parentheses and that/when clauses do not split a clause. Cost: one refusal per turn. Decision: mistake-means-missing-guard.
+- windows-rest-72pct: checks-windows-rest's slowest green run was 20.2 of 28 min (72%, run 42283179251, window of 2026-11-06), past the merge tool's 70% warning but under the 80% target. Decision: ci-job-caps.
 - lane-tag-copies: `hooks/guard.py` and `lint/report_guard.py` each keep their own `cs-build:lane` constant beside `hooks/shared_names.py` `LANE_TAG`. Decision: session-tiers.
 - draft-landed-two-homes: the roadmap's idle-lane test checks a draft head on main by merge-base on the local checkout; the archive guard checks it by GitHub's compare. The local test is stricter (a stale local main reads not landed). Decision: session-tiers.
 - idle-lane-mixed-bucket-forms: a live lane row whose status_bucket is not an enum name, beside a row that is, is skipped with no unknown entry (skills/roadmap/build.py idle_lanes). False negative only. Decision: session-tiers.
