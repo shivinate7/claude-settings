@@ -7,12 +7,13 @@
 import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
 import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
-import { execFileSync, spawnSync, spawn } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { stamp, claim, check, loadConfig, currentBranch, onDefaultBranch } from "./stamp.mjs";
+import { CHILD, HANG, START, leftoverExit, sweepAllowed, waitForGo, watchdog } from "./suite_watchdog.mjs";
 
 // Each fixture builds its own git repo. A CI run's GITHUB_REF and GITHUB_BASE_REF name the
 // runner's branch, not the fixture's. GITHUB_ACTIONS picks a hard refusal or an UNKNOWN line
@@ -1797,35 +1798,35 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
 // ---------------------------------------------------------------- watchdog
 // The suite is synchronous, so a timer inside it never fires while a command hangs. Run normally,
 // this file re-runs itself as a child with piped stdio, so no process under it holds the runner's
-// output pipe, and keeps the timer here. On expiry it names the running test, kills the process
-// tree, prints what ran and exits 1. STAMP_SUITE_CAP_S sets the cap, inside the step's own.
-const CHILD = "STAMP_SUITE_CHILD";
-const HANG = "STAMP_SUITE_HANG_FIXTURE"; // a pid file: the child runs only the hang fixture
-const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold" or "orphan", as hangCommand reads it
-const START = "STAMP-START ";
+// output pipe, and the watchdog in suite_watchdog.mjs keeps the timer. On expiry it names the running
+// test, kills the process tree, prints what ran and exits 1. After the child closes, it kills and
+// names each process the suite left running, and exits 1.
+const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as hangCommand reads it
 
-// node -e code: its child holds the pipe and sleeps forever. "hold": the command sleeps too.
-// "orphan": the command exits, so the sleeper's parent pid names a dead process. Both pids go to
-// pidFile first. Both command lines carry pidFile raw, in a comment, so a check can tell them from
-// a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not match.
-function hangCommand(pidFile, orphan) {
-  const sleeper = `setInterval(() => {}, 1e9); // ${pidFile}`;
-  return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], { stdio: "inherit" });
-require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
-${orphan ? "process.exit(0);" : "setInterval(() => {}, 1e9);"}
+// node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
+// command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
+// child is detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as
+// escape, but the child exits 2 s later, inside the watchdog's 3 s grace. "clean": no child at all. Both
+// pids go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw,
+// in a comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash,
+// so a quoted copy alone would not match.
+function hangCommand(pidFile, kind) {
+  const escape = kind === "escape" || kind === "grace";
+  const sleeper = kind === "grace" ? `setTimeout(() => {}, 2000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
+  const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
+  const start = kind === "clean" ? "const c = { pid: process.pid };\n"
+    : `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});\n${escape ? "c.unref();\n" : ""}`;
+  return `${start}require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
+${kind === "hold" ? "setInterval(() => {}, 1e9);" : "process.exit(0);"}
 // ${pidFile}`;
 }
 
 test("hang fixture: each command line carries a Windows pid-file path raw", () => {
   const pidFile = "C:\\Temp\\stamp-test-x\\pids";
-  const code = hangCommand(pidFile, false);
+  const code = hangCommand(pidFile, "hold");
   assert.ok(code.includes(pidFile), code); // the intermediate's own command line
   assert.ok(JSON.parse(code.match(/"-e", ("(?:[^"\\]|\\.)*")/)[1]).includes(pidFile), code);
 });
-
-// The Windows orphan sweep runs only in CI or when asked. On a dev machine an orphan of this suite
-// may stay; another session's process is never swept.
-const sweepAllowed = (ci, env) => ci || env.STAMP_SUITE_SWEEP === "1";
 
 test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWEEP=1", () => {
   assert.equal(sweepAllowed(false, {}), false);
@@ -1833,9 +1834,32 @@ test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWE
   assert.equal(sweepAllowed(false, { STAMP_SUITE_SWEEP: "1" }), true);
 });
 
+// The run's exit once its leftovers are known. Any leftover, named or not, fails the run. With none,
+// the suite's own code stands, and a run with no code at all still fails.
+test("watchdog: the leftover exit is 1 for any leftover, and the suite's own code otherwise", () => {
+  const cases = [
+    [0, {}, 0, "no leftover: the suite's exit 0 stands"],
+    [2, {}, 2, "no leftover: the suite's exit 2 stands"],
+    [null, {}, 1, "no leftover and no code: the run still fails"],
+    [0, { alive: ["7"] }, 1, "a pid still alive after the kill is a leftover, even with no line"],
+    [0, { lines: ["x"] }, 1, "a named leftover fails the run although the suite exited 0"],
+    [0, { unknown: ["y"] }, 1, "a sweep that could not read fails the run"],
+  ];
+  for (const [code, lists, want, why] of cases) {
+    assert.equal(leftoverExit(code, lists), want, why);
+  }
+});
+
+const hangLabels = {
+  hold: "a command's child holds its pipe and sleeps forever",
+  orphan: "a command's child holds its pipe and sleeps forever",
+  escape: "a command's detached child outlives it, holding no pipe",
+  grace: "a command's detached child exits inside the grace, holding no pipe",
+  clean: "a command that exits fast and leaves nothing",
+};
 const hangFixture = (kind) => ({
-  name: `hang fixture (${kind}): a command's child holds its pipe and sleeps forever`,
-  fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind === "orphan")]); },
+  name: `hang fixture (${kind}): ${hangLabels[kind]}`,
+  fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind)]); },
 });
 
 const sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -1872,7 +1896,7 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
     let found;
     try {
       // process.execPath may hold a space (C:\Program Files\nodejs\node.exe), so match it whole.
-      assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, false)], { timeout: 3000 }),
+      assert.throws(() => shSync(process.execPath, ["-e", hangCommand(pidFile, "hold")], { timeout: 3000 }),
         (e) => e.message.startsWith(`timed out after 3 s: ${process.execPath} -e `));
     } finally {
       found = leftovers(pidFile);
@@ -1884,7 +1908,8 @@ test("a timed-out call names its command, and on Windows leaves no orphan behind
 
 // Windows, orphan: spawnSync returns once its direct child exits, even while a grandchild holds the
 // pipe (measured on windows-latest). So nothing hangs: the fixture passes, within the cap, and the
-// orphan sleeps on. That is the guarantee there; this test kills the orphan after.
+// orphan sleeps on. The suite then closes with a process it started still running, so the watchdog
+// names it, kills it and fails the suite.
 const orphanEndsOnItsOwn = (kind) => kind === "orphan" && !POSIX;
 
 for (const kind of ["hold", "orphan"]) {
@@ -1909,8 +1934,10 @@ for (const kind of ["hold", "orphan"]) {
       assert.ok(secs < 30, `took ${secs} s\n${out}`);
       assert.equal(found.pids.length, 2, out);
       if (orphanEndsOnItsOwn(kind)) {
-        assert.equal(r.status, 0, out);
+        assert.equal(r.status, 1, out);
         assert.match(out, /ok - hang fixture \(orphan\)/, out);
+        assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite did not name the leftover orphan pid ${found.pids[1]}\n${out}`);
+        assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
         return;
       }
       assert.equal(r.status, 1, out);
@@ -1919,123 +1946,144 @@ for (const kind of ["hold", "orphan"]) {
     }));
 }
 
-// POSIX: each live process in the child's group, with its command line. The child leads its own
-// group, so the group holds even an orphan. ps is fast, so it lists before the kill.
-function posixTree(root) {
-  try {
-    const ps = shSync("ps", ["-eo", "pid=,ppid=,pgid=,args="], { encoding: "utf8", timeout: 15_000 });
-    return ps.stdout.split("\n").filter((l) => l.trim().split(/\s+/)[2] === String(root));
-  } catch (e) {
-    return [`(process tree unreadable: ${e.message})`];
-  }
-}
-
-// Windows, after taskkill /T on root: processes it missed. An orphan's parent pid names a dead
-// process, and a dead parent's own parent is unreadable, so "ours" is read from what is left: a
-// process the suite's programs run, started after the suite, whose parent is dead, and whose command
-// line names a fixture dir. Plus their trees. Only the root's tree when sweepAllowed says no.
-function windowsLeftovers(root, startedAt, sweep) {
-  const prefix = TEMP_PREFIX.replace(/'/g, "''");
-  const walk = `$start = [datetime]::Parse('${new Date(startedAt).toISOString()}');
-$all = @(Get-CimInstance Win32_Process); $live = @{}; foreach ($p in $all) { $live[[int]$p.ProcessId] = 1 }
-$ids = @(${root});
-if ($${sweep ? "true" : "false"}) { foreach ($p in $all) { if ($p.CreationDate -gt $start -and -not $live.ContainsKey([int]$p.ParentProcessId) -and $p.Name -match '^(node|git|git-[\\w-]+|bash|sh)\\.exe$' -and $p.CommandLine -and $p.CommandLine.Contains('${prefix}')) { $ids += [int]$p.ProcessId } } }
-for ($i = 0; $i -lt $ids.Count; $i++) { foreach ($p in $all) { if ($p.ParentProcessId -eq $ids[$i] -and $ids -notcontains $p.ProcessId) { $ids += [int]$p.ProcessId } } }
-foreach ($p in $all) { if ($ids -contains $p.ProcessId) { '{0} {1} {2}' -f $p.ProcessId, $p.ParentProcessId, ($p.CommandLine -replace '\\s+', ' ') } }`;
-  try {
-    const ps = shSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", walk], { encoding: "utf8", timeout: 20_000 });
-    return ps.stdout.split(/\r?\n/).filter((l) => l.trim());
-  } catch (e) {
-    return [`(leftover processes unreadable: ${e.message})`];
-  }
-}
-
-const taskkill = (pids) => {
-  try {
-    return shSync("taskkill", ["/T", "/F", ...pids.flatMap((p) => ["/PID", String(p)])], { encoding: "utf8", timeout: 15_000 }).stdout;
-  } catch (e) {
-    return `(taskkill failed: ${e.message})`;
-  }
+// An escape: a process the suite started, detached with no pipe, outlives the suite. Nothing waits on
+// it, so the suite and the watchdog both finish, and the watchdog must still name it, kill it and fail.
+// The helper runs the watchdog with piped stdio and reads its 'close' against a deadline of its own:
+// spawnSync returns at the direct child's exit on Windows, so it cannot see a pipe a grandchild holds.
+// Values reach the helper through env, so no temp path sits in its command line.
+const ESCAPE_CAP_S = 5;
+const WATCH_HELPER = `
+const { spawn } = require("child_process");
+const env = process.env;
+const c = spawn(process.execPath, [env.HELPER_SELF], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+let out = "", done = false;
+c.stdout.setEncoding("utf8");
+c.stderr.setEncoding("utf8");
+c.stdout.on("data", (d) => { out += d; });
+c.stderr.on("data", (d) => { out += d; });
+const report = (code, signal, closed) => {
+  if (done) return;
+  done = true;
+  clearTimeout(deadline);
+  process.stdout.write(JSON.stringify({ code, signal, closed, out }) + "\\n");
 };
+const deadline = setTimeout(() => { report(null, null, false); c.kill("SIGKILL"); }, Number(env.HELPER_DEADLINE_MS));
+c.on("close", (code, signal) => report(code, signal, true));
+`;
 
-function watchdog() {
-  const capS = Number(process.env.STAMP_SUITE_CAP_S) || 240;
-  const startedAt = Date.now() - 1000;
-  const child = spawn(process.execPath, [SELF], {
-    env: { ...process.env, [CHILD]: "1" }, stdio: ["ignore", "pipe", "pipe"], detached: POSIX, windowsHide: true,
-  });
-  let current = null, pending = "", over = false, timer;
-  const forward = (line) => {
-    const bare = line.replace(/\r$/, "");
-    if (bare.startsWith(START)) current = bare.slice(START.length);
-    else process.stdout.write(line + "\n");
-  };
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (d) => {
-    const lines = (pending + d).split("\n");
-    pending = lines.pop();
-    lines.forEach(forward);
-  });
-  child.stderr.on("data", (d) => process.stderr.write(d));
-
-  // Ends without process.exit, so the output still queued on a Windows pipe drains first.
-  const finish = (code) => {
-    if (over) return;
-    over = true;
-    clearTimeout(timer);
-    if (pending) forward(pending);
-    child.stdout.destroy();
-    child.stderr.destroy();
-    child.unref();
-    process.exitCode = code;
-  };
-  // Windows kills first: a cold PowerShell walk can take seconds, and the step cap is near.
-  const stopTree = (why) => {
-    if (over) return;
-    if (pending) { forward(pending); pending = ""; }
-    console.error(why);
-    if (POSIX) {
-      const lines = posixTree(child.pid);
-      console.error(lines.length ? lines.join("\n") : "(none)");
-      try { process.kill(-child.pid, "SIGKILL"); } catch {}
-    } else {
-      console.error(taskkill([child.pid]).trim());
-      const left = windowsLeftovers(child.pid, startedAt, sweepAllowed(CI, process.env));
-      console.error(left.length ? `Left after that, killed now:\n${left.join("\n")}` : "Nothing left after that.");
-      const pids = left.map((l) => l.split(" ")[0]).filter((p) => /^\d+$/.test(p));
-      if (pids.length) taskkill(pids);
+test("watchdog: a detached process the suite started, holding no pipe, is named, killed, and fails the suite", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const deadlineMs = (ESCAPE_CAP_S + 30) * 1000;
+    const env = { ...process.env, STAMP_SUITE_CAP_S: String(ESCAPE_CAP_S), STAMP_SUITE_SWEEP: "1",
+      [HANG]: pidFile, [HANG_KIND]: "escape", HELPER_SELF: SELF, HELPER_DEADLINE_MS: String(deadlineMs) };
+    delete env[CHILD];
+    let run, found;
+    try {
+      run = shSync(process.execPath, ["-e", WATCH_HELPER], { env, timeout: deadlineMs + 15_000 });
+    } finally {
+      found = leftovers(pidFile); // reaps the sleeper whatever happened, and reports what was still running
     }
-    finish(1);
-  };
-  const arm = () => {
-    timer = setTimeout(() => stopTree(
-      `FAIL - ${current ?? "(before the first test)"}\nThe suite ran past its ${capS} s cap (STAMP_SUITE_CAP_S). Processes under it:`,
-    ), capS * 1000);
-  };
-  // The proof's cap counts from the fixture's pid file, so a slow start cannot read red early.
-  if (process.env[HANG]) {
-    const t0 = Date.now();
-    const wait = setInterval(() => {
-      if (existsSync(process.env[HANG]) || Date.now() - t0 > 30_000) { clearInterval(wait); if (!over) arm(); }
-    }, 50);
-    wait.unref();
-  } else arm();
-  child.on("close", (code) => finish(code ?? 1));
-  // An exit with no close means a process the suite started still holds its output.
-  child.on("exit", (code) => {
-    clearTimeout(timer);
-    setTimeout(() => stopTree(`FAIL - the suite exited ${code}, but a process it started still holds its output:`), 5000).unref();
-  });
-  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => stopTree(`Stopped by ${sig}. Processes under the suite:`));
+    let rep = null;
+    try { rep = JSON.parse(run.stdout); } catch {}
+    assert.ok(rep, `the helper printed no report\n${run.stdout}${run.stderr}`);
+    const { code, signal, closed, out } = rep;
+    // Scope first: the escape fixture ran, passed, and wrote both pids, so a sleeper existed.
+    assert.equal(found.pids.length, 2, `the escape fixture wrote no pid file, so no sleeper was started\n${out}`);
+    assert.match(out, /ok - hang fixture \(escape\)/, `the escape fixture did not pass\n${out}`);
+    // Pipes first: output read before they close is partial, and the checks below would mislead.
+    assert.equal(closed, true, `the suite's output pipes did not close within ${ESCAPE_CAP_S + 30} s: a process still holds them\n${out}`);
+    assert.notEqual(code, 0, `the suite exited ${code ?? `on signal ${signal}`} while a process it started still ran: no failure was reported\n${out}`);
+    assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite's output does not name the leftover sleeper pid ${found.pids[1]}\n${out}`);
+    assert.deepEqual(found.left, [], `the sleeper is still running after the suite ended: ${found.left}\n${out}`);
+  }));
+
+// A run that leaves nothing, and a process that exits inside the grace, both end green: they guard
+// against a false alarm, a leftover that is not one. Both read the hang fixture's pid file, so the
+// watchdog arms on it as it does for the other fixtures. A file, not a pipe, takes the output.
+function watchdogRun(env, dir) {
+  const outFile = join(dir, "out.txt");
+  const fd = openSync(outFile, "w");
+  let r;
+  try {
+    r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 120_000 });
+  } finally {
+    closeSync(fd);
+  }
+  return { status: r.status, out: readFileSync(outFile, "utf8") };
 }
+
+test("watchdog: a command that exits fast and leaves nothing exits 0 and names no leftover", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "clean" };
+    delete env[CHILD];
+    let r, found;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      found = leftovers(pidFile);
+    }
+    assert.equal(found.pids.length, 2, r.out); // scope: the fixture ran and wrote its pids
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+  }));
+
+test("watchdog: a detached child that exits inside the 3 s grace is no leftover, so the run exits 0", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace" };
+    delete env[CHILD];
+    let r, found;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      found = leftovers(pidFile);
+    }
+    assert.equal(found.pids.length, 2, r.out); // scope: the fixture ran, and its child was started
+    assert.match(r.out, /ok - hang fixture \(grace\)/, r.out);
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+  }));
+
+// Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
+// not pass on the tree walk alone. STAMP_SUITE_NO_JOB=1 makes the job assignment fail: the builder must
+// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. Windows red: unmeasured. On Linux
+// this case returns at once, so its ok line is no evidence of anything.
+test("watchdog, CI on Windows: no Job Object fails the run with a line starting FAIL - no job object", () => {
+  if (POSIX) return;
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, GITHUB_ACTIONS: "true", STAMP_SUITE_NO_JOB: "1", STAMP_SUITE_CAP_S: "60",
+      [HANG]: pidFile, [HANG_KIND]: "clean" };
+    delete env[CHILD];
+    let r;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      leftovers(pidFile); // reaps anything the run left, so nothing outlives the test
+    }
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^FAIL - no job object/m, r.out);
+  });
+});
 
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
-if (process.env[CHILD] !== "1") watchdog();
+if (process.env[CHILD] !== "1") {
+  watchdog({ self: SELF, ci: CI, tempPrefix: TEMP_PREFIX }).catch((e) => {
+    console.error(`FAIL - the watchdog itself threw, so the suite's processes were not checked:\n${e.stack ?? e}`);
+    process.exitCode = 1;
+  });
+}
 else {
   const run = process.env[HANG] ? [hangFixture(process.env[HANG_KIND] ?? "hold")] : tests;
   let failed = 0;
+  waitForGo();
   for (const { name, fn } of run) {
     console.log(START + name); // the watchdog reads this to name a hung test
     try {
