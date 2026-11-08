@@ -57,14 +57,22 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             states what code does or does not do: a code subject (a noun such as tool, ledger, script, hook, guard,
             check, or one source file) and a behaviour verb (reads, writes, prints, calls, refuses, counts, runs,
             checks; also after never, only, or does not). It passes when it cites `file.py` `name`, (file.py name) or
-            a test node id, as STALE002 reads them, and each cited name is bound in that file at head (`names_in`).
-            A cite to a name or file absent at head is reported as dead. A cite to a .mjs, .js, .cjs, .ts or .sh file
-            prints the unknown form of STALE002. Paragraphs, sentences and the mark come from STALE005. It prints as
+            a test node id, as STALE002 reads them, or a .mjs, .js, .cjs, .ts or .sh file (the unknown form of
+            STALE002). A dead cite is no missing cite: STALE010 judges it, and STALE009 reports only a code claim
+            with no cite. Paragraphs, sentences and the mark come from STALE005. It prints as
             `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
             source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
+  STALE010  (range mode only, a finding) a line the range ADDS to governed Markdown that cites a Python name in a STALE002
+            form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
+            not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
+            prose, as for STALE002. It fires on a line the range adds, never on a line it only moved or left, and not
+            in --tree mode. It leaves a cite of a path the range removed or renamed to STALE001 and a name the range
+            unbound to STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .js, .cjs, .ts or .sh
+            file keeps the unknown line. A cited .py that does not parse at head is one unknown line, no finding.
+            A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008, STALE010). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
 change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
@@ -103,7 +111,11 @@ when a row id is gone it also lists the tree once and reads each tracked .md onc
 A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
-look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+look for. STALE010 starts no process of its own. It reads the added lines the one diff already carries, and for each .py file an
+added line cites, one blob at head through the same `cat-file`, once per range (one `git cat-file` read per cited .py
+file). That `cat-file` opens only when an added line cites a .py file, and no Markdown blob is read. CostTests pins no
+range that adds such a cite, so no test pins the starts for one; the ranges it does pin add none and keep their counts.
+A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
 whose added lines hold a value cite of a .py, .mjs, .js, .cjs, .ts or .sh file, found from the diff already read. Such a
@@ -138,6 +150,7 @@ import route_match  # noqa: E402  the one home of the route rows file's path (ho
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
+CODE_NAME_CITE = "STALE010"  # a dead Python name cite on an added line (`dead_name_cites`)
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
@@ -525,7 +538,8 @@ class Range:
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
-        self.bound_names = {}  # path -> names bound at head (CodeClaimReader), read once
+        self.bound_names = {}  # path -> names bound at head (`head_names`), read once
+        self.removed_names = {}  # file at base -> names the range unbound there (NameReader.prepare)
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
@@ -580,6 +594,7 @@ class NameReader:
                                     % (path, " and ".join(bad)))
             elif before - after:
                 removed_names[path] = before - after
+        rng.removed_names = removed_names  # STALE010 leaves these names to STALE002
         return removed_names or None
 
     def line(self, state, text, claimed):
@@ -1196,10 +1211,61 @@ CODE_CLAIM = re.compile(
 CODE_VERB_WORD = re.compile(r"\b(?:%s)\b" % "|".join(BEHAVIOUR_VERBS + PRESENT_VERBS), re.I)  # the loose pre-check
 
 
+NO_FILE = ()  # `head_names` answer for a file absent at head; an empty file gives an empty set
+
+
+def head_names(rng, path):
+    """The names `path` binds at head (`names_in`), NO_FILE for a file absent at head, or None when it does not parse.
+    Read once per path through the one `cat-file` and cached on `rng.bound_names`."""
+    if path not in rng.bound_names:
+        blob = rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path)))
+        if blob is None:
+            rng.bound_names[path] = NO_FILE
+        else:
+            names = names_in(blob.decode("utf-8", "replace"))
+            if names is None:
+                rng.unknowns.append("%s does not parse at head; cites of its names were not checked" % path)
+            rng.bound_names[path] = names
+    return rng.bound_names[path]
+
+
+def python_cites(text):
+    """[(path, name)] of each Python name a line cites in a STALE002 form or as a test node id, in line order."""
+    cites = [(m.start(), m.group(1), m.group(2)) for pair in PAIR_RES for m in pair.finditer(text)]
+    for node in NODE_RE.finditer(text):
+        cites += [(node.start(), node.group(1), name) for name in node.group(2).split("::")]
+    return [(path, name) for _, path, name in sorted(cites, key=lambda c: c[0])]
+
+
+def dead_name_cites(rng):
+    """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
+    governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
+    or renamed is STALE001's, and a name the range unbound is STALE002's. Fenced lines count as prose, as for STALE002.
+    The blobs come from the one `cat-file`, and only for a line that cites a .py file."""
+    found, excludes = {}, exclude_patterns(".")
+    gone = set(rng.removed) | set(rng.renamed)
+    for md in sorted(rng.added_lines):
+        if not governed(md, excludes):
+            continue
+        for number, line in rng.added_lines[md]:
+            if ".py" not in line or ("ste-disable-line" in line and CODE_NAME_CITE in disabled(line)):
+                continue
+            for path, name in python_cites(line):
+                names = None if path in gone else head_names(rng, path)
+                if names is None or name in names or name in rng.removed_names.get(path, ()):
+                    continue
+                message = "cites %s %s, %s" % (path, name, "a file absent at head" if names is NO_FILE
+                                                else "a file with no such name at head")
+                if message not in found.setdefault((md, number, CODE_NAME_CITE), []):
+                    found[(md, number, CODE_NAME_CITE)].append(message)
+    return found
+
+
 class CodeClaimReader(RouteClaimReader):
     """STALE009: a sentence an added line of a decision record states about what code does or does not do (a code
     subject and a behaviour verb) and that cites no name bound at head. A cite is STALE002's: "`file.py` `name`",
-    "(file.py name)" or a test node id. A cite of a .mjs, .js, .cjs, .ts or .sh file is read as unknown. Report only
+    "(file.py name)" or a test node id. A cite of a .mjs, .js, .cjs, .ts or .sh file is read as unknown. A cite whose
+    name is gone is no missing cite here: STALE010 fails it. Report only
     (decision source-prose-lint-ships-dark). Paragraphs, sentences and the disable mark are RouteClaimReader's."""
     code = "STALE009"
 
@@ -1221,43 +1287,15 @@ class CodeClaimReader(RouteClaimReader):
     def states_claim(self, outside, route):
         return bool(CODE_CLAIM.search(outside))
 
-    def bound(self, rng, path):
-        """The names `path` binds at head, [] for a file absent at head, or None when it does not parse."""
-        if path not in rng.bound_names:
-            blob = rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path)))
-            if blob is None:
-                rng.bound_names[path] = []
-            else:
-                names = names_in(blob.decode("utf-8", "replace"))
-                if names is None:
-                    rng.unknowns.append("%s does not parse at head; cites of its names were not checked" % path)
-                rng.bound_names[path] = names
-        return rng.bound_names[path]
-
     def judge(self, rng, sentence, rows_at_head, where=None):
-        cites = [(m.group(1), m.group(2)) for pair in PAIR_RES for m in pair.finditer(sentence)]
-        for node in NODE_RE.finditer(sentence):
-            cites += [(node.group(1), name) for name in node.group(2).split("::")]
+        cites = python_cites(sentence)
         for pair in FOREIGN_PAIR_RES:
             for m in pair.finditer(sentence):
                 note = "%s:%d: %s %s: JavaScript and shell names are not checked" % (where + (m.group(1), m.group(2)))
                 if note not in rng.unknowns:
                     rng.unknowns.append(note)
-        dead, unchecked, backed = [], False, False
-        for path, name in cites:
-            names = self.bound(rng, path)
-            if names is None:
-                unchecked = True
-            elif name in names:
-                backed = True
-            else:
-                dead.append("%s %s, %s" % (path, name, "a file with no such name at head" if names else "a file absent at head"))
-        if dead:
-            return "cites %s" % "; ".join(dead)
-        if backed or unchecked:
-            return None
-        if any(True for pair in FOREIGN_PAIR_RES for _ in pair.finditer(sentence)):
-            return None
+        if cites or any(True for pair in FOREIGN_PAIR_RES for _ in pair.finditer(sentence)):
+            return None  # a cite, live or dead, is no missing cite: STALE010 judges a dead one
         return "states what code does or does not do with no cite; cite `file.py` `name` or (file.py name), a name bound at head"
 
 
@@ -1331,6 +1369,7 @@ def find_stale(rng):
     active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
               for state in [r.prepare(rng)] if state is not None]
     judges = [(r, state) for r, state in active if not getattr(r, "unknown", False)]
+    found.update(dead_name_cites(rng))
     if not judges:
         return found  # an unknown line never starts the Markdown read
 
