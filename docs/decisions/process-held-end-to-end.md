@@ -117,12 +117,12 @@ Audit claims with no step or note in this record. The owner's orchestrator decid
 Stale-decision protocol (rule `outcomes-stale-decision-protocol`: name the record and sentence, measure or say unmeasured, name the outcome and what protects it, propose a fix, wait for the grant). Not a step. Answered: owner pick a, page item 382, 21:26 CST 2026-11-07, with `docs/decisions/pr-review-record.md` Q1 rewritten to match. In build (PR #1871, not on main): `merge-unreviewed-head`.
 
 - Record: `docs/decisions/pr-review-record.md`, Q1 in Lane picks (whether preview or confirm refuses a PR with no valid record). Q1 now reads pick a, as the owner rewrote it at 21:26 CST 2026-11-07 (page item 382). The coordinator answered at 23:14. The record gives no date.
-- Departs from: that Q1 pick a. Ruling 113 a reads "The batch runner finds reviewed, green PRs itself. No merge message." It names no refusal (rule `outcomes-grant-covers-named-act`: a grant covers the act it names). Ruling 113 a: owner, 2026-11-01 04:26 CST, waiting-page item 113 a.
+- Departs from: that Q1 pick a. Ruling 113 a reads "Each PR carries a review record. The batch runner finds reviewed, green PRs itself. No merge message." It names no refusal (rule `outcomes-grant-covers-named-act`: a grant covers the act it names). Ruling 113 a: owner, 2026-11-01 04:26 CST, waiting-page item 113 a.
 - Links: 7, 9, 11 and 13.
 - Incidents since: PR #1683 (PASS claimed for heads no reviewer read). Five hand-written records (PRs #1494, #1506, #1597, #1667, #1668).
 - Outcome Q1 protected: unmeasured. The record names no outcome.
 - Measured: no. The audit does not count lane tips merged with no done record.
-- What protects it now: `refuse_owed_round` refuses it at confirm (in build, PR #1871, not on main). `merge --reviewed` lists each PR's state and CI, and refuses no merge. Once landed: `review-record-provenance`, `review-record-from-render` (PR #1601), `review-record-needs-reviewer`.
+- What protects it now: `refuse_owed_round` refuses it at confirm (in build, PR #1871, not on main). `merge --reviewed` lists the state and CI of each PR that has a record, and refuses no merge. Once landed: `review-record-provenance`, `review-record-from-render` (PR #1601), `review-record-needs-reviewer`.
 - Fix (in build, PR #1871, not on main): `merge confirm` refuses a lane tip whose `review_state` is not `done` for that exact head (`merge/merge.py:review_state`). Q2 (`docs/decisions/pr-review-record.md`, Lane picks) counts round 3 as done, whatever its verdict, so the key is `done`, not PASS. Done check: a red test where a lane head whose `review_state` is not `done` is refused, then green.
 - Grant given: owner pick a, page item 382, 21:26 CST 2026-11-07 (links 7, 9, 11 and 13; in build, `merge-unreviewed-head`, PR #1871, not on main).
 
