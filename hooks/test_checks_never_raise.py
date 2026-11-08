@@ -15,22 +15,41 @@ attribute (`question_form.page_item_hit`, for one). A call that resolves to no h
 the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
 Each check gets COUNT seeded random command strings per env shape (one stream per check and shape, seed
-SEED), built from shell and PowerShell characters and fragments, plus fixed edge inputs. Each input carries one tool:
-two of every three are Bash or PowerShell, the others go round the rest. A payload carries the keys
-of every tool's shape, filled with random strings, with typed values where a string reaches
+SEED), built from shell and PowerShell characters, digits and fragments, plus fixed edge inputs. Fragments hold
+CONFIG_TOKEN where the config dir's settings path goes, and run_checks swaps in the run folder when it hands an
+input to a check, so the drawn text is the same on every run. A share of the inputs opens with a kill of one
+pid (`kill <pid>` or `kill -9 <pid>`, the pid 0, 1, -1 or random digits), the act that reaches pid_is_owned. A share
+of the payloads holds a well-formed decision item in `data`, and another share holds a workflow step (continue-on-error)
+ahead of the text in `content` and `new_string`, with `old_string` empty: the step rides on every tool, not only a Write
+or an Edit. Each input carries one tool: two of every three are Bash or PowerShell, the others go round the rest.
+A payload carries the keys of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
 permissionDecision on stdout. Any other exit, and any raise, is a failure.
 
 Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the
-real config. PATH is an empty folder, so git and gh are absent and every read fails as on a machine
-without them. The parsers of git and gh output are not fuzzed here.
+real config. PATH is an empty folder, so git, gh and ps are absent and every read fails as on a machine
+without them. CLAUDE_GUARD_ROOT_PID pins the session root, so a kill reaches its pid read. The checks that
+reach the session root (session_root_pid) run a second pass with the pin unset: the walk finds no root, so
+foreign_pid_kill takes its no-root return.
+
+Not fuzzed: the parsers of git, gh and ps output. The parent walk of pid_is_owned past its first read
+(ps never answers, so it returns at once). The parent walk of session_root_pid past its first read (ps never
+answers, so the walk returns 0 at once and its loop over each parent's name never runs). The rest of
+in_own_agent_worktree past its first line (ps never answers, so it returns False at once, and its cwd read and
+transcript-folder check never run). The rest of foreign_pid_kill past pid_is_owned: _under_init, holds_session_tag
+and the refusal after them (pid_is_owned never says False with ps absent). The git-backed commit reads:
+own_changes returns None without git, so diff_violation stops before role_offences, and no input here reaches
+role_offences.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
 remote_session_id, and the trust-card check under a session id) run only under the shape that reaches them.
+Each shape also runs the session-root checks once more with the root pin unset.
 
 Fixtures: CHECKOUT is a plain folder. PAGE_CHECKOUT is a repository root (a .git folder) whose extras file
-names a waiting page, so the item checks and the workflow check run on a real path. fixture_proof asserts
+names a waiting page, so the item checks and the workflow check run on a real path. CONFIG is also the
+pointer checkout: its CLAUDE.md names it, and it holds the role table and an agents folder with one role
+file, so the role checks read real files. fixture_proof asserts
 that each fixture reaches its check, so a moved key or path fails by name instead of leaving the fuzz blind.
 
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
@@ -59,7 +78,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  the one home of the run folder (decision test-temp-standard)
 
 SEED = "checks-never-raise"
-COUNT = 1000   # random inputs per check and env shape, on top of the fixed edge inputs below (both shapes: ~65 s)
+COUNT = 1000   # random inputs per check and env shape, on top of the fixed edge inputs below
 GUARD = "guard"
 DISPATCH = ("judge_shell", "judge")      # the two entry points the guard's PreToolUse hook runs
 TOOL_VARIABLES = ("tool", "tool_name")   # the names judge's branches compare a tool by
@@ -83,10 +102,17 @@ CHECKOUT = os.path.join(RUN, "checkout")    # a plain folder, not a repository
 PAGE_CHECKOUT = os.path.join(RUN, "page-checkout")   # a repository root whose waiting page is PAGE_URL
 PAGE_URL = "https://claude.ai/artifact/fuzzpage"
 WORKFLOW_TARGET = ".github/workflows/ci.yml"    # a workflow file: guard.workflow_builder_refused judges its edits
+WORKFLOW_STEP = ("      - name: test\n"          # a step that runs a test and passes anyway: a builder may not add it
+                 "        run: pytest\n"
+                 "        continue-on-error: true\n")
 REMOTE_ID = "cse_fuzz01"   # the lane id a cloud session names in CLAUDE_CODE_REMOTE_SESSION_ID (override.LANE_ENV)
+ROOT_PID = "9999"          # the session root the kill checks read (guard_kill.session_root_pid, the test hook)
+ROOT_ENV = "CLAUDE_GUARD_ROOT_PID"   # the env var that pins that root
+ROOT_READER = ("guard_kill", "session_root_pid")   # the one read of the root; checks that reach it also run unpinned
 TRANSCRIPT = os.path.join(RUN, "transcript.jsonl")
 EMPTY_TRANSCRIPT = os.path.join(RUN, "empty.jsonl")
 MISSING_TRANSCRIPT = os.path.join(RUN, "missing.jsonl")
+SETTINGS_PATH = os.path.join(CONFIG, "settings.json")   # a settings file in the config dir: guard_frozen judges writes to it
 for folder in (CONFIG, NO_TOOLS, CHECKOUT, os.path.join(PAGE_CHECKOUT, ".git")):
     os.makedirs(folder)
 import layout  # noqa: E402  the one home of the layout and of the waiting-page key (lint/layout.py)
@@ -99,23 +125,44 @@ with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
 os.environ["CLAUDE_CONFIG_DIR"] = CONFIG
 os.environ["PATH"] = NO_TOOLS
+os.environ[ROOT_ENV] = ROOT_PID
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
+import guard_kill  # noqa: E402  the kill checks and the session root (hooks/guard_kill.py)
 import guard_shared_tree  # noqa: E402  the shared-tree verbs (hooks/guard_shared_tree.py)
 import override  # noqa: E402  the lane id a session env names (hooks/override.py)
 import question_form  # noqa: E402  the ArtifactData item shape (hooks/question_form.py)
 import shared_names  # noqa: E402  the one home of the markers a spawn shape carries
 
+# The pointer checkout is the config dir: its CLAUDE.md names it (guard_pointer.POINTER_LINE), and it holds the role
+# table in the decisions folder and an agents folder with one role file, so role_model_table, role_name and
+# role_agent_keys read real files (decision agent-model-cap).
+ROLE_TABLE = ("| Role | Model | Effort |\n| --- | --- | --- |\n| builder | opus | high |\n"
+              "| reviewer | sonnet | high |\n| Explore | haiku | xhigh |\n")
+DECISIONS = os.path.join(CONFIG, *layout.layout()["kinds"]["decisions"]["path"].split("/"))
+os.makedirs(os.path.join(CONFIG, "agents"))
+os.makedirs(DECISIONS)
+with open(os.path.join(CONFIG, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+    handle.write("@%s/CLAUDE.md\n" % CONFIG.replace(os.sep, "/"))
+with open(os.path.join(DECISIONS, guard.ROLE_TABLE_FILE), "w", encoding="utf-8") as handle:
+    handle.write(ROLE_TABLE)
+with open(os.path.join(CONFIG, "agents", "builder.md"), "w", encoding="utf-8") as handle:
+    handle.write("---\nname: builder\nmodel: opus\n---\n\nThe builder role.\n")
+
 HOOK_MODULES = frozenset(os.path.splitext(name)[0] for name in os.listdir(HERE) if name.endswith(".py"))
 
-CHARS = "${}()[]=;'\"`|&<> \n$-*?"
+CHARS = "${}()[]=;'\"`|&<> \n$-*?0123456789"
+CONFIG_TOKEN = "{config}"   # where the config dir's path goes in a drawn fragment; run_checks swaps in CONFIG
+SETTINGS_FRAGMENT = CONFIG_TOKEN + os.sep + "settings.json"   # SETTINGS_PATH with the run folder held back
+KILL_SHARE = 0.25   # the share of inputs that open with a kill of one pid: the act that reaches pid_is_owned
 FRAGMENTS = (
     "git ", "env:GIT_DIR", "rm -rf", "wsl -e", "pwsh -Command", "sh -c", "<<EOF", "$(", "${",
     "${X:?", "git push --force", "git stash", "git worktree remove", "xargs kill", "pgrep x | ",
     "lsof -t", "gh pr merge", "cd ", "&& ", "| ", "'", '"', "`", "\\", "\n", "-Command ",
     "Remove-Item ", "$env:", "kill -9 ", "git -C ", "--force-with-lease", "node -e ",
     "git reset --hard", "git clean -fd", "git checkout -- x", "git restore", "git switch", WORKFLOW_TARGET,
+    SETTINGS_FRAGMENT, "> " + SETTINGS_FRAGMENT,
 )
 WEIGHTED = ("${", "$(", "'", '"', "<<EOF", "${X", "`")   # the incident class, drawn more often
 LONG = "sh -c \"git stash ${X:-$(pwd)} | rm -rf '\" <<EOF\n" * 80   # several KB, unclosed quotes and expansions
@@ -152,10 +199,21 @@ CALLABLES = {"record_branch_of": guard.record_branch_of, "read_verb": guard.read
              "predicate": _predicate}
 
 
+def kill_fragment(rng):
+    """`kill <pid>` or `kill -9 <pid>`: a kill of one pid. The pid is 0, 1 or -1, which foreign_pid_kill returns at once
+    (-1 reads as a pid only after a signal flag, so `kill -9 -1`), or a random pid that pid_is_owned judges once the
+    session root is read. Everything comes from rng, so the draw is the same on every run."""
+    pid = rng.choice((0, 1, -1, rng.randint(2, 99999)))
+    return rng.choice(("kill ", "kill -9 ")) + str(pid) + rng.choice((" ", "; "))
+
+
 def draw_text(rng):
-    """A random command string: mostly short, sometimes several hundred characters."""
+    """A random command string: mostly short, sometimes several hundred characters. A share opens with a kill of one pid."""
     limit = rng.randint(0, 400) if rng.random() < 0.1 else rng.randint(0, 60)
     parts, size = [], 0
+    if rng.random() < KILL_SHARE:
+        parts.append(kill_fragment(rng))
+        size = len(parts[0])
     while size < limit:
         roll = rng.random()
         if roll < 0.35:
@@ -169,11 +227,23 @@ def draw_text(rng):
     return "".join(parts)
 
 
-class Env:
-    """The per-call context that is not the command string: tool, folders, session, transcript, role."""
+def decision_item(text):
+    """A well-formed decision item whose Goal holds `text`. Its form lines and option effects pass, so each check
+    reaches the Departs from line (question_form.departs_hit), whose change side holds no `;`."""
+    goal = " ".join(text.split()) or "x"
+    return {"kind": "decision",
+            "context": "Goal: %s\nProblem (goal): why the owner judges it\nBased on (read): one premise\n"
+                       "Departs from: main — adds a check" % goal,
+            "options": [{"label": "a", "gain": "saves time", "lose": "one more check"}]}
 
-    def __init__(self, rng, tool):
+
+class Env:
+    """The per-call context that is not the command string: tool, folders, session, transcript, role. `template` is
+    the drawn text before run_checks swaps the run folder in, so a bound drawn from it does not move with the path."""
+
+    def __init__(self, rng, tool, template):
         self.tool = tool
+        self.template = template
         self.cwd = rng.choice((RUN, CHECKOUT, CHECKOUT, PAGE_CHECKOUT, PAGE_CHECKOUT))
         self.session = rng.choice(("", "sess-1"))
         self.transcript = rng.choice((TRANSCRIPT, EMPTY_TRANSCRIPT, MISSING_TRANSCRIPT, ""))
@@ -209,6 +279,11 @@ def tool_input_for(tool, rng, text, env):
         tool_input["action"] = rng.choice(question_form.ITEM_OPS)
     if rng.random() < 0.5:
         tool_input["data"] = {"question": text, "options": [{"key": rng.choice(("a", "b", "none")), "label": text}]}
+    if rng.random() < 0.3:   # a well-formed decision item: the form passes, so the checks past the form run
+        tool_input["data"] = decision_item(text)
+    if rng.random() < 0.3:   # a Write or an Edit that adds a workflow step: the old text is empty, the new holds it
+        tool_input["old_string"] = ""
+        tool_input["content"] = tool_input["new_string"] = WORKFLOW_STEP + text
     return tool_input
 
 
@@ -256,7 +331,7 @@ def value_for(fn, name, param, rng, text, env, state):
     if name == "number":
         return rng.randrange(len(state("segments")))
     if name == "before":
-        return rng.randint(0, len(text))
+        return rng.randint(0, len(env.template))
     if name == "depth":
         return rng.randint(0, 2)
     if name in BOOL_NAMES or annotation == "bool":
@@ -354,9 +429,10 @@ def run_checks(checks, count, tools, shape=""):
         rng = random.Random("%s:%s:%s" % (SEED, shape, label))
         inputs = EDGE + [draw_text(rng) for _ in range(count)]
         bad = []
-        for index, text in enumerate(inputs):
+        for index, drawn in enumerate(inputs):
+            text = drawn.replace(CONFIG_TOKEN, CONFIG)   # the run folder enters here only, so the draws match on every run
             tool = tool_for(index, shells, others)
-            env = Env(rng, tool)
+            env = Env(rng, tool, drawn)
             guard_core.POWERSHELL_CALL[0] = tool == "PowerShell"
             try:
                 if mode == "judge":
@@ -365,7 +441,7 @@ def run_checks(checks, count, tools, shape=""):
                 else:
                     call = (fn, (), build_kwargs(fn, rng, text, env))
             except Exception as exc:  # a harness defect, reported as such: never a silent pass
-                bad.append((text, tool, "input builder raised " + describe(exc)))
+                bad.append((drawn, tool, "input builder raised " + describe(exc)))
                 continue
             out = io.StringIO()
             try:
@@ -373,9 +449,9 @@ def run_checks(checks, count, tools, shape=""):
                     call[0](*call[1], **call[2])
             except SystemExit as exc:
                 if not refusal_printed(out.getvalue()):
-                    bad.append((text, tool, "exit %r with no refusal on stdout" % (exc.code,)))
+                    bad.append((drawn, tool, "exit %r with no refusal on stdout" % (exc.code,)))
             except Exception as exc:
-                bad.append((text, tool, describe(exc)))
+                bad.append((drawn, tool, describe(exc)))
         if bad:
             failures.append((label, len(bad), len(inputs), sorted({row[1] for row in bad}), bad[0]))
     return failures
@@ -459,6 +535,33 @@ def pinned_env(values):
                 os.environ[name] = value
 
 
+@contextlib.contextmanager
+def root_unpinned():
+    """Unset ROOT_ENV, so session_root_pid walks the process tree. With ps absent the walk finds no root and reads 0."""
+    before = os.environ.pop(ROOT_ENV, None)
+    try:
+        yield
+    finally:
+        if before is not None:
+            os.environ[ROOT_ENV] = before
+
+
+def calls_pid_is_owned(run):
+    """True when `run()` calls guard_kill.pid_is_owned. The real function still answers, and the wrap is undone on exit."""
+    calls, real = [], guard_kill.pid_is_owned
+
+    def recording(pid, root):
+        calls.append(pid)
+        return real(pid, root)
+
+    guard_kill.pid_is_owned = recording
+    try:
+        run()
+    finally:
+        guard_kill.pid_is_owned = real
+    return bool(calls)
+
+
 def _probe(problems, cause, probe):
     """Run one reach probe. A False result or a raise is a problem named by `cause`: a raise is the check failing, so
     it is reported here and the fuzz still runs."""
@@ -490,6 +593,30 @@ def fixture_proof():
                lambda: override.remote_session_id() == expected)
         _probe(problems, "CLAUDE_CODE_REMOTE=true, yet is_cloud() is false (the CLAUDE_CODE_REMOTE read moved)",
                guard_core.is_cloud)
+    _probe(problems, "CLAUDE_GUARD_ROOT_PID is pinned, yet session_root_pid() reads no root (the root hook moved)",
+           lambda: guard_kill.session_root_pid() == int(ROOT_PID))
+    with root_unpinned():
+        _probe(problems, "CLAUDE_GUARD_ROOT_PID is unset, yet session_root_pid() reads a root with ps absent (the walk "
+                         "moved): the no-root return of foreign_pid_kill is not reached",
+               lambda: guard_kill.session_root_pid() == 0)
+    _probe(problems, "a kill of one pid under the pinned root does not reach pid_is_owned (the kill path of "
+                     "foreign_pid_kill moved, or the root read did)",
+           lambda: calls_pid_is_owned(lambda: guard_kill.foreign_pid_kill(tokens_of("kill 4242"))))
+    _probe(problems, "a drawn fragment holds the run folder's name, so the drawn inputs differ on each run "
+                     "(CONFIG_TOKEN moved, or a fragment takes RUN)",
+           lambda: not any(os.path.basename(RUN) in piece for piece in [*FRAGMENTS, *CHARS, *WEIGHTED, *EDGE]))
+    _probe(problems, "CONFIG's CLAUDE.md names no pointer checkout (POINTER_LINE or the config dir moved)",
+           lambda: guard.pointer_checkout() == os.path.normcase(os.path.realpath(CONFIG)))
+    _probe(problems, "CONFIG's decisions folder holds no builder row (the layout decisions path or ROLE_TABLE_FILE moved)",
+           lambda: (guard.role_model_table(CONFIG) or {}).get("builder") == "opus")
+    _probe(problems, "CONFIG's agents folder yields no builder role (role_agent_keys or the agents folder moved)",
+           lambda: any(keys.get("name") == "builder" for keys in guard.role_agent_keys(CONFIG)))
+    _probe(problems, "the decision item's form lines refuse it, so the Departs from check never runs (the form moved)",
+           lambda: question_form._lines_hit(decision_item("x")["context"]) == question_form.PASS)
+    _probe(problems, "WORKFLOW_STEP's continue-on-error line is no disabling step (WORKFLOW_DISABLE_STEP moved)",
+           lambda: guard.workflow_step_disables("        continue-on-error: true"))
+    _probe(problems, "SETTINGS_PATH is no settings file (the settings basenames moved)",
+           lambda: guard.is_settings_file(SETTINGS_PATH, CONFIG))
     return problems
 
 
@@ -634,6 +761,19 @@ def dispatch():
     return set(direct), reads, missing, outside
 
 
+def reaches(key, target):
+    """True when the hook function `key` calls `target`, directly or through the hook functions it calls."""
+    queue, seen = [key], set()
+    while queue:
+        node = queue.pop()
+        if node == target:
+            return True
+        if node not in seen:
+            seen.add(node)
+            queue.extend(_edges(node[0], _function_node(*node))[0])
+    return False
+
+
 def _callable(key):
     module, name = key
     return getattr(importlib.import_module(module), name)
@@ -716,18 +856,29 @@ def main():
             if required not in tools:
                 print("FAIL tool %s is not among the discovered tools: the branch reading is broken" % required)
                 return 1
-        checks = [("%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
-        checks.append(("judge (end to end)", guard.judge, "judge"))
+        keyed = [(key, "%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
+        keyed.append(((GUARD, "judge"), "judge (end to end)", guard.judge, "judge"))
+        checks = [check[1:] for check in keyed]
+        root_checks = [check[1:] for check in keyed if reaches(check[0], ROOT_READER)]
+        if not root_checks:
+            print("FAIL no check reaches %s.%s: the root reading is broken" % ROOT_READER)
+            return 1
         failing = 0
         for shape, values in SHAPES:
             with pinned_env(values):
                 failures = run_checks(checks, COUNT, tools, shape)
-            report(failures, shape)
-            failing += len(failures)
+                report(failures, shape)
+                failing += len(failures)
+                with root_unpinned():
+                    unpinned = shape + ", root unpinned"
+                    failures = run_checks(root_checks, COUNT, tools, unpinned)
+                report(failures, unpinned)
+                failing += len(failures)
         elapsed = time.monotonic() - started
-        print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d inputs each per shape "
-              "(%d random + %d edge), %d failing rows, %.1f s"
-              % (len(direct), len(tools), len(SHAPES), COUNT + len(EDGE), COUNT, len(EDGE), failing, elapsed))
+        print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d root-reading checks also run "
+              "with the root unpinned, %d inputs each per pass (%d random + %d edge), %d failing rows, %.1f s"
+              % (len(direct), len(tools), len(SHAPES), len(root_checks), COUNT + len(EDGE), COUNT, len(EDGE),
+                 failing, elapsed))
         print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
                                                   for key, why in sorted(outside.items())))
         return 1 if failing or problems else 0
