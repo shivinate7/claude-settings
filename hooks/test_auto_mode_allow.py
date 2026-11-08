@@ -27,7 +27,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
-  one `--confirm` merge rule, and that command with the head flag read from merge/merge.py's argparse.
+  one `--confirm` merge rule with the head flag read from merge/merge.py's argparse.
   Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
@@ -267,10 +267,11 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
 
     def test_entry_quotes_the_merge_command(self):
         entry = self.relayed_merge_entry()
-        command = merge_command()
+        command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
-        self.assertIn("`%s`" % command, bounds_text(entry),
-                      "Covers text must quote the merge command in backticks")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
 
     def test_covers_names_the_coordinator_tag(self):
         entry = self.relayed_merge_entry()
@@ -304,14 +305,6 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
         missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
         self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
-
-    def test_entry_quotes_the_merge_command_with_the_head_flag(self):
-        entry = self.relayed_merge_entry()
-        command, flag = merge_command(), head_flag()
-        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
-        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the relayed head")
-        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
-                      "Covers text must quote the merge command with the head flag and <sha> for the relayed head")
 
     def test_never_covers_names_a_head_the_relay_did_not_name(self):
         clause = never_covers(self.relayed_merge_entry())

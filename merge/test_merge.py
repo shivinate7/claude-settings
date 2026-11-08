@@ -619,6 +619,20 @@ class ConfirmHead(Env):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(sent, [head], "the merge call did not carry the relayed head as its sha")
 
+    def test_a_claim_push_merges_the_claim_commit_on_the_relayed_head(self):
+        relayed = self.head()  # the pending record makes this run push a claim, so the head moves to the claim commit
+        sent = []
+        real = self.host.merge
+        self.host.merge = lambda n, m, sha: (sent.append(sha), real(n, m, sha))[1]
+        rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(sent), 1, out + err)
+        claim = sent[0]
+        self.assertNotEqual(claim, relayed, "the merge call got the relayed head, not the claim commit pushed on top of it")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", f"{claim}^"), relayed,
+                         "the merge call's sha is not the claim commit on the relayed head")
+
     def test_a_moved_head_is_refused_and_says_so(self):
         relayed = self.head()
         self.competitor_push()  # the head moves after the relay
