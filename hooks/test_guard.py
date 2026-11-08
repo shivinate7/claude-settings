@@ -5891,6 +5891,227 @@ for _label, _command in (
             command=_command, **({"run_in_background": True} if _bg else {}))
 
 
+# ------------------------------------------------------------------ wait-until: a wait for a clock time
+#
+# A session waits until a clock time, then runs one command. Under run_in_background a loop may wait on the
+# clock only when its one test orders `date` output against a literal time, in the direction that turns
+# false at that time: `until` with `>`, `-ge` or `-gt`, or `while` with `<`, `-lt` or `-le`. Such a loop
+# ends at that time, so it is a deadline and not a wait with no end. Equality, a second test, a second
+# loop, a poll of a file and the other direction never reach the time, so each stays refused. A pause of
+# 25 s or more is allowed under run_in_background only when a command follows it. The one helper for a
+# wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
+WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
+WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
+                         r'do sleep 15; done; node tool.mjs')
+
+# Allowed under run_in_background: a pause of 25 s or more when a command follows it, and a loop whose test
+# orders the clock against a literal in the direction that ends it. A quote, a `#` or a line break ahead of a
+# loop is text, so the scan still finds the loop.
+add("wait-until: a pause of 600 s, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command="sleep 600; node tool.mjs", run_in_background=True)
+add("wait-until: a clock loop, then one command, is allowed under run_in_background", "allow",
+    cwd=NOGIT, command=WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+add("wait-until: the same clock loop split over lines is allowed under run_in_background", "allow",
+    cwd=NOGIT, run_in_background=True,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \\> "2026-11-06T22:48:00" ]\ndo sleep 15; done\nnode tool.mjs')
+add("wait-until: a quote and a # ahead of the clock loop are text, and the loop is allowed under run_in_background",
+    "allow", cwd=NOGIT, command='echo "it\'s # fine"; ' + WAIT_UNTIL_CLOCK_LOOP, run_in_background=True)
+
+# Refused in these shapes, so a change to the clock rule cannot widen them: the clock loop in the foreground,
+# a pause in the foreground, two pauses, a loop with no clock bound, a loop that names the date only inside a
+# string, and gh run watch.
+sh("wait-until: the clock loop in the foreground stays refused", WAIT_UNTIL_CLOCK_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+sh("wait-until: a 30 s pause in the foreground stays refused", "sleep 30", "deny", "waiter", cwd=NOGIT)
+add("wait-until: two pauses under run_in_background stay refused", "deny", "waiter", cwd=NOGIT,
+    command="sleep 5; sleep 5; node tool.mjs", run_in_background=True)
+add("wait-until: a loop with no clock bound stays refused under run_in_background", "deny", "waiter",
+    cwd=NOGIT, command="until grep -q x f; do sleep 15; done", run_in_background=True)
+add("wait-until: a loop that names the date only inside a string stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until grep -q "date" f; do sleep 15; done; node tool.mjs',
+    run_in_background=True)
+for _bg in (False, True):
+    add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
+        "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
+
+# Refused under run_in_background. Each shape looks like a clock wait and is not one. Its test does not end the
+# loop at the named time: the other direction ends it at once, equality rarely holds, a poll of a file names no
+# time, and an extra test adds a condition. Or a second loop follows, or a long pause has no command after it.
+# Each case covers one check in clock_loop or waiter_verdict.
+add("wait-until: a loop on a literal time with no date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="until [ -s 2026-11-06T22:48:00 ]; do sleep 15; done; cmd", run_in_background=True)
+add("wait-until: a loop on date with no literal time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt "$X" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop whose test has a && clause after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ] && true; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: two clock loops in one command stay refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=(r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+             r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-07T00:00:00" ]; do sleep 15; done; cmd'),
+    run_in_background=True)
+add("wait-until: a bare sleep of 600 s with nothing after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="sleep 600", run_in_background=True)
+add("wait-until: a while loop that waits while the clock is later than a literal stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='while [ "$(date +%s)" -gt 1700000000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop that tests the date for equality stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%F)" = "2026-11-06" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop that polls a file for a dated name stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until grep -q "$(date +%F)" 2026-11-07.log; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop with an extra file test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt 1700000000 -a -f done.flag ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a clock loop then a second loop with no pause stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+            r'until [ -f x ]; do :; done; cmd',
+    run_in_background=True)
+# A read of another command is no clock read, even with a +%s format, so its order against an epoch never
+# reaches a clock time.
+add("wait-until: a loop on a read of another command with a +%s format stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT, command='until [ "$(clock +%s)" -gt 1762470000 ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop that tests the clock for equality with a full ISO time stays refused under "
+    "run_in_background", "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" = "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a loop written as an arithmetic test stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until (( $(date +%s) -gt 1762470000 )); do sleep 15; done; cmd',
+    run_in_background=True)
+# Each read and literal disagree in kind, so the test never turns and the loop never ends: `-gt` and `-ge` on a
+# text read are an error, not an order; a text order of epoch digits against an ISO time puts the digits first,
+# so `\>` never holds and `\<` always does.
+add("wait-until: a numeric order on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: a numeric order with -ge on an ISO date-time read stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: an ISO date-time read ordered numerically against an epoch stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order of an epoch read against an ISO time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%s)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a [[ ]] text order of an epoch read against an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [[ "$(date +%s)" > "2026-11-06T22:48:00" ]]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while text order of an epoch read below an ISO time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'while [ "$(date +%s)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+# A `for` loop is a loop of its own, so the command has two loops and the clock loop is not its one loop.
+add("wait-until: a clock loop with a command body, then a for loop with pauses, stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt 1762470000 ]; do cmd; done; for i in 1 2; do sleep 15; done',
+    run_in_background=True)
+# A numeric order needs an epoch read and an epoch literal; a text order needs an ISO read and an ISO literal.
+# Each pairing here crosses the two, so the test never turns and the loop never ends.
+add("wait-until: a numeric order on a +%s read against an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command='until [ "$(date +%s)" -gt "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a text order on an ISO read against an epoch stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+# A read whose time is not the clock reaches no clock time, whatever its format: a fixed date, a file's time, or a
+# text format that is not an ISO date-time.
+add("wait-until: a loop on a fixed date read with -d stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -d 2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a fixed date read with --date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date --date=2026-01-01 +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a file's time read with -r stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command='until [ "$(date -r stamp.txt +%s)" -gt 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop on a text format that is not an ISO date-time stays refused under run_in_background",
+    "deny", "waiter", cwd=NOGIT,
+    command=r'until [ "$(date +%m-%d)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+# Allowed under run_in_background: a numeric order of an epoch read, and a while loop that waits while the clock is
+# earlier than a literal. The order and the read agree in kind, so the test turns at the time it names.
+add("wait-until: a clock loop on an epoch that is reached is allowed under run_in_background", "allow",
+    cwd=NOGIT, command='until [ "$(date +%s)" -ge 1762470000 ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a while loop that waits while the clock is earlier than a literal is allowed under "
+    "run_in_background", "allow", cwd=NOGIT,
+    command=r'while [ "$(date -u +%FT%T)" \< "2026-11-06T22:48:00" ]; do sleep 15; done; cmd',
+    run_in_background=True)
+# The ISO formats a session writes for a text order, with and without the zone suffix and the -u flag.
+add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date -u +%FT%TZ)" \> "2026-11-06T22:48:00Z" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
+    command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
+
+# The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
+sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
+   carries=("`wait-until",))
+
+# The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
+# pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
+for _command in ("wait-until %s" % WAIT_UNTIL_TIME, "wait-until %s --timeout 500" % WAIT_UNTIL_TIME):
+    sh("wait-until: %s is allowed in the foreground" % _command, _command, "allow", cwd=NOGIT)
+    add("wait-until: %s is allowed under run_in_background" % _command, "allow", cwd=NOGIT,
+        command=_command, run_in_background=True)
+add("wait-until: the helper, then one command, is allowed under run_in_background", "allow", cwd=NOGIT,
+    command="wait-until %s; node tool.mjs" % WAIT_UNTIL_TIME, run_in_background=True)
+
+# THE REMEDY CHECK. Every command form that a waiter-family remedy names in backticks is allowed, in the
+# foreground and under run_in_background: the guard must not refuse the advice it gives. The remedies are read
+# from guard_stream, the one home of them. A form is tried with its optional `[...]` part and without it.
+WAIT_SAMPLES = {"PID": "12345", "SECS": "500", "TIME": WAIT_UNTIL_TIME, "T": WAIT_UNTIL_TIME}
+REMEDY_CONSTANTS = ("WAITER_REASON", "LIVE_STREAM_REASON", "PATTERN_POLLER_REASON")
+
+
+def remedy_forms(reason):
+    """The command forms a remedy names in backticks, each placeholder filled from WAIT_SAMPLES. A placeholder
+    with no sample is kept as `<NAME>`, so the check names it."""
+    forms = []
+    for span in re.findall(r"`([^`]+)`", reason):
+        for form in (re.sub(r"[\[\]]", "", span), re.sub(r"\s*\[[^\]]*\]", "", span)):
+            words = [WAIT_SAMPLES.get(w, "<%s>" % w) if re.fullmatch(r"[A-Z][A-Z_]*", w) else w
+                     for w in form.split()]
+            forms.append(" ".join(words))
+    return list(dict.fromkeys(forms))
+
+
+def remedy_refusal(form):
+    """'' when the guard allows `form` in the foreground and under run_in_background, else what it refused."""
+    for background in (False, True):
+        tool_input = {"command": form}
+        if background:
+            tool_input["run_in_background"] = True
+        got, reason = decide({"raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
+                              "env_path": None, "tool_input": tool_input})
+        if got != "allow":
+            return "%s%s is %s (%s)" % (form, " under run_in_background" if background else "", got, reason[:70])
+    return ""
+
+
+def remedy_check(constant):
+    """A log check: the remedy named by `constant` names at least one command form, every form is a placeholder
+    the check can fill, and the guard allows every form."""
+    def check():
+        import guard_stream  # the one home of the waiter-family remedies (hooks/guard_stream.py)
+        reason = getattr(guard_stream, constant, None)
+        if not isinstance(reason, str):
+            return False, "guard_stream has no %s to read the remedy from" % constant
+        forms = remedy_forms(reason)
+        if not forms:
+            return False, "%s names no command form in backticks, so the check reads nothing" % constant
+        unfilled = [f for f in forms if "<" in f]
+        if unfilled:
+            return False, "%s names a placeholder the check cannot fill: %s" % (constant, unfilled[0])
+        refused = [m for m in (remedy_refusal(f) for f in forms) if m]
+        if refused:
+            return False, "%s names a form the guard refuses: %s" % (constant, refused[0])
+        return True, "%s names %d command forms, and the guard allows each" % (constant, len(forms))
+    return check
+
+
 # =========================================================================== background end condition
 #
 # Owner ruling 2026-10-13 23:41 CDT, "End condition at start". A background server or watcher needs
@@ -14171,6 +14392,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The wait-until remedy checks are defined beside the wait-until cases. They are log checks, so they are
+# registered here, where LOG_CHECKS_EXTRA is defined, and their family is set by hand.
+for _constant in REMEDY_CONSTANTS:
+    _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
+    LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
+    LOG_FAMILY[_remedy_label] = "stream"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -24595,6 +24822,9 @@ OV_ACTS = (
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
+    ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
+     WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
 )
 
 
