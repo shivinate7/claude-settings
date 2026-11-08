@@ -1,9 +1,9 @@
 {
   "title": "A red main run may be re-run once; a green re-run clears it",
   "phase": "merge",
-  "status": "doing",
+  "status": "done",
   "order": 530,
   "why": "Owner answered page item 166 with 'one time rerun' (Nov 3 18:16 CST); coordinator reading.",
-  "note": "Nov 6 14:40 CST (triage audit): lane session_013NEJL3r8JbyJKhCzBoC6sF tagged cs-step:red-main-same-sha (it had cs-step:newer-run-clears-red).\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): step red-main-same-sha-green merged here.\nLane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST. Idle-lane audit (triage, 03:26 CST Nov 8): lane session_013NEJL3r8JbyJKhCzBoC6sF is idle; its PR #1162 closed unmerged on Nov 3 22:16 CST, and main has no `rerun_once` in merge/merge.py (read 03:25 CST). No live lane holds this step; sent to the coordinator.",
-  "updatedAt": "2026-11-08T03:21:00-06:00"
+  "note": "Nov 6 14:40 CST (triage audit): lane session_013NEJL3r8JbyJKhCzBoC6sF tagged cs-step:red-main-same-sha (it had cs-step:newer-run-clears-red).\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): step red-main-same-sha-green merged here.\nLane session_013NEJL3r8JbyJKhCzBoC6sF. Close item 166 when the ruling lands in no-merge-onto-red-main. Named by the coordinator Nov 3 18:19 CST. Idle-lane audit (triage, 03:26 CST Nov 8): lane session_013NEJL3r8JbyJKhCzBoC6sF is idle; its PR #1162 closed unmerged on Nov 3 22:16 CST, and main has no `rerun_once` in merge/merge.py (read 03:25 CST). No live lane holds this step; sent to the coordinator. Done (coordinator, 03:24 CST Nov 8): home is owner item 166 (Nov 3, \"none\", note \"one time rerun\"), a one-time act, not a standing rule. The one re-run went green: banchi runs 41593550249 and 41623713142, attempt 2. #1162 stays closed by design; its build is on archive/red-main-one-rerun. Lane session_013NEJL3r8JbyJKhCzBoC6sF confirmed. Triage's 03:26 audit line read the one-time act as a standing rule; withdrawn.",
+  "updatedAt": "2026-11-08T03:24:00-06:00"
 }
