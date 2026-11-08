@@ -181,6 +181,16 @@ def post_stop_peer_wake(task_id="ad2d560f6a8ff8331"):
     return [reminder, hand_back]
 
 
+def task_notification_wake():
+    """The records a queued task notification writes when it wakes an idle session after a Stop, as a list like
+    post_stop_peer_wake. It is one user record with no isMeta, origin kind task-notification, and turnOrigin
+    task_notification (not peer), in the shape a real transcript stores. Its text is a stub in the notice's shape."""
+    return [{"type": "user", "isSidechain": False, "promptSource": "system", "turnOrigin": "task_notification",
+             "turnPosition": {"promptIndex": 0, "turnIndex": 2}, "origin": {"kind": "task-notification"},
+             "message": {"role": "user", "content": "%s\n<task-type>queued-remote-notifications</task-type>\n"
+                         "<status>pending</status>\n</task-notification>" % shared_names.TASK_NOTIFICATION_TAG}}]
+
+
 def mid_turn_hand_back(task_id="a8c18267fa7d7dcb9"):
     """A peer hand-back that lands while a turn runs, in the shape a real transcript stores: a queued_command
     attachment whose origin says peer and handback. It has no turnOrigin and no user type. The text is a stub."""
@@ -1156,16 +1166,16 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIn("no model named for reviewer", out["reason"])
 
     @classmethod
-    def turn_one_then_wake(cls, spawn, landed=True):
+    def turn_one_then_wake(cls, spawn, landed=True, wake=post_stop_peer_wake):
         """Turn 1 ran `spawn`. With `landed`, it committed and reported (a reviewer on sonnet). Without it, turn 1
-        ended with no commit, so no Done line checked its spawn. Then the Stop hook wrote its summary and a peer
-        hand-back wake arrived, starting turn 2."""
+        ended with no commit, so no Done line checked its spawn. Then the Stop hook wrote its summary and the wake
+        `wake()` builds arrived, starting turn 2: a peer hand-back by default."""
         if not landed:
             return [human("do the task"), *cls.run_of(spawn), assistant_text("The builder is running."),
-                    stop_summary(), *post_stop_peer_wake()]
+                    stop_summary(), *wake()]
         return [human("do the task"), *cls.run_of(spawn), tool_use_msg("Bash", {"command": "git commit -m x"}),
                 tool_result_msg(), assistant_text("> **Done** BUILT x, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none"),
-                stop_summary(), *post_stop_peer_wake()]
+                stop_summary(), *wake()]
 
     def test_dm_false_alarm_reviewer_before_a_post_stop_peer_wake_is_not_required_passes(self):
         # Catches: a peer hand-back wake that follows a Stop starts turn 2, but the guard reads it as no turn start
@@ -1231,6 +1241,33 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: a compact summary after an unlanded turn cleared the builder spawn")
         self.assertEqual(out["decision"], "block")
         self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_unlanded_turn_builder_before_a_task_notification_wake_unnamed_blocks(self):
+        # Catches: turn 1 spawned a builder and landed nothing. A task-notification wake after its Stop starts turn 2
+        # at the wake, since its origin is not peer, so the builder falls out of the window and a turn-2 report that
+        # names no builder passes. A wake starts a window only when the turn before it landed.
+        out = self.verdict("> **Done** BUILT x, PR #6\n> **Next** Unstarted: none", [],
+                           lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False, wake=task_notification_wake))
+        self.assertIsNotNone(out, "the report passed: a builder spawned in an unlanded turn went unnamed past a task-notification wake")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
+    def test_dm_red_unlanded_turn_builder_before_a_task_notification_wake_no_unstarted_blocks(self):
+        # Catches: the same transcript with the builder named in Done. A window that misses the unlanded turn's builder
+        # spawn skips the Unstarted guard, so a report with no Unstarted line passes.
+        out = self.verdict("> **Done** BUILT x, PR #6 (builder opus)\n> **Next** merge the batch", [],
+                           lead=self.turn_one_then_wake(self.BUILDER_OPUS, landed=False, wake=task_notification_wake))
+        self.assertIsNotNone(out, "the report passed: an unlanded turn's builder spawn was not checked for an Unstarted line")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Unstarted guard", out["reason"])
+
+    def test_dm_false_alarm_landed_turn_reviewer_before_a_task_notification_wake_is_not_required_passes(self):
+        # Catches: the control for the two cases above. Turn 1 landed, so its reviewer spawn sits before a window that
+        # starts at the task-notification wake. Turn 2 spawns a builder that the report names with its Unstarted line.
+        # A fix that holds every task-notification window back, or keeps turn 1 in it, blocks this report on the reviewer.
+        out = self.verdict("> **Done** BUILT x, PR #6 (builder opus)\n> **Next** Unstarted: none", [self.BUILDER_OPUS],
+                           lead=self.turn_one_then_wake(self.REVIEWER_R2, landed=True, wake=task_notification_wake))
+        self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_red_mid_turn_peer_hand_back_starts_no_window_blocks(self):
         # Catches: a peer hand-back that lands mid-turn, as an attachment with no Stop before it, must start no
