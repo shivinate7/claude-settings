@@ -25,6 +25,9 @@ WATCH_NONE = re.compile(r"none\b", re.I)
 URL = re.compile(r"https?://\S+")
 # A standalone number, as `12` or `#12`, outside any URL: a copied item id.
 ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
+# A count in parentheses, as `(3 open)`, tells how many items are open and copies no id. A digit or `#`
+# after the count word is an id, so it stays out of the match.
+COUNT = re.compile(r"\(\s*\d+\s+[A-Za-z][^()\d#]*\)")
 HOME = "Write `Open items: none`, or name the page's items collection by URL, not ids."
 
 
@@ -48,7 +51,7 @@ def handoff_problems(text):
         return [f"The `Open items:` line is not filled. {HOME}"]
     if not no_items and not _is_url(items):
         return [f'The `Open items:` line holds no items collection URL: "{items}". {HOME}']
-    if not no_items and ID.search(URL.sub(" ", items)):
+    if not no_items and ID.search(COUNT.sub(" ", URL.sub(" ", items))):
         return [f'The `Open items:` line copies ids beside the URL: "{items}". {HOME}']
     watches = WATCH.findall(pages)
     if not watches:
