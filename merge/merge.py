@@ -1960,11 +1960,11 @@ def holds_base(wt, base_ref, sha, before_run=None):
     return (f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
             f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`). {BASE_CITE}"), None
 
-def push_branch(wt, branch):
-    """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
+def push_branch(wt, branch, cite=""):
+    """A plain push. Never force: a moved branch refuses it, and nothing reaches origin. `cite` (with its own leading newline) ends the refusal text, for a caller whose refusal names its decision."""
     c, out = git(wt, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     if c:
-        raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.\n{out}")
+        raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.\n{out}{cite}")
 
 def origin_head(root, branch):
     return git(root, "ls-remote", "origin", f"refs/heads/{branch}")[1].split("\t")[0]
@@ -2593,7 +2593,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
 # ------------------------------------------------------------------ merge --build-batch
 
 MERGE_AFTER = re.compile(r"merge after:? (#\d+(?:, #\d+)*)\.?", re.I | re.ASCII)  # a whole line of a PR body: `Merge after #1742.` or `Merge after: #1676, #1742.`
-BATCH_CITE_BUILD = "(decision merge-builds-batches, the batch runner builds the batch from pull request state alone)"
+PUSH_BASE_CITE = "(rule git-main-only-by-pr, main moves only by pull request, so a batch is pushed to a new branch)"
+PUSH_EXISTS_CITE = "(rule shared-trees-no-destructive-git, a push never moves a branch that may hold another agent's work)"
 
 def merge_after_targets(body):
     """-> the PR numbers a PR body says it merges after: each line that is wholly a `Merge after #n[, #m]` line, in any case, with an optional
@@ -2607,7 +2608,7 @@ def merged_into(h, n, base):
     if c:
         if "404" in out:
             return False
-        raise Stop(f"reading #{n} from GitHub failed: {out.strip()[:300]}")
+        raise Stop(f"reading #{n} from GitHub failed: {out.strip()[:300]} {READ_CITE}")
     d = json.loads(out)
     return bool((d.get("merged") or d.get("merged_at")) and d["base"]["ref"] == base)
 
@@ -2658,7 +2659,7 @@ class BatchBuild:
     def open(self):
         c, out = git(self.root, "fetch", "-q", "origin", f"+refs/heads/{self.base}:refs/remotes/origin/{self.base}")
         if c:
-            raise Stop(f"git fetch origin {self.base} failed: {out} {BATCH_CITE_BUILD}")
+            raise Stop(f"git fetch origin {self.base} failed: {out} {BASE_CITE}")
         self.tip = git(self.root, "rev-parse", self.base_ref)[1]
         for _ in range(2):  # the batch tree, and the probe tree that holds the base alone
             self.trees.append(add_worktree(self.root, self.tip))
@@ -2797,7 +2798,7 @@ class BatchBuild:
         except Stop as e:
             c, out = 1, str(e)
         if c:
-            self.warnings.append(f"merge: whether #{n} carries the lint-red comment is unknown: the POST failed: {out.strip()[:300]} The next build lints it again. {BATCH_CITE_BUILD}")
+            self.warnings.append(f"merge: whether #{n} carries the lint-red comment is unknown: the POST failed: {out.strip()[:300]} The next build lints it again. {UNKNOWN_CITE}")
 
     def settle(self):
         """Wait for every queued lint, in merge order: a unit whose lints all pass joins, the first that is not a pass leaves it out. A red one gets its
@@ -2899,9 +2900,9 @@ def build_batch(root, h, base, push=""):
     the records page runs the records generator once (heal_records_page), and again when rebuild replays it. No timer, file or log of its own."""
     if push:
         if push == base:
-            raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {BATCH_CITE_BUILD}")
+            raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {PUSH_BASE_CITE}")
         if origin_head(root, push):
-            raise Stop(f"origin already has the branch {push}: --push makes a new branch and never moves one. {BATCH_CITE_BUILD}")
+            raise Stop(f"origin already has the branch {push}: --push makes a new branch and never moves one. {PUSH_EXISTS_CITE}")
     try:
         pulls = h.pages("pulls", fields={"state": "open"})
         by_num = {d["number"]: d for d in pulls}
@@ -2916,7 +2917,7 @@ def build_batch(root, h, base, push=""):
         print(f"merge: {e}", file=sys.stderr)
         return 2
     except (KeyError, TypeError, ValueError, AttributeError, IndexError) as e:
-        print(f"merge: a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the batch is unknown. {BATCH_CITE_BUILD}", file=sys.stderr)
+        print(f"merge: a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the batch is unknown. {UNKNOWN_CITE}", file=sys.stderr)
         return 2
     cap = max(1, (os.cpu_count() or 1) - 2)
     out, left, joined = [], {}, []
@@ -2955,7 +2956,7 @@ def build_batch(root, h, base, push=""):
             joined, left, warnings = b.joined, {**left, **b.left}, b.warnings
             out += b.lines
             if push and joined:
-                push_branch(b.wt, push)
+                push_branch(b.wt, push, "\n" + PUSH_BASE_CITE)
                 out.append(f"pushed: {push} at {b.head()[:9]}")
         finally:
             b.close()
@@ -3977,7 +3978,7 @@ def main(argv, host=None, lock=None):
         if a.build_batch:
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:
-                raise Stop("not in a git checkout " + BATCH_CITE_BUILD)
+                raise Stop("not in a git checkout " + LANE_LINT_CITE)
             h = host or Host()
             with release_on_signals():  # a signal ends the run through build_batch's `finally`, which removes the trees
                 return build_batch(root, h, a.base or h.base, a.push or "")  # before the role check and any lock: it reads, and moves a ref only under --push
