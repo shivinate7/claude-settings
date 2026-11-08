@@ -19,8 +19,8 @@ Choices pinned here:
   contains the word UNKNOWN, exit 0, no traceback. It never refuses on that alone.
 - An empty rows file reads, holds no id, so a route cite in it is dead and is refused.
 - Scope: only a "Why yours" line is judged. An Input Needed item with no such label is not touched.
-- The refusal names itself "Hand-off guard" and its remedy line starts "Remedy:". It ends with the output rule
-  id, not the waiting-page rule.
+- The refusal names itself "Hand-off guard", opens with its owner line, and cites the record that holds its remedy.
+  It ends with the output rule id, not the waiting-page rule.
 - A capability reason ("can't", "cannot", "refuse", "refuses", "refused", "unable to", "denied", "forbidden", "no
   access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable", "403", "blocked", "not available")
   passes with a route cite whose row is refused or asks, a refusal of this session, or "(measured <date>, <check and
@@ -112,9 +112,10 @@ UNTIL_LINES = (
 )
 UNTIL_WITH_VERB = "Why yours: the push is blocked until CI ends, and I can't push from here."
 OTHER_TOOL = "mcp__claude-code-remote__other_tool"  # a tool this session did not refuse
-NO_CITE_OPENING = "Hand-off guard: a Why yours line gives a capability reason with no cite."
-NO_DATE_REMEDY = ("Hand-off guard: a Why yours line carries a measured premise with no date or no check and result. "
-                  "Remedy: write `(measured <date>, <check and result>)`, the date as YYYY-MM-DD.")
+NO_CITE_OPENING = ("Hand-off guard: a Why yours line gives a capability reason with no cite "
+                   "(decision guard-remedy-not-to-owner).")
+NO_DATE_REFUSAL = ("Hand-off guard: a Why yours line carries a measured premise with no date, or with no check and "
+                   "result (decision guard-remedy-not-to-owner).")
 UNREAD_REFUSALS = "Hand-off guard: UNKNOWN, this session's refusals file did not read"
 CATCH_NOTE = r"Hand-off guard: UNKNOWN, the check did not run \((ImportError|ModuleNotFoundError)\)\."  # a regex
 MEASURED_OK = "Why yours: I can't push from here (measured 2026-11-06, check_red_run exited 1)."
@@ -312,7 +313,8 @@ class HandOffTests(unittest.TestCase):
                     out = self.stop(make(CHECK_ONLY), landed=landed)
                     self.assert_refused(out, "a refusal to check its remedy (%s, landed %s)" % (shape, landed))
                     self.assertNotIn(ACT, out["reason"], "the remedy names the act the reply handed over")
-                    self.assertIn("Remedy:", out["reason"], "the refusal has no remedy line")
+                    self.assertIn("decision guard-remedy-not-to-owner", out["reason"],
+                                  "the refusal does not cite the record that holds its remedy")
 
     def test_hd_red_route_cite_with_no_rows_file_reads_unknown(self):
         # Catches: a route cite the rows file cannot give, refused on the unread file alone, or passed with no word
@@ -526,7 +528,8 @@ class HandOffTests(unittest.TestCase):
                 with self.subTest(shape=shape, landed=landed):
                     out = self.stop(make(MEASURED_NO_DATE), landed=landed)
                     self.assert_refused(out, "a measured premise with no date (%s, landed %s)" % (shape, landed))
-                    self.assertIn(NO_DATE_REMEDY, out["reason"], "the refusal's remedy for a missing date is not the pinned text")
+                    self.assertIn(NO_DATE_REFUSAL, out["reason"],
+                                  "the refusal for a missing date is not the pinned text")
 
     # ---- choice phrases, widened capability verbs, "until", the refusals file's unread states, and the note for
     # a check that did not run
