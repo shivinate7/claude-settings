@@ -551,6 +551,7 @@ test("an icon that is not an inline svg or png data URI, or is too long, leaves 
   for (const icon of ["data:image/png;base64,AAAA", "https://example.com/icon.svg", long, "data:image/jpeg;base64,/9j/4AAQ", 42]) {
     const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
     await named(page, "Compass");
+    // Kept as a sleep: no icon in this list decodes to a visible mark, so a loosened ICON_RE stays green and no signal ends its decode.
     await page.waitForTimeout(150);
     const m = await markState(page);
     assert.deepEqual([m.icon, m.img, m.text, m.hidden], [false, null, "C", false], String(icon).slice(0, 40));
@@ -581,14 +582,14 @@ test("a meta write with the same icon keeps it shown, with no flash of the lette
   const icon = svgIcon("#11151b");
   const page = await open(t, { meta: { identity: { name: "Compass", icon } } }); if (!page) return;
   await page.waitForSelector("#mark.icon img");
-  const flashed = await page.evaluate(async (icon) => {
-    const m = document.getElementById("mark"); let lost = false;
-    new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) lost = true; }).observe(m, { attributes: true, childList: true });
+  // The observer's callback runs at the microtask checkpoint after this write, so its flag is set before decodeQuiet returns.
+  await page.evaluate((icon) => {
+    const m = document.getElementById("mark"); window.__lost = false;
+    new MutationObserver(() => { if (!m.classList.contains("icon") || !m.querySelector("img")) window.__lost = true; }).observe(m, { attributes: true, childList: true });
     state.meta = { identity: { name: "Compass", brand: "#f47820", icon } }; applyIdentity();
-    await new Promise((r) => setTimeout(r, 200));
-    return lost;
   }, icon);
-  assert.equal(flashed, false);
+  await decodeQuiet(page);
+  assert.equal(await page.evaluate(() => window.__lost), false, "the mark dropped its icon for the letter on a same-icon write");
   assert.equal((await markState(page)).img, icon);
 });
 
@@ -598,6 +599,7 @@ test("a decode that finishes after a newer identity is ignored", async (t) => {
   const slow = svgIcon("#11151b", "<!--slow-->");
   await page.evaluate((slow) => {
     const decode = HTMLImageElement.prototype.decode;
+    // The 400 ms here is the fixture's own decode delay, a floor that only lengthens the load (test-practices P5), so it stays.
     HTMLImageElement.prototype.decode = function () { const wait = this.src === slow; return decode.call(this).then(() => wait && new Promise((r) => setTimeout(r, 400)).then(() => { window.__slowDecodeDone = true; })); };
     state.meta = { identity: { name: "Compass", icon: slow } }; applyIdentity();
     state.meta = { identity: { name: "Compass" } }; applyIdentity();
@@ -680,6 +682,12 @@ const TALL_PIC = (h) => `<body style="margin:0"><div style="height:${h - 50}px;b
 const FOCUS_TALL = '<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:390px;height:1700px;background:linear-gradient(#a62,#26a)"></div><div style="height:600px;background:#999"></div></body>';
 // Waits until the frame has posted a mockup h px tall.
 const frameSettled = (page, h) => page.waitForFunction((H) => Object.values(FIT).some((c) => c.h === H), h);
+// Each waits on a signal with a 5 s cap, which only stops a hang (test-practices P5), and names the one cause it reports when the cap passes.
+// stubQuiet: the stub has no callback or fake call in flight. decodeQuiet: no icon decode is pending.
+const stubQuiet = (page) => page.waitForFunction(() => window.__inflight === 0, null, { timeout: 5000 }).catch(() => assert.fail("the stub still has a callback in flight after 5 s"));
+const decodeQuiet = (page) => page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("an icon decode is still pending after 5 s"));
+// fitsReported: a picture frame is on the page and every picture frame on it has posted its height. The frame must exist, so the check never passes on nothing.
+const fitsReported = (page) => page.waitForFunction(() => { const live = FITS.filter((x) => x.f.isConnected); return live.length > 0 && live.every((x) => FIT[x.key]); }, null, { timeout: 5000 }).catch(() => assert.fail("no picture frame posted its height in 5 s"));
 const boxSel = (id, key = "a") => `#item-${id} label.opt[for="o-${id}-${key}"] .dfitwrap`;
 // The box, its scroll, and the frame's place. g is the scrollbar gutter plus any border past 1px.
 const measure = (page, id, key = "a") => page.locator(boxSel(id, key)).evaluate((w) => {
@@ -948,10 +956,11 @@ test("a resize or a repaint keeps the owner's scroll, the same box, and the scro
   await page.locator(boxSel(it.id)).evaluate((w) => { window.__w = w; w.scrollTop = 150; });
   assert.equal((await measure(page, it.id)).st, 150, "the owner's scroll did not take");
   await page.setViewportSize({ width: 1300, height: 900 });
-  await page.waitForTimeout(300);
+  await settleFit(page, it.id);
   assert.equal((await measure(page, it.id)).st, 150, "a resize moved the scroll");
   await choose(page, it, "b");
-  await page.waitForTimeout(300);
+  await page.waitForFunction((sel) => !!document.querySelector(sel)?.classList.contains("sel"), `label.opt[for="o-${it.id}-b"]`, { timeout: 5000 }).catch(() => assert.fail("option b did not show as picked in 5 s"));
+  await settleFit(page, it.id);
   const after = await page.locator(boxSel(it.id)).evaluate((w) => ({ same: w === window.__w, st: w.scrollTop }));
   assert.deepEqual(after, { same: true, st: 150 }, "a repaint replaced the box or moved its scroll");
   const label = await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).getAttribute("aria-label");
@@ -986,13 +995,14 @@ test("a touch drag scrolls the picture and opens nothing, and a tap opens View, 
   await page.locator(boxSel(it.id)).scrollIntoViewIfNeeded();
   const r = await page.locator(boxSel(it.id)).boundingBox();
   const x = r.x + 40, y = r.y + 380;
+  // The picture's scroll end is armed before the drag, so the wait after touchEnd sees the drag's own end.
+  await page.evaluate((sel) => { window.__scrollEnded = false; document.querySelector(sel).addEventListener("scrollend", () => { window.__scrollEnded = true; }, { once: true }); }, boxSel(it.id));
   await touch("touchStart", [{ x, y }]);
-  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await page.waitForTimeout(16); }
+  for (let i = 1; i <= 6; i++) { await touch("touchMove", [{ x, y: y - i * 40 }]); await frameWait(page, 1); }
   await touch("touchEnd", []);
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => window.__scrollEnded === true, null, { timeout: 5000 }).catch(() => assert.fail("the picture did not end its scroll 5 s after the drag"));
   assert.ok((await measure(page, it.id)).st > 0, "the touch drag did not scroll the picture");
   assert.equal(await page.locator("#dsheet").isVisible(), false, "the touch drag opened View");
-  await page.waitForTimeout(300);
   const r2 = await page.locator(boxSel(it.id)).boundingBox();
   await touch("touchStart", [{ x: r2.x + 40, y: r2.y + 200 }]);
   await touch("touchEnd", []);
@@ -1537,7 +1547,9 @@ test("a tap on each star on two cards and one Send gives exactly one notice for 
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
-  await page.evaluate(() => new Promise((r) => setTimeout(r, 300))); // a second send would land in this window
+  // A second send would land after the notice: wait until the notice says a session was told, and the page has left its send.
+  await page.waitForFunction(() => document.getElementById("sentStatus")?.textContent === "A wake was sent.", null, { timeout: 5000 }).catch(() => assert.fail("the notice never said a session was told, in 5 s"));
+  await page.waitForFunction(() => !state.sending, null, { timeout: 5000 }).catch(() => assert.fail("the page still counts a send in progress 5 s after the notice"));
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -1704,6 +1716,7 @@ test("pressing Send again while a batch is in flight does nothing", async (t) =>
   await takePick(page, DECISION);
   await send(page);
   await page.evaluate(() => { for (let i = 0; i < 3; i++) document.getElementById("send").click(); });
+  // Kept as a sleep: the clicks land after the first send has saved and Send is disabled, so a mutant that lets clicks through in flight stays green.
   await page.evaluate(() => new Promise((r) => setTimeout(r, 1500)));
   assert.equal((await sent(page)).length, 1, "a second notice went out");
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "set").length, 1, "the batch saved twice");
@@ -1752,6 +1765,7 @@ test("Undo refuses a delete once 8 seconds from the send have passed", async (t)
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
   await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
+  // Kept as a sleep: a mutant that moves the busy check after an await stays green, since the undo loop's own clock check still stops the delete.
   await page.evaluate(() => new Promise((r) => setTimeout(r, 400)));
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
   assert.ok((await answers(page))[DECISION.id]);
@@ -4948,6 +4962,7 @@ async function answerWithoutSend(t, { width, scheme }) {
   const atOnce = await cardMap(page);
   assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
   await frameWait(page, 2);
+  // Kept as a sleep: a mutant that drops releaseHeld's in-view check stays green here, since the card never leaves the view in this case.
   await page.waitForTimeout(600);
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
@@ -5025,7 +5040,7 @@ for (const scheme of ["light", "dark"]) for (const width of SIZES) {
     const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, phone(o.design)]));
     const page = await open(t, { items: [it], designData, scheme, viewport: { width, height: 900 } }); if (!page) return;
     await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-    await page.waitForTimeout(300);
+    await fitsReported(page); await settleFit(page, it.id);
     const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt`)].map((o) => {
       const b = o.getBoundingClientRect(), pw = o.querySelector(".dfitwrap"), w = pw.getBoundingClientRect();
       const text = [...o.querySelectorAll(".how, .lab, .tr, .pick, .nopick, .dwarn")].map((x) => x.getBoundingClientRect()).filter((x) => x.height > 0);
@@ -5047,6 +5062,7 @@ test("a rail jump after Send lands on its card", async (t) => {
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
   await page.click("#c-q9");
+  // Kept as a sleep: a mutant that drops releaseHeld's idle check stays green, since the rail jump still lands in the band.
   await page.waitForTimeout(2500);
   // The card lands inside the band, just under the header's bottom edge.
   const band = await bandOf(page);
@@ -5064,7 +5080,7 @@ test("a receipt wholly below the screen drops its height without moving the page
   const at = await railTop();
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  await page.waitForTimeout(600);
+  await page.waitForFunction(() => document.getElementById("item-q0").style.minHeight === "", null, { timeout: 5000 }).catch(() => assert.fail("the off-screen receipt did not drop its height in 5 s"));
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
@@ -5074,7 +5090,7 @@ for (const width of SIZES) test(`an option's picture is at most 480px high and c
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
   const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
   await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
+  await fitsReported(page); await settleFit(page, it.id);
   const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
   for (const o of m) {
     assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
@@ -5147,7 +5163,11 @@ test("containment sweep: nothing crosses its card, the rail or the Sent bar, not
   for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
     const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
     if (act) await act(page);
-    await page.waitForTimeout(150);
+    await stubQuiet(page);
+    // A picture frame, where the state has one, has posted its height; a finite animation has ended. An infinite one never ends, so it is left out.
+    await page.waitForFunction(() => FITS.filter((x) => x.f.isConnected).every((x) => FIT[x.key]), null, { timeout: 5000 }).catch(() => assert.fail(`${state} @${width} ${scheme}: a picture frame did not post its height in 5 s`));
+    await page.waitForFunction(() => document.getAnimations().every((a) => !a.effect || a.effect.getComputedTiming().iterations === Infinity || (a.playState !== "running" && a.playState !== "pending")), null, { timeout: 5000 }).catch(() => assert.fail(`${state} @${width} ${scheme}: a finite animation was still running after 5 s`));
+    await frameWait(page, 2);
     for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
     await page.close();
   }
@@ -5161,7 +5181,7 @@ const picBox = (page) => page.evaluate(() => [...document.querySelectorAll("#ite
 
 test("a capped picture grows back when its card widens and stays inside when it narrows", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(844), viewport: { width: 1070, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(300);
+  await fitsReported(page); await settleFit(page, "grow-pics");
   const narrow = (await picBox(page))[0].w;
   await page.setViewportSize({ width: 1280, height: 900 });
   // The picture grows back once its card widens: wait for that, or for 5 s, then measure.
@@ -5169,13 +5189,13 @@ test("a capped picture grows back when its card widens and stays inside when it 
   const wide = await picBox(page);
   assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
   await page.setViewportSize({ width: 1066, height: 900 });
-  await page.waitForTimeout(400);
+  await fitsReported(page); await settleFit(page, "grow-pics");
   for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
 });
 
 test("a very tall mockup with no focus is never a thin strip", async (t) => {
   const page = await open(t, { items: [growItem()], designData: growData(3000), viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await frameSettled(page, 3000); await settleFit(page, "grow-pics");
   for (const b of await picBox(page)) assert.ok(b.w >= 120, "the picture is a strip, " + b.w + "px wide");
 });
 
@@ -5238,7 +5258,7 @@ test("option pictures of different heights keep the View bars at 44px", async (t
   const data = Object.fromEntries(LOOK_OPTS.map((o, i) => [o.design, `<body style="margin:0"><div style="width:390px;height:${[844, 300, 560][i]}px;background:#eee"></div></body>`]));
   const it2 = { ...it, designs: it.designs.map((d, i) => ({ ...d, size: { w: 390, h: [844, 300, 560][i] } })) };
   const page = await open(t, { items: [it2], designData: data, viewport: { width: 1280, height: 900 } }); if (!page) return;
-  await page.waitForTimeout(400);
+  await fitsReported(page); await settleFit(page, it2.id);
   const hs = await page.evaluate(() => [...document.querySelectorAll("#item-grow-pics .opic .view")].map((v) => Math.round(v.getBoundingClientRect().height)));
   assert.deepEqual(hs, [44, 44, 44]);
 });
@@ -5496,7 +5516,10 @@ test("an option whose links is a string, not a list, renders with no page error 
   });
   const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
   if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
-  await page.waitForTimeout(200); // a page error can land a tick after the card appears
+  // A page error can land a tick after the card appears. Every callback the stub scheduled has returned by then, and one round trip lets
+  // the error reports that came before it reach the test.
+  await stubQuiet(page);
+  await page.evaluate(() => 0);
   assert.deepEqual(errors, [], "the page threw on a string links value");
   assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
   assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
@@ -5531,7 +5554,7 @@ async function openStatus(page) {
   assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
   await tab.click();
   await panel.waitFor({ state: "visible" });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read would land here
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); // a late read lands in the next task after the frame
   return panel;
 }
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
