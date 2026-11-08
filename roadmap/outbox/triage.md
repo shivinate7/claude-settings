@@ -98,3 +98,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pick-claim-owner-picked-a-lane (lane step-pick-claims-match-page, #2294): the pick-claim reader flags the prose `the owner picked a lane` as a claim.
 - pick-claim-underscore-key (lane step-pick-claims-match-page, #2294): `item 9 a_b` reads as a pick claim.
 - pick-claim-quoted-word-no-item (lane step-pick-claims-match-page, #2294): a quoted word between the pick and `on item N` reads as a claim with no item.
+- (debt) draft-rule-ready-bypass (lane lane-pr-opens-as-draft, #2284, Step: lane-pr-opens-as-draft): a `gh api` POST, or MCP update_pull_request with draft:false, can mark a PR ready, which goes around the draft rule.
+- (debt) guard-matcher-no-mcp-merge (lane lane-pr-opens-as-draft, #2284, Step: mcp-tools-in-guard-matcher): the guard's matcher does not cover the MCP merge_pull_request tool.
