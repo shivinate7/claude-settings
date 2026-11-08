@@ -2190,3 +2190,5 @@
 - map-seam-reader-unbuilt: skills/plain-english-map/scripts/map-check.mjs binds no model-call reader, so a repo that sets `modelSeam` gets a note and no call-site check. Decision: ci-unknown-is-red.
 - glossary-dir-arg-clean: lint/check_glossary.py skips a directory path to pass a gitlink, so a directory passed by hand as an argument reads as clean instead of UNKNOWN. Decision: ci-unknown-is-red.
 - alarm-window-cap-100: actions/ci-alarm/alarm.sh reads `gh run list --limit 100`, so a red run older than the newest 100 runs on the branch is never judged. A full-window rule must first read which events each workflow runs on. Decision: ci-unknown-is-red.
+- stale-cites-unread-list-short: lint/stale_cites.py docstring lists the unread cases as a closed list. The code also makes three more red in CI: a value cite of an unparseable `.py`, an unreadable route rows file, and a missing decision blob. Decision: ci-unknown-is-red.
+- stale-value-cite-ci-untested: no test runs a STALE008 value cite with CI=1, so its unread case (red) and its limit case (exit 0) are untested under CI. Decision: ci-unknown-is-red.
