@@ -1,0 +1,68 @@
+{
+  "added": "2026-11-08T01:19:00Z",
+  "context": "Goal: every step's state shows on every phase bar, at every size.\nProblem (goal): a bar narrower than about 5 px per step shrinks cells to 1-2 px, so paused reads as done (contrast 1.02-1.25:1). No colour reaches 3:1 against both done and to-do.\nBased on (measured): the PR #1635 design-review renders at 390 and 1280 px, light and dark.\nBased on (read): the lane's mockups on branch nfp-narrow-paused-cell at d3117a007, with notes in the matching -notes.md files.\nDeparts from: main draws one cell per step on every bar \u2014 a narrow bar would draw one run per state instead (done, in progress, stalled, paused, blocked, to do), each at least 4 px wide.\nNot blocking: the lane builds a now, and an answer of b reverts it. Each picture shows the roadmap's 30-step phase: the rail chip on a phone, and the phase-head bar at 1280 px (Wide).",
+  "designs": [
+    {
+      "file": "docs/design/roadmap-narrow-cells.html",
+      "focus": "#pick-rail",
+      "label": "Runs on narrow bars: phone rail chip",
+      "option": "a",
+      "slug": "narrow-cells-a"
+    },
+    {
+      "drawn": 1280,
+      "file": "docs/design/roadmap-narrow-cells.html",
+      "focus": "#pick-bars",
+      "label": "Runs on narrow bars: phase-head bar",
+      "option": "a",
+      "slug": "narrow-cells-a-wide",
+      "width": "Wide"
+    },
+    {
+      "file": "docs/design/roadmap-narrow-cells.html",
+      "focus": "#pick-rail",
+      "label": "One cell per step: phone rail chip",
+      "option": "b",
+      "slug": "narrow-cells-b"
+    },
+    {
+      "drawn": 1280,
+      "file": "docs/design/roadmap-narrow-cells.html",
+      "focus": "#pick-bars",
+      "label": "One cell per step: phase-head bar",
+      "option": "b",
+      "slug": "narrow-cells-b-wide",
+      "width": "Wide"
+    }
+  ],
+  "home": "notes-fix-page",
+  "id": "narrow-cells",
+  "kind": "decision",
+  "look": true,
+  "n": 380,
+  "options": [
+    {
+      "design": "narrow-cells-a",
+      "gain": "Every state stays visible on a narrow bar, paused included, and the phone rail chip reads again.",
+      "how": "A bar with under about 5 px per step draws one run per state, each at least 4 px wide. Wider bars keep one cell per step.",
+      "key": "a",
+      "label": "Runs on narrow bars only",
+      "lose": "A narrow bar no longer shows the step count by its cells; the label still gives the counts."
+    },
+    {
+      "design": "narrow-cells-b",
+      "gain": "Bars read as they do today, one cell per step.",
+      "how": "Every bar draws one cell per step, as main does today.",
+      "key": "b",
+      "label": "Keep one cell per step",
+      "lose": "On a narrow bar paused still looks like done, and the phone rail chip stays near empty."
+    }
+  ],
+  "owner": "lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), branch nfp-narrow-paused-cell",
+  "pick": "a",
+  "ref": "PR #1635 design review (narrow bars); mockups docs/design/roadmap-narrow-cells.html and status-narrow-cells.html on branch nfp-narrow-paused-cell at d3117a007",
+  "short": "Narrow bar cells",
+  "status": "open",
+  "title": "How should a narrow phase bar show each step's state?",
+  "why": "The lane and triage recommend a: it is the only option where every state shows at every size, and it can be undone."
+}
