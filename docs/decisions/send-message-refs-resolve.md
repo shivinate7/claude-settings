@@ -1,0 +1,46 @@
+# A message to another session names only refs that exist
+
+## The ruling
+
+A `send_message` call to another session is refused when its text names a commit, a pull request or a PR comment of this repo that does not exist. The refusal names each missing ref. The guard stops a mistake Claude makes, not an attacker (`guard-guards-mistakes-only`).
+
+Kind: build
+Plan: docs/decisions/send-message-refs-resolve.md#the-ruling (all)
+Home: hooks/guard.py
+
+**Incident.** 2026-11-08, lane `notes-fix-large-1` sent batch runner 8 a record link it typed before the post returned. **Harm stopped:** a session acts on a ref that does not exist.
+
+**Ruling.** Coordinator, 2026-11-08 02:30 CST: reuse the sha function of decision `agent-report-shas-resolve` on `send_message`, with a rule for which repo a ref resolves against, and state the cost of each GitHub read.
+
+## What is judged
+
+The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any session, main or agent. The text is `tool_input.message`. Rule `message-ref-missing` (deny). An owner override lifts it.
+
+- **Commit sha.** The token rule of `agent-report-shas-resolve`, resolved in the repo of the payload's `cwd`.
+- **Pull request.** `PR #N`, `PR N`, `PRs #N and #M`, and a `github.com/<owner>/<repo>/pull/N` URL of this repo. A bare `#N` with no `PR` word is skipped: it may be an issue or an item.
+- **PR comment.** A `github.com/<owner>/<repo>/(pull|issues)/N#issuecomment-<id>` URL of this repo.
+
+## Which repo
+
+"This repo" is the `owner/repo` of the `cwd` checkout's `origin`. Two kinds of text are skipped, because they name another repo:
+
+- A URL to another repo.
+- A sha on a line that names another `owner/repo`.
+
+With no origin, only shas are judged.
+
+## Fail open
+
+- No git repo, no origin, or git fails: allowed.
+- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed, logged `message-ref-unread`.
+- Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or a 404 from `gh api`.
+- A shallow clone with a missing sha: allowed, logged `report-sha-shallow`.
+
+## Cost
+
+A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+
+## Known gaps
+
+- An issue number, a branch name and a record path are not judged.
+- A ref that exists but is the wrong one passes.
