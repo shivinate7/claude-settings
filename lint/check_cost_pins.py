@@ -5,8 +5,8 @@
 
 A Cost paragraph starts at a line whose first word is `Cost` followed by a character that is not a letter
 (`Cost:`, `Cost.`, `Cost, per`, `Cost of`, `**Cost**:`), bare or after a list marker (`-`, `*`, `8.`, `3)`) or bold
-marks. `Costs` and `Costly` start none. A sentence that begins `Cost:` after the stop of an earlier sentence on its line
-starts one too, from that sentence. It runs until a blank line, a list item at the same or a lesser indent than the
+marks. `Costs` and `Costly` start none. A sentence that starts in any of these forms after the stop of an earlier sentence on
+its line starts one too, from that sentence. It runs until a blank line, a list item at the same or a lesser indent than the
 Cost line, a heading (one to six `#` and a space) or a code fence. A deeper line or list item stays in it. Fenced code is not read. A paragraph with
 an unclosed backtick span cannot be read: it is one finding on its first line.
 
@@ -20,7 +20,7 @@ length closes it. Closing marks `)`, `*`, `"` and `'` after the stop belong to t
 
 A file token is a backticked name that ends in a known file extension (EXTENSIONS, any case), or starts with `~/` or
 `.git/`. A trailing `:<digits>` (a line number) is dropped before the test, and the token is reported as written. A
-token whose name is a test file (`test_*`, `*_test.*`, `*.test.*`, `*Tests.swift`, `*.spec.ts`, `*.spec.js`) is a pin candidate, not a file token. A token is
+token whose name is a test file (`test_*`, `*_test.*`, `*.test.*`, `*Tests.swift`, and `*.spec.*` ending in js, jsx, ts, tsx, mjs, cjs, mts or cts) is a pin candidate, not a file token. A token is
 flagged whether or not its file exists. It is pinned when a candidate in the same sentence exists under the root and
 holds the token's name as a whole name: its basename, or the folder before a `<placeholder>` basename, with no letter,
 digit, `_`, `-` or `.`-and-name character beside it. A sentence that says "not pinned", "unpinned", "unmeasured" or
@@ -50,10 +50,10 @@ EXEMPT = re.compile(r"\b(?:not pinned|unpinned|unmeasured|no test)", re.IGNORECA
 PLACEHOLDER = re.compile(r"<[^<>]*>")
 # A bare `tool.call` or `e.g.` has a dot and no file, so only these extensions mark a file.
 EXTENSIONS = ("md py mjs js ts tsx json jsonl sh ps1 cmd bat html css yml yaml toml txt log csv tmpl sql cfg ini "
-              "lock xml swift jsx").split()
+              "lock xml swift jsx cjs mts cts").split()
 EXTENSION = re.compile(r"^.+\.(?:%s)$" % "|".join(EXTENSIONS), re.IGNORECASE)
 LINE_SUFFIX = re.compile(r"(?::\d+)+$")
-TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\.spec\.(?:js|jsx|ts|tsx|mjs))$")
+TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\.spec\.(?:js|jsx|ts|tsx|mjs|cjs|mts|cts))$")
 CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 
