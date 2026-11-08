@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads two things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads four things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -13,6 +13,12 @@
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
   commit added on the branch alone is the branch's.
+- **Revived note.** A note the branch deleted is back at head. Notes merge by union (decision
+  `notes-merge-union`, how notes files merge), so a merge of the base can bring a deleted note back with no
+  conflict. Notes count per slug (`- <slug>:` at line start). A slug is refused when its last count change was a
+  delete and head holds more copies than that commit left. A note added again on purpose passes, and so does a
+  dedupe that keeps a copy.
+- **Note edit.** The branch edits a row the base holds, in place. See "Notes rows the branch did not add," below.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
@@ -70,8 +76,35 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
   differs from both the lost line and the base line, and its operators and negation match the lost line.
   Numbers may differ only when both sides changed the base line (a third value).
 
-**Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
-failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
+**Notes rows the branch did not add.**
+
+Question: should a branch change notes rows it did not add?
+
+Ruling: no edit in place. A notes row carries no owner, so a row is the branch's own when the merge base lacks it.
+
+- **Refused:** an edit in place of a base row. Either the same slug with new text, or a slug gone while a new
+  row under another slug reads 0.85 or more like a base text (a rename with a reword). Likeness is over the
+  text after the slug.
+- **Passes:** adds, deletes, unchanged rows, a dedupe that keeps a base text, and a merge of main.
+- **Escape:** a `Drops-lines` trailer for the notes path, as for every read.
+
+**Mistake and harm.** PR #2041, a notes-only pull request, added Fix lines to 12 notes that belong to other
+lanes, among them the lane past-ruling-on-send. Only a hand check of the diff caught it. The restore is commit
+f9d09b9bf. Harm: another lane's notes change unseen by their owner.
+
+**Measured.**
+
+- The 0.85 threshold on 1587 real notes rows on main: 1 of 1586 consecutive pairs reads at or above it.
+- A replay over 118 merged PRs that touched the notes file: 196 flags in 29 PRs, none false.
+- Named limit: a rename with a reword that changes more than about 15 percent of the text passes. Three or
+  four real events seen.
+
+**Cost, per run.** One `git merge-base`. For a notes file with a row at head, three git reads: `show` of head,
+`merge-base`, and `show` of base. A file absent at head adds an `ls-tree`, and a rename lookup when the base
+holds a row. No process stays running, and no log or file is written.
+
+**Unknown is red in CI.** These print UNKNOWN: no upstream, a shallow clone, a merge of three or more parents,
+an old git, or a failed git read. So does a notes file with a row at head and no merge base. Locally it exits 0. With env `CI` or `--strict` it exits 1
 (ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
 way out that does not depend on the check is the reason flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner
