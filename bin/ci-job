@@ -81,6 +81,7 @@ from workflow_steps import job_block, run_body, step_blocks, step_env, step_key,
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 13 s on this repo's 118 suites, the median of 3 runs on a branch diff) before it reads unknown
 PREAMBLE_DONE = "echo ci-job-preamble-done"  # the line preamble_marked adds right before a CI step's first suite line
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
+ANY_SUITE_LINE = re.compile(r"python3 ((?:[\w.-]+/)+test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # the same line for a suite in any folder
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
@@ -357,6 +358,12 @@ def suite_paths(step):
     return [m.group(1) for ln in run_lines(step) if (m := SUITE_LINE.fullmatch(ln))]
 
 
+def outside_paths(step):
+    """The suites a CI step runs that lane lint's scope leaves out: the path of each run: line that is `python3 <dir>/test_<name>.py`
+    outside hooks/ and merge/. The selector may pick one; --lint never runs it, and the step's line says so."""
+    return [m.group(1) for ln in run_lines(step) if not SUITE_LINE.fullmatch(ln) and (m := ANY_SUITE_LINE.fullmatch(ln))]
+
+
 def log_text(log, start):
     """This run's part of the log: from byte `start` on; empty when the log cannot be read."""
     try:
@@ -454,6 +461,7 @@ def main(argv):
     unshallow(block, top, dry, tally)
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
     suites = [suite_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suite lines
+    outside = [outside_paths(st) if lint and not k else [] for st, k in zip(steps, kind)]  # each step's suites beyond lane lint's scope
     elsewhere = {}  # each other job: the suites of its CI steps, which this run does not run
     if lint and base:
         for other in re.findall(r"^  ([\w-]+):\s*$", text.split("\njobs:", 1)[-1], re.M):
@@ -461,7 +469,7 @@ def main(argv):
             if found:
                 elsewhere[other] = found
     picked, why = None, "no base to read a diff"
-    if base and (any(suites) or elsewhere):  # one selector process for the CI steps with a suite in every job
+    if base and (any(suites) or any(outside) or elsewhere):  # one selector process for the CI steps with a suite in every job
         why = "the selector did not run"
         try:
             done = _nowindow.run([sys.executable, os.path.join(os.path.dirname(BIN), "hooks", "mutate_guard.py"),
@@ -497,6 +505,8 @@ def main(argv):
                 print("%-15s %s: --lint runs only lint and install steps; %s" % (
                     "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else
                     "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
+                    else "this suite is picked by the diff and is outside lane lint's scope (hooks/ and merge/), so batch CI runs it"
+                    if picked and picked.intersection(outside[n - 1])
                     else "its run: is neither a lint nor an install command"))
             continue
         if kind[n - 1] == "install" and (blocker or not any(runs[n:])):
