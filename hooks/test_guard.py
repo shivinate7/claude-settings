@@ -16285,6 +16285,9 @@ MRF_BADREMOTE = os.path.join(MRF_DIR, "badremote")    # origin routed to a bare 
 MRF_GH_BIN = os.path.join(MRF_DIR, "gh-bin")          # a folder that holds the fake gh
 MRF_GH_LOG = os.path.join(MRF_DIR, "gh-calls.log")    # one line per call the fake gh receives
 MRF_PATH = MRF_GH_BIN + os.pathsep + os.environ.get("PATH", "")
+MRF_EXISTING_PRS = list(range(10, 31))                # 21 pull requests the bare repo holds beyond #7; #8 and #9 stay missing
+MRF_DEEP_SRC = os.path.join(MRF_DIR, "deep-src")      # two commits, so a depth-1 clone of it is shallow
+MRF_SHALLOW = os.path.join(MRF_DIR, "shallow-clone")  # a depth-1 clone of MRF_DEEP_SRC, its sha lookups fail
 # The fake gh. Comment 111 exists; any other comment is a 404. FAKE_GH_MODE=error is a 500, the non-404 failure.
 # FAKE_GH_MODE=url404 is a 500 whose URL holds /404/, so it is not a 404 answer. FAKE_GH_MODE=all200 answers
 # every comment as existing.
@@ -16333,7 +16336,19 @@ def mrf_build():
     _rsha_git(MRF_REPO, "remote", "add", "origin", MRF_ORIGIN)
     _rsha_git(MRF_REPO, "config", "url.%s.insteadOf" % MRF_BARE, MRF_ORIGIN)
     _rsha_git(MRF_REPO, "push", "-q", "origin", "HEAD:refs/heads/main")
-    _rsha_git(MRF_BARE, "update-ref", "refs/pull/7/head", _rsha_git(MRF_REPO, "rev-parse", "HEAD"))
+    head = _rsha_git(MRF_REPO, "rev-parse", "HEAD")
+    _rsha_git(MRF_BARE, "update-ref", "refs/pull/7/head", head)
+    for number in MRF_EXISTING_PRS:
+        _rsha_git(MRF_BARE, "update-ref", "refs/pull/%d/head" % number, head)
+    os.makedirs(MRF_DEEP_SRC, exist_ok=True)
+    _rsha_git(MRF_DEEP_SRC, "init", "-q", "-b", "main", ".")
+    for text, message in (("x = 1\n", "first"), ("x = 2\n", "second")):
+        write(os.path.join(MRF_DEEP_SRC, "src", "app.py"), text)
+        _rsha_git(MRF_DEEP_SRC, "add", "-A")
+        _rsha_git(MRF_DEEP_SRC, *IDENT, "commit", "-q", "-m", message, date=RSHA_DATE)
+    _rsha_git(MRF_DIR, "clone", "-q", "--depth", "1", "file://" + slash(MRF_DEEP_SRC), MRF_SHALLOW)
+    if _rsha_git(MRF_SHALLOW, "rev-parse", "--is-shallow-repository") != "true":
+        sys.exit("fixture setup failed in mrf_build: MRF_SHALLOW is not a shallow clone")
     _rsha_git(MRF_BADREMOTE, "remote", "add", "origin", MRF_ORIGIN)
     _rsha_git(MRF_BADREMOTE, "config", "url.%s.insteadOf" % os.path.join(MRF_DIR, "missing.git"), MRF_ORIGIN)
     os.makedirs(MRF_GH_BIN, exist_ok=True)
@@ -16364,7 +16379,7 @@ def mrf_build():
         sys.exit("fixture setup failed in mrf_build: the fake gh error mode is not a non-404 failure")
 
 
-lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE, MRF_GH_BIN], mrf_build)
+lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE, MRF_GH_BIN, MRF_SHALLOW, MRF_DEEP_SRC], mrf_build)
 
 
 def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
@@ -16535,6 +16550,34 @@ mrf_case("origin/main: PR #8 names no other repo, so PR 8 is judged and refused"
          "origin/main: PR #8 has the fix.", carries=("#8",))
 mrf_case("hooks/guard.py:100 PR #8 names no repo, so PR 8 is judged and refused", "deny",
          "hooks/guard.py:100 PR #8 has the fix.", carries=("#8",))
+
+# Marks and forms, in running text. The first group's labels are not repo marks, so PR 8 and sha 8c1f0e2a7 are judged.
+mrf_case("CI/CD: PR #8 is green is refused", "deny", "CI/CD: PR #8 is green.", carries=("#8",))
+mrf_case("Done/Next: PR #8 open is refused", "deny", "Done/Next: PR #8 open.", carries=("#8",))
+mrf_case("Batch 2/3: PR #8 merged is refused", "deny", "Batch 2/3: PR #8 merged.", carries=("#8",))
+mrf_case("Done/Next: head 8c1f0e2a7 is refused", "deny", "Done/Next: head 8c1f0e2a7", carries=("8c1f0e2a7",))
+mrf_case("PR: #8 is refused and named", "deny", "PR: #8", carries=("#8",))
+mrf_case("PR (#8) is refused and named", "deny", "PR (#8)", carries=("#8",))
+mrf_case("**PR** #8 is refused and named", "deny", "**PR** #8", carries=("#8",))
+mrf_case("PR `#8` is refused and named", "deny", "PR `#8`", carries=("#8",))
+mrf_case("PR number 8 is refused and named", "deny", "PR number 8", carries=("#8",))
+mrf_case("PRs #7 #8 names 8 and is refused", "deny", "PRs #7 #8", carries=("#8",))
+mrf_case("PRs #7 or #8 names 8 and is refused", "deny", "PRs #7 or #8", carries=("#8",))
+mrf_case("PRs #7 + #8 names 8 and is refused", "deny", "PRs #7 + #8", carries=("#8",))
+# Fail open: a shallow clone and a repo with no origin name what they could not check, with no permissionDecision.
+mrf_case("a made-up sha in a shallow clone is allowed, and the output names the sha", "allow",
+         "Rebased on 8c1f0e2a7.", cwd=MRF_SHALLOW, carries=("8c1f0e2a7",), context=True)
+mrf_case("PR #8 in a repo with no origin is allowed, and the output names #8", "allow",
+         "PR #8 has the fix.", cwd=MRF_NOORIGIN, carries=("#8",), context=True)
+# Another repo's PR, written with a mark, is not judged.
+mrf_case("acme/widgets PR #9 is another repo and is allowed", "allow", "acme/widgets PR #9 is ready.")
+# Twenty-one PRs that exist: the first twenty resolve, and the twenty-first is named as unchecked, not dropped.
+MRF_TWENTY_ONE = "PRs " + ", ".join("#%d" % number for number in MRF_EXISTING_PRS) + " are open."
+mrf_case("21 existing PRs are allowed, and the output names the 21st, #30", "allow", MRF_TWENTY_ONE,
+         carries=("#30",), context=True)
+# A capitalised repo with a colon mark is not a mark, so its PR is judged against this repo.
+mrf_case("Acme/Widgets: PR #8 is judged against this repo and refused", "deny", "Acme/Widgets: PR #8 has the fix.",
+         carries=("#8",))
 
 
 # =========================================================================== failing open
