@@ -83,8 +83,8 @@ demand; the current reply counts by its blockquote. A bare `Recovered:` takes th
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
 the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
 page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
-a colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
-`issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source,
+a colon or spaces, then at most one backtick, may sit between), `PR #<n>`, `PRs #<n>`, `PR (#<n>)`, `PR#<n>`,
+`pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source,
 and a PR with no `#` (`PR 3`) is no source even beside git, page or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
@@ -788,16 +788,19 @@ CARRY_LINES = (
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
 )
 # A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
-# colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
-# `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
+# colon or spaces, then at most one backtick, may sit between), `PR #<n>`, `PRs #<n>`, `PR (#<n>)`, `PR#<n>`,
+# `pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
 # A PR with no `#` is no source, and the word beside it (git, page, digest) does not rescue it (see
 # item_names_source): "PR 978", "PR978", "PR-978", "PR: 978", "PR number 978", "PR no. 978", "PRs 978", "pull 978",
 # "pull request 978", "pull requests 978".
 SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                            r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
-BARE_PR_RE = re.compile(r"\b(?:PRs?|pull(?:\s+requests?)?)(?:\s*[-:]?\s*|\s+(?:number|no\.?)\s+)\d", re.I)
+                            r"|\bPRs?\s*\(?#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+# A bare "pull <n>" is no PR when a git verb leads it ("git pull 2") or a word follows the number ("pull 3 files").
+_BARE_PR_SEP = r"(?:\s*[-:]?\s*|\s+(?:number|no\.?)\s+)"
+BARE_PR_RE = re.compile(r"\b(?:(?:PRs?|pull\s+requests?)" + _BARE_PR_SEP + r"\d|(?<!\bgit\s)pull" + _BARE_PR_SEP
+                        + r"\d+\b(?!\s+[a-z]))", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
