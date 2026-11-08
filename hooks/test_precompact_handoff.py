@@ -1890,6 +1890,11 @@ REFUSAL_ROWS = (
     ("The tool call was denied by the Claude Code auto mode classifier.", True),
     ("This agent is isolated in the worktree X, but the command runs elsewhere. "
      "Refusing to run it", True),
+    ("Permission to read .env has been denied.", True),
+    ("Permission to edit ~/.claude/settings.json has been denied.", True),
+    ("Permission for this tool use was denied: it requires interactive approval", True),
+    ("Permission for this command was denied by a built-in Claude Code safety check", True),
+    ("Permission to read /home/user/My Docs/x.txt has been denied.", True),
     ("Error: connect ECONNREFUSED 127.0.0.1", False),
     ("bash: /x: Permission denied", False),
     ("Nobody refused it", False),
