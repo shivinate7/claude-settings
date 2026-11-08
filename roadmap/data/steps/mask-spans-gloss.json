@@ -1,0 +1,11 @@
+{
+  "title": "The code-span mask also masks a span's paren gloss",
+  "status": "doing",
+  "order": 60.1,
+  "owner": "coordinator",
+  "lane": "session_013NEJL4HFe7Gz9VNMNryxaZ",
+  "why": "A backticked role word inside a gloss counts as a role, so the model-name check gives a false alarm in Done and a loose waiver in Next.",
+  "note": "word_runs.mask_code_spans(only=...) leaves a span's paren gloss unmasked. Note: mask-spans-gloss-escapes. PR stacked on #1690. Filed from lane report-model-from-role, 19:22 CST Nov 7, at the coordinator's 19:01 CST ask.",
+  "phase": "now",
+  "updatedAt": "2026-11-07T19:22:00-06:00"
+}

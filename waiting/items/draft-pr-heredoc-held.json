@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T01:22:00Z",
+  "context": "Goal: stop the draft-PR check's false alarm on a python heredoc that mentions `gh pr create` in backticks.\nProblem (rule): the lane's fix was held after round 3 at negative net value, and a held change gets no more work without your word. It opened a hole: after a kept heredoc body, `nohup bash run.sh &` or `npm start &` passes, where main refuses them as a detached launch.\nBased on (measured): the lane's runs. #1642 still refuses the incident; the cause is shell_run_texts reading python backtick spans.\nDeparts from: main refuses the incident's python heredoc as a draft-PR create \u2014 a fixes it in #1642's stacked PR and drops the held change; b re-lanes the held change with the hole fixed.",
+  "home": "draft-pr-guard-heredoc",
+  "id": "draft-pr-heredoc-held",
+  "kind": "decision",
+  "n": 381,
+  "options": [
+    {
+      "gain": "The false alarm goes, and no hole opens.",
+      "how": "The stacked PR, already queued, treats python backticks as text, not shell. The held branch stays archived.",
+      "key": "a",
+      "label": "Drop the held change; fix the incident in #1642's stacked PR",
+      "lose": "Debt heredoc-written-run-false-alarm (a data heredoc kept in view) stays open."
+    },
+    {
+      "gain": "It also closes debt heredoc-written-run-false-alarm.",
+      "how": "A new lane at round 1 fixes the detached-launch hole, then runs full review rounds.",
+      "key": "b",
+      "label": "Re-lane the held change with the hole fixed",
+      "lose": "One more lane on the shared heredoc code that caused the hole, so the risk of a new hole repeats."
+    }
+  ],
+  "owner": "lane draft-pr-guard-heredoc (session_013NEJL43F31tNPDKT4u3HJv)",
+  "pick": "a",
+  "ref": "step draft-pr-guard-heredoc; decision hold-unsafe-after-round-3 (net-value hold after round 3); PR #1642; archived branch archive/draft-pr-guard-heredoc",
+  "short": "Held draft-PR heredoc fix",
+  "status": "open",
+  "title": "What happens to the held draft-PR heredoc fix?",
+  "why": "The coordinator and the lane recommend a: it removes the false alarm with no new hole, and the debt stays filed."
+}

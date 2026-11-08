@@ -1,11 +1,11 @@
 {
   "title": "banchi: find why T7 runs over 25 min in a cloud VM",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 50,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL2iYsBGsEeEAggnRjE",
   "why": "T7 ran over 25 min in a cloud VM and did not finish (15:01-15:26 CST Nov 7), against 2.6-4.2 min per CI shard (main run 87). The log showed \"capture server has failed to stay up\" 5 times and repeated price-service 403s.",
-  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane.",
-  "updatedAt": "2026-11-07T19:13:00-06:00"
+  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane. Lane session_013NEJL2iYsBGsEeEAggnRjE has had it since 19:08 CST (coordinator, 19:17 CST).",
+  "updatedAt": "2026-11-07T19:22:00-06:00"
 }
