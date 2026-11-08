@@ -52,6 +52,13 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_monitor(self):
+        # The Monitor tool's command is judged by the shell rules (judge_shell), so the first guard matcher must see Monitor.
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        self.assertTrue(re.fullmatch(matchers[0], "Monitor"),
+                        "the first guard matcher does not cover Monitor: %r" % matchers[0])
+
     def test_guard_matcher_covers_exit_worktree(self):
         # Rule session-home deletes a session's record on ExitWorktree, so the guard must see that call.
         matchers = guard_matchers()
