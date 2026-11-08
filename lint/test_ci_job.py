@@ -10,7 +10,7 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 JobReaders reads a job's own timeout-minutes and runs-on: a quoted or commented value reads as its value; a timeout that is
   not a whole number above zero, an expression, an absent key and a step's key read as None.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
-SignalKilled: a step whose run ends by a signal, or whose verdict is killed first, reads unknown, never FAIL.
+SignalKilled: a step whose shell a signal kills reads FAIL; a verdict cut off with no verdict line and a nonzero exit reads unknown, never FAIL.
 SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when the selector picks it for the diff; a selector
   that cannot run exits 2.
   SuiteSteps also covers a multi-line step with a preamble line, a suite with an argument, a suite that reaches a changed
