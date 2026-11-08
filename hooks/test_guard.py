@@ -22283,10 +22283,11 @@ FIXTURELESS_CHECKS.update((
 
 # ------------------------------------------------------------------ review-rounds: a later round waits for an earlier one
 #
-# A reviewer spawn for round 2 or 3 of a pull request is refused while an earlier round's reviewer on that
-# pull request still runs in this session (rule review-rounds-in-order). The round is the brief's `Round N of 3`
-# first line; a brief with no marker is round 1. The pull request is the `PR #<n>` (or `#<n>`) the brief names,
-# matched as a whole number. The transcript is the spawn payload's transcript_path, one record per line: each
+# A reviewer spawn for the second or third round of a pull request is refused while an earlier round's reviewer on
+# that pull request still runs in this session (rule review-rounds-in-order). The round is the brief's `Round N of 3`
+# first line; a brief with no marker is the first round. The pull request is the number the brief names after `PR`
+# or `#` (`PR #<n>`, `PR <n>`, `PR#<n>` or `#<n>`), matched as a whole number. The transcript is the spawn payload's
+# transcript_path, one record per line: each
 # tool_use is its own assistant record, and each result is a user record that comes after it.
 #
 # An earlier reviewer still runs when its call has no result yet, or when it launched in the background and no
@@ -22298,16 +22299,16 @@ FIXTURELESS_CHECKS.update((
 FAMILY = "review-rounds"
 RR_RULE = "review-rounds-in-order"
 RR_DIR = os.path.join(ROOT, "review-rounds")
-RR_R1 = "Review PR #2038 for correctness."                    # round 1: no marker
+RR_R1 = "Review PR #2038 for correctness."                    # the first round: no marker
 RR_R2 = "Round 2 of 3. Re-check PR #2038 after the fix."
 RR_R3 = "Round 3 of 3. Re-check PR #2038 after the second fix."
 
 
-def rr_use(cid, prompt, subagent="reviewer", model="haiku"):
+def rr_use(cid, prompt, agent="reviewer", model="haiku"):
     """An Agent tool_use: the assistant's call. Its result comes in a later record, or not yet."""
     return {"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": cid, "name": "Agent",
-         "input": {"description": "review", "prompt": prompt, "subagent_type": subagent, "model": model}}]}}
+         "input": {"description": "review", "prompt": prompt, "subagent_type": agent, "model": model}}]}}
 
 
 def rr_result(cid, text, tur, is_error=False):
@@ -22317,10 +22318,10 @@ def rr_result(cid, text, tur, is_error=False):
         "toolUseResult": tur}
 
 
-def rr_background(aid, prompt, subagent="reviewer", model="haiku"):
+def rr_background(aid, prompt, agent="reviewer", model="haiku"):
     """A background agent: its tool_use, then the async launch result, which names the agentId."""
     cid = "toolu_" + aid
-    return [rr_use(cid, prompt, subagent, model), rr_result(
+    return [rr_use(cid, prompt, agent, model), rr_result(
         cid, "Async agent launched successfully. agentId: %s." % aid,
         {"isAsync": True, "status": "async_launched", "agentId": aid, "description": "review",
          "outputFile": "/nonexistent/%s.output" % aid})]
@@ -22367,12 +22368,12 @@ def rr_transcript(slug, records):
     return path
 
 
-def rr_case(name, expected, slug, records, prompt, subagent="reviewer", model="sonnet", carries=()):
+def rr_case(name, expected, slug, records, prompt, agent="reviewer", model="sonnet", carries=(), lacks=()):
     """One case: the spawn of prompt, judged in a session whose transcript holds records. A refusal names its
     rule, so it reads the rule; an allow prints no reason, so it reads none."""
     add(name, expected, rule=RR_RULE if expected == "deny" else None, tool="Agent",
-        transcript=rr_transcript(slug, records), carries=carries, prompt=prompt, subagent_type=subagent,
-        model=model)
+        transcript=rr_transcript(slug, records), carries=carries, lacks=lacks, prompt=prompt,
+        subagent_type=agent, model=model)
 
 
 # A refusal: the earlier round still runs, so the later round is refused and the reason names that round.
@@ -22408,7 +22409,7 @@ rr_case("review-rounds: a second round 1 reviewer on PR #2038 is allowed while t
         "ok-two-round-1", rr_background("rr-l1", RR_R1), RR_R1, model="haiku")
 rr_case("review-rounds: a builder's round 3 is not refused by this rule while a round 2 reviewer runs", "allow",
         "ok-builder-round-3", rr_background("rr-m1", RR_R2), "Round 3 of 3. Finish the fix for PR #2038.",
-        subagent="builder", model="opus")
+        agent="builder", model="opus")
 rr_case("review-rounds: round 2 on PR #2038 is allowed when the transcript holds no spawn", "allow",
         "ok-empty", [], RR_R2)
 
