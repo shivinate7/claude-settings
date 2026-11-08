@@ -1,11 +1,11 @@
 {
   "title": "The guard refuses a push that moves a branch another worktree has checked out",
   "why": "Lane review-record-post-check (session_013NEJKzmHFbqZ9QC2TAupBc, #2219), relayed by the coordinator 13:49 CST Nov 8: a test-author agent pushed to a branch that the lane's own worktree had checked out, and that worktree was left with a stale index. Step one-worktree-per-branch (#1583) refuses only `git checkout -B` or `switch -C` of a held branch, not a push that moves one. The harm is the same: a later commit from the stale index silently undoes pushed work.",
-  "note": "Sighting (lane sim-tool-lease-check, via coordinator 13:55 CST Nov 8): its brief sent an agent to a branch the lane's own worktree held. Sighting (lane runner-drops-handed-lane, 15:53 CST Nov 8): a builder subagent moved a local branch ref that the orchestrator's worktree had checked out (lane/runner-drops-handed-lane to d8a855e55); the stale tree nearly committed a revert. Details on step resumed-agent-stale-tree. Note: step agent-push-moves-held-branch (lane session_013NEJKyzA8bkZSm147VHnke) has the same title.",
+  "note": "Sighting (lane sim-tool-lease-check, via coordinator 13:55 CST Nov 8): its brief sent an agent to a branch the lane's own worktree held. Sighting (lane runner-drops-handed-lane, 15:53 CST Nov 8): a builder subagent moved a local branch ref that the orchestrator's worktree had checked out (lane/runner-drops-handed-lane to d8a855e55); the stale tree nearly committed a revert. Details on step resumed-agent-stale-tree. Note: step agent-push-moves-held-branch (lane session_013NEJKyzA8bkZSm147VHnke) has the same title. Coordinator 15:55 CST Nov 8: PR #2298; step agent-push-moves-held-branch folds in here.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL3MgGYEmmygRpZfXzy",
   "status": "doing",
   "order": 812,
-  "updatedAt": "2026-11-08T15:54:00-06:00"
+  "updatedAt": "2026-11-08T15:57:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "The guard refuses a push to a branch that another worktree holds",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 0.2,
   "owner": "coordinator",
   "why": "Coordinator, 14:29 CST Nov 7.",
-  "note": "Same lane as step override-plain-ask.",
-  "lane": "session_013NEJKyzA8bkZSm147VHnke",
-  "updatedAt": "2026-11-07T14:28:00-06:00"
+  "note": "Same lane as step override-plain-ask. Folded (coordinator 15:55 CST Nov 8) into step push-branch-held-elsewhere (#2298): a plain push moves no local ref. Session session_013NEJKyzA8bkZSm147VHnke never held this step.",
+  "lane": "push-branch-held-elsewhere (session_013NEJL3MgGYEmmygRpZfXzy)",
+  "updatedAt": "2026-11-08T15:57:00-06:00"
 }
