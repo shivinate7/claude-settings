@@ -5667,6 +5667,26 @@ sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in th
    "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
    "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tail, then && push, is refused",
+   "~/.claude/bin/merge --lane-lint 7 2>&1 | tail -3 && git push", "deny", "check-tail",
+   cwd=NOGIT)
+# A lint piped to tail or head reports the filter's exit, not the lint's, so a commit or push after it
+# runs on a red lint. The pipe is refused when a git commit or git push follows it in the same call.
+sh("check-tail: lint piped to tail, then ; git add and && git commit is refused",
+   "python3 lint/ste_lint.py docs/x.md 2>&1 | tail -2; git add docs/x.md && git commit -m m",
+   "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: lint piped to tail, then && git commit is refused",
+   "python3 lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: set -e, then lint piped to head, then ; git push is refused",
+   "set -e; python3 lint/rule_audit.py 2>&1 | head -3; git push origin HEAD:b", "deny", "check-tail",
+   cwd=NOGIT)
+# Controls: a lint piped onward with nothing after it, a verdict call with no pipe, and a lint with no pipe.
+sh("check-tail: lint piped to tail with no commit after is allowed",
+   "python3 lint/ste_lint.py docs/x.md | tail -2", "allow", cwd=NOGIT)
+sh("check-tail: verdict on a lint, then ; git commit, is allowed",
+   "verdict python3 lint/ste_lint.py docs/x.md; git commit -m m", "allow", cwd=NOGIT)
+sh("check-tail: lint then && git commit, with no pipe, is allowed",
+   "python3 lint/ste_lint.py docs/x.md && git commit -m m", "allow", cwd=NOGIT)
 sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
    "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
    cwd=NOGIT)
@@ -5704,26 +5724,6 @@ sh("check-tail: a $(pwd) script path with no space piped to tail in the foregrou
 # Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
 sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
    "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
-sh("check-tail: merge --lane-lint piped to tail, then && push, is refused",
-   "~/.claude/bin/merge --lane-lint 7 2>&1 | tail -3 && git push", "deny", "check-tail",
-   cwd=NOGIT)
-# A lint piped to tail or head reports the filter's exit, not the lint's, so a commit or push after it
-# runs on a red lint. The pipe is refused when a git commit or git push follows it in the same call.
-sh("check-tail: lint piped to tail, then ; git add and && git commit is refused",
-   "python3 lint/ste_lint.py docs/x.md 2>&1 | tail -2; git add docs/x.md && git commit -m m",
-   "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: lint piped to tail, then && git commit is refused",
-   "python3 lint/ste_lint.py docs/x.md | tail -2 && git commit -m m", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: set -e, then lint piped to head, then ; git push is refused",
-   "set -e; python3 lint/rule_audit.py 2>&1 | head -3; git push origin HEAD:b", "deny", "check-tail",
-   cwd=NOGIT)
-# Controls: a lint piped onward with nothing after it, a verdict call with no pipe, and a lint with no pipe.
-sh("check-tail: lint piped to tail with no commit after is allowed",
-   "python3 lint/ste_lint.py docs/x.md | tail -2", "allow", cwd=NOGIT)
-sh("check-tail: verdict on a lint, then ; git commit, is allowed",
-   "verdict python3 lint/ste_lint.py docs/x.md; git commit -m m", "allow", cwd=NOGIT)
-sh("check-tail: lint then && git commit, with no pipe, is allowed",
-   "python3 lint/ste_lint.py docs/x.md && git commit -m m", "allow", cwd=NOGIT)
 
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
