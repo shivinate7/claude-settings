@@ -61,7 +61,7 @@ Stop: stall_watch.py --stop
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. A background agent (toolUseResult isAsync, status async_launched, agentId) is a job too: its
   transcript is <session dir>/<session stem>/subagents/agent-<id>.jsonl (else the launch's outputFile),
-  and it closes as a shell does. It is not listed while its last tool_use has no tool_result, read from
+  and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
   the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
@@ -529,10 +529,10 @@ def agent_transcripts(session, agent, output):
 
 
 def open_call(path, size):
-    """True when the last tool_use in the transcript at path has no tool_result yet: the agent is in
+    """True when any tool_use in the read window has no tool_result yet: the agent is in
     one long call, not stalled. Reads only the end of the file: TAIL_BYTES, doubled until the window
     holds a whole last record (the first line of a window that starts mid-file is cut and dropped).
-    An empty file, or one whose last records are text, is not an open call."""
+    An empty file, or one with every tool_use answered, is not an open call."""
     window = TAIL_BYTES
     with open(path, "rb") as f:
         while True:
