@@ -10489,6 +10489,23 @@ RF_WF_AGENTS = [
 RF_WF_NOMETA_RUN = "wf_0a7d3e9b-4c1"
 RF_WF_NOMETA_AGENT = "f2c8e5a1d7b09346d"
 RF_WF_NOMETA_AGENTS = [(RF_WF_NOMETA_AGENT, "meta-missing", "Review", None, True)]
+# A run whose agents are workflow-subagents spawned with isolation worktree: their meta holds spawnedWithWorktree and a
+# worktreePath, as the probe measured it (wf_19ac2aae-ebb). A finished one with those keys is refused, a running one
+# with them passes, and a finished one with no worktree keys passes (the control).
+RF_WF_WT_RUN = "wf_7d3a1f0c-9e2"
+RF_WF_WT_AGENT, RF_WF_WT_RUNNING_AGENT, RF_WF_NOKEYS_AGENT = "a1d4c7e0b9f25683e", "c5e9b2f7a0d13846d", "f0b6d3a9e4c17258b"
+RF_WF_WT_PATH = os.path.join(ROOT, "rf-worktrees", "wf_7d3a1f0c-9e2-1")
+RF_WF_WT_KEYS = {"spawnedWithWorktree": True, "worktreePath": RF_WF_WT_PATH}
+RF_WF_WT_AGENTS = [
+    (RF_WF_WT_AGENT, "scan-worktree", "Scan", "workflow-subagent", True),
+    (RF_WF_WT_RUNNING_AGENT, "scan-worktree-running", "Scan", "workflow-subagent", False),
+    (RF_WF_NOKEYS_AGENT, "scan-no-worktree", "Scan", "workflow-subagent", True),
+]
+RF_WF_WT_EXTRA = {RF_WF_WT_AGENT: RF_WF_WT_KEYS, RF_WF_WT_RUNNING_AGENT: RF_WF_WT_KEYS}
+# A run whose journal cannot be read: its journal.jsonl is a folder, so the guard's open() fails on it. The journal
+# holds no agent, so the target is named by no readable journal.
+RF_WF_UNREADABLE_RUN = "wf_9b2c6e4a-1f7"
+RF_WF_UNREADABLE_AGENT = "d8f0a3c6e2b91574f"
 
 
 def rf_workflow_launch(transcript_name, run):
@@ -10609,15 +10626,22 @@ RF_TRANSCRIPTS = {
                                            rf_workflow_launch("workflow-subagent-sender", RF_WF_RUN)),
     # A Workflow run whose one agent has a result line and no meta file.
     "workflow-no-meta": rr_session(rf_workflow_launch("workflow-no-meta", RF_WF_NOMETA_RUN)),
+    # A builder spawned in the transcript, still running, then a Workflow run whose agents were spawned with isolation
+    # worktree (RF_WF_WT_RUN). The builder is the sender of the subagent cases.
+    "workflow-worktree": rr_session(rf_launch("b1", "builder", RF_OTHER, RF_OTHER_AGENT),
+                                    rf_workflow_launch("workflow-worktree", RF_WF_WT_RUN)),
+    # A Workflow run whose journal cannot be read (write_rf_transcripts makes its journal a folder).
+    "workflow-unreadable": rr_session(rf_workflow_launch("workflow-unreadable", RF_WF_UNREADABLE_RUN)),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
 
 
-def write_rf_workflow(transcript_name, run, agents):
+def write_rf_workflow(transcript_name, run, agents, meta_extra=None):
     """A Workflow run's folder beside the transcript `transcript_name`: the journal, a launched line, then a started line
     for each agent and a result line for each one that finished, and one meta file per agent, holding its agentType.
-    An agent whose agentType is None has no meta file."""
+    An agent whose agentType is None has no meta file. `meta_extra` maps an agent id to more meta keys, such as the
+    worktree keys of an agent spawned with isolation worktree."""
     folder = os.path.join(RF_DIR, transcript_name, "subagents", "workflows", run)
     lines = [json.dumps({"type": "launched"})]
     for agent_id, label, phase, agent_type, finished in agents:
@@ -10627,8 +10651,9 @@ def write_rf_workflow(transcript_name, run, agents):
             lines.append(json.dumps({"type": "result", "key": key, "agentId": agent_id, "result": "done",
                                      "toolsUsed": ["Bash"]}))
         if agent_type is not None:
-            write(os.path.join(folder, "agent-%s.meta.json" % agent_id),
-                  json.dumps({"agentType": agent_type, "model": "sonnet"}))
+            meta = {"agentType": agent_type, "model": "sonnet"}
+            meta.update((meta_extra or {}).get(agent_id, {}))
+            write(os.path.join(folder, "agent-%s.meta.json" % agent_id), json.dumps(meta))
     write(os.path.join(folder, "journal.jsonl"), "\n".join(lines) + "\n")
 
 
@@ -10637,6 +10662,10 @@ def write_rf_transcripts():
     write_rf_workflow("workflow-agents", RF_WF_RUN, RF_WF_AGENTS)
     write_rf_workflow("workflow-subagent-sender", RF_WF_RUN, RF_WF_AGENTS)
     write_rf_workflow("workflow-no-meta", RF_WF_NOMETA_RUN, RF_WF_NOMETA_AGENTS)
+    write_rf_workflow("workflow-worktree", RF_WF_WT_RUN, RF_WF_WT_AGENTS, RF_WF_WT_EXTRA)
+    # The journal is a folder, so the guard's open() fails on it, as the role transcript's `unreadable` folder does.
+    os.makedirs(os.path.join(RF_DIR, "workflow-unreadable", "subagents", "workflows", RF_WF_UNREADABLE_RUN,
+                             "journal.jsonl"), exist_ok=True)
 
 
 # `missing` is never written: the guard's read of it fails, and the rule allows.
@@ -10776,6 +10805,27 @@ rf_refuse("a subagent's send to a finished Workflow reviewer is refused",
 rf_allow("control: a subagent's send to a finished non-reviewer Workflow agent passes",
          {"to": RF_WF_DONE_AGENT, "message": RF_MSG}, rf_path("workflow-subagent-sender"),
          agent_id=RF_OTHER_AGENT, agent_type="builder")
+# A finished Workflow agent of agentType workflow-subagent that was spawned with isolation worktree: its meta holds
+# spawnedWithWorktree and a worktreePath, and its worktree is gone once it finishes. Refused for a main-session send and
+# for a subagent's send. The role pins no isolation, so the meta keys are what decide.
+rf_refuse("a main-session send to a finished Workflow agent spawned with a worktree is refused",
+          {"to": RF_WF_WT_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"),
+          carries=("fresh workflow-subagent", "prior report"))
+rf_refuse("a subagent's send to a finished Workflow agent spawned with a worktree is refused",
+          {"to": RF_WF_WT_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"),
+          agent_id=RF_OTHER_AGENT, agent_type="builder", carries=("fresh workflow-subagent", "prior report"))
+# The same agent type with the same keys, while it runs (a started line, no result), passes. A finished one with no
+# worktree keys passes too: it is the control that shows the keys alone make the refusal above.
+rf_allow("a main-session send to a running Workflow agent spawned with a worktree passes: a started line, no result",
+         {"to": RF_WF_WT_RUNNING_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"))
+rf_allow("control: a main-session send to a finished Workflow agent of workflow-subagent with no worktree keys passes",
+         {"to": RF_WF_NOKEYS_AGENT, "message": RF_MSG}, rf_path("workflow-worktree"))
+# Asked: no readable journal names the target, and a journal beside the transcript cannot be read. The control is the
+# same target on a transcript whose journals all read: nothing names it, so it passes.
+rf_ask("a Workflow agent whose journal cannot be read asks: no readable journal names it",
+       {"to": RF_WF_UNREADABLE_AGENT, "message": RF_MSG}, rf_path("workflow-unreadable"))
+rf_allow("control: a Workflow agent that no journal names passes when every journal can be read",
+         {"to": RF_WF_UNREADABLE_AGENT, "message": RF_MSG}, rf_path("workflow-agents"))
 rf_allow("a send in a transcript with no spawn at all is allowed",
          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("no-spawn"))
 rf_allow("a missing transcript is allowed, never refused",
