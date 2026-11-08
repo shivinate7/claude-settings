@@ -11,7 +11,7 @@ from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _drop_heredoc_bodies, _runs_written_file,
     _split_heredocs, _without_message_values,
-    JS_DEPTH, code_parses, code_paths, heredoc_code, inline_code,
+    JS_DEPTH, _piped_calls, code_parses, code_paths, heredoc_code, inline_code, runner_scripts,
     inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
@@ -359,7 +359,7 @@ def _plain_escaped_quotes(cmd: str) -> str:
     runs_file = None
     for quote, body, header in bodies:
         header = _without_message_values(header)
-        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+        if body and ((INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header)) or _piped_calls(header)):
             plain = _ESCAPED_QUOTE.sub(
                 lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body)
             if quote and runs_file is None:
@@ -502,6 +502,7 @@ def _handed_on_scripts(text: str):
         tokens = segment_tokens(piece)
         if tokens:
             scripts.extend(inner_commands(tokens))
+            scripts.extend(runner_scripts(tokens))
     return scripts
 
 

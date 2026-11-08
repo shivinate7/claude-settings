@@ -860,8 +860,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
             text, [header for _, _, header in bodies]):
         return cmd  # the body may be executed, so keep it under inspection
-    if not shells_only and heredoc_code(cmd):
-        return cmd  # the code reader finds python or node in a body no test above names: `| python3`, `uv run x.py`
+    if not shells_only and (heredoc_code(cmd) or any(_piped_calls(_without_message_values(header))
+                                                     for _, _, header in bodies)):
+        return cmd  # python or node reads a body no test above names (`| python3`, `uv run x.py`), as code or as data
     return "\n".join([dropped] + runs)
 
 
@@ -1912,6 +1913,7 @@ PY_MOVE_CALLS = frozenset({"rename", "replace", "move"})
 PY_TEXT_CALLS = frozenset({"print", "pprint", "write", "writelines", "write_text", "write_bytes",
                            "dumps", "dump", "startswith", "endswith"})
 PY_TEXT_COMPARES = (ast.In, ast.NotIn, ast.Eq, ast.NotEq)
+PY_PREFIX_TESTS = frozenset({"startswith", "endswith"})
 # Nodes that carry a string on to the call around them: a list, a dict, an f-string, a sum.
 PY_CARRIERS = (ast.Dict, ast.List, ast.Tuple, ast.Set, ast.JoinedStr, ast.FormattedValue, ast.BinOp,
                ast.Starred, ast.keyword, ast.IfExp, ast.BoolOp)
@@ -1933,8 +1935,10 @@ JS_CALLEE = re.compile(r"([\w$.?]+)\s*$")
 JS_COMPARE_BEFORE = re.compile(r"[!=]==?\s*$")
 JS_COMPARE_AFTER = re.compile(r"\s*[!=]==?")
 # The bare name on the other side of a compare with a string literal: `f === 'x'`, `'x' !== f`.
-JS_NAME_BEFORE = re.compile(r"(?<![\w$.])([\w$]+)\s*[!=]==?\s*$")
-JS_NAME_AFTER = re.compile(r"\s*[!=]==?\s*([\w$]+)(?![\w$.(\[])")
+JS_NAME_BEFORE = re.compile(r"(?<![\w$.])([\w$]+)\s*(!==?|===?)\s*$")
+JS_NAME_AFTER = re.compile(r"\s*(!==?|===?)\s*([\w$]+)(?![\w$.(\[])")
+JS_PREFIX_CALLEE = re.compile(r"([\w$]+)\.(?:startsWith|endsWith)")
+JS_IF_OPEN = re.compile(r"\bif\s*\(")
 # A word before `(` that opens no call: its parenthesis holds a condition or a parameter list.
 JS_NOT_CALLS = frozenset({"", "if", "while", "for", "switch", "catch", "function", "return", "typeof"})
 JS_EVAL_FLAGS = ("-e", "-p", "--eval", "--print")
@@ -1953,7 +1957,14 @@ CODE_RUNNERS = {"uv": (("run",), ("tool", "run")), "poetry": (("run",),), "pipen
 CODE_RUNNER_VALUE_FLAGS = frozenset({"--with", "--python", "-p", "--project", "--directory", "--extra",
                                      "--group", "--package", "--with-requirements", "--env-file",
                                      "--index", "--index-url", "--extra-index-url", "--with-editable",
-                                     "--from", "--python-version"})
+                                     "--from", "--python-version", "--cache-dir", "--config-file", "--color",
+                                     "--python-preference", "--default-index", "--find-links", "--link-mode",
+                                     "--resolution", "--prerelease", "--exclude-newer", "--constraints",
+                                     "--overrides", "--only-group", "--no-group", "--index-strategy",
+                                     "--keyring-provider", "--allow-insecure-host", "--refresh-package",
+                                     "--reinstall-package", "--upgrade-package"})
+# npx takes a package with `-p`, and a shell string with `-c`: `runner_scripts` reads that string.
+NPX_RUN_VALUE_FLAGS = frozenset({"-p", "--package", "-c", "--call", "--registry", "--cache", "--userconfig"})
 # conda names its environment with these; `-n` there is no boolean flag as it is in uv (`--no-cache`).
 CONDA_RUN_VALUE_FLAGS = frozenset({"-n", "--name", "-p", "--prefix"})
 
@@ -2005,8 +2016,9 @@ def _python_mode(node, parents, calls_only: bool = False) -> str:
     """The mode a python string constant gives its path, from the call that holds it. A join
     (`os.path.join(a, p)`) passes the mode of its result on; a list, a dict, an f-string or a sum
     carries the string to the call around it, where only a text call reads it (`direct` is then off).
-    A list or tuple that is the argument of `str.join` (`'\\n'.join(['a', p])`) is text: the joined
-    string is a listing, never a path. `calls_only` is for a name (see `_python_paths`): a node that
+    A list or tuple that is the argument of `str.join` (`'/'.join(['a', p])`) gives the joined string
+    the mode its consumer gives it, as `os.path.join` does: text for a print, a write's content or a
+    compare, a read for `open`. `calls_only` is for a name (see `_python_paths`): a node that
     no call holds gives "" there, not "unknown"."""
     value, direct, listed = node, True, False
     while True:
@@ -2015,7 +2027,8 @@ def _python_mode(node, parents, calls_only: bool = False) -> str:
             return "text" if all(isinstance(op, PY_TEXT_COMPARES) for op in parent.ops) else "unknown"
         if (listed and isinstance(parent, ast.Call) and _call_name(parent) == "join"
                 and not _stdlib_call(parent) and parent.args[:1] == [value]):
-            return "text"
+            value, direct, listed = parent, True, False   # the joined string takes its consumer's mode
+            continue
         if (direct and isinstance(parent, ast.Call) and _call_name(parent) == "join"
                 and _stdlib_call(parent) and value in parent.args):
             value = parent
@@ -2056,25 +2069,57 @@ def _python_paths(code: str):
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     found = [(node.value, _python_mode(node, parents)) for node in ast.walk(tree)
              if isinstance(node, ast.Constant) and isinstance(node.value, str)]
-    # A literal that a name is compared with (`f == '.env'`, `f in ('.env', 'x')`) is text where it
-    # stands, but the name picks that file out, so a call that takes the name opens the file. The
-    # name is read by its spelling alone, over the whole code (no scope); a use that holds no call
-    # (`[f for f in names if f != '.env']`) opens nothing.
-    compared = {}
-    for compare in (node for node in ast.walk(tree) if isinstance(node, ast.Compare)):
-        operands = [compare.left] + compare.comparators
+    # A literal that a name is tested against (`f == '.env'`, `f in ('.env', 'x')`, `f.startswith('.env')`)
+    # is text where it stands, but the name picks that file out. So a call that takes the name inside
+    # the test's positive branch opens the file. The name is read by its spelling alone (no scope); a
+    # `!=` test, an `else` branch and the code after an `if` body that ends in `continue` pick nothing.
+    for tests, scope in _python_positive_scopes(tree):
+        for name, literals in tests:
+            for root in scope:
+                for node in ast.walk(root):
+                    if isinstance(node, ast.Name) and node.id == name:
+                        mode = _python_mode(node, parents, calls_only=True)
+                        if mode not in ("", "text", "exists"):
+                            found.extend((literal, mode) for literal in literals)
+    return found
+
+
+def _python_positive_tests(test):
+    """[(name, [string literals])] for the names a test picks out when it is true: `f == 'x'`,
+    `f in ('x', 'y')`, `f.startswith('x')`, each also as a conjunct of an `and`. A `!=`, a `not in`, a
+    `not` and an `or` pick none."""
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And):
+        return [found for value in test.values for found in _python_positive_tests(value)]
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], (ast.Eq, ast.In)):
+        operands = [test.left] + test.comparators
         literals = [part.value for operand in operands
                     for part in (operand.elts if isinstance(operand, (ast.Tuple, ast.List, ast.Set)) else [operand])
                     if isinstance(part, ast.Constant) and isinstance(part.value, str)]
-        for operand in operands:
-            if isinstance(operand, ast.Name) and literals:
-                compared.setdefault(operand.id, []).extend(literals)
-    for node in ast.walk(tree) if compared else ():
-        if isinstance(node, ast.Name) and node.id in compared:
-            mode = _python_mode(node, parents, calls_only=True)
-            if mode not in ("", "text", "exists"):
-                found.extend((literal, mode) for literal in compared[node.id])
-    return found
+        return [(operand.id, literals) for operand in operands if isinstance(operand, ast.Name)] if literals else []
+    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) and test.func.attr in PY_PREFIX_TESTS
+            and isinstance(test.func.value, ast.Name) and test.args and isinstance(test.args[0], ast.Constant)
+            and isinstance(test.args[0].value, str)):
+        return [(test.func.value.id, [test.args[0].value])]
+    return []
+
+
+def _python_positive_scopes(tree):
+    """(tests, nodes) for each place that runs only when the tests are true: the body of an `if`, the
+    body of a conditional expression, the right of an `and`, and the element and later conditions of
+    a comprehension after its own `if`."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            yield _python_positive_tests(node.test), node.body
+        elif isinstance(node, ast.IfExp):
+            yield _python_positive_tests(node.test), [node.body]
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.And):
+            for at, value in enumerate(node.values[:-1]):
+                yield _python_positive_tests(value), node.values[at + 1:]
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            tail = [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+            for generator in node.generators:
+                for at, test in enumerate(generator.ifs):
+                    yield _python_positive_tests(test), tail + generator.ifs[at + 1:]
 
 
 def _python_token_strings(code: str):
@@ -2117,6 +2162,11 @@ def _js_mode(frames, code: str, start: int, end: int, whole: bool) -> str:
     join passes the mode of its result on to the call around it."""
     if JS_COMPARE_BEFORE.search(code[max(0, start - 8):start]) or JS_COMPARE_AFTER.match(code, end):
         return "text"
+    return _js_frames_mode(frames, whole)
+
+
+def _js_frames_mode(frames, whole: bool) -> str:
+    """The mode the calls around a string or a name give it (see `_js_mode`)."""
     direct = whole
     for kind, callee, index in reversed(frames):
         if kind != "(":
@@ -2143,18 +2193,24 @@ def _js_scan(code: str):
     found, stack, frames, prev = [], [], [], ""
     i, n = 0, len(code)
     broken = False
-    # A name that a literal is compared with (`f === '.env'`) picks that file out: a file call that takes
-    # the name as its whole argument (`readFileSync(f)`) then opens the literal. `uses` holds each such
-    # whole argument that is a bare name, with the mode its call gives it. The name is read by its
-    # spelling over the whole code (no scope).
-    compared, uses = {}, []
+    # A name that a literal is tested against (`f === '.env'`, `f.startsWith('.env')`) picks that file
+    # out: a file call that takes the name as its whole argument (`readFileSync(f)`), inside the
+    # test's positive branch (`_js_positive_scopes`), then opens the literal. `tests` holds each such
+    # test as (name, literal, start, end of the test text). `uses` holds each whole argument that is a
+    # bare name, as (name, the mode its call gives it, its position). The name is read by its spelling
+    # (no scope).
+    tests, uses = [], []
 
     def note_compared(text: str, start: int, end: int):
         before = JS_NAME_BEFORE.search(code[max(0, start - 80):start])
         after = JS_NAME_AFTER.match(code, end)
-        for found_name in (before, after):
-            if found_name:
-                compared.setdefault(found_name.group(1), []).append(text)
+        if before and before.group(2) in ("==", "==="):
+            tests.append((before.group(1), text, max(0, start - 80) + before.start(1), end))
+        if after and after.group(1) in ("==", "==="):
+            tests.append((after.group(2), text, start, after.end(2)))
+        prefix = JS_PREFIX_CALLEE.fullmatch(frames[-1][1]) if frames and frames[-1][0] == "(" else None
+        if prefix and whole_arg(start, end) and frames[-1][2] == 0:
+            tests.append((prefix.group(1), text, code.rfind(frames[-1][1], 0, start), code.find(")", end) + 1))
 
     def whole_arg(start: int, end: int) -> bool:
         before = code[:start].rstrip()[-1:]
@@ -2246,22 +2302,84 @@ def _js_scan(code: str):
             j = i
             while j < n and (code[j].isalnum() or code[j] in "_$"):
                 j += 1
-            if whole_arg(i, j) and frames[-1][1] not in JS_NOT_CALLS:
-                base = frames[-1][1].rsplit(".", 1)[-1]
-                if base in JS_TEXT_CALLS or base.endswith("Error") or (
-                        base in JS_CONSOLE_CALLS and frames[-1][1].startswith("console.")):
-                    uses.append((code[i:j], "text"))
-                elif base not in JS_JOIN_CALLS:
-                    uses.append((code[i:j], _js_file_mode(base, frames[-1][2])))
+            if tests and whole_arg(i, j) and frames[-1][1] not in JS_NOT_CALLS:
+                uses.append((code[i:j], _js_frames_mode(frames, True), i))
             prev, i = ("kw" if code[i:j] in JS_REGEX_WORDS else "a"), j
         else:
             if not char.isspace():
                 prev = char
             i += 1
-    for name, mode in uses if compared else ():
-        if mode not in ("text", "exists"):
-            found.extend((literal, mode) for literal in compared.get(name, ()))
+    for name, literal, first, last in _js_positive_scopes(code, tests) if uses else ():
+        found.extend((literal, mode) for used, mode, at in uses
+                     if used == name and first <= at < last and mode not in ("text", "exists"))
     return found, not (broken or stack or frames)
+
+
+def _js_close(code: str, opened: int) -> int:
+    """The index of the bracket that closes the one at code[opened], skipping string contents; len(code)
+    when it never closes."""
+    depth, at, size = 0, opened, len(code)
+    while at < size:
+        char = code[at]
+        if char in "'\"`":
+            at += 1
+            while at < size and code[at] != char:
+                at += 2 if code[at] == "\\" else 1
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth <= 0:
+                return at
+        at += 1
+    return size
+
+
+def _js_extent(code: str, start: int, stop: str = "") -> int:
+    """The end of the statement or expression that begins at `start`: the match of a `{` block, or the
+    first `;`, `,`, `stop` character or line break at depth 0, or a bracket that closes the enclosing one."""
+    at, size, depth, seen = start, len(code), 0, False
+    while at < size and code[at] in " \t\r\n":
+        at += 1
+    if at < size and code[at] == "{":
+        return _js_close(code, at) + 1
+    while at < size:
+        char = code[at]
+        if char in "'\"`":
+            at += 1
+            while at < size and code[at] != char:
+                at += 2 if code[at] == "\\" else 1
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return at
+            depth -= 1
+        elif depth == 0 and (char in ";," or char in stop or (char == "\n" and seen)):
+            return at
+        seen = seen or not char.isspace()
+        at += 1
+    return size
+
+
+def _js_positive_scopes(code: str, tests):
+    """(name, literal, first, last) for each place that runs only when a test is true: the body of the
+    `if` whose condition holds the test, the right of an `&&` after it, and the `?` branch of a
+    conditional. A test under `!` picks nothing."""
+    for name, literal, start, end in tests:
+        if code[:start].rstrip().endswith(("!", "!(")):
+            continue
+        after = code[end:].lstrip()
+        base = len(code) - len(after)
+        if after.startswith("&&"):
+            yield name, literal, base + 2, _js_extent(code, base + 2)
+        elif after.startswith("?") and not after.startswith(("?.", "??")):
+            yield name, literal, base + 1, _js_extent(code, base + 1, ":")
+        opened = [m for m in JS_IF_OPEN.finditer(code, 0, start)]
+        if opened:
+            close = _js_close(code, opened[-1].end() - 1)
+            if close >= end:
+                yield name, literal, close + 1, _js_extent(code, close + 1)
 
 
 def code_paths(code: str, language: str):
@@ -2310,7 +2428,7 @@ def _runner_tail(rest):
     for words in CODE_RUNNERS.get(name, ()):
         if tuple(rest[1:1 + len(words)]) == words:
             rest = rest[1 + len(words):]
-            flags = CONDA_RUN_VALUE_FLAGS if name == "conda" else CODE_RUNNER_VALUE_FLAGS
+            flags = {"conda": CONDA_RUN_VALUE_FLAGS, "npx": NPX_RUN_VALUE_FLAGS}.get(name, CODE_RUNNER_VALUE_FLAGS)
             while rest and rest[0].startswith("-"):
                 rest = rest[2:] if rest[0] in flags else rest[1:]
             return name, words, rest
@@ -2339,6 +2457,27 @@ def _interpreter_calls(tokens):
             found.append((language, rest[1:]))
         elif re.sub(r"\.exe$", "", rest[0].rsplit("/", 1)[-1]) == "deno" and rest[1:2] == ["eval"]:
             found.append(("deno", rest[1:]))
+    return found
+
+
+def runner_scripts(tokens):
+    """The shell strings that `npx -c` and `npx --call` hand on (`npx -c 'cat .env'`): a script for the
+    caller's own shell reader, as `inner_commands` gives for `sh -c`. `inner_commands` is read by other
+    rules and stays as it is."""
+    found = []
+    for at in command_indexes(tokens):
+        rest = tokens[at:]
+        if not rest or basename(rest[0]) != "npx":
+            continue
+        k = 1
+        while k < len(rest) and rest[k].startswith("-"):
+            if rest[k] in ("-c", "--call") and k + 1 < len(rest):
+                found.append(rest[k + 1])
+                break
+            if rest[k].startswith("--call="):
+                found.append(rest[k].partition("=")[2])
+                break
+            k += 2 if rest[k] in NPX_RUN_VALUE_FLAGS else 1
     return found
 
 
@@ -2390,17 +2529,19 @@ def _code_args(args):
     return kept
 
 
+def _piped_calls(header: str):
+    """[(language, args)] for the interpreter calls that are the stage after the pipe on a heredoc's
+    header line (`cat <<'PY' | python3 runner.py`): the stage the body is piped into."""
+    piped = _HEREDOC_PIPE.search(header)
+    stages = split_segments(piped.group(1)) if piped else []
+    return _interpreter_calls(segment_tokens(stages[0]) or []) if stages else []
+
+
 def _piped_interpreters(header: str):
     """The languages of the interpreter that reads the heredoc body from stdin when the header pipes it
     on (`cat <<'PY' | python3`, `| node`, `| python3 -u -`). The interpreter must take no script file
-    or code of its own: only flags, and `-` for stdin."""
-    piped = _HEREDOC_PIPE.search(header)
-    if not piped:
-        return []
-    stages = split_segments(piped.group(1))
-    if not stages:
-        return []
-    return [language for language, args in _interpreter_calls(segment_tokens(stages[0]) or [])
+    or code of its own: only flags, and `-` for stdin. With a script word the body is data."""
+    return [language for language, args in _piped_calls(header)
             if all(arg.startswith("-") for arg in _code_args(args))]
 
 
