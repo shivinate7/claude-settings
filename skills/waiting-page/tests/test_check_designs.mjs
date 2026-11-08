@@ -211,7 +211,7 @@ test("guard path, no --answers: an item answered by its wait is still judged, so
   assert.match(got.json.problem, /focus/);
 });
 
-// A page published before its isAnswered (commit 052707c4a) has no such function. Renaming the name everywhere on the page
+// A page built before isAnswered existed has no such function. Renaming the name everywhere on the page
 // gives a page that still renders, with only the checker's call to isAnswered missing. The control is the page as it is:
 // the same bad item is a miss there.
 test("guard path on a page with no isAnswered: the bad item is a miss, exit 1, not unknown", async (t) => {
