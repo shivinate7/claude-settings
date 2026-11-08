@@ -1191,8 +1191,26 @@ def counts(row):
     return tuple(int(row[name]) for name in ("deny", "ask", "noted"))
 
 
+def last_day(out):
+    """The date in the last row of the per-day table, the window's end day."""
+    rows = [line for line in out.splitlines() if re.fullmatch(r"\| \d{4}-\d\d-\d\d \| \d+ \|", line)]
+    return rows[-1].split("|")[1].strip()
+
+
+# The one clock of the dated cases: 23:59:59.9, local wall time. The reader reads its own clock
+# (main's datetime.now()), so report() pins that clock to this instant as well. Read apart, a midnight
+# between the fixture and the reader moves the window, and the expected dates move with it.
+PIN_NOW = datetime(2026, 11, 3, 23, 59, 59, 900000)
+
+
+class _PinnedNow(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return PIN_NOW  # main() reads the naive local clock only
+
+
 def days_ago(n):
-    return (datetime.now().date() - timedelta(days=n)).isoformat()
+    return (PIN_NOW.date() - timedelta(days=n)).isoformat()
 
 
 def stamped(n, decision, rule, matched="x"):
@@ -1202,10 +1220,12 @@ def stamped(n, decision, rule, matched="x"):
 
 class AllRulesTests(unittest.TestCase):
     def report(self, lines, *flags):
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(glr, "datetime", _PinnedNow):
             path = write_log(os.path.join(folder, "guard.log"), lines)
             rc, out, err = run_cli(["--log", path] + list(flags))
         self.assertEqual(rc, 0, "the report refused its flags: %s" % err)
+        if "all" not in flags:  # scope first (P7): the reader read the pinned day, so its window ends there
+            self.assertEqual(last_day(out), PIN_NOW.date().isoformat(), "the reader did not read the pinned day")
         return out
 
     def test_a_rule_with_no_lines_shows_0_and_never(self):
