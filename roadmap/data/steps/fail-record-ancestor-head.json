@@ -1,11 +1,11 @@
 {
   "title": "A FAIL record from a review round run before its PR exists names the live head",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 266.6,
   "owner": "coordinator",
   "lane": "session_013NEJKzYhDtNPLcEdeVFEVe",
   "why": "Incident #1565 (coordinator, Nov 7): a review round ran before its PR existed, and its FAIL record named an ancestor of the live head.",
-  "note": "Stacks on fix-check-after-notes-v2. Done check: a red test where the FAIL record names an ancestor, then the record names the live head or is refused. Folded in, Nov 7 23:10 CST: proposed step record-fix-check-on-new-pr. `merge --review-record` refuses a Fix check line on a PR with no earlier record, so #1781, whose review ran before the PR existed, lists its fix checks in a note. Same gap, second shape: q_max #1106 ran its rounds at an old head and its fix check on a main-merge delta, but the tool prints a record only for the live head. #1575 (--fix-base-record) covers only a review recorded on another PR (coordinator, 23:07 CST).",
-  "updatedAt": "2026-11-07T23:08:00-06:00"
+  "note": "Stacks on fix-check-after-notes-v2. Done check: a red test where the FAIL record names an ancestor, then the record names the live head or is refused. Folded in, Nov 7 23:10 CST: proposed step record-fix-check-on-new-pr. `merge --review-record` refuses a Fix check line on a PR with no earlier record, so #1781, whose review ran before the PR existed, lists its fix checks in a note. Same gap, second shape: q_max #1106 ran its rounds at an old head and its fix check on a main-merge delta, but the tool prints a record only for the live head. #1575 (--fix-base-record) covers only a review recorded on another PR (coordinator, 23:07 CST). Own-rounds path dropped: PR #1795 closes, because it would let a done record rest on an unchecked head that main refuses. Shapes #1781 and q_max #1106 stay on the fresh round 1 route (coordinator, 00:02 CST Nov 8). Done with no change: the path was dropped, not built.",
+  "updatedAt": "2026-11-08T00:02:00-06:00"
 }
