@@ -14562,6 +14562,25 @@ class BuildBatchLint(BuildEnv):
         self.assertEqual(len(self.lint_calls), 1, "an older head was not linted:\n" + out)
         self.assertIn("feat9", self.lint_calls[0])
 
+    def test_a_head_that_edits_a_lint_read_path_is_linted_even_when_its_base_holds_main_s_lint_change(self):
+        lint_sha = self.main_commit({BUILD_LINT_FILE: "step input\n"})  # main's newest lint-step change
+        self.main_commit({"docs/notes.md": "later\n"})
+        self.verdicts["feat7"] = ("fail", FAIL_LINES, [], False)
+        h7 = self.lane(7, {BUILD_LINT_FILE: "head edit\n"})  # its merge base holds the lint change, and the head edits a lint-read path itself
+        h8 = self.lane(8)  # the control: the same base, and no lint-read path edited
+        rc, out, err = self.build(self.done_host({7: h7, 8: h8}))
+        self.assertEqual(rc, 0, f"--build-batch did not run to its end (rc {rc}):\n{err}{out}")
+        self.assertIn("feat7", self.linted(), "a head that edits a lint-read path was skipped, not linted:\n" + out + err)
+        left = left_of(out)
+        self.assertEqual(len(left), 1, out + err)
+        self.assertTrue(left[0].startswith("left out: #7 feat7: lane lint red: "), out + err)
+        for step in ("check invariants", "lint prose"):
+            self.assertIn(step, left[0], "the reason does not name the failing step " + step + ":\n" + out)
+        self.assertEqual(lines_with(out, "skipped lint: "), [f"skipped lint: #8 feat8: its merge base holds {lint_sha[:9]}, main's newest lint change"], out)
+        self.assertEqual(joins_of(out), [f"joins: #8 feat8 {h8[:9]}"], out)
+        self.assertNotIn("feat8", self.linted(), "a head that edits no lint-read path was linted")
+        self.assert_ran(rc, out, err, 1)
+
     def test_the_cap_line_prints_the_cap_and_its_source(self):
         rc, out, err = self.build(self.done_host({7: self.lane(7)}))
         self.assert_ran(rc, out, err, 1)
@@ -14741,6 +14760,28 @@ class BuildBatchOrderedAfter(BuildEnv):
                     self.assert_ran(rc, out, err, 0)
                     left = left_of(out)
                     self.assertTrue(left and left[0].startswith("left out: #1675 feat1675: waits on #1676"), out)
+
+
+class BuildBatchLabels(BuildEnv):
+    """A candidate that carries a held, parked or replaced label is left out, with that label as its reason, even with a done record for its
+    live head. A candidate with no such label joins beside it."""
+
+    def label_case(self, label):
+        h7, h8 = self.lane(7), self.lane(8)
+        host = PullsHost([batch_pull(7, h7, labels=(label,)), batch_pull(8, h8)], {}, comments=self.done(7, h7) + self.done(8, h8))
+        rc, out, err = self.build(host)
+        self.assertEqual(left_of(out), [f"left out: #7 feat7: label {label}"], out + err)
+        self.assertEqual(joins_of(out), [f"joins: #8 feat8 {h8[:9]}"], out + err)
+        self.assert_ran(rc, out, err, 1)
+
+    def test_a_held_candidate_with_a_done_record_is_left_out_naming_the_label(self):
+        self.label_case("held")
+
+    def test_a_parked_candidate_with_a_done_record_is_left_out_naming_the_label(self):
+        self.label_case("parked")
+
+    def test_a_replaced_candidate_with_a_done_record_is_left_out_naming_the_label(self):
+        self.label_case("replaced")
 
 
 if __name__ == "__main__":
