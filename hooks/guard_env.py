@@ -59,7 +59,7 @@ def names_env_file(name: str) -> bool:
 # A head holds no space, except in a quote that sits inside the word (`C:\"My Dir"\.env`) or in a
 # quoted word that is a rooted path from its first character (`"C:\My Dir\.env"`). Prose before the
 # backslash (`"see C:\MyDir\.env"`) and a regex (`"\d+ \.env"`) have no root, so they stay text.
-# The argument of a PowerShell path command (ENV_PATH_COMMANDS) is no text: none of this applies.
+# In PowerShell text every other argument is a path (`path_arg`): none of this applies to it.
 #
 # The residue, stated rather than hidden: a RELATIVE Windows path whose every segment after the
 # first begins with a dot, such as `foo\.config\.env`, is no longer read as a path. Text alone
@@ -68,11 +68,20 @@ ENV_PATH_PREFIX = re.compile(r"^(\.{1,2}|~|[A-Za-z]:|\S*(/|\\(?![.\\]))\S*)$")
 ENV_QUOTED_ROOT = re.compile(r"^([A-Za-z]:[\\/]|\\\\|~[\\/]|\.{1,2}[\\/]|/)")
 ENV_QUOTED_SPAN = re.compile(r"\"[^\"]*\"|'[^']*'")
 
-# PowerShell commands whose arguments are paths, with their aliases, in lower case. Their backslash
-# is a path separator, never a regex escape.
-ENV_PATH_COMMANDS = frozenset((
-    "get-content", "gc", "cat", "type", "get-item", "gi", "copy-item", "cpi", "copy", "cp",
-    "move-item", "mi", "move", "mv"))
+# In PowerShell text an argument is a path unless it is one of these. A path's backslash is a
+# separator. A pattern's is a regex escape, and a text command's arguments are text. A second list
+# beside ENV_PATTERN_COMMANDS and ENV_TEXT_COMMANDS, since PowerShell names its pattern flag
+# `-Pattern`, which `_pattern_words` would misread as the short flag `-e`, and its print cmdlets
+# are not `echo` or `printf`. Lower case.
+ENV_POWERSHELL_PATTERN_COMMANDS = ("select-string", "sls")
+ENV_POWERSHELL_TEXT_COMMANDS = (
+    "write-host", "write-output", "write-error", "write-warning", "write-verbose", "write-debug",
+    "write-information")
+# `-Path` and the like take a value that is never the pattern.
+ENV_SELECT_STRING_VALUES = (
+    "-path", "-literalpath", "-include", "-exclude", "-encoding", "-context", "-inputobject")
+# The operators whose right-hand word is a regex.
+ENV_REGEX_OPERATOR = re.compile(r"-[ic]?(not)?match|-[ic]?replace|-[ic]?split", re.IGNORECASE)
 
 # Runners that read the file into their own environment and echo nothing. `npm` and `npx` reach the
 # flag through node, so `node --env-file=.env <npm-cli.js> run x` is the npm form.
@@ -336,9 +345,10 @@ def _joined_spaces(word: str, path_arg: bool = False) -> str:
 def env_reference(word: str, path_arg: bool = False) -> str:
     """Return the environment file that one shell word names as a path, else ''.
 
-    `path_arg` is set for an argument of a PowerShell command that takes a path (ENV_PATH_COMMANDS).
-    There a backslash is always a separator and a quoted word is one path, so `sub\\.env` and
-    `"My Dir\\.env"` name the file. In any other argument a backslash may be a regex escape.
+    `path_arg` is set for a PowerShell argument that is a path: any one but a pattern or text (see
+    ENV_POWERSHELL_PATTERN_COMMANDS). There a backslash is always a separator and a quoted word is
+    one path, so `sub\\.env` and `"My Dir\\.env"` name the file. In a pattern a backslash may be a
+    regex escape.
 
     A reference is the WHOLE BASENAME of the word and never a substring of it. That one property
     keeps `process.env`, `import.meta.env` and `dotenv` out, because in none of them does `.env`
@@ -498,6 +508,41 @@ def _pattern_words(words, position: int, command: str):
     if not given and plain:
         skip.add(plain[0])
     return skip, glued
+
+
+def _powershell_regex_words(words, position: int, command: str):
+    """The indexes of the words in a PowerShell segment that are a regex and no path: the word
+    after a `-match`, `-replace` or `-split` operator, a `git grep` pattern, and a Select-String
+    pattern (`-Pattern x`, `-Pattern:x`, or the first plain word when no flag gives it)."""
+    found = {i for i in range(1, len(words)) if ENV_REGEX_OPERATOR.fullmatch(words[i - 1])}
+    name = command.lower()
+    if name == "git" and words[position + 1:position + 2] == ["grep"]:
+        found |= _pattern_words(words, position + 1, "grep")[0]
+    elif name in ENV_POWERSHELL_PATTERN_COMMANDS:
+        plain, explicit, i = [], False, position + 1
+        while i < len(words):
+            word = words[i]
+            if REDIRECT.fullmatch(word):
+                i += 2
+                continue
+            flag, colon, _ = word.partition(":")
+            low = flag.lower()
+            if len(word) > 1 and word.startswith("-"):
+                if len(low) >= 5 and "-pattern".startswith(low):
+                    explicit = True
+                    found.add(i if colon else i + 1)
+                    i += 1
+                elif not colon and len(low) >= 3 and any(
+                        v.startswith(low) for v in ENV_SELECT_STRING_VALUES):
+                    i += 2
+                else:
+                    i += 1
+                continue
+            plain.append(i)
+            i += 1
+        if not explicit and plain:
+            found.add(plain[0])
+    return found
 
 
 def _assignment_end(words, position: int) -> int:
@@ -676,7 +721,10 @@ def _env_flat(cmd: str, text_ok: bool = False):
             # A text command's arguments are data. A redirect onto an environment file is refused
             # below, first.
             text_to_file = command in ENV_TEXT_COMMANDS and text_ok and not piped
-            path_arg = command.lower() in ENV_PATH_COMMANDS and is_powershell(segment)
+            powershell = is_powershell(segment)
+            not_paths = _powershell_regex_words(words, position, command) if powershell else set()
+            if command.lower() in ENV_TEXT_COMMANDS + ENV_POWERSHELL_TEXT_COMMANDS:
+                not_paths = set(range(len(words)))
             patterns, glued = (_pattern_words(words, position, command)
                                if command in ENV_PATTERN_COMMANDS + ENV_SCRIPT_COMMANDS
                                else (set(), {}))
@@ -693,7 +741,7 @@ def _env_flat(cmd: str, text_ok: bool = False):
                 prefix, assigned, rest = word.partition("=")
                 flag = prefix if assigned and prefix.startswith("-") else ""
                 named = env_reference(glued[index] if index in glued else rest if assigned else word,
-                                      path_arg)
+                                      powershell and index not in not_paths)
                 if not named:
                     continue
                 previous = words[index - 1] if index else ""
