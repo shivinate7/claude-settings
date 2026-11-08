@@ -309,7 +309,7 @@ def plan(step, pr, values, top, pinned=None):
             return "unknown", "no run.sh: looked for %s" % looked, None, None, None
         env = {}
         if "paths" in step_with(step):
-            env["ZIZMOR_PATHS"] = expand(step_with(step)["paths"].strip("'\""), values)
+            env["ZIZMOR_PATHS"] = expand(yaml_scalar(step_with(step)["paths"]), values)
             if env["ZIZMOR_PATHS"] is None:
                 return "unknown", "with: paths needs an expression this runner cannot read: %s" % step_with(step)["paths"], None, None, None
         # A missing run.sh of a local uses: must FAIL, as in CI; bash alone would exit 127 and read as a missing tool.
@@ -346,7 +346,7 @@ def plan(step, pr, values, top, pinned=None):
         return "unknown", "no run: and no uses:", None, None, None
     env = {}
     for name, raw in step_env(step).items():
-        val = expand(raw.strip("'\""), values)
+        val = expand(yaml_scalar(raw), values)
         if val is None:
             return "unknown", "env %s needs an expression this runner cannot read: %s" % (name, raw), None, None, None
         env[name] = val
