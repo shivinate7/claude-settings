@@ -1,7 +1,8 @@
 # Operating model
 
-Paste this into the project instructions. Replace each `<placeholder>`. The roster goes with it,
-from `roster.md`.
+Paste this into the project instructions. Replace each `<placeholder>`. The roster does not go
+with it: `roster.md` becomes the Standing sessions section of the record branch's CLAUDE.md, where
+every session can read it with git.
 
 ## Session tiers
 
