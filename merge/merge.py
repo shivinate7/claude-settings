@@ -3853,7 +3853,8 @@ def _reviewed_lines(h, root):
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
     the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); a done record whose Findings line is not met (see
     `findings_read`: `none` is met with no read) is `lane: <cause>` (the filing is owed, no round is: `findings not filed: this PR`, `follow-up #N does not exist`,
-    `follow-up #N closed unmerged` or `follow-up #N is this PR`; the lane round age limit holds), or `findings unknown: <why>`
+    `follow-up #N closed unmerged`, `follow-up #N is this PR` or `review record lacks Findings` (a done record created at or after
+    FINDINGS_REQUIRED_FROM with no Findings line; an earlier one is legacy and keeps its verdict); the lane round age limit holds), or `findings unknown: <why>`
     when the read could not run, which holds like any unknown and counts against the batch limit; the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
