@@ -10925,6 +10925,13 @@ class CapMatrixFloor(Env):
         self.assertEqual(out.count(fix_line(47)), 1, out)
 
 
+    def test_a_flow_map_include_item_cap_sets_the_floor_above_the_flow_list(self):
+        waits, out = self.floor_waits(build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                                           "        include:", "          - { cap: 90, os: linux }"))
+        self.assertEqual(set(waits), {95}, "the flow-map include item's cap, 90, must set the floor at 95, not the flow list's 42\n" + out)
+        self.assertEqual(out.count(fix_line(95)), 1, out)
+
+
 class CapUnknownDeadline(Env):
     """An unknown cap sets no floor. With no merge.deadlineMinutes in the config, the merge tool prints one line naming the job and the key.
     With the deadline set, no line names the key."""
@@ -10941,6 +10948,22 @@ class CapUnknownDeadline(Env):
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {5}, "scope: the deadline 5 is set, and an unknown cap sets no floor\n" + out)
         self.assertNotIn("merge.deadlineMinutes", out, "the deadline is set, so no line may name merge.deadlineMinutes\n" + out)
+
+
+    def test_two_unknown_jobs_with_no_deadline_set_are_both_named_and_no_line_says_that_job(self):
+        two = "\n".join([
+            "name: checks", "on: push", "jobs:",
+            "  alpha-probe:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+            "  beta-probe:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ inputs.cap }}", "    steps:", "      - run: echo ok",
+        ]) + "\n"
+        push_base(self, {".github/stamp.json": merge_stamp_text(None), ".github/workflows/checks.yml": two})
+        rc, out, _ = confirmed_wait(self)
+        self.assertEqual(rc, 0, out)
+        notice = " ".join(line for line in out.splitlines() if "merge.deadlineMinutes" in line)
+        self.assertTrue(notice, "no printed line names merge.deadlineMinutes\n" + out)
+        self.assertIn("alpha-probe", notice, "the notice must name job alpha-probe\n" + out)
+        self.assertIn("beta-probe", notice, "the notice must name job beta-probe\n" + out)
+        self.assertNotIn("that job's", notice, "with several unknown jobs the notice must not say that job's cap\n" + out)
 
 
 class CapMatrixValues(unittest.TestCase):
@@ -10988,6 +11011,38 @@ class CapMatrixValues(unittest.TestCase):
 
     def test_a_comment_after_a_flow_list_is_not_a_value(self):
         text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]  # 99")
+        self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
+
+
+class CapMatrixFlowMapInclude(unittest.TestCase):
+    """An include item written as a flow map (`- { cap: 90, os: linux }`) or with a quoted key (`- "cap": 90`) gives the job its cap,
+    or makes the job unknown. Either way the flow list's 42 is not the cap that the include item's own value replaces."""
+    def test_a_flow_map_include_item_cap_is_the_cap(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                    "        include:", "          - { cap: 90, os: linux }")
+        self.assertEqual(merge.job_caps([text]), {"build": 90, "checks": 40})
+
+    def test_a_flow_map_include_item_with_an_expression_cap_makes_the_job_unknown(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                    "        include:", "          - { cap: \"${{ x }}\", os: linux }")
+        caps, unknown = merge.scan_job_caps([text])
+        self.assertNotIn("build", caps, "an include cap the scan cannot read must not leave the flow list's 42 as the cap\n" + repr(caps))
+        self.assertIn("build", unknown, "an include cap that is an expression must make the job unknown\n" + repr(unknown))
+
+    def test_a_quoted_include_key_gives_its_cap_or_makes_the_job_unknown(self):
+        text = build_beside_literal("${{ matrix.cap }}", "    strategy:", "      matrix:", "        cap: [30, 42]",
+                                    "        include:", "          - \"cap\": 90")
+        caps, unknown = merge.scan_job_caps([text])
+        if "build" in caps:
+            self.assertEqual(caps["build"], 90, "a quoted include key must read as 90, never the flow list's 42\n" + repr(caps))
+        else:
+            self.assertIn("build", unknown, "a quoted include key must read as 90 or make the job unknown\n" + repr(caps))
+
+
+class CapMatrixQuotedExpression(unittest.TestCase):
+    """A quoted timeout expression, `timeout-minutes: "${{ matrix.cap }}"`, resolves like the bare form."""
+    def test_a_double_quoted_matrix_expression_resolves_like_the_bare_form(self):
+        text = build_beside_literal('"${{ matrix.cap }}"', "    strategy:", "      matrix:", "        cap: [30, 42]")
         self.assertEqual(merge.job_caps([text]), {"build": 42, "checks": 40})
 
 
@@ -11040,6 +11095,35 @@ class CapMatrixControls(unittest.TestCase):
             "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: 40", "    steps:", "      - run: echo ok",
         ]) + "\n"
         self.assertNoBuildCap(text)
+
+
+MATRIX_CHECKS_WORKFLOW = "\n".join([
+    "name: checks", "on: push", "jobs:",
+    "  checks:", "    runs-on: ubuntu-latest", "    timeout-minutes: ${{ matrix.cap }}",
+    "    strategy:", "      matrix:", "        cap: [30, 42]", "    steps:", "      - run: echo ok",
+]) + "\n"
+
+
+class CapMatrixTimeout(Env):
+    """The timeout read takes a matrix job's cap from its own matrix: a cancel at the largest matrix value (42) is a timeout,
+    and a cancel under it is not. The job is `checks`, the name the check rows carry."""
+    def setUp(self):
+        super().setUp()
+        push_base(self, {".github/workflows/checks.yml": MATRIX_CHECKS_WORKFLOW})
+
+    def test_a_cancel_at_the_largest_matrix_value_is_a_timeout(self):
+        host = CapsHost(self.co, [check("checks", "cancel", 42)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertFalse(ok, why)
+        self.assertIn(RE_CAP, why, "a cancel at 42 is the matrix job's cap of 42, so it is a timeout")
+
+    def test_a_cancel_under_the_largest_matrix_value_is_not_a_timeout(self):
+        host = CapsHost(self.co, [check("checks", "cancel", 42)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertIn(RE_CAP, why, "scope: the cap of 42 must be read before a cancel under it can be judged")
+        host = CapsHost(self.co, [check("checks", "cancel", 30)], [run("cancelled")])
+        (ok, why), _ = captured(lambda: host.wait_checks(7, HEAD_SHA, 30))
+        self.assertNotIn(RE_CAP, why, "a cancel at 30 is under the cap of 42, so it is not a timeout")
 
 
 class DuplicateJobIds(Env):
