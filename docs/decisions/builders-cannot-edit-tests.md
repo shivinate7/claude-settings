@@ -29,7 +29,7 @@ An unreadable state logs `role-diff-unread` and is allowed. A merge path whose b
 
 **Named limit.** On a checkout that converts files (`core.autocrlf`, `.gitattributes` text, eol or ident, an LFS smudge), an open merge's untouched conflicted test file is still refused: the working-tree bytes differ from git's merge blob. That is a refusal, never a pass; debt `merge-resolved-worktree-convert` (open merge refused on a converting checkout) holds it. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 83 of 83 `builder-refuse` cases pass on this tip.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 91 of 91 `builder-refuse` cases pass on this tip.
 
 ## Roles
 

@@ -2292,12 +2292,13 @@ def pyproject_author_ok(old: str, new: str) -> bool:
                for key in set(before) | set(after) if not key.startswith("tool.pytest"))
 
 
-def text_at(root: str, rev, rel: str) -> str:
+def text_at(root: str, rev, rel: str, top: str = "") -> str:
     """The file's text at `rev` (a commit or tree), in the working tree when `rev` is None, and ''
-    when it does not exist there or `rev` is '' (no commit)."""
+    when it does not exist there or `rev` is '' (no commit). `rel` is relative to the top of the checkout,
+    so the working tree is read from `top`; `top` defaults to `root`."""
     if rev is None:
         try:
-            with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as handle:
+            with open(os.path.join(top or root, rel), encoding="utf-8", errors="replace") as handle:
                 return handle.read()
         except Exception:
             return ""
@@ -2318,21 +2319,21 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
-            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+            bad = not workflow_test_steps_only(text_at(root, old, rel, top), text_at(root, new, rel, top))
         elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not package_json_author_ok(text_at(root, old, rel, top), text_at(root, new, rel, top))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not pyproject_author_ok(text_at(root, old, rel, top), text_at(root, new, rel, top))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
             bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
-                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
+                text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
         if bad:
             found.append(rel)
     return found
