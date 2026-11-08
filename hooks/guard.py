@@ -1552,6 +1552,7 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
     r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
     r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
@@ -1659,7 +1660,7 @@ WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 WORKFLOW_DISABLE_STEP = re.compile(
-    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))\s*$")
+    r"^\s*(?:-\s+)?(?:continue-on-error:\s*(?:true|\$\{\{\s*true\s*\}\})|if:\s*(?:false|\$\{\{\s*false\s*\}\}))(?:\s+#.*)?\s*$")  # YAML: a comment needs space before `#`
 
 
 def is_workflow_rel(rel: str) -> bool:
@@ -1819,6 +1820,13 @@ WORKFLOW_RUN_PREFIX = re.compile(r"^\s*(?:-\s+)?run:\s*")
 WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
+def workflow_runs_test(path: str) -> bool:
+    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
+    step are runs too."""
+    return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
+
+
 def workflow_command_tests(command: str) -> set:
     """The test paths one shell command line runs, each in its `workflow_path` spelling: the script an
     interpreter runs past its flags, every test path after a test runner, or the command itself when it is a
@@ -1848,7 +1856,7 @@ def workflow_command_tests(command: str) -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
+        found.update(workflow_path(tok) for tok in args if workflow_runs_test(workflow_path(tok)))
     return found
 
 
