@@ -92,9 +92,19 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
 # stems `mon` and `turn` but are credential names. Any other `key`, `secret`, `token` or `cookie` in a name counts.
 EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
 KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
-# The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
-# end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+# A credential name: a key word, then name characters up to the next key word, then `=` or `:`. Each name character is
+# read once, so a long name or a long run scans in linear time.
+CREDENTIAL_NAME = KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*[=:][ \t]*[\"']?"
+VALUE_CHARS = r"[A-Za-z0-9+/_.~%=-]"  # the characters of a credential value
+# The `credential-name` shape looks for the letter and the digit of a value in its first VALUE_LOOKAHEAD_MAX + 1
+# characters: a lookahead to the end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
+# A longer value is matched whole by LONG_CREDENTIAL_VALUE and read once by long_value_is_no_secret.
 VALUE_LOOKAHEAD_MAX = 256
+# It has no lookahead and no end condition: a value shorter than its bound fails within that many characters, and a
+# match takes the whole run, so finditer reads each run once. A later key word in the run starts a value that is a
+# suffix of this one, so it has a letter and a digit only if this one does.
+LONG_CREDENTIAL_VALUE = re.compile(
+    CREDENTIAL_NAME + r"(" + VALUE_CHARS + r"{" + str(VALUE_LOOKAHEAD_MAX + 1) + r",})", re.I)
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
@@ -132,10 +142,12 @@ SECRET_SHAPES = (
     # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
     # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass.
     ("credential-name", re.compile(
-        KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*[=:][ \t]*[\"']?(?:"
-        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
-        r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)[A-Za-z0-9+/_.~%=-]{8,}"
+        CREDENTIAL_NAME + r"(?:"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)" + VALUE_CHARS + r"{8,}"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))[A-Za-z_-]{12,}(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
+    # A credential value longer than the lookaheads above read: refused when it has a letter and a digit anywhere.
+    ("credential-name", LONG_CREDENTIAL_VALUE),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
         r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
@@ -259,8 +271,18 @@ def email_is_no_person(found):
             and found.string[found.end():found.end() + 1] in (":", "/"))
 
 
+def long_value_is_no_secret(found):
+    """True when `found` is a LONG_CREDENTIAL_VALUE match whose value lacks a letter or a digit. A match of the
+    other `credential-name` shape refuses as it is."""
+    if found.re is not LONG_CREDENTIAL_VALUE:
+        return False
+    value = found.group(1)
+    return not (any(c.isdigit() for c in value) and any(c.isalpha() for c in value))
+
+
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
-NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person}
+NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person,
+                   "credential-name": long_value_is_no_secret}
 
 
 def kinds_in(text):
