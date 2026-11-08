@@ -5429,6 +5429,22 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+# --- ln -s onto a directory that is already there
+sh("ln: -s over a real directory nests the link inside it",
+   "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
+if LINKS_MADE:
+    sh("ln: -sf over a link to a directory descends into it",
+       "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
+    sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
+       cwd=TRAPLN)
+    sh("ln: -sf over a link to a file replaces the link, as -f says",
+       "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
+sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
+sh("ln: a trailing slash says the destination is a directory",
+   "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
+sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
+   cwd=TRAPLN)
+
 # --- a roster command piped into tail or head (rule check-tail)
 #
 # A backgrounded `merge --lane-lint 1476 2>&1 | tail -8` loses its verdict (decision
@@ -5436,8 +5452,9 @@ sh("narrate: merge --confirm named in a quoted argument runs nothing",
 # `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
 # `merge --lane-lint` and `merge --review-record` are refused in the foreground and in the background.
 # `ci-job` is refused only in the background. The whole pipeline is read, so a filter between the check
-# and tail or head does not hide it. A `tee` stage ends the check's reach. `verdict` keeps the whole
-# output, so a call through it is allowed.
+# and tail or head does not hide it. A `tee` stage ends the check's reach. A pipe out of `verdict` is
+# refused by rule verdict-pipe (decision verdict-pipe-refused), so those rows name that rule. A verdict
+# call with no pipe after it is allowed here.
 # Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
@@ -5470,12 +5487,20 @@ add("check-tail: merge --lane-lint through grep -v and tail, backgrounded, is re
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | grep -v DEBUG | tail -8")
 
-add("check-tail: the incident line through verdict, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+# A pipe out of verdict is refused by verdict-pipe, which runs before check-tail. The same call with
+# no pipe keeps the point these rows had: the verdict form is not a check-tail refusal.
+add("verdict-pipe: the incident line through verdict piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
-add("check-tail: a python3 verdict wrapper piped to tail, backgrounded, is allowed", "allow",
+add("check-tail: the incident line through verdict with no pipe, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1")
+add("verdict-pipe: a python3 verdict wrapper piped to tail, backgrounded, is refused", "deny",
+    "verdict-pipe", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
+add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476")
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
@@ -5506,7 +5531,8 @@ add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed",
     command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
 
 # Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
-# not refused in the foreground, and neither is a verdict call.
+# not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
+# after it, a verdict call is allowed.
 sh("check-tail: the incident line in the foreground is refused",
    "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
@@ -5518,24 +5544,10 @@ sh("check-tail: ci-job piped to tail in the foreground is allowed",
    "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
 sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
    "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
-sh("check-tail: a verdict call piped to tail in the foreground is allowed",
-   "verdict merge --lane-lint 1476 | tail -3", "allow", cwd=NOGIT)
-
-# --- ln -s onto a directory that is already there
-sh("ln: -s over a real directory nests the link inside it",
-   "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
-if LINKS_MADE:
-    sh("ln: -sf over a link to a directory descends into it",
-       "ln -sf /opt/tool/linkdir linkdir", "deny", "ln-over-directory", cwd=TRAPLN)
-    sh("ln: -sfn replaces a link to a directory", "ln -sfn /opt/tool/linkdir linkdir", "allow",
-       cwd=TRAPLN)
-    sh("ln: -sf over a link to a file replaces the link, as -f says",
-       "ln -sf /opt/tool/other linkfile", "allow", cwd=TRAPLN)
-sh("ln: a free name", "ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
-sh("ln: a trailing slash says the destination is a directory",
-   "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
-sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
-   cwd=TRAPLN)
+sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
+   "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
+sh("check-tail: a verdict call with no pipe in the foreground is allowed",
+   "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
 
 # =========================================================================== 2c. waiter loops
 #
