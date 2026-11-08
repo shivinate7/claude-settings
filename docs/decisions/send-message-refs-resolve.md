@@ -32,13 +32,13 @@ With no origin, only shas are judged.
 ## Fail open
 
 - No git repo, no origin, or git fails: allowed.
-- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed, logged `message-ref-unread`.
+- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries a line that names each ref it could not check, so the sender reads it in the tool result. No log is written.
 - Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or a 404 from `gh api`.
 - A shallow clone with a missing sha: allowed, logged `report-sha-shallow`.
 
 ## Cost
 
-A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+Per send: at most one `git cat-file`, one `git ls-remote`, and one `gh` read per comment link. A message with no ref starts no process. One with shas starts one `git cat-file --batch-check`. One with PR numbers starts one `git ls-remote origin` for all of them, a network read of about 0.6 s, measured once from a cloud container. Each comment link starts one `gh api repos/<owner>/<repo>/issues/comments/<id>`, a network read. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
