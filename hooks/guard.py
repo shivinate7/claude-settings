@@ -2507,11 +2507,19 @@ MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)
 # A PR word that may be followed by a number, and the `#N` that comes after other words or marks: `PR is #N`,
 # `PR opened: #N`, `PR - #N`, `PR [#N]`, `Opened the PR as #N`, `pull #N`. The gap holds no digit, `#` or sentence end,
 # so it never reaches a count (`PR: 2500 lines`) or a later sentence.
-MESSAGE_PR_WORD = re.compile(r"\b(PRs?|pull(?:\s+requests?)?)\b", re.IGNORECASE)
+# The word stands alone: `pr` inside a name (`msg-ref-pr-forms`, `hooks/pr.py`) is no PR word. `pull` counts only
+# right before its number (`pull #N`) or in `pull request`, so the verb (`pull the list at #8`) is no PR word.
+MESSAGE_PR_WORD = re.compile(
+    r"(?<![\w/.-])(PRs?|pull\s+requests?|pull(?=\s*#\d))(?![\w-]|\.\w)", re.IGNORECASE)
 MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]*?)#(\d+)")
 MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
-# A word in the gap that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR.
-MESSAGE_PR_GAP_NOT = re.compile(r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?)\b", re.IGNORECASE)
+# A word in the gap that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb
+# that closes an issue (`This PR closes #8`) says the same.
+MESSAGE_PR_GAP_NOT = re.compile(
+    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?|closes|fixes|resolves)\b", re.IGNORECASE)
+# The issue word right before an `owner/repo#N`, so `Issue o/r#5` names no PR.
+MESSAGE_ISSUE_BEFORE = re.compile(
+    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?)\W{0,3}$", re.IGNORECASE)
 # This repo's own `owner/repo#N`, the owner/repo to be compared with the origin.
 MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
@@ -2580,8 +2588,9 @@ def message_other_link_text_blanked(line: str, this) -> str:
     return MESSAGE_LINK_TEXT.sub(blank, line)
 
 
-def message_pr_list(line: str, at: int, plural: bool) -> list:
-    """The further numbers of a list that starts at `at`. After a singular word a further number needs its own `#`."""
+def message_pr_list(line: str, at: int, plural: bool):
+    """(the further numbers of a list that starts at `at`, where the list ends). After a singular word a further
+    number needs its own `#`."""
     prs = []
     while True:
         for item in MESSAGE_PR_ITEMS:
@@ -2589,7 +2598,7 @@ def message_pr_list(line: str, at: int, plural: bool) -> list:
             if more and (plural or more.group(1) == "#"):
                 break
         else:
-            return prs
+            return prs, at
         prs.append(more.group(2))
         at = more.end()
 
@@ -2601,20 +2610,25 @@ def message_line_prs(line: str) -> list:
     the number needs its `#`, so `PR: 2500 lines` names none."""
     prs = []
     for word in MESSAGE_PR_WORD.finditer(line):
+        plural = word.group(1).lower().endswith("s")
+        at = word.end()
         found = MESSAGE_PR.match(line, word.start())
         if found:
             # After `:` or `(`, only a number with `#` is a PR, so `PR: 2500 lines` and `PR (2500 lines)` are counts.
             if not found.group(2) and re.search(r"[:(]", line[found.end(1):found.start(3)]):
                 continue
             prs.append(found.group(3))
-            prs += message_pr_list(line, found.end(), found.group(1).lower().endswith("s"))
-            continue
-        gap = MESSAGE_PR_GAP.match(line, word.end())
-        if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) \
-                or len(re.findall(r"[A-Za-z']+", gap.group(1))) > MESSAGE_PR_GAP_WORDS:
-            continue
-        prs.append(gap.group(2))
-        prs += message_pr_list(line, gap.end(), word.group(1).lower().endswith("s"))
+            more, at = message_pr_list(line, found.end(), plural)
+            prs += more
+        # Each `#N` after the word is judged by the same gap rule, so `PR #7 is #8` names both.
+        while True:
+            gap = MESSAGE_PR_GAP.match(line, at)
+            if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) \
+                    or len(re.findall(r"[A-Za-z']+", gap.group(1))) > MESSAGE_PR_GAP_WORDS:
+                break
+            prs.append(gap.group(2))
+            more, at = message_pr_list(line, gap.end(), plural)
+            prs += more
     prs += MESSAGE_PR_NUMBERED.findall(line)
     return prs
 
@@ -2641,7 +2655,9 @@ def message_refs(text: str, where: str):
             line = message_other_link_text_blanked(line, this())
         numbers = message_line_prs(line)
         if "#" in line and MESSAGE_OWN_REF.search(line) and this() is not None:
-            numbers += [n for o, r, n in MESSAGE_OWN_REF.findall(line) if (o.lower(), r.lower()) == this()]
+            numbers += [ref.group(3) for ref in MESSAGE_OWN_REF.finditer(line)
+                        if (ref.group(1).lower(), ref.group(2).lower()) == this()
+                        and not MESSAGE_ISSUE_BEFORE.search(line[:ref.start()])]
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
