@@ -105,7 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a double-quoted value); a time in prose, another field or collection, a single-quoted value, or a value with no offset passes",
+    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10914,9 +10914,10 @@ def mtc_batch(name, expected, writes):
     mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action="batch", writes=writes)
 
 
-def mtc_bash(name, expected, command):
-    """A Bash command whose text carries, or does not carry, a literal updatedAt value."""
-    mtc_write(name, expected, "Bash", command=command)
+def mtc_bash(name, expected, command, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, transcript=None):
+    """A Bash command whose text carries, or does not carry, a literal updatedAt value. A case whose command needs
+    another clock, or a transcript for another rule to allow it, names both; the rest keep the 14:14 CST clock."""
+    mtc_write(name, expected, "Bash", clock=clock, carries=carries, command=command, transcript=transcript)
 
 
 # Refused: an `added` in items 4 minutes ahead. The limit is 1 minute, so this is past it.
@@ -11164,6 +11165,34 @@ mtc_bash("a Bash python3 -c assignment with a single-quoted updatedAt key, 14:30
 # Refused: a jq |= assignment of updatedAt 14:30 at -06:00. The `|` sits between the key and the value.
 mtc_bash("a Bash jq |= assignment of updatedAt 14:30 at -06:00 is refused", "deny",
          r"""jq '.updatedAt |= "2026-11-07T14:30:00-06:00"' roadmap/data/steps/silent-undo-edit-pass.json""")
+# Refused: a single-quoted key and value, 16 minutes ahead. The shell reads the quotes, so the quote style does not
+# hide the literal from the clock.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'"''')
+# Passes: the same assignment 4 minutes behind the clock. A value behind the clock passes.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:10:00-06:00'"''')
+# Refused: a dict literal with a single-quoted key and value, 16 minutes ahead.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:30:00-06:00'}"''')
+# Passes: the same dict literal 4 minutes behind the clock.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:10:00-06:00'}"''')
+# Refused: the incident's Python write as written. Its value, 05:40Z on Nov 2, is 23:40 CST, which is 10 minutes ahead
+# of a 23:30 CST clock. At the 14:14 CST clock that value is days behind, so that clock cannot refuse this command.
+mtc_bash("the incident Python write, a single-quoted updatedAt 10 minutes ahead at 23:30 CST, is refused", "deny",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:30:00-06:00",
+         carries=("23:30 CST", "2026-11-01T23:30-06:00", "2026-11-02T05:30Z"), transcript=TRIAGE_TRANSCRIPT)
+# Passes: the same write at 23:41 CST, a minute after its value. A value behind the clock passes.
+mtc_bash("the incident Python write at 23:41 CST, a minute after its value, is allowed", "allow",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:41:00-06:00", transcript=TRIAGE_TRANSCRIPT)
+# Passes: a single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last. Only the last keyed literal is
+# judged, and it is behind the clock.
+mtc_bash("a Bash single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'.replace(\"'updatedAt': '2026-11-07T14:30:00-06:00'\", \"'updatedAt': '2026-11-07T14:10:00-06:00'\")"''')
+# Passes: a grep for a single-quoted key holds no instant, so no written value is judged.
+mtc_bash("a Bash grep for a single-quoted updatedAt key with no instant is allowed", "allow",
+         r'''grep "'updatedAt'" roadmap/data/steps/x.json''')
 # Passes: // and /* inside quoted strings, beside an updatedAt 20 minutes behind. The scan must not crash or refuse.
 mtc_bash("a Bash command with // and /* inside quoted strings, beside a behind updatedAt, is allowed", "allow",
          r'''echo "see http://claude.ai/x /* note */" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
