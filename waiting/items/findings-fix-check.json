@@ -7,25 +7,26 @@
   "n": 394,
   "options": [
     {
-      "gain": "Findings ride in the lane's own PR, as you picked, with no second PR.",
-      "how": "A short fix check passes a push whose diff only adds the round's findings to the debt store or the notes file.",
+      "gain": "Findings ride in the lane's own PR, with no second PR.",
+      "how": "A short fix check passes a push whose diff only adds the round's findings to the debt store or the notes file. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
       "key": "a",
-      "label": "Allow it (recommended)",
-      "lose": "One more fix check per lane."
+      "label": "Allow it",
+      "lose": "The shared fix check accepts a wider set of pushes, and each lane uses one more fix check.",
+      "widens": true
     },
     {
-      "gain": "No change to the decision.",
+      "gain": "No change to the decision or to the shared fix check.",
       "how": "The lane's PR keeps its reviewed head. Its findings go in one docs PR per topic.",
       "key": "b",
-      "label": "Findings go only to one follow-up docs PR per topic",
-      "lose": "Every lane opens a second PR, the shape your 386 b meant to cut."
+      "label": "Findings go to one follow-up docs PR per topic (recommended)",
+      "lose": "Each lane with findings opens one more PR."
     }
   ],
   "owner": "lane findings-ride-in-lane (session_013NEJKyuRd6zdQhuiRC27g9), via the coordinator",
-  "pick": "a",
+  "pick": "b",
   "ref": "item 386 b; decision hold-unsafe-after-round-3",
   "short": "Findings in the lane's PR after review",
   "status": "open",
   "title": "May a short fix check pass a push that only files the review's findings in the lane's own PR?",
-  "why": "The coordinator recommends a: it is what your 386 b asked for, and the fix check still reads the diff."
+  "why": "The coordinator recommends b: a widens what the shared fix check accepts, and a widening option is never the pick."
 }
