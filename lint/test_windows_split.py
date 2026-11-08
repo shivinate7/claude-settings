@@ -1981,8 +1981,8 @@ class CiCoverageGating(unittest.TestCase):
         # Named failure: a lone quote in a step name is text, so it must not hide the gating key below it.
         step = ["name: Don't run it", "run: python3 lint/test_x.py", "continue-on-error: true"]
         self.assert_gap(checks_yml(("checks", "ubuntu-latest", [step])), True,
-                        "a lone quote in the name of the only gating step hides its continue-on-error: true, "
-                        "so the file counts as covered")
+                        "the only step naming lint/test_x.py has continue-on-error: true after a lone quote in its name, "
+                        "which cannot fail a pull request, yet the file counts as covered")
 
     def test_a_step_that_can_fail_a_pull_request_is_not_reported(self):
         # Rows: a normal step; a key that is false, or an if: that can be true, on the step or the job; a file named by
