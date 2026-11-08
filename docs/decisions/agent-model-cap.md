@@ -27,7 +27,6 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Explore that audits or judges meaning, not a plain search | sonnet or opus, when its brief's first non-blank line carries the `Audit:` marker (owner, 2026-11-01 18:38 CST, item 137, pick a); set per spawn, which overrides the frontmatter `haiku` | high |
 | test-author | haiku | xhigh |
 | reviewer | haiku | xhigh |
-| reviewer, fix check of a guard or check change | sonnet; set per spawn, which overrides the frontmatter `haiku` (owner, 2026-11-07 14:44 CST, item 351 a). Any other fix check stays haiku | xhigh |
 | reviewer, rounds 2 and 3 | sonnet, the ceiling; set per spawn, which overrides the frontmatter `haiku`. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a) | round 2: high, set per spawn; round 3 on sonnet: xhigh, the frontmatter; round 3 on opus, by override: high, set per spawn |
 | record-writer (`agents/record-writer.md`) | haiku | xhigh |
 | builder | sonnet | high |
