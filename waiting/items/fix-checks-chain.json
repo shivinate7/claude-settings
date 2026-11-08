@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T12:40:00Z",
+  "context": "Goal: a lane fixes a small finding after review and merges, without repeat reviews that add nothing and without a record that hides a failed check.\nProblem (rule): today a record holds one fix check, so a second small fix forces a fresh review chain. Tonight that sent many PRs back for full rounds. #1829 lets fix checks chain after a passed one, which changes your ruling.\nBased on (ruling): your typed go of 2026-11-05 07:45 CST (commit a89fdc05e, decision pr-review-record) set the one-fix-check limit. Asked again because tonight's queue shows the cost of a fresh chain each time, which that ruling did not weigh.\nBased on (measured): #1829's round 3 (reviewer sonnet) passed with net value zero at f812874cd. The saving in rounds is unmeasured; the coordinator asked the lane for it.\nDeparts from: decision pr-review-record, one fix check per record \u2014 allows a chain of fix checks, each on the diff since the last passed one.\nMeanwhile: #1829 is held from runner 8; other lanes keep the fresh-chain rule.",
+  "home": "fix-check-chain",
+  "id": "fix-checks-chain",
+  "kind": "decision",
+  "n": 418,
+  "options": [
+    {
+      "gain": "Small fixes after review merge after one short check each, so fewer full review rounds.",
+      "how": "#1829 merges. After a passed fix check, the next small fix gets its own fix check on the diff since that pass. Decision pr-review-record is rewritten in place.",
+      "key": "a",
+      "label": "Allow chained fix checks (merge #1829)",
+      "lose": "A long chain of small checks can drift from the reviewed whole; no full read after the first."
+    },
+    {
+      "gain": "Every merged head has had one whole-diff read since its last real change.",
+      "how": "#1829 closes. A second fix after a passed fix check starts a fresh review chain.",
+      "key": "b",
+      "label": "Keep one fix check, then a fresh chain (today's rule)",
+      "lose": "More full review rounds, at haiku and sonnet cost."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "ref": "#1829 (lane fail-record-ancestor-head, session_013NEJKzYhDtNPLcEdeVFEVe); decision pr-review-record; step fix-check-chain",
+  "short": "Chain fix checks, or keep one per record",
+  "status": "open",
+  "title": "May fix checks chain after a passed one, or does a second small fix still start a fresh review chain?"
+}
