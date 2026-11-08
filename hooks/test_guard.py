@@ -13716,6 +13716,67 @@ sendto_refuse("a read of a product path, then Fix the guard, is refused to a tes
               lacks=("hooks/guard.py",))
 
 
+# ---- brief-role-scope: an Agent or Task spawn whose brief edits a path its role may not change is asked before it
+# runs. The role is the spawn's `subagent_type`, read from the call itself (no transcript). The clause reader is the one
+# message-role-scope uses (`message_edit_paths`). A builder is not briefed to edit a test. A test-author is not briefed
+# to edit product code or a Markdown file, since a record-writer owns Markdown. The ask names the role to send the work
+# to, never the path. Rule brief-role-scope; the message-role-scope decision record holds the clause rules.
+BRIEF_TOOL = "Agent"
+BRIEF_RULE = "brief-role-scope"
+BRIEF_FILLER = "Check the output of each run before the next step. "
+
+
+def brief_ask(name, subagent_type, prompt, send_to, lacks, tool=BRIEF_TOOL):
+    """An Agent or Task spawn the guard asks about under brief-role-scope. The reason names the role to send the work
+    to (`send_to`, a phrase such as `to a builder`), and it names none of the `lacks` fragments, which are the path."""
+    add("brief-role: " + name, "ask", rule=BRIEF_RULE, tool=tool, cwd=NOGIT, subagent_type=subagent_type,
+        prompt=prompt, carries=(send_to,), lacks=lacks)
+
+
+def brief_allow(name, subagent_type, prompt, tool=BRIEF_TOOL):
+    """An Agent or Task spawn the guard lets through silently under brief-role-scope."""
+    add("brief-role: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, subagent_type=subagent_type, prompt=prompt)
+
+
+# Asked: a test-author's brief edits a Markdown record. The ask sends it to a record-writer.
+brief_ask("a test-author brief that deletes a notes line is asked, naming record-writer",
+          "test-author", "Task: delete the one line in docs/debts/notes.md that starts `- x:`.",
+          "to a record-writer", lacks=("docs/debts/notes.md", "notes.md"))
+# Asked: a test-author's brief edits product code. The ask sends it to a builder.
+brief_ask("a test-author brief that fixes a product script is asked, naming builder",
+          "test-author", "Fix janitor/sweep.py so the case passes.", "to a builder",
+          lacks=("janitor/sweep.py", "sweep.py"))
+# Asked: a builder's brief edits a test. The ask sends it to a test-author.
+brief_ask("a builder brief that replaces a test assert is asked, naming test-author",
+          "builder", "Replace the assert at hooks/test_guard.py:120 with an assert on the verdict.",
+          "to a test-author", lacks=("hooks/test_guard.py", "test_guard.py"))
+# Asked: the Task tool is judged the same way as the Agent tool.
+brief_ask("a Task spawn of a test-author with a product fix is asked, naming builder",
+          "test-author", "Fix hooks/guard.py so the case passes.", "to a builder",
+          lacks=("hooks/guard.py",), tool="Task")
+# Asked: a long brief with the off-role clause last. The whole brief is read, not only its first lines.
+brief_ask("a long builder brief with a test assert edit at its end is asked, naming test-author",
+          "builder",
+          BRIEF_FILLER * 300 + "Then replace the assert at hooks/test_guard.py:120 with an assert on the verdict.",
+          "to a test-author", lacks=("hooks/test_guard.py", "test_guard.py"))
+# Passes: a brief that edits only the role's own paths, or only reads or waits on another path.
+brief_allow("a test-author brief that edits a test and reads a doc is allowed",
+            "test-author", "Edit only lint/test_find_time_pinned.py. Read docs/decisions/test-practices.md first.")
+brief_allow("a test-author brief whose docs path follows a read verb is allowed",
+            "test-author", "Read docs/decisions/test-practices.md, then add a case to lint/test_find_time_pinned.py.")
+brief_allow("a test-author brief whose docs path follows governed by is allowed",
+            "test-author", "Add a case to lint/test_find_time_pinned.py, governed by docs/decisions/test-practices.md.")
+brief_allow("an empty test-author brief is allowed", "test-author", "")
+brief_allow("a builder brief that reads a test and fixes the guard is allowed",
+            "builder", "Read hooks/test_guard.py, then fix the guard so the red cases pass.")
+brief_allow("a builder brief that changes the guard for red cases is allowed",
+            "builder", "Make the red cases in hooks/test_guard.py go green by changing hooks/guard.py only.")
+brief_allow("a record-writer brief that deletes a notes line is allowed",
+            "record-writer", "Delete the one line in docs/debts/notes.md that starts `- x:`.")
+brief_allow("a reviewer brief that reads a notes file is allowed",
+            "reviewer", "Review hooks/test_guard.py against docs/debts/notes.md and report the findings.")
+
+
 # The crash pin. The guard's main fails open on any exception, so the hook shows a silent allow for a message whose
 # judging raises. A plain word `quotespan0` is read as a masked quote that is not there, so only this direct call
 # shows the defect. Registered as a log check where LOG_CHECKS_EXTRA exists (see below).
