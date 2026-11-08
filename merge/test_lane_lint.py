@@ -154,6 +154,12 @@ PARENT_BRANCH = "silent-undo-base"  # the parent's head branch, as ParentHost re
 SECOND_PARENT_PR = 1700  # a second parent, for a body that names two
 SECOND_PARENT_HEAD = "3f9a0c2b7e41d5a86c0f1e2b9d7a4c5e6f8091a2"
 SECOND_PARENT_BRANCH = "notes-base"
+FIRST_PARENT_PR = 1676  # the first of two parents on one Merge after line
+FIRST_PARENT_HEAD = "5b2e7d91c0a4f3e8d6b1a97c2f0e4d8b3a6c9f15"
+FIRST_PARENT_BRANCH = "notes-first-base"
+LAST_PARENT_PR = 1742  # the second of the two, and the one a range starts at
+LAST_PARENT_HEAD = "c81f4a0e9d3b7261f5e8a2c0d4b9e7f1a3c6d802"
+LAST_PARENT_BRANCH = "notes-last-base"
 PARENTS = {PARENT_PR: (PARENT_HEAD, PARENT_BRANCH)}
 BELOW_START = "c05c0e626"  # #1969's range start, seven commits below PARENT_HEAD
 PR_1969_BODY = """Lane notes-fix-page, step silent-undo-cli-ignores-pr-body. Owner ruling: item 411 a, 2026-11-08 06:11 CST, "The CLI reads the body through the merge tool's reader". This branch stacks on #1785. Review only `git diff c05c0e626 nfp-undo-pr-body` (its base is #1785 at c05c0e626).
@@ -565,7 +571,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def assert_review_range_refused(self, body, start, what, parents=PARENTS):
         """The lint refuses `body` before ci-job runs: rc 1, no lint run, and a refusal that names the start, the parent PR and its head.
         `what` names the range in each message."""
-        self.assertIn("Merge after", body, "the body names no parent, so the check is not in play")  # scope before subject (P7)
+        self.assertRegex(body, "(?i)merge after", "the body names no parent, so the check is not in play")  # scope before subject (P7)
         self.assertIn("`git diff", body, "the body holds no backticked range, so the check is not in play")
         rc, text, runs = self.review_range_run(body, parents)
         self.assertEqual(rc, 1, "the lint passed %s, whose start %s is not the parent's head:\n%s" % (what, start, text))
@@ -681,6 +687,65 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def assert_review_range_passes(self, body, what, parents=PARENTS):
+        """The check passes `body` and the lint runs once: rc 0, one lint run, one PASS line. `what` names the body in each message."""
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 0, "the check refused %s, which it must pass:\n%s" % (what, text))
+        self.assertEqual(len(runs), 1, "the lint ran %d times for %s, want once: %s" % (len(runs), what, text))
+        self.assertEqual(len(pass_lines(text)), 1, "no PASS line for %s: %s" % (what, text))
+
+    def test_review_range_passes_a_placeholder_start_beside_a_real_range(self):
+        """`<start>` and `{reviewed-head}` are placeholders in prose: a start holding any of <>{} is skipped, and the real range is judged."""
+        self.use_ci_job(PASSING, 0)
+        body = ("Merge after: #1785\n\n"
+                "Review the range `git diff <start> <end>`, or `git diff {reviewed-head}..{head}`, against the parent. "
+                "The range to read is `git diff %s nfp-undo-pr-body`.\n") % PARENT_HEAD[:9]
+        self.assert_review_range_passes(body, "a body with placeholder ranges in prose beside a real range")
+
+    def test_review_range_passes_a_git_diff_inside_a_fenced_block(self):
+        """A range inside a fenced block is an example: the wrong start in the fence is skipped, and the real range outside it is judged."""
+        self.use_ci_job(PASSING, 0)
+        body = ("Merge after: #1785\n\n"
+                "```\n`git diff %s nfp-undo-pr-body`\n```\n\n"
+                "Review only `git diff %s nfp-undo-pr-body`.\n") % (BELOW_START, PARENT_HEAD[:9])
+        self.assert_review_range_passes(body, "a body whose only wrong range sits in a fenced block")
+
+    def test_review_range_passes_every_number_on_a_merge_after_line(self):
+        """`Merge after: #1676, #1742` names two parents, so a range at the head of #1742 passes."""
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("Merge after: #1785", "Merge after: #%d, #%d" % (FIRST_PARENT_PR, LAST_PARENT_PR))
+        body = body.replace(BELOW_START, LAST_PARENT_HEAD[:9])
+        self.assertIn("Merge after: #1676, #1742", body, "the fixture did not take the two-number line")
+        parents = {FIRST_PARENT_PR: (FIRST_PARENT_HEAD, FIRST_PARENT_BRANCH), LAST_PARENT_PR: (LAST_PARENT_HEAD, LAST_PARENT_BRANCH)}
+        self.assert_review_range_passes(body, "a Merge after line that names #1676 and #1742", parents)
+
+    def test_review_range_refuses_a_start_below_a_bold_merge_after_line(self):
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("Merge after: #1785", "**Merge after: #1785**")
+        self.assert_review_range_refused(body, BELOW_START, "the #1969 range under a bold Merge after line")
+
+    def test_review_range_refuses_a_start_below_a_bulleted_merge_after_line(self):
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("Merge after: #1785", "- Merge after: #1785")
+        self.assert_review_range_refused(body, BELOW_START, "the #1969 range under a bulleted Merge after line")
+
+    def test_review_range_refuses_a_start_below_a_mid_line_merge_after(self):
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("Merge after: #1785", "Built on the notes lane, and merge after #1785.")
+        self.assert_review_range_refused(body, BELOW_START, "the #1969 range under a mid-line merge after")
+
+    def test_review_range_refuses_a_start_followed_by_a_flag(self):
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("`git diff %s nfp-undo-pr-body`" % BELOW_START, "`git diff %s nfp-undo-pr-body --stat`" % BELOW_START)
+        self.assertIn("--stat`", body, "the fixture did not take the flag")
+        self.assert_review_range_refused(body, BELOW_START, "the #1969 range followed by --stat")
+
+    def test_review_range_refuses_a_start_followed_by_a_path(self):
+        self.use_ci_job(PASSING, 0)
+        body = PR_1969_BODY.replace("`git diff %s nfp-undo-pr-body`" % BELOW_START, "`git diff %s nfp-undo-pr-body -- merge/merge.py`" % BELOW_START)
+        self.assertIn("-- merge/merge.py`", body, "the fixture did not take the path")
+        self.assert_review_range_refused(body, BELOW_START, "the #1969 range followed by a path")
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
