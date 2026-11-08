@@ -285,7 +285,7 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     counting as a write to a path named in a comment.
     """
     target = re.escape(path)
-    if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
+    if re.search(r"\d?>>?\s*&?\s*['\"]?" + target, cmd):   # `>& FILE` and `>&FILE` write it (the word scan shows `> & FILE`); `>&1` names no file
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
@@ -380,9 +380,11 @@ _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fp
 # (`_VALUE_SHORTS`: what follows one in its cluster is its value, never a flag), and the long flag that
 # writes a file with the shortest form a command reads for it (`_OUTPUT_LONGS`). `git diff` is the command
 # name `_output_targets` gives a `git` call whose subcommand is `diff`.
-_OUTPUT_SHORTS = {"sort": "o", "less": "oO"}
-_VALUE_SHORTS = {"sort": "kStT", "less": "bhjkPpTtxyzD#"}
-_OUTPUT_LONGS = {"sort": ("output", 1), "less": ("log-file", 3), "git diff": ("output", 6)}
+_OUTPUT_SHORTS = {"sort": "o", "less": "oO", "curl": "o", "wget": "O"}
+_VALUE_SHORTS = {"sort": "kStT", "less": "bhjkPpTtxyzD#", "curl": "AbCcDdEeFHKmPQrTtUuwXxYyz",
+                 "wget": "oaeiBtTwQPlARDIXU"}
+_OUTPUT_LONGS = {"sort": ("output", 1), "less": ("log-file", 3), "git diff": ("output", 6),
+                 "curl": ("output", 3), "wget": ("output-document", 9)}
 
 
 def _output_flag_value(command: str, word: str):
@@ -390,7 +392,8 @@ def _output_flag_value(command: str, word: str):
     `command`; else the file glued to it (`-ofile`, `--output=file`), or '' when the next word is the file
     (`-o file`, `--output file`). `sort`: `-o` in a short cluster, `--output` or a prefix of it (`--o`, `--out`).
     `less`: `-o` and `-O`, `--log-file` or a prefix of it from `--log`, in any case. `git diff`: `--output` only, as git
-    reads no shorter form (it is a prefix of other flags)."""
+    reads no shorter form (it is a prefix of other flags). `curl`: `-o`, `--output` or a prefix from `--out`.
+    `wget`: `-O`, `--output-document` or a prefix from `--output-d` (`--output-file` is a log file, not read)."""
     if command not in _OUTPUT_LONGS or not word.startswith("-") or word == "-":
         return None
     if word.startswith("--"):
