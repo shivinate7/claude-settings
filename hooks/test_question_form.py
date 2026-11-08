@@ -1526,6 +1526,45 @@ def case_step_folder_without_slash_names_the_slash_remedy():
          ("command-in-item", "end it with /"))
 
 
+# The refusal a session reads is the printed reason, which guard.py prints from PAGE_REASONS. The folder remedy and the
+# four PowerShell forms reached only `matched`, which goes to guard.log, so the printed reason named none of them. Each
+# form is refused by command-in-item, and its printed reason must name the form's fix. Each check names one cause.
+def case_printed_reason_names_each_fix():
+    sample = ("If it names a folder, end it with /. A pipe into head, tail or grep is bash, and so is FOO=1 before a "
+              "command, a bracket test [ -f x ], and a line that ends in a backslash.")
+    causes = (
+        ("the folder remedy, a folder at a path ends with /",
+         task_item(["Save the notes in `~/Documents/Test-Results` before the review"]),
+         (r"folder[^.;]*\b(?:end|ends|ending|trailing)\b[^.;]*/",)),
+        ("a pipe into head, tail or grep",
+         ps_task("git log | head -5"),
+         (r"\bpipe\b|(?<!\|)\|(?!\|)", r"\b(?:head|tail|grep)\b")),
+        ("NAME=value before a command",
+         ps_task("FOO=1 git push"),
+         (r"\w=\w|\bassignment\b|\benvironment variable\b",)),
+        ("a [ ] test",
+         ps_task("if [ -f x ]; then git push; fi"),
+         (r"\[ [^\]]*\]|\[\]|\bbracket\b",)),
+        ("a backslash at a line end",
+         ps_task("git push origin \\\nmain"),
+         (r"\bbackslash\b|\\",)),
+    )
+    for cause, data, patterns in causes:
+        entry = entry_of(data)
+        rule = guard_hit("set", entry)[0]
+        if rule != "command-in-item":
+            check("printed reason names %s" % cause, False, "refused by rule %r, not command-in-item" % rule)
+            continue
+        reason = printed_reason(dict(entry, url=PAGE_URL, action="set"))
+        missing = [p for p in patterns if not re.search(p, reason, re.I)]
+        check("printed reason names %s" % cause, not missing, "printed %r, no match for %r" % (reason, missing))
+    # Control: the patterns match a sample reason that names every cause, so a red comes from the printed text.
+    unmatched = [cause for cause, _, patterns in causes
+                 if not all(re.search(p, sample, re.I) for p in patterns)]
+    check("printed reason patterns match a sample naming every cause (control)", not unmatched,
+          "sample does not match for %r" % unmatched)
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2245,7 +2284,7 @@ def main():
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
                  case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
-                 case_powershell_spaced_literals_are_no_bash_test,
+                 case_printed_reason_names_each_fix, case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
             case()
