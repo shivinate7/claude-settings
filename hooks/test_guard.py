@@ -10303,6 +10303,10 @@ DUP_NEW_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"]
 DUP_OTHER_REPO_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:other/repo"]  # the carrier's step, in another repo
 DUP_NO_REPO_TAGS = ["cs-build:lane", "cs-topic:dup-topic"]  # a subject with no cs-repo tag: it cannot be matched
 DUP_FILLER = 40  # the live lanes a full page holds before the carrier
+DUP_SECOND = "session_DUPSECOND01"  # a second live lane that carries the step, beside the target that carries it too
+DUP_SECOND_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:o/r"]
+DUP_UPPER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:DUP-STEP-A", "cs-repo:o/r"]  # the carrier's step in capitals
+UNARCHIVE_TOOL = "mcp__claude-code-remote__unarchive_session"
 
 
 def dup_row(sid, status, tags):
@@ -10316,11 +10320,12 @@ def dup_filler(count):
             for n in range(count)]
 
 
-def dup_list(tool_id, rows, cut=False, more=False):
+def dup_list(tool_id, rows, cut=False, more=False, args=None):
     """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that did not
-    return every page. `cut` drops the end of the result, so the JSON is not whole and its rows are text, not a read."""
+    return every page. `cut` drops the end of the result, so the JSON is not whole and its rows are text, not a read.
+    `args` is the call's input: a cursor (after_id or before_id) makes the read a part of the list, not the whole."""
     body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
-    return [role_use(tool_id, LIST_SESSIONS, {}), role_result(tool_id, body[:-40] if cut else body)]
+    return [role_use(tool_id, LIST_SESSIONS, dict(args or {})), role_result(tool_id, body[:-40] if cut else body)]
 
 
 def dup_get(tool_id, sid, status, tags):
@@ -10331,6 +10336,22 @@ def dup_get(tool_id, sid, status, tags):
 def dup_archive(tool_id, sid):
     """One archive_session call on `sid`, and its result."""
     return [role_use(tool_id, ARCHIVE_TOOL, {"session_id": sid}), role_result(tool_id, "ok")]
+
+
+def dup_archive_failed(tool_id, sid):
+    """One archive_session call on `sid` whose result is an error: the session is not archived."""
+    return [role_use(tool_id, ARCHIVE_TOOL, {"session_id": sid}),
+            role_result_block(tool_id, content="archive_session failed", is_error=True)]
+
+
+def dup_unarchive(tool_id, sid):
+    """One unarchive_session call on `sid`, and its result: the session is live again."""
+    return [role_use(tool_id, UNARCHIVE_TOOL, {"session_id": sid}), role_result(tool_id, "ok")]
+
+
+def dup_tag(tool_id, sid, tag):
+    """One set_session_tags call that adds `tag` to `sid`, and its result."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [sid], "add": [tag]}), role_result(tool_id, "ok")]
 
 
 def dup_noise(count):
@@ -10352,6 +10373,7 @@ DUP_STEP_ROUTE = os.path.join(ROOT, "grant", "dupstep-route")  # the route repo'
 DUP_STEP_OTHER = os.path.join(ROOT, "grant", "dupstep-other")  # dup-step-a's record: its lane names another session
 DUP_STEP_EMPTY = os.path.join(ROOT, "grant", "dupstep-empty")  # origin/roadmap reads, and holds no step record
 DUP_STEP_NOREF = os.path.join(ROOT, "grant", "dupstep-noref")  # a step record in the checkout, with no origin/roadmap ref
+DUP_STEP_COORD = os.path.join(ROOT, "grant", "dupstep-coord")  # dup-step-a's lane names a coordinator, and the id it routes to
 DUP_ROUTE_STEPS = ("dup-step-a", "dup-step-c", "icon-a", "icon-b")  # the steps the route repo holds
 
 
@@ -10391,10 +10413,17 @@ def build_dup_noref():
     gs_repo("dupstep-noref", dict([dup_step_file("dup-step-a", "coordinator, to route the step")]), ref=False)
 
 
+def build_dup_coord():
+    """A readable roadmap ref whose dup-step-a record names a coordinator, with a session id after the word. The
+    coordinator's id is a reference to the router, not a lane that holds the step."""
+    gs_repo("dupstep-coord", dict([dup_step_file("dup-step-a", "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route")]))
+
+
 lazy_fixture([DUP_PRS_OPEN, DUP_PRS_NONE, DUP_PRS_BROKEN], build_dup_prs)
 lazy_fixture([DUP_STEP_ROUTE, DUP_STEP_OTHER], build_dup_steps)
 lazy_fixture([DUP_STEP_EMPTY], build_dup_empty)
 lazy_fixture([DUP_STEP_NOREF], build_dup_noref)
+lazy_fixture([DUP_STEP_COORD], build_dup_coord)
 
 
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
@@ -10561,6 +10590,33 @@ ROLE_LINES = {
     "dup-pr-open": dup_list("l1", []) + dup_noise(3) + dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS),
     "dup-pr-carrier": dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)])
                       + dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS),
+    # Round 4. "dup-tag-after-list": the carrier is listed with no step, then set_session_tags adds its step after the read.
+    "dup-tag-after-list": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                          + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"])])
+                          + dup_tag("s1", DUP_CARRIER, "cs-step:dup-step-a"),
+    # "dup-archive-unarchive": archived, then unarchived again, so the carrier is live. "dup-archive-failed": the archive
+    # call's result is an error, so the carrier stays live.
+    "dup-archive-unarchive": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                             + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)])
+                             + dup_archive("a1", DUP_CARRIER) + dup_unarchive("u1", DUP_CARRIER),
+    "dup-archive-failed": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                          + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)])
+                          + dup_archive_failed("a1", DUP_CARRIER),
+    # A cursor makes the read a part of the list: each read below returns no rows and no more pages.
+    "dup-list-after-cursor": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                             + dup_list("l1", [], args={"after_id": "session_DUPFILL039"}),
+    "dup-list-before-cursor": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                              + dup_list("l1", [], args={"before_id": "session_DUPFILL000"}),
+    # The carrier's step in capitals: the match is case-insensitive.
+    "dup-list-carrier-upper": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                              + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_UPPER_TAGS)]),
+    # A whole read with no carrier, then a read with more pages: any one whole read counts, a later partial read does not cancel it.
+    "dup-whole-then-more": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", [])
+                           + dup_list("l2", [], more=True),
+    # The target carries the step, and a second live lane carries it too: the brief is the remedy for the target.
+    "dup-target-carrier-second": dup_get("t0", DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)
+                                 + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS),
+                                                   dup_row(DUP_SECOND, DUP_LIVE, DUP_SECOND_TAGS)]),
 }
 
 
@@ -11367,6 +11423,47 @@ dup_send("a step record absent from a readable roadmap ref is no verdict: a brie
 # (vii) is asked: the step record sits in the checkout, but origin/roadmap cannot be read, so the lane it names is unknown.
 dup_send("a roadmap ref that cannot be read is asked, though the step record is in the checkout",
          "ask", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_NOREF, env_path=dup_gh_path(DUP_PRS_NONE))
+
+
+# Round 4. Each case below is red on becca0df9 unless its comment says it is a control. The reads run on the route repo
+# and the no-PR stand-in, so the red comes from the judgment, never from a missing fixture.
+# (1) A lane listed with no step, whose step is set by set_session_tags after the read: that lane is unknown, so asked.
+dup_send("a set_session_tags call after the list read that may add the step to a listed lane makes that lane unknown: asked",
+         "ask", role_path("dup-tag-after-list"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (2) Archived, then unarchived: live again, so the brief is refused, and the reason names the carrier.
+dup_send("a carrier archived and then unarchived is live again: a brief to a new lane is refused, and names it",
+         "deny", role_path("dup-archive-unarchive"), BRIEF_DUP, carries=DUP_STEER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (8) Control, green on becca0df9: an archive_session call whose result is an error does not archive the carrier.
+dup_send("an archive_session call whose result is an error leaves the carrier live: a brief to a new lane is refused",
+         "deny", role_path("dup-archive-failed"), BRIEF_DUP, carries=DUP_STEER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (3) A list read with a cursor is a part of the list, not the whole: with no carrier in it, the brief is asked.
+dup_send("a list_sessions read with after_id is a part of the list: a brief with no carrier in it is asked",
+         "ask", role_path("dup-list-after-cursor"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_send("a list_sessions read with before_id is a part of the list: a brief with no carrier in it is asked",
+         "ask", role_path("dup-list-before-cursor"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (4) The step match is case-insensitive: a brief or a create in capitals meets a lower-case carrier, and a capitalised
+# carrier meets a lower-case brief. Each is refused and names the carrier.
+dup_send("a brief for step DUP-STEP-A, in capitals, is refused by the lower-case carrier of dup-step-a, and names it",
+         "deny", role_path("dup-list-carrier"), "Lane brief: DUP-STEP-A. Topic: dup-topic.\n\nDo the step.",
+         carries=DUP_STEER, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_create("a create_session tagged cs-step:DUP-STEP-A is refused by the lower-case carrier, and names it",
+           "deny", role_path("dup-list-carrier"), ["cs-build:lane", "cs-step:DUP-STEP-A", "cs-topic:dup-topic", "cs-repo:o/r"],
+           carries=DUP_STEER, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+dup_send("a brief for step dup-step-a is refused by a carrier whose step tag is in capitals, and names it",
+         "deny", role_path("dup-list-carrier-upper"), BRIEF_DUP, carries=DUP_STEER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (5) A step record whose lane names a coordinator is a reference to the router, not a lane: no verdict, so allowed.
+dup_send("a step record whose lane is a coordinator, with a session id after it, is no lane: a brief is allowed",
+         "allow", role_path("dup-pr-open"), BRIEF_DUP, cwd=DUP_STEP_COORD, env_path=dup_gh_path(DUP_PRS_NONE))
+# (6) One whole read with no carrier, then a read with more pages: the whole read still counts, so the brief is allowed.
+dup_send("a whole list read with no carrier, then a read with more pages, is still a whole read: a brief is allowed",
+         "allow", role_path("dup-whole-then-more"), BRIEF_DUP, cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
+# (7) The target carries the step, and a second live lane carries it too: the brief is the remedy, so it is allowed.
+dup_send("a brief to a target that carries the step is allowed while a second live lane carries it too",
+         "allow", role_path("dup-target-carrier-second"), BRIEF_DUP, target=DUP_CARRIER,
+         cwd=DUP_STEP_ROUTE, env_path=dup_gh_path(DUP_PRS_NONE))
 
 
 # =========================================================================== 5d. cite by id
