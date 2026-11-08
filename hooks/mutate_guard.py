@@ -1828,7 +1828,7 @@ MUTATIONS = [
      '                if subcommand in ("commit", "push"):', '                if subcommand in ("commit",):',
      "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("role-diff: the builder's own commits are never read",
-     'ENTRY_OWN = re.compile(r"^commit(?: \\((?:initial|amend|merge)\\))?:")',
+     'ENTRY_OWN = re.compile(r"^(?:commit(?: \\((?:initial|amend|merge)\\))?|(?:merge|pull)\\b[^:]*(?=: Merge made by\\b)):")',
      'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
      "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
     ("role-diff: a merge commit is judged against its first parent, not git's own merge",
