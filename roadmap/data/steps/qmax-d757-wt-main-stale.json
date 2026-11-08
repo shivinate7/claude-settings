@@ -1,0 +1,11 @@
+{
+  "title": "q_max decision D-757 (wt-main is the one database testers share) is rewritten to the ruling that stands now",
+  "why": "Coordinator 13:07 CST Nov 8, found by lane qmax-worktree-db-after-neon-purge (session_013NEJL1kqjrZZqdqpz3eaGB), #1138: D-757 names Neon branch wt-main, which the 2026-11-08 purge deleted (113 wt- branches; only production and live-backup-2026-10-02 remain). Since D-827 a session never touches Neon. The record is rewritten to the ruling that stands now, or the owner is asked if he still wants a shared tester database.",
+  "note": "",
+  "phase": "now",
+  "owner": "q_max",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 801,
+  "updatedAt": "2026-11-08T13:09:00-06:00"
+}
