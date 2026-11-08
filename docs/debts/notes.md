@@ -188,6 +188,8 @@
 - moved-kind-path-forgets-numbers: after a kind folder moves, claim ignores old-path numbers and may reuse one (actions/stamp/stamp.mjs)
 - mutate-sweep-no-control: `run_mutant` in janitor/mutate_sweep.py has no clean-layout control, so a scaffold that crashes on every case reads as a kill (hooks/mutate_guard.py `run_controls` has one)
 - mutate-tree-paths-uncollided: the `tree_` folders of ruling and decision mutants are not in the path-collision check of `main` (hooks/mutate_guard.py `lay_out`)
+- mutate-unknown-flag-runs-all: `python3 hooks/mutate_guard.py --help` (any unknown flag) starts the full mutant run; a builder did this once in lane mutate-guard-split. Fix: `main` refuses an unknown flag with a usage line and exit 2 (hooks/mutate_guard.py).
+- mutate-shard-blank-runs-all: a blank MUTATE_SHARD runs every mutant, so a shard job whose env line is lost runs all of them under a 25 min cap. lint/test_windows_split.py pins the env on each shard job, which holds CI (hooks/mutate_guard.py `parse_shard`).
 - nesting-risk-unrecorded: nothing prompts a risk record when a repo raises agent spawn depth (settings.json, deleted rule roles-workers-never-spawn)
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR)
 - no-start-lock-has-no-pid-check: agent lock with no start time has no pid-reuse check; a reused pid keeps the tree, the safe side (janitor/sweep.py)
