@@ -19883,15 +19883,26 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
 # ---- Builder brief code check (rule builder-brief-code-check). A builder brief in a repo whose top level holds
-# .github/workflows/checks.yml must name a code check: `merge --lane-lint`, `ci-job checks --lint` or
-# `actions/code-check/code_check.py`. A brief whose only done check is a test lets the builder hand off a head that
-# the batch's lint never saw. Role match is case-blind. Not judged: a payload with no cwd, a cwd with no checks.yml,
-# and every other role. Selector: MUTATE_ONLY=builder-code-check: runs these cases alone. Each deny is red on
-# main, which lets the brief through. Each allow is a control the rule must leave alone.
+# .github/workflows/checks.yml, and whose checks.yml defines a job `checks`, must name a code check: `merge --lane-lint`
+# (or merge.py, merge.cmd), `ci-job checks --lint` (or ci-job.cmd) or `actions/code-check/code_check.py`. With a
+# done-check label, only the label's section (to the next blank line or heading) counts. A brief whose only done check
+# is a test lets the builder hand off a head that the batch's lint never saw. Role match is case-blind. Not judged: a
+# payload with no cwd, a cwd with no checks.yml, a checks.yml with no `checks` job, and every other role. Selector:
+# MUTATE_ONLY=builder-code-check: runs these cases alone. The scope, spelling and gate cases the rule does not yet
+# honour are red on the head; the controls are green there.
 BUILDER_CODE_RULE = "builder-brief-code-check"
 CODE_CHECK = "merge --lane-lint"  # the remedy the refusal names
-WFGIT = os.path.join(ROOT, "wfgit")      # a git checkout whose top level holds .github/workflows/checks.yml
+WFGIT = os.path.join(ROOT, "wfgit")      # a git checkout whose top level holds .github/workflows/checks.yml, with a checks job
 BAREGIT = os.path.join(ROOT, "baregit")  # a git checkout with no workflow file at all
+WFBUILD = os.path.join(ROOT, "wfbuild")      # a checks.yml with a build job and no checks job
+WFENVKEY = os.path.join(ROOT, "wfenvkey")    # a checks.yml with a checks key under env, outside jobs, and no checks job
+WFEMPTY = os.path.join(ROOT, "wfempty")      # an empty checks.yml: no job at all
+CHECKS_JOB_YAML = ("name: checks\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                   "      - run: echo ok\n")
+BUILD_JOB_YAML = ("name: ci\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                  "      - run: echo ok\n")
+ENV_KEY_YAML = ("name: ci\non: push\nenv:\n  checks: 1\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - run: echo ok\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
 BUILDER_TEST_ONLY = "Task: fix the typo in hooks/x.py.\nDone check: `verdict python3 hooks/test_x.py` passes."
 BUILDER_PR_2100 = ("Task: fix the failing lane test.\n"
                    "Done check: `~/.claude/bin/verdict python3 merge/test_lane_lint.py` passes. Also run ruff "
@@ -19899,8 +19910,8 @@ BUILDER_PR_2100 = ("Task: fix the failing lane test.\n"
 
 
 def _build_wfgit():
-    """WFGIT: one commit, and the CI checks workflow at the top level of the checkout."""
-    make_repo(WFGIT, {os.path.join(".github", "workflows", "checks.yml"): "name: checks\n"})
+    """WFGIT: one commit, and the CI checks workflow at the top level of the checkout, holding its checks job."""
+    make_repo(WFGIT, {os.path.join(".github", "workflows", "checks.yml"): CHECKS_JOB_YAML})
 
 
 def _build_baregit():
@@ -19908,8 +19919,26 @@ def _build_baregit():
     make_repo(BAREGIT, {"README.md": "no workflow here\n"})
 
 
+def _build_wfbuild():
+    """WFBUILD: one commit, and a checks.yml whose only job is build."""
+    make_repo(WFBUILD, {os.path.join(".github", "workflows", "checks.yml"): BUILD_JOB_YAML})
+
+
+def _build_wfenvkey():
+    """WFENVKEY: one commit, and a checks.yml with a checks key under env and no checks job."""
+    make_repo(WFENVKEY, {os.path.join(".github", "workflows", "checks.yml"): ENV_KEY_YAML})
+
+
+def _build_wfempty():
+    """WFEMPTY: one commit, and an empty checks.yml."""
+    make_repo(WFEMPTY, {os.path.join(".github", "workflows", "checks.yml"): ""})
+
+
 lazy_fixture([WFGIT], _build_wfgit)
 lazy_fixture([BAREGIT], _build_baregit)
+lazy_fixture([WFBUILD], _build_wfbuild)
+lazy_fixture([WFENVKEY], _build_wfenvkey)
+lazy_fixture([WFEMPTY], _build_wfempty)
 
 add("builder-code-check: Agent builder brief whose only done check is a test, in a repo with checks.yml, is denied",
     "deny", BUILDER_CODE_RULE, tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder",
@@ -19952,6 +19981,72 @@ add("builder-code-check: Agent builder brief with no code check, in a cwd with n
 add("builder-code-check: Agent builder brief with no code check and no cwd is allowed",
     "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet")
 
+# Done-check scope: with a done-check label (Done check, Done when, Proof, Check that proves; case-blind; a line start
+# after an optional -, *, # or **), only the label's section counts, to the next blank line or heading. With no label
+# the whole brief counts. A deny names a code check only outside the section; a control keeps the code check inside it.
+add("builder-code-check: a Done check section with no code check is denied, though a line above a blank line names merge --lane-lint",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="Fix the dated-comment failure that `merge --lane-lint 2100` reported.\n\n"
+           "Done check: `verdict python3 merge/test_lane_lint.py` passes.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a Proof section with no code check is denied, though a line above a blank line names code_check.py",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="The checks job runs code_check.py.\n\nProof: `verdict python3 hooks/test_x.py`",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a Done when section after ** with no code check is denied, though a later paragraph names merge --lane-lint",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\n**Done when:** `verdict python3 hooks/test_x.py` passes.\n\n"
+           "Run `merge --lane-lint HEAD` too.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a lower-case done check section after - with no code check is denied, though a later paragraph names merge --lane-lint",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\n- done check: `verdict python3 hooks/test_x.py` passes.\n\n"
+           "Run `merge --lane-lint HEAD` too.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a Check that proves section with no code check is denied, though a later paragraph names code_check.py",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nCheck that proves: `verdict python3 hooks/test_x.py` passes.\n\n"
+           "The checks job runs code_check.py.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a done check section ends at a heading, so a code check under the heading does not count, and is denied",
+    "deny", BUILDER_CODE_RULE, tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `verdict python3 hooks/test_x.py` passes.\n"
+           "## Notes\nRun `merge --lane-lint HEAD` before you report.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT, carries=(CODE_CHECK,))
+add("builder-code-check: a done check section that runs on to a second line naming merge --lane-lint HEAD is allowed",
+    "allow", tool="Agent",
+    prompt=("Task: fix the typo in hooks/x.py.\nDone check: `verdict python3 hooks/test_x.py` passes and\n"
+            "`merge --lane-lint HEAD` exits 0."),
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: a brief with no done-check label names a code check anywhere and is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\n\nAfter the fix, run `merge --lane-lint HEAD` and report its verdict.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+
+# Spellings that run the real lint (rule builder-brief-code-check): merge.py, merge.cmd and ci-job.cmd are the same tools
+# under their other launchers, so a done check naming one of them is a code check.
+add("builder-code-check: a done check naming python3 merge/merge.py --lane-lint HEAD is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `python3 merge/merge.py --lane-lint HEAD` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: a done check naming merge.cmd --lane-lint HEAD is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `merge.cmd --lane-lint HEAD` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+add("builder-code-check: a done check naming ci-job.cmd checks --lint is allowed",
+    "allow", tool="Agent",
+    prompt="Task: fix the typo in hooks/x.py.\nDone check: `ci-job.cmd checks --lint` exits 0.",
+    subagent_type="builder", model="sonnet", cwd=WFGIT)
+
+# Gate on the job (rule builder-brief-code-check): the brief is judged only when checks.yml defines a job `checks`. A
+# checks key outside jobs, an empty file, or a checks.yml with other jobs only is not judged, so a test-only brief passes.
+add("builder-code-check: a checks.yml with a build job and no checks job is not judged, so a test-only brief is allowed",
+    "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet", cwd=WFBUILD)
+add("builder-code-check: a checks.yml with a checks key under env and no checks job is not judged, so a test-only brief is allowed",
+    "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet", cwd=WFENVKEY)
+add("builder-code-check: an empty checks.yml defines no checks job, so a test-only brief is allowed",
+    "allow", tool="Agent", prompt=BUILDER_TEST_ONLY, subagent_type="builder", model="sonnet", cwd=WFEMPTY)
+
 
 def lane_lint_flag_check():
     """The brief rule names `merge --lane-lint`, so the flag must be the merge tool's own, or a rename goes unseen."""
@@ -19971,11 +20066,22 @@ def checks_workflow_code_check_tie():
     return False, "checks.yml no longer names actions/code-check/code_check.py; the brief rule accepts that path"
 
 
-FIXTURELESS_CHECKS.update((lane_lint_flag_check, checks_workflow_code_check_tie))
+def ci_job_lint_flag_check():
+    """The brief rule names `ci-job checks --lint`, so bin/ci-job must still parse the --lint flag, or a rename goes unseen."""
+    with open(os.path.join(REPO, "bin", "ci-job"), encoding="utf-8") as handle:
+        text = handle.read()
+    if '"--lint" in args' in text:
+        return True, "bin/ci-job parses the --lint flag"
+    return False, 'bin/ci-job no longer parses "--lint" in args; the brief rule names `ci-job checks --lint`'
+
+
+FIXTURELESS_CHECKS.update((lane_lint_flag_check, checks_workflow_code_check_tie, ci_job_lint_flag_check))
 LOG_CHECKS_EXTRA.append(("builder-code-check: merge.py defines the --lane-lint argument the brief rule names",
                          lane_lint_flag_check))
 LOG_CHECKS_EXTRA.append(("builder-code-check: checks.yml still runs code_check.py, the third name the brief rule "
                          "accepts", checks_workflow_code_check_tie))
+LOG_CHECKS_EXTRA.append(("builder-code-check: bin/ci-job parses the --lint flag the brief rule names",
+                         ci_job_lint_flag_check))
 
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
