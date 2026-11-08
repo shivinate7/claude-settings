@@ -8,6 +8,7 @@ The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+SuiteSteps: --lint runs a hooks/merge/lint suite step only when the selector picks it for the diff; a selector that cannot run exits 2.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -873,6 +874,130 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+
+def suite_text(parts, code=0):
+    """A suite that opens one file through a path constant, as hooks/test_wrappers.py opens its guard, then exits `code`.
+    `parts` are the path's pieces from the suite's folder: ("..", "lint", "check_a.py") names lint/check_a.py."""
+    return ("import os\nimport sys\n\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+            "TARGET = os.path.join(HERE, %s)\n"
+            "with open(TARGET, encoding='utf-8') as f:\n    f.read()\n"
+            "print('one check ran')\nsys.exit(%d)\n") % (", ".join(repr(p) for p in parts), code)
+
+
+class SuiteSteps(Job):
+    """--lint runs a suite step (`python3 hooks|lint|merge/test_*.py`) when the selector, `hooks/mutate_guard.py
+    --tests-for`, picks that suite for a file in the diff base...HEAD: a suite beside the file, or one that loads it by an
+    import or a path constant. A suite the diff does not pick prints `not run`. A selector that cannot run reads unknown
+    and exits 2, never a pass with no suite run. A listed file (REPORT_TARGETS) still gets each suite that loads it.
+    Each fixture suite sits outside the folder of the file it opens, so only its path constant can pick it."""
+
+    MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
+    LINT = ("--lint", "--base", "origin/main")
+    WIRING = step("Wiring suite", "python3 hooks/test_wiring.py")
+    CHECK_A = step("Check A suite", "python3 hooks/test_check_a.py")
+    CHECK_B = step("Check B suite", "python3 hooks/test_check_b.py")
+    UNDO = step("Undo suite", "python3 hooks/test_undo_loads.py")
+
+    def write(self, rel, text):
+        path = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def git(self, *a):
+        LintBase.git(self, *a)  # the one home of this helper
+
+    def make_repo(self, base, lane):
+        """A base commit holding `base` (path -> text), origin/main at it, then a branch that writes `lane` and commits,
+        so the diff base...HEAD is the files `lane` names."""
+        for rel, text in base.items():
+            self.write(rel, text)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-qb", "lane")
+        for rel, text in lane.items():
+            self.write(rel, text)
+        self.git("add", ".")
+        self.git("commit", "-q", "--allow-empty", "-m", "change")
+
+    def diff(self):
+        done = subprocess.run(["git", "-C", self.root, "diff", "--name-only", "origin/main...HEAD"], check=True,
+                              env=ENV, capture_output=True, text=True)
+        return sorted(done.stdout.split())
+
+    def test_a_suite_that_opens_the_changed_file_by_a_path_constant_runs_and_passes(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "PASS"}),
+                         "--lint must run the suite that opens the changed file by its path constant\n" + out)
+
+    def test_a_diff_that_no_suite_opens_runs_no_suite_step(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",)),
+                        "docs/notes.md": "one\n"}, {"docs/notes.md": "two\n"})
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds a file no suite opens")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run"}),
+                         "--lint must not run a suite that opens no changed file\n" + out)
+
+    def test_an_empty_diff_runs_no_suite_step(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))}, {})
+        self.assertEqual(self.diff(), [], "the scope: the diff is empty")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Wiring suite": "not run"}),
+                         "--lint with an empty diff must run no suite\n" + out)
+
+    def test_a_picked_suite_that_fails_reads_fail_and_the_job_exits_one(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",), code=1)},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
+                         "--lint must read a picked suite that exits 1 as FAIL, and exit 1\n" + out)
+
+    def test_a_selector_that_cannot_list_the_repository_reads_unknown_and_the_job_exits_two(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"})
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        with open(os.path.join(self.root, ".git", "index"), "wb") as f:  # git ls-files reads the index and fails on this
+            f.write(b"not an index\n")
+        done = subprocess.run([sys.executable, self.MUTATE_GUARD, "--tests-for", "hooks/bridge.py"], cwd=self.root,
+                              capture_output=True, text=True, env=ENV)
+        self.assertEqual(done.returncode, 2, "the fixture: the selector cannot list the tracked files\n"
+                         + done.stdout + done.stderr)
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual(rc, 2, "--lint must exit 2 when the selector cannot run, never 0\n" + out)
+        self.assertTrue(any(ln.startswith("unknown") for ln in lines),
+                        "a selector that cannot run must print an unknown line\n" + out)
+        self.assertNotIn(by_step(lines).get("Wiring suite"), ("PASS", "not run"),
+                         "a selector that cannot run must not read its suite as PASS or not run\n" + out)
+
+    def test_a_diff_touching_one_check_runs_only_the_suite_that_opens_it(self):
+        self.make_repo({"lint/check_a.py": "A = 1\n", "lint/check_b.py": "B = 1\n",
+                        "hooks/test_check_a.py": suite_text(("..", "lint", "check_a.py")),
+                        "hooks/test_check_b.py": suite_text(("..", "lint", "check_b.py"))},
+                       {"lint/check_a.py": "A = 2\n"})
+        self.assertEqual(self.diff(), ["lint/check_a.py"], "the scope: the diff holds only check_a")
+        rc, lines, out = self.run_job(self.CHECK_A, self.CHECK_B, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Check A suite": "PASS", "Check B suite": "not run"}),
+                         "--lint must run only the suite that opens the changed check\n" + out)
+
+    def test_a_listed_file_still_gets_each_suite_that_opens_it_under_lint(self):
+        self.make_repo({"lint/check_silent_undo.py": "U = 1\n",
+                        "hooks/test_undo_loads.py": suite_text(("..", "lint", "check_silent_undo.py"))},
+                       {"lint/check_silent_undo.py": "U = 2\n"})
+        self.assertEqual(self.diff(), ["lint/check_silent_undo.py"], "the scope: the diff holds the listed file")
+        done = subprocess.run([sys.executable, self.MUTATE_GUARD, "--tests-for", "lint/check_silent_undo.py"],
+                              cwd=self.root, capture_output=True, text=True, env=ENV)
+        self.assertEqual(done.stdout.split(), ["lint/test_check_silent_undo.py"],
+                         "the fixture: --tests-for prints a listed file's REPORT_TARGETS suites only\n"
+                         + done.stdout + done.stderr)
+        rc, lines, out = self.run_job(self.UNDO, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Undo suite": "PASS"}),
+                         "--lint must still run a suite that opens a file listed in REPORT_TARGETS\n" + out)
 
 
 class Progress(Job):

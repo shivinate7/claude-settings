@@ -1424,6 +1424,38 @@ class TestsForTests(unittest.TestCase):
         self.assertIn(loader, out.splitlines(),
                       "%s loads guard_rm_var inside a function, so --tests-for %s must print it" % (loader, target))
 
+    def test_a_path_constant_naming_guard_py_prints_the_suite_that_copies_it(self):
+        target = "hooks/guard.py"
+        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
+        loader = "hooks/test_wrappers.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^GUARD_PY = os\.path\.join\(HERE, "guard\.py"\)$',
+                         "the fixture: %s binds guard.py to the GUARD_PY path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s copies guard.py by its GUARD_PY path constant, so --tests-for %s must print it" % (loader, target))
+
+    def test_a_path_constant_naming_settings_json_prints_the_suite_that_opens_it(self):
+        target = "settings.json"
+        loader = "hooks/test_wrappers.py"
+        self.assertRegex(show(REPO, "HEAD", loader),
+                         r'(?m)^SETTINGS = .*os\.path\.join\(HERE, "\.\.", "settings\.json"\)$',
+                         "the fixture: %s binds settings.json to the SETTINGS path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s opens settings.json by its SETTINGS path constant, so --tests-for %s must print it" % (loader, target))
+
+    def test_a_path_constant_naming_bin_ci_job_prints_the_suite_that_runs_it(self):
+        target = "bin/ci-job"
+        loader = "lint/test_ci_job.py"
+        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^CI_JOB = os\.path\.join\(HERE, "\.\.", "bin", "ci-job"\)$',
+                         "the fixture: %s binds bin/ci-job to the CI_JOB path constant" % loader)
+        code, out, err = run_cli(["--tests-for", target])
+        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        self.assertIn(loader, out.splitlines(),
+                      "%s runs bin/ci-job by its CI_JOB path constant, so --tests-for %s must print it" % (loader, target))
+
 
 if __name__ == "__main__":
     unittest.main()
