@@ -34,7 +34,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   rotation ruling (claude-settings decision `session-tiers`) back to the owner if losses repeat.
   It may run agents.
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
-  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
+  tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After each merge result it runs `merge --idle-lanes --live FILE` and archives each lane that run lists, running get_session on each alone first, before its turn ends (claude-settings decision `session-tiers`, archiving lanes). It skips and names in its report each case that needs judgment: unpushed work, records on another head, a lane waiting on the owner.
   It runs `merge <pr> --confirm` on the integration PR while it is a draft. That step rebuilds the
   records page and pushes it. When the draft run of the pushed head shows, the batch runner marks
   the PR ready, so the branch is final at ready (claude-settings

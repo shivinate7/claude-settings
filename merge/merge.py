@@ -113,6 +113,10 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
+MERGED_LINE = "merge: #{n} merged as {commit}."  # the one home of the merged line; lint/report_guard.py runner_hold reads it back
+IDLE_SUMMARY = "merge: {n} lanes to archive"  # the start of merge --idle-lanes' summary line; lint/report_guard.py runner_hold reads it back
+NO_LIST = "No list was made."  # the end of each merge --idle-lanes line that says no list was made; runner_hold reads it back
+REVIEW_SEND_BACK = "send back: "  # the prefix of merge --reviewed's send-back line, read by lint/report_guard.py runner_hold
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -3042,7 +3046,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise
         except Exception as e:
             fail(f"unexpected {type(e).__name__} after the claim was pushed: {e}")
-        say(f"merge: #{n} merged as {commit[:9]}.")
+        say(MERGED_LINE.format(n=n, commit=commit[:9]))
         if rule_files is None:
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
@@ -3351,7 +3355,7 @@ def idle_lanes(live, sessions=None, items=None, host=None):
     The input is `live` (the publisher's file), or `sessions` and `items` (the raw list_sessions and ArtifactData list outputs), for which the pulls are read here with `gh api`.
     Cost: runs only on call. With --sessions: gh REST pages (open pulls, all; closed pulls, to the bound live_from_files states and never past CLOSED_PULL_PAGES pages), one repo read, one git merge-base per distinct pull head. No file is written and no timer is set."""
     if not live and not (sessions and items):
-        print("merge: --idle-lanes needs --live FILE, the publisher's live-work file, or --sessions FILE and --items FILE. No list was made.", file=sys.stderr)
+        print("merge: --idle-lanes needs --live FILE, the publisher's live-work file, or --sessions FILE and --items FILE. " + NO_LIST, file=sys.stderr)
         return 1
     try:
         import importlib.util
@@ -3359,11 +3363,11 @@ def idle_lanes(live, sessions=None, items=None, host=None):
         build = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(build)
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
-        print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. {NO_LIST}", file=sys.stderr)
         return 1
     c, root = sh(["git", "rev-parse", "--show-toplevel"])
     if c:
-        print("merge: not in a git checkout. No list was made.", file=sys.stderr)
+        print("merge: not in a git checkout. " + NO_LIST, file=sys.stderr)
         return 1
     try:
         if live:
@@ -3372,10 +3376,10 @@ def idle_lanes(live, sessions=None, items=None, host=None):
             h = host or Host(cwd=root)
             entries = build.idle_lanes_report(root, live_from_files(build, root, sessions, items, h), main_branch=host_default_branch(root))
     except Stop as e:
-        print(f"merge: {e}. No list was made.", file=sys.stderr)
+        print(f"merge: {e}. {NO_LIST}", file=sys.stderr)
         return 1
     except (Exception, SystemExit) as e:
-        print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. {NO_LIST}", file=sys.stderr)
         return 1
     holds = [x for x in entries if x.startswith("hold (")]
     lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
@@ -3384,7 +3388,7 @@ def idle_lanes(live, sessions=None, items=None, host=None):
     if not unread:
         held = f", {len(holds)} held" if holds else ""
         tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
+        entries = [*entries, f"{IDLE_SUMMARY.format(n=len(lanes))}{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
