@@ -10341,8 +10341,14 @@ roles_refuse("another role's label in the gap is refused: Triage's id is not Coo
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator Triage: session_TRIAGE01" + RUNNER_LINE, ["Coordinator"])
 roles_refuse("a Coordinator label with no id on its line is refused, though the next line names a Triage id",
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator:" + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
+roles_refuse("a Coordinator label with its id on the next line is refused: the gap holds no newline",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator:\nsession_C1" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
 roles_refuse("a Coordinator id with no digit, session_TBD, is refused",
              role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator: session_TBD" + TRIAGE_LINE + RUNNER_LINE,
+             ["Coordinator"])
+roles_refuse("a Coordinator id after a session_ placeholder on the same line is refused: the gap holds no session_",
+             role_path("step-topic-lane"), ROLE_TOP + "\nCoordinator: session_TBD or session_C1" + TRIAGE_LINE + RUNNER_LINE,
              ["Coordinator"])
 roles_refuse("three session ids with no role labels are refused: an id names a role only beside its label",
              role_path("step-topic-lane"), ROLE_TOP + " session_COORD01 session_TRIAGE01 session_RUNNER01.",
@@ -10359,8 +10365,8 @@ roles_refuse("a Triage label with words before its id and no digit, Triage sessi
 roles_refuse("a Triage label with words before its id and no digit, Triage id: session_x, is refused",
              role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nTriage id: session_x" + RUNNER_LINE, ["Triage"])
 
-# Allowed: the coordinator ruled the wider form, so a role label may have words before its id, and its colon is
-# optional. Each of these is refused on the old code, which needs a colon before a Triage id.
+# Allowed (coordinator ruling effective 2026-11-08 07:58 CST): a role label may have words before its id, and its
+# colon is optional. Each of these is refused on the old code, which needs a colon before a Triage id.
 step_allow("a triage label with no colon, triage session_abc123, is allowed: the colon is optional",
            role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\ntriage session_abc123" + RUNNER_LINE)
 step_allow("a Triage label with words before its id, Triage session: session_x1, is allowed",
