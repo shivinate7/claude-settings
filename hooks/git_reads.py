@@ -31,6 +31,29 @@ def _git(where: str, *args):
         return None
 
 
+def lists_refs(args):
+    """True for `git -C <dir> ls-remote ...`, the only call read stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
+    Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
+    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` and `ls_remote` below both read it."""
+    return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
+
+
+def listing_text(returncode, stdout, stderr):
+    """-> (returncode, text) for a finished `ls-remote`: stdout alone on success, both streams on a failure (the network-error read needs the stderr line)."""
+    if returncode == 0:
+        return returncode, stdout.strip()
+    return returncode, (stdout + stderr).strip()
+
+
+def ls_remote(where: str, *args, env=None, timeout=10):
+    """-> (returncode, text) of `git -C where ls-remote *args`, or None when git did not run or timed out. The janitor's reader; merge's `sh` shares `lists_refs` and `listing_text`."""
+    try:
+        r = _nowindow.run(["git", "-C", where, "ls-remote", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
+    except Exception:
+        return None
+    return listing_text(r.returncode, r.stdout, r.stderr)
+
+
 def is_worktree(where: str):
     """True in a linked worktree, False in an ordinary checkout, None when unknown.
 
