@@ -400,7 +400,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, ROLE_TAG_PREFIX, _add_shape,
-            _commit_shape, _is_python, _own_get_session_tags,
+            _commit_shape, _is_python,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, merge_confirm_of,
             record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
@@ -5212,12 +5212,14 @@ def coordinator_interpreter_hit(command: str, cwd: str, session_id: str) -> str:
 
 def _own_tag_tier(transcript) -> str:
     """The tier the session's own cs-build tag names, else '': the tags of the newest get_session result for the
-    session's own id (merge-role-proof's reader), read from the transcript."""
+    session's own id (merge-role-proof's reader) plus what the session's own later set_session_tags calls added,
+    read from the transcript in one pass."""
     try:
         from override import remote_session_id
+        import own_session
         own_id = remote_session_id()
         if own_id and isinstance(transcript, str) and transcript:
-            tags = _own_get_session_tags(transcript, own_id)
+            tags = own_session.own_session_read(transcript, own_id, applied=True)[0]
             if isinstance(tags, list) and ROLE_TAG_PREFIX + "coordinator" in tags:
                 return "coordinator"
     except Exception:

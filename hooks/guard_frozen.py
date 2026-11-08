@@ -284,9 +284,16 @@ _SED_REDIRECT = re.compile(r"\d*>>?|<{1,3}")   # an operator word whose target i
 _UNQUOTED_EXPANSION = re.compile(r"""'[^']*'|"[^"]*"|([$`])""")
 
 
+def _command_start(raw):
+    """The index of a segment's command word: the first shell word that is neither an assignment nor a loop keyword
+    (`do`, `then`, `else`, ...), so the segment `do sed -i ...` of a `for` loop reads as a `sed`."""
+    return next((i for i, word in enumerate(raw)
+                 if not _ASSIGNMENT.match(word) and word not in guard_core.LOOP_KEYWORDS), len(raw))
+
+
 def _sed_operands(raw):
     """(script indexes, file indexes, in place?) of a `sed` segment's shell words, else None."""
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    start = _command_start(raw)
     if start >= len(raw) or _name(raw[start]) != "sed":
         return None
     scripts, operands, in_place, given, options = set(), [], False, False, True
@@ -340,8 +347,9 @@ def _sed_operands(raw):
 # single quotes do not expand. An unassigned variable stays unresolved and allowed. `$HOME` reads
 # as `~`: `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a
 # literal `$HOME/.claude/...` target was allowed.
-# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval`, or an
-# interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, `eval`, or an
+# interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. A `for`
+# variable is read only in the forms of LOOPS AND BRACES, below.
 # Fixing that needs a shell parser, not a regex.
 _VAR_TOKEN = re.compile(
     r"""'[^']*'"""                                                    # single quotes: no expansion
@@ -373,6 +381,188 @@ def _resolve_vars(cmd: str) -> str:
         return use(m) if (m.group("x") or m.group("y")) else m.group(0)
 
     return _VAR_TOKEN.sub(step, cmd)
+
+
+# LOOPS AND BRACES. `for NAME in WORDS; do ... "$NAME" ...; done` names the words NAME takes, and a brace list
+# `docs/{a,b}.md` names the words it expands to. `_resolve_loops` puts WORDS in place of each whole-word `$NAME`
+# (`$f`, `${f}`, either in double quotes) in the body, and `_expand_braces` expands each unquoted comma brace of a parsed
+# word, so the predicate judges the real paths. Both read shell words with `_quoted_words` and the segments of
+# `split_segments`, never raw text. Each of these keeps today's literal reading (the word stays as written):
+#  - a list word holds `$` or a backtick, or has white space inside its quotes, or is a redirect;
+#  - the body assigns NAME, uses `$NAME` as part of a word (`"$f.md"`, `$(cmd "$f")`), as the command word, or as a
+#    redirect target; or a loop nests inside it, or no `done` closes it, or the list is empty;
+#  - a brace is a `{a..b}` range (the word is kept whole), or an expansion goes past 32 words.
+# A PowerShell command is not read: its braces and `for` are another syntax.
+_LOOP_OPENERS = frozenset(("for", "while", "until", "select"))
+_LOOP_CAP = 32
+_LOOP_NAME = re.compile(r"[A-Za-z_]\w*")
+
+
+def _brace_groups(word):
+    """(open index, close index, comma indexes) of each unquoted brace pair of a shell word. A `${...}` is a
+    parameter expansion, not a brace list: its pair and the commas inside it are skipped."""
+    groups, stack, quote, index = [], [], "", 0
+    while index < len(word):
+        char = word[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            index += 1
+        elif char in "'\"":
+            quote = char
+        elif char == "{":
+            stack.append([index, None if word[index - 1:index] == "$" else []])
+        elif char == "," and stack and stack[-1][1] is not None:
+            stack[-1][1].append(index)
+        elif char == "}" and stack:
+            start, commas = stack.pop()
+            if commas is not None:
+                groups.append((start, index, commas))
+        index += 1
+    return groups
+
+
+def _brace_expand(word):
+    """The words an unquoted comma brace list in a shell word stands for, else None when the word keeps its literal
+    reading: it holds a `{a..b}` range, or the expansion goes past _LOOP_CAP words. A word with no comma brace is
+    its own one-word list."""
+    groups = _brace_groups(word)
+    if any(not commas and ".." in word[start + 1:end] for start, end, commas in groups):
+        return None
+    lists = [group for group in groups if group[2]]
+    if not lists:
+        return [word]
+    start, end, commas = min(lists)
+    edges = [start, *commas, end]
+    out = []
+    for left, right in zip(edges, edges[1:]):
+        more = _brace_expand(word[:start] + word[left + 1:right] + word[end + 1:])
+        if more is None:
+            return None
+        out.extend(more)
+        if len(out) > _LOOP_CAP:
+            return None
+    return out
+
+
+def _expand_braces(words):
+    """The shell words with each comma brace list expanded, in place."""
+    out = []
+    for word in words:
+        expanded = _brace_expand(word) if "{" in word else None
+        out.extend(expanded if expanded is not None else [word])
+    return out
+
+
+def _loop_whole_use(word, name):
+    """True when a shell word is exactly `$NAME` or `${NAME}`, bare or in double quotes."""
+    return bool(re.fullmatch(r'(")?\$(?:%s|\{%s\})(?(1)")' % (name, name), word))
+
+
+def _loop_part_use(word, name):
+    """True when a shell word expands NAME inside more text, or in any way but a whole word. A word that is one
+    single-quoted string expands nothing."""
+    if len(word) > 1 and word[0] == word[-1] == "'" and "'" not in word[1:-1]:
+        return False
+    return bool(re.search(r"\$\{?%s(?!\w)" % name, word)) and not _loop_whole_use(word, name)
+
+
+def _segment_spans(cmd, segments):
+    """(start, end) of each segment in `cmd`, in order, or None when one is not found past the one before: a
+    command with an unmated quote is read twice by `split_segments`, and its second reading is not a place in the text."""
+    spans, at = [], 0
+    for segment in segments:
+        start = cmd.find(segment, at)
+        if start < 0:
+            return None
+        at = start + len(segment)
+        spans.append((start, at))
+    return spans
+
+
+def _loop_body(words, first):
+    """(index of the `done` that closes the `for` segment at `first`, whether a loop nests in it), else None."""
+    depth, nested = 0, False
+    for index in range(first + 1, len(words)):
+        start = _command_start(words[index])
+        head = words[index][start] if start < len(words[index]) else ""
+        if head in _LOOP_OPENERS:
+            depth, nested = depth + 1, True
+        elif head == "done":
+            if depth == 0:
+                return index, nested
+            depth -= 1
+    return None
+
+
+def _loop_items(listed):
+    """The words a `for` list stands for, else None when any keeps its literal reading (see LOOPS AND BRACES)."""
+    items, count = [], 0
+    for word in listed:
+        if "$" in word or "`" in word or any(char.isspace() for char in _unquoted(word)) or _is_redirect(word) \
+                or word[0] in "<>&|();":
+            return None
+        expanded = _brace_expand(word)
+        count += 1 if expanded is None else len(expanded)
+        if count > _LOOP_CAP:
+            return None
+        items.append(word)
+    return items or None
+
+
+def _loop_rewrites(words, first, last, name, items):
+    """{segment index: new text} for the body segments of one loop that use `$NAME` as a whole word, else None when the
+    loop keeps its literal reading: the body assigns NAME, uses it in part, as the command word or as a redirect target."""
+    assigned = re.compile(r"%s\+?=" % name)
+    out = {}
+    for index in range(first + 1, last + 1):
+        body, changed, made = words[index], False, []
+        start = _command_start(body)
+        for place, word in enumerate(body):
+            if word == name or assigned.match(_unquoted(word)) or _loop_part_use(word, name):
+                return None
+            if _loop_whole_use(word, name):
+                if index == last or place == start or (place and _is_redirect(body[place - 1])):
+                    return None
+                made.extend(items)
+                changed = True
+            else:
+                made.append(word)
+        if changed:
+            out[index] = " ".join(made)
+    return out
+
+
+def _resolve_loops(cmd):
+    """`cmd` with each `for NAME in WORDS; ...; done` body read as its words: WORDS stand in each whole-word `$NAME`."""
+    if "for" not in cmd or guard_core.is_powershell(cmd):
+        return cmd
+    segments = split_segments(cmd, [])
+    spans = _segment_spans(cmd, segments)
+    if spans is None:
+        return cmd
+    words = [_quoted_words(segment) for segment in segments]
+    edits, index = {}, 0
+    while index < len(words):
+        start = _command_start(words[index])
+        head = words[index][start:start + 3]
+        if len(head) < 3 or head[0] != "for" or head[2] != "in" or not _LOOP_NAME.fullmatch(head[1]):
+            index += 1
+            continue
+        closed = _loop_body(words, index)
+        if closed is None:
+            index += 1
+            continue
+        last, nested = closed
+        items = None if nested else _loop_items(words[index][start + 3:])
+        edits.update((items and _loop_rewrites(words, index, last, head[1], items)) or {})
+        index = last + 1
+    for at in sorted(edits, reverse=True):
+        cmd = cmd[:spans[at][0]] + edits[at] + cmd[spans[at][1]:]
+    return cmd
 
 
 # DATA IS NOT A WRITE. A command that only names the cap key or a frozen path as text is not asked
@@ -557,7 +747,7 @@ _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 def _copy_reads(raw, predicate, cwd):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    start = _command_start(raw)
     if _name(raw[start] if start < len(raw) else "") != "cp":
         return set()
     operands, target, index = [], None, start + 1
@@ -606,7 +796,7 @@ def _cp_link_source(raw, holds, cwd) -> str:
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
+    start = _command_start(raw)
     if _name(raw[start] if start < len(raw) else "") != "cp":
         return ""
     link = target = False
@@ -667,11 +857,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     cheap `predicate` first, because `writes_to` scans the whole text for each word and a command of
     thousands of words scales with the square of its length."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
-    cmd = _resolve_vars(cmd)
+    cmd = _resolve_vars(_resolve_loops(cmd))
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
     parsed = [_quoted_words(segment) for segment in segments]
+    if not guard_core.is_powershell(cmd):
+        parsed = [_expand_braces(words) for words in parsed]
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -696,7 +888,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, stood_in, written = [], [], set(), set()
+        command_at = _command_start(raw)
         for index, word in enumerate(raw):
+            if index < command_at and word in guard_core.LOOP_KEYWORDS:
+                continue   # `do` before the command is shell syntax: as a path it matches `docs/...` as text
             if index in data:
                 stood_in.add(len(words))
                 words.append('""')   # data, a `cp` source or a sed script: no redirect or `tee` in it runs
