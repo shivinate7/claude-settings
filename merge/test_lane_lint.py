@@ -31,10 +31,12 @@ UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
-JOBS, VERBATIM = __JOBS__, __VERBATIM__  # {job: (steps, rc)} for a job a case scripts on its own; lines the checks lint prints as they are
+JOBS, VERBATIM = __JOBS__, __VERBATIM__  # {job: (steps, rc) or (steps, rc, lines)} for a job a case scripts on its own; lines the checks lint prints as they are
 JOB = sys.argv[1] if len(sys.argv) > 1 else ""
+JOB_LINES = []  # the lines a job's own run prints after its step lines, as ci-job prints them
 if JOB in JOBS:
-    STEPS, RC = JOBS[JOB]
+    STEPS, RC, *EXTRA = JOBS[JOB]
+    JOB_LINES = EXTRA[0] if EXTRA else []
 if "--step" in sys.argv:  # ci-job's --step NAME: only the named steps print
     wanted = [sys.argv[i + 1] for i, arg in enumerate(sys.argv[:-1]) if arg == "--step"]
     STEPS = [pair for pair in STEPS if pair[1] in wanted]
@@ -54,6 +56,7 @@ while time.time() < end and os.getppid() == PARENT:
 lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
 if JOB == "checks":
     lines += VERBATIM
+lines += JOB_LINES
 print("\\n".join(lines))
 if RC == 1:
     with open(STEP_LOG, "w", encoding="utf-8") as f:
@@ -95,10 +98,12 @@ jobs:
         run: python3 lint/b.py
 """
 
-# The workflow of the other jobs, committed on the lane's head. checks-merge-install is Linux, checks-macos is not. Each picked suite's
-# step is named here, so a case reads the step a follow-up run names.
+# The workflow of the other jobs, committed on the lane's head. checks-merge-install and checks-guard are Linux, checks-macos is not.
+# Each picked suite's step is named here, so a case reads the step a follow-up run names.
 OTHER_JOB, MACOS_JOB = "checks-merge-install", "checks-macos"
 MERGE_SUITE, MACOS_SUITE = "Merge tool git-half fixture suite", "Idle-lanes reader fixture suite"  # python3 merge/test_merge.py, python3 merge/test_idle_lanes.py
+NODE_JOB, NODE_STEP, NODE_SUITE = "checks-guard", "Guard hook suite", "hooks/test_guard.py"  # the Linux job whose suite step sets NODE_PATH
+NODE_PATH_DIR = "tools/guard-node-modules"  # the folder that step's NODE_PATH names: not in the checkout, as the uses: step that installs it never runs here
 OTHER_JOBS_WORKFLOW = """name: t
 on: push
 jobs:
@@ -117,6 +122,13 @@ jobs:
     steps:
       - name: Idle-lanes reader fixture suite
         run: python3 merge/test_idle_lanes.py
+  checks-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard hook suite
+        env:
+          NODE_PATH: tools/guard-node-modules
+        run: python3 hooks/test_guard.py
 """
 COLLISION = "error: cannot lock ref 'refs/remotes/origin/main': is at %s but expected %s" % ("a" * 40, "b" * 40)  # git's text when another fetch moved the ref
 
@@ -128,6 +140,17 @@ def pass_lines(text):
 def not_run_line(job, suites):
     """The line bin/ci-job prints for the picked suites of another job, as it prints it: the checks lint names each such job."""
     return "%-15s job %s: picked %s; job %s runs them, not checks" % ("not run", job, ", ".join(suites), job)
+
+
+def unknown_line(step, detail):
+    """A step's unknown line as bin/ci-job's main prints it: `%-15s %s: %s`, the state padded to 15 columns."""
+    return "%-15s %s: %s" % ("unknown", step, detail)
+
+
+def node_path_detail(path):
+    """The detail bin/ci-job's plan() gives a step whose env NODE_PATH names a folder that is not in the checkout (its NODE_PATH check)."""
+    return ("env NODE_PATH names %s, which is not installed here: the step that installs it (a uses: action) is not run locally, "
+            "so the suite cannot run" % path)
 
 
 class QuietClock:
@@ -177,8 +200,9 @@ class CiJobStub:
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
     def stub_text(self, steps, rc, sleep=0, jobs=None, verbatim=()):
-        """The stub's source. `jobs` ({job: (steps, rc)}) scripts a job's own run, by its name as argv[0]; `verbatim` lines follow the
-        checks lint's step lines, as ci-job prints its not-run lines."""
+        """The stub's source. `jobs` ({job: (steps, rc)} or {job: (steps, rc, lines)}) scripts a job's own run, by its name as argv[0];
+        its `lines` (a third element) print after its step lines, as ci-job prints a verdict it words itself, with `steps` empty when
+        that is the only line. `verbatim` lines follow the checks lint's step lines, as ci-job prints its not-run lines."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
         return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
                 .replace("__JOBS__", repr(dict(jobs or {}))).replace("__VERBATIM__", repr(list(verbatim))))
@@ -865,6 +889,32 @@ class LaneLint(CiJobStub, tm.CloudSession):
         rc, out = self.lint_run("--lane-lint", head, head=head)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_picked_suite_whose_env_node_path_is_not_installed_here_is_one_not_run_line_naming_the_path_and_the_lane_lint_passes(self):
+        head = self.other_jobs_head()
+        verbatim = [not_run_line(NODE_JOB, [NODE_SUITE])]
+        self.use_ci_job(PASSING, 0, jobs={NODE_JOB: ([], 2, [unknown_line(NODE_STEP, node_path_detail(NODE_PATH_DIR))])}, verbatim=verbatim)
+        rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)  # the guard job's run is asserted first: scope before subject
+        self.assertEqual(rc, 0, "a picked suite whose env NODE_PATH names a folder not installed here read as unknown and refused the lane lint: " + out)
+        notes = [line for line in out.splitlines() if line.startswith("not run") and NODE_JOB in line]
+        self.assertEqual(len(notes), 1, "the picked suite of %s is not one `not run` line: %s" % (NODE_JOB, out))
+        self.assertTrue(NODE_SUITE in notes[0] or NODE_STEP in notes[0], "the `not run` line does not name the suite: " + out)
+        self.assertIn(NODE_PATH_DIR, notes[0], "the `not run` line does not name the missing NODE_PATH folder: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_control_a_picked_suite_of_a_node_path_job_whose_unknown_is_other_text_still_refuses(self):
+        head = self.other_jobs_head()
+        verbatim = [not_run_line(NODE_JOB, [NODE_SUITE])]
+        other_text = [unknown_line(NODE_STEP, "env NODE_PATH needs an expression this runner cannot read: ${{ matrix.node }}"),
+                      unknown_line(NODE_STEP, "tool missing: node")]
+        self.use_ci_job(PASSING, 0, jobs={NODE_JOB: ([], 2, other_text[:1])}, verbatim=verbatim)
+        for line in other_text:
+            with self.subTest(line=line):
+                self.write_stub(PASSING, 0, jobs={NODE_JOB: ([], 2, [line])}, verbatim=verbatim)
+                rc, out = self.lint_run("--lane-lint", head, head=head, other_runs=1)
+                self.assertNotEqual(rc, 0, "an unknown line of other text read as a pass: " + out)
+                self.assertEqual(pass_lines(out), [], out)
+                self.assertRegex(out, r"(?i)unknown")
 
     def run_with_main_fetch_failing(self, target, fails, failure):
         """Run the lane lint of `target` with the first `fails` fetches of main answered `failure` (exit, text), as a fetch that another
