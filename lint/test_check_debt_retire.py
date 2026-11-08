@@ -6,7 +6,7 @@ commits a base and a head, and asks the check for its findings. A fixture test s
 working folder to the file named by RETIRE_MARKS, so a case shows that a Retire check ran, or did not, from that file.
 No case waits on a clock. The Retire-run cases pass a fake run_state, so no case reads the network.
 """
-import atexit, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, inspect, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -41,6 +41,8 @@ PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+HEAD_URL = "https://github.com/fixture/repo/actions/runs/77"  # the PR head's own checks run
+NO_HEAD_RUN = "check() takes no head_run: the merge-mode read of the head's own checks run is not built (ruling 20:03 CST)"
 
 
 def sh(cwd, *cmd):
@@ -73,6 +75,18 @@ class Runs:
         self.urls.append(url)
         if isinstance(self.answer, BaseException):
             raise self.answer
+        return self.answer
+
+
+class HeadRuns:
+    """A fake head_run: answers the head's own checks run as (conclusion, url), or None when the head has no run. A conclusion of
+    None is a run still pending. Each call records the head sha it was asked about."""
+
+    def __init__(self, answer):
+        self.answer, self.shas = answer, []
+
+    def __call__(self, sha):
+        self.shas.append(sha)
         return self.answer
 
 
@@ -361,11 +375,55 @@ class RetireRun(Case):
         found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(pairs(found), [("d-prose", "red")], "a failing cited run did not refuse as red")
 
-    def test_r3_a_cite_of_a_green_run_on_an_older_commit_is_red(self):
+    def merge_mode(self, pr_body, run_state, head_run):
+        """check() in merge mode, as debt_check calls it: a deferred cite is held on the head's own checks run, read through head_run.
+        A check() with no head_run parameter fails the case by name."""
+        self.assertIn("head_run", inspect.signature(D.check).parameters, NO_HEAD_RUN)
+        return D.check(self.dir, self.base, head=self.head, pr_body=pr_body, run_state=run_state, head_run=head_run)
+
+    def sibling_sha(self):
+        """A commit on a branch cut from the base that the PR head does not contain. -> its sha. The checkout is back on main."""
+        sh(self.dir, "git", "checkout", "-q", "-b", "side", self.base)
+        put(os.path.join(self.dir, "side.txt"), "side\n")
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "-m", "side")
+        side = sh(self.dir, "git", "rev-parse", "HEAD")
+        sh(self.dir, "git", "checkout", "-q", "main")
+        return side
+
+    def test_d1_a_deferred_cite_with_a_green_head_run_is_no_finding(self):
+        # Ruling 20:03 CST: a cited sha that is a strict ancestor of the head is deferred to merge, and merge mode holds it on the head's run.
         self.closed_prose()
-        runs = Runs(("success", self.base))  # the parent of the PR head: an ancestor, not a descendant
-        found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
-        self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on an older commit cleared the debt")
+        head_runs = HeadRuns(("success", HEAD_URL))
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", self.base)), head_runs)
+        self.assertEqual(head_runs.shas, [self.head], "the head's own checks run was not read")
+        self.assertEqual(pairs(found), [], "a deferred cite with a green head run did not clear the debt")
+
+    def test_d2_a_deferred_cite_with_a_red_head_run_is_a_finding_that_names_the_head_run(self):
+        self.closed_prose()
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", self.base)), HeadRuns(("failure", HEAD_URL)))
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with a red head run did not refuse")
+        self.assertIn(HEAD_URL, found[0].text, "the refusal does not name the head's checks run")
+
+    def test_r3_a_green_run_on_an_older_commit_is_deferred_and_a_missing_head_run_refuses(self):
+        # Ruling 20:03 CST: the parent of the head is a strict ancestor, so the cite is deferred, not red. With no head run it refuses.
+        self.closed_prose()
+        head_runs = HeadRuns(None)  # the PR head has no checks run
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", self.base)), head_runs)
+        self.assertEqual(head_runs.shas, [self.head], "the head's own checks run was not read")
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with no head run cleared the debt")
+
+    def test_d4_a_deferred_cite_with_a_pending_head_run_is_a_finding_that_names_the_head_run(self):
+        self.closed_prose()
+        found = self.merge_mode("Retire-run: d-prose -- %s\n" % RUN_URL, Runs(("success", self.base)), HeadRuns((None, HEAD_URL)))
+        self.assertEqual([f.slug for f in found], ["d-prose"], "a deferred cite with a pending head run did not refuse")
+        self.assertIn(HEAD_URL, found[0].text, "the refusal does not name the pending head run")
+
+    def test_d5_a_cite_of_a_sha_the_head_does_not_contain_stays_red(self):  # control
+        self.closed_prose()
+        side = self.sibling_sha()
+        found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=Runs(("success", side)))
+        self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on a commit the head does not contain did not stay red")
 
     def test_r4_an_unreadable_cited_run_is_unknown(self):
         self.closed_prose()

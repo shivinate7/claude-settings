@@ -2298,15 +2298,15 @@ class RetireCite(unittest.TestCase):
         problems, notes = self.silent(head, body, Runs(("failure", head)))
         self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
 
-    def test_a_green_run_below_the_pr_head_does_not_excuse_the_debt_delete(self):
+    def test_a_green_run_below_the_pr_head_is_deferred_to_merge_and_excuses_the_debt_delete_in_ci(self):  # ruling 20:03 CST
         self.land({self.DEBT: debt(PROSE)})
         head = self.drop(self.DEBT)
         self.assert_deleted(head, self.DEBT)
         body = self.CITE % (self.SLUG, RUN_URL)
-        below = self.r.sh("rev-parse", "origin/main")  # the parent of the PR head: an ancestor, not a commit at or above it
-        self.assertEqual(self.scope(head, body, Runs(("success", below))), [(self.SLUG, "red")], "scope")
+        below = self.r.sh("rev-parse", "origin/main")  # the parent of the PR head: a strict ancestor, so the cite is deferred to merge
         problems, notes = self.silent(head, body, Runs(("success", below)))
-        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assertFalse(self.finding(problems, self.DEBT), (problems, notes))
+        self.assertTrue(any("deferred to merge" in n and below[:9] in n for n in notes), notes)
 
     def test_no_run_reader_excuses_nothing(self):
         self.land({self.DEBT: debt(PROSE)})
@@ -2468,8 +2468,26 @@ class RetireCite(unittest.TestCase):
         runs = Runs(("success", below))
         code, out = self.cli(head, runs, env={CASE_BODY: body})
         self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the cited run, so the case proves nothing")
-        self.assertEqual(code, 1, out)
-        self.assertIn("FAIL: %s:" % self.DEBT, out, "the green run below the head excused the debt delete:\n" + out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("deferred to merge", out, "the run was not judged against the head the flag gives: a reader keyed to the checkout sees it on HEAD\n" + out)
+
+    def lane_into(self):
+        """A lane commit cut from origin/main and merged into the retire branch, as a batch does. -> (the lane tip, the batch head)."""
+        self.r.sh("checkout", "-q", "-b", "lane", "origin/main")
+        tip = self.r.commit("lane: a commit", lane_txt="lane\n")
+        self.r.sh("checkout", "-q", "retire")
+        self.r.sh("merge", "-q", "--no-ff", "-m", "Merge the lane into retire", tip)
+        return tip, self.r.sh("rev-parse", "HEAD")
+
+    def test_a_lane_tip_cite_on_a_batch_head_is_deferred_to_merge_and_excuses_in_ci(self):  # ruling 20:03 CST
+        self.cited_close()
+        tip, batch = self.lane_into()
+        runs = Runs(("success", tip))
+        code, out = self.cli(batch, runs, env={CASE_BODY: self.CITE % (self.SLUG, RUN_URL)})
+        self.assertIn(RUN_URL, runs.urls, "the run reader was not asked for the lane tip's cited run")
+        self.assertEqual(code, 0, out)
+        self.assertIn("deferred to merge", out, "no 'deferred to merge' note for a lane tip the batch head contains:\n" + out)
+        self.assertIn(tip[:9], out, "the note does not name the lane-tip sha")
 
     def test_the_flag_with_no_body_excuses_nothing(self):
         head, body = self.cited_close()

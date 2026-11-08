@@ -144,6 +144,7 @@ class FakeHost:
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
         self.events = []  # ("body", n, text) per set_body, ("ready", n) per ready call, in call order
         self.lane_prs, self.lane_read_error = {}, None  # lane_prs: commit sha -> the rows commits/<sha>/pulls returns; lane_read_error: the Stop prs_of_commit raises
+        self.head_run, self.head_run_reads = None, []  # head_run: the head's own checks run, (conclusion, url), or None for no run; conclusion None while pending
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -200,6 +201,10 @@ class FakeHost:
     def set_body(self, n, body):  # PATCH pulls/<n>: the body the next pr() read returns
         self.events.append(("body", n, body))
         self.body = body
+
+    def head_checks_run(self, sha):  # the head's own checks run, read when a cite is deferred to merge: (conclusion, url), or None for no run
+        self.head_run_reads.append(sha)
+        return self.head_run
 
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
@@ -5980,6 +5985,46 @@ class DebtRetire(Env):
         self.assertEqual(self.claims(), 1, out)
         names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
         self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
+
+    HEAD_RUN = "https://github.com/fixture/repo/actions/runs/77"  # the PR head's own checks run
+
+    def lane_into_feat(self):
+        """A lane commit cut from origin/main and merged into feat, as a batch does. -> the lane tip, which feat contains."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "lane-x", "origin/main")
+        put(os.path.join(o, "lane.txt"), "lane\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "lane: a commit")
+        tip = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "checkout", "-q", "feat")
+        sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge remote-tracking branch 'origin/lane-x' into feat", tip)
+        sh(o, "git", "push", "-q", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return tip
+
+    def cite_lane_tip(self, tip, head_state):
+        """The batch's body cites a run on the lane tip, which the batch head contains. The head's own run is head_state."""
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: ("success", tip)
+        self.host.head_run = head_state
+
+    def test_a_deferred_cite_on_a_batch_is_refused_when_the_head_run_is_red(self):
+        # Ruling 20:03 CST: a cite of a lane tip the batch head contains is deferred to merge. Merge holds it on the head's own run.
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        tip = self.lane_into_feat()
+        self.cite_lane_tip(tip, ("failure", self.HEAD_RUN))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn(self.HEAD_RUN, out, "the refusal does not name the head's red checks run")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_deferred_cite_on_a_batch_passes_when_the_head_run_is_green(self):
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        tip = self.lane_into_feat()
+        self.cite_lane_tip(tip, ("success", self.HEAD_RUN))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
 
 class DraftPreview(Env):
