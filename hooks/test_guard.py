@@ -14882,6 +14882,103 @@ def _open_test_conflict_edited(w):
     write(os.path.join(w, TEST_A), LANE_TEXT)
 
 
+# An empty test file is still a test file. text_at reads '' for a missing file and for an empty one alike, so a merge
+# check that compares text alone reads an empty file added or deleted in a merge as no change. Line endings and
+# invalid bytes are the same kind of change: the bytes differ, and the text, read in text mode, does not.
+EMPTY_TEST = "tests/test_empty.py"
+TEST_BYTES = "tests/test_bytes.py"
+COST_PATHS = ["src/app.py", "tests/test_cost_one.py", "tests/test_cost_two.py"]
+
+
+def _put_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _rewrite_bytes(path, change):
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    _put_bytes(path, change(raw))
+
+
+def _clean_merge_open(w, main_adds=None):
+    """Cut at main. The builder commits product work. Main adds each file in `main_adds` (path: bytes) and changes a
+    product file. The builder merges main with no commit: the merge is clean and stays in progress, so git's own
+    merge is the base the builder's change is judged against."""
+    main = w + "-main"
+    _product_commit(w)
+    for rel, data in (main_adds or {}).items():
+        _put_bytes(os.path.join(main, rel), data)
+    write(os.path.join(main, "src/other.py"), "z = 1\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main adds files")
+    _must(w, *IDENT, "merge", "-q", "--no-commit", "--no-ff", "main")
+
+
+def _empty_add_open(w):
+    """A clean merge left open, where the builder adds an empty test file that git's merge does not have."""
+    _clean_merge_open(w)
+    write(os.path.join(w, EMPTY_TEST), "")
+
+
+def _empty_delete_open(w):
+    """A clean merge left open, where git's merge holds an empty test file and the builder deletes it."""
+    _clean_merge_open(w, {EMPTY_TEST: b""})
+    os.remove(os.path.join(w, EMPTY_TEST))
+
+
+def _commit_merge(w):
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _empty_add_committed(w):
+    """The _empty_add_open change, committed as the builder's merge commit (reflog `commit (merge)`)."""
+    _empty_add_open(w)
+    _commit_merge(w)
+
+
+def _empty_delete_committed(w):
+    """The _empty_delete_open change, committed as the builder's merge commit."""
+    _empty_delete_open(w)
+    _commit_merge(w)
+
+
+def _conflict_crlf(w):
+    """The open conflict of _f2_conflict_open, where the builder rewrites the conflicted test file with each LF as
+    CRLF. Only the line endings change."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r\n"))
+
+
+def _conflict_cr(w):
+    """As _conflict_crlf, with each LF as a lone CR."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    _rewrite_bytes(os.path.join(w, TEST_A), lambda raw: raw.replace(b"\n", b"\r"))
+
+
+def _invalid_byte_open(w):
+    """A clean merge left open, where git's merge holds a test file with one stray byte, 0x80, and the builder
+    rewrites that byte to 0x81. Both are invalid UTF-8, so both decode to the same replacement character."""
+    _clean_merge_open(w, {TEST_BYTES: b"# \x80\n"})
+    _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
+
+
+def _cost_files(w):
+    """The builder's change for the cost checks: a product edit and two new test files."""
+    write(os.path.join(w, "src/app.py"), "x = 4\n")
+    write(os.path.join(w, "tests/test_cost_one.py"), "def test_one():\n    assert 1\n")
+    write(os.path.join(w, "tests/test_cost_two.py"), "def test_two():\n    assert 2\n")
+
+
+def _cost_merge_open(w):
+    _clean_merge_open(w)
+    _cost_files(w)
+
+
 def _g_lane_and_product(w):
     """Cut from a lane tip that adds a test case at the end of the test file. The builder commits product work
     on that tip. Main then prepends a test case to the same file, a different hunk, and is published."""
@@ -15291,6 +15388,109 @@ sh("builder-refuse: a builder's merge in progress that rewrites a conflicted tes
 _bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
 sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
    "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
+
+# An empty test file that a builder adds or deletes is a builder's change in a merge as in a plain change. The two
+# plain cases are the controls: the same change, outside a merge, is refused now and stays refused.
+_bd_empty_plain_add = diff_repo("bd-empty-plain-add", _put(EMPTY_TEST, ""))
+sh("builder-refuse: a new empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_add, agent_id="bld1", agent_type="builder")
+_bd_empty_plain_del = diff_repo("bd-empty-plain-del", _rm(EMPTY_TEST), files={**BASE_FILES, EMPTY_TEST: ""})
+sh("builder-refuse: a deleted empty test file in a builder's plain change is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_empty_plain_del, agent_id="bld1", agent_type="builder")
+
+_bd_m_empty_add = diff_repo("bd-m-empty-add", _empty_add_open)
+sh("builder-refuse: a builder's merge in progress that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del = diff_repo("bd-m-empty-del", _empty_delete_open)
+sh("builder-refuse: a builder's merge in progress that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del, agent_id="bld1", agent_type="builder")
+_bd_m_empty_add_c = diff_repo("bd-m-empty-add-commit", _empty_add_committed)
+sh("builder-refuse: a builder's merge commit that adds an empty test file git's merge lacks is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_add_c, agent_id="bld1", agent_type="builder")
+_bd_m_empty_del_c = diff_repo("bd-m-empty-del-commit", _empty_delete_committed)
+sh("builder-refuse: a builder's merge commit that deletes an empty test file git's merge has is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del_c, agent_id="bld1", agent_type="builder")
+
+# A conflicted test file whose bytes change only in line endings is the builder's change: text mode folds the CR.
+_bd_m_crlf = diff_repo("bd-m-crlf", _conflict_crlf)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(LF to CRLF) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_crlf, agent_id="bld1",
+   agent_type="builder")
+_bd_m_cr = diff_repo("bd-m-cr", _conflict_cr)
+sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
+   "(a lone CR) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_cr, agent_id="bld1",
+   agent_type="builder")
+
+# A test file that differs only in one invalid UTF-8 byte is the builder's change: both bytes decode alike.
+_bd_m_byte = diff_repo("bd-m-invalid-byte", _invalid_byte_open)
+sh("builder-refuse: a builder's merge in progress that changes only an invalid UTF-8 byte of a test file is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_byte, agent_id="bld1", agent_type="builder")
+
+
+def _counted_own_changes(where):
+    """own_changes(where) with every git call the guard makes counted: the changes, and the argument tuples of the
+    calls in order. The count is taken at the reader the guard calls, so it is the guard's own."""
+    guard = _load_guard_module()
+    core = sys.modules["guard_core"]
+    calls = []
+    real_git = core._git
+
+    def counting_git(root, *args):
+        calls.append(args)
+        return real_git(root, *args)
+
+    core._git = counting_git
+    try:
+        changes = guard.own_changes(where)
+    finally:
+        core._git = real_git
+    return changes, calls
+
+
+def _calls_naming(calls, rels):
+    """{rel: how many git calls name rel} for each path in `rels`."""
+    return {rel: sum(1 for args in calls if any(rel in part for part in args)) for rel in rels}
+
+
+def plain_commit_reads_case():
+    """A builder's plain commit: own_changes reads none of its paths with git, since merge_resolved runs in a merge only."""
+    where = diff_repo("bd-cost-plain", _cost_files, commit=True)
+    materialize(where)
+    changes, calls = _counted_own_changes(where)
+    if changes is None:
+        return False, "own_changes returned None for the plain commit"
+    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    if found != set(COST_PATHS):
+        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
+    named = {rel: n for rel, n in _calls_naming(calls, COST_PATHS).items() if n}
+    if named:
+        return False, "the plain commit's git calls name paths %r, want none" % (named,)
+    return True, "the plain commit's three paths are read through no git call"
+
+
+def merge_reads_case():
+    """A builder's merge in progress with three differing paths: git makes at most two calls per differing path."""
+    where = diff_repo("bd-cost-merge", _cost_merge_open)
+    materialize(where)
+    changes, calls = _counted_own_changes(where)
+    if changes is None:
+        return False, "own_changes returned None for the merge"
+    counts = _calls_naming(calls, COST_PATHS)
+    if not any(counts.values()):
+        return False, "no git call names a differing path, so the merge's reads were not counted"
+    found = {path for _old, _new, paths, _kind in changes for path in paths}
+    if found != set(COST_PATHS):
+        return False, "own_changes found paths %r, want %r" % (sorted(found), COST_PATHS)
+    over = {rel: n for rel, n in counts.items() if n > 2}
+    if over:
+        return False, "git calls per differing path above 2: %r" % (over,)
+    return True, "git calls per differing path %r, bound 2" % (counts,)
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
+                         plain_commit_reads_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge in progress makes at most two git calls per differing path",
+                         merge_reads_case))
 
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
