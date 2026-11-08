@@ -999,7 +999,7 @@ ARCHIVE_READ_REASON = (
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_SCOPE_REASON = (
-    "the lane's repo is not in this session's GitHub scope, so no read from here can reach its pull requests. "
+    "the lane's repo is not in this session's GitHub scope, so a read from here fails until the repo is attached. "
     "Route the archive to the batch runner whose session holds that repo. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
