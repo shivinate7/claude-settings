@@ -25230,7 +25230,7 @@ for _command in ("echo x >> docs/todo.md",
                  'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
                  "cat > docs/todo.md <<'EOF'\n# heading > README.md\nEOF"):
     cs_shell("shell_write_allowed", "allow", _command)
-# A `>` inside the double quotes of a `gh` comment body is text, not a redirect: a coordinator posts "Round 2 -> pass" and
+# A `>` inside the double quotes of a `gh` comment body is text, not a redirect: a coordinator posts "label -> pass" and
 # writes no file. The control is a real redirect to a product path, which stays refused.
 for _command in ('gh pr comment 5 --body "Round 2 -> pass"',
                  'gh pr comment 5 --body "> quoted text"',
@@ -25415,7 +25415,7 @@ cs_write("main_checkout_briefs_denied", "deny", os.path.join(CS_RECORD_MAIN, "br
 cs_write("main_checkout_product_denied", "deny", os.path.join(CS_RECORD_MAIN, "src", "app.py"), "Write", cwd=CS_RECORD_MAIN)
 cs_write("record_checkout_other_path_denied", "deny", os.path.join(CS_RECORD, "src", "app.py"), "Write", cwd=CS_RECORD)
 
-# 2b. The waiting page's copy on the record branch. Decision session-tiers ("Where triage runs", owner 2026-11-02 14:02 CST):
+# 2b. The waiting page's copy on the record branch. Decision session-tiers ("Where triage runs"):
 # with no triage, the coordinator writes the waiting page. Decision waiting-data-in-repo: the page writer's copy lives on the
 # record branch, under `waiting/` (the page and its items) and `artifacts/<id>/` (each registered artifact's export). So a
 # coordinator's write and commit of those paths in a record checkout pass. A product path beside them stays refused, and so

@@ -954,7 +954,7 @@ class LaneUndo(unittest.TestCase):
         assert_finding(self, r.verdict(), "tests/card.txt", c, e)
 
     def test_a_net_loss_of_one_line_from_an_eight_line_test_block_is_red(self):
-        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: a net loss of one line counts, with no line-count floor."""
+        """Owner, page item 220, pick b: a net loss of one line counts, with no line-count floor."""
         r = self.r
         e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
         c = r.commit("C: remove one of the lines", tests__card_txt=self.EIGHT.replace("eight test line 3\n", ""))
@@ -963,7 +963,7 @@ class LaneUndo(unittest.TestCase):
         assert_finding(self, r.verdict(), "tests/card.txt", c, e)
 
     def test_a_net_loss_of_two_adjacent_lines_from_an_eight_line_test_block_is_red(self):
-        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: the net loss has no line-count floor, so two lines count too."""
+        """Owner, page item 220, pick b: the net loss has no line-count floor, so two lines count too."""
         r = self.r
         e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
         c = r.commit("C: remove two adjacent lines", tests__card_txt=self.EIGHT.replace("eight test line 3\neight test line 4\n", ""))
