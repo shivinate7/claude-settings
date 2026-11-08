@@ -105,14 +105,31 @@ INTERPRETER_VALUE_FLAGS = ("-W", "-X")
 REDIRECT_WORD = re.compile(r"^(?:\d*|&)(?:>>|<<<|<<|>&|<&|>|<|&>)(.*)$")
 
 
+def _redirect_width(tokens, at: int) -> int:
+    """How many words the redirect at `at` takes (1 for `2>&1`, 2 for a bare `>` and its target), 0 when
+    the word at `at` is no redirect."""
+    redirect = REDIRECT_WORD.match(tokens[at])
+    if not redirect:
+        return 0
+    return 1 if redirect.group(1) else 2
+
+
+def _skip_redirects(tokens, at: int) -> int:
+    """The index of the first word from `at` on that is no redirect word. A redirect before the command
+    (`2>/dev/null python3 lint/x.py`) is stripped by the shell, so the command is the word after it."""
+    while at < len(tokens) and (width := _redirect_width(tokens, at)):
+        at += width
+    return at
+
+
 def _script_operand(tokens, index: int) -> str:
     """The script an interpreter at `index` runs: its first word that is no flag and no redirect. '' for
     `-m <module>` and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
     at = index + 1
     while at < len(tokens):
-        redirect = REDIRECT_WORD.match(tokens[at])
-        if redirect:
-            at += 1 if redirect.group(1) else 2
+        width = _redirect_width(tokens, at)
+        if width:
+            at += width
         elif tokens[at].startswith("-"):
             flag = tokens[at]
             if flag in ("-m", "-c"):
@@ -231,6 +248,7 @@ def _skip_uv_run(tokens, index: int) -> int:
     """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
     again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
     reads the command word, and only the check rule needs it."""
+    index = _skip_redirects(tokens, index)
     while index < len(tokens) and basename(tokens[index]) == "uv":
         run = index + 1
         while run < len(tokens) and tokens[run].startswith("-"):
@@ -243,7 +261,7 @@ def _skip_uv_run(tokens, index: int) -> int:
         at = resolve_command(tokens[start:])
         if at is None:
             break
-        index = start + at
+        index = _skip_redirects(tokens, start + at)
     return index
 
 
@@ -283,10 +301,12 @@ def lint_stage(segment: str, background: bool) -> str:
     return ""
 
 
-def _pipeline_hit(stages, background: bool, stage_of=check_stage) -> str:
+def _pipeline_hit(stages, background: bool, stage_of=check_stage, any_later: bool = False) -> str:
     """The matched text when a stage that `stage_of` names, in one pipeline's stages, reaches
     `tail`/`head`. A `tee` between them does not end the reach, since the filter after it still cuts
-    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit."""
+    what the agent reads. A `tee` with no `tail` or `head` after it is not a hit. With `any_later`, any
+    later command counts: a pipeline's exit is its last stage's, so `grep`, `tee` and `wc` mask the
+    exit of the stage before them as `tail` does (the lint-then-commit gate reads the exit, not the cut)."""
     for first, segment in enumerate(stages):
         stage = stage_of(segment, background)
         if not stage:
@@ -296,8 +316,11 @@ def _pipeline_hit(stages, background: bool, stage_of=check_stage) -> str:
             at = resolve_command(tokens) if tokens else None
             if at is None:
                 continue
+            at = _skip_redirects(tokens, at)
+            if at >= len(tokens):
+                continue
             word = basename(tokens[at])
-            if word in TRUNCATING_FILTERS:
+            if any_later or word in TRUNCATING_FILTERS:
                 return stage + " | " + word
     return ""
 
@@ -307,13 +330,11 @@ def _commits_or_pushes(segment: str) -> bool:
     return any(verb in ("commit", "push") for verb, _args in git_calls(segment))
 
 
-def check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
-    filters. A pipeline ends at any separator other than `|`. A lint script piped into `tail`/`head`
-    counts only when a later segment of the call runs a commit or a push: the filter's exit hides a
-    red lint, and the commit or push runs on it (incident, lane windows-tests-for-touched-files)."""
+def _pipelines(text: str):
+    """One command text as its pipelines, each a list of stage segments. A pipeline ends at any
+    separator other than `|`."""
     ends = []
-    segments = split_segments(stripped, ends)
+    segments = split_segments(text, ends)
     pipelines = []
     stages = []
     for segment, end in zip(segments, ends):
@@ -322,14 +343,38 @@ def check_tail_hit(stripped: str, background: bool) -> str:
             pipelines.append(stages)
             stages = []
     pipelines.append(stages)
-    for stages in pipelines:
-        hit = _pipeline_hit(stages, background)
-        if hit:
-            return hit
-    for at, stages in enumerate(pipelines):
-        hit = _pipeline_hit(stages, background, lint_stage)
-        if hit and any(_commits_or_pushes(segment) for later in pipelines[at + 1:] for segment in later):
-            return hit + " then a commit or push"
+    return pipelines
+
+
+def check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters. Each command substitution is its own text, read through the one reader in guard_env as
+    `verdict_pipe_hit` reads it, so a pipe inside `$(...)` counts. A lint script piped into any later
+    command counts only when a later segment of the call runs a commit or a push: the pipeline's exit is
+    the last stage's, so a red lint hides, and the commit or push runs on it (incident, lane
+    windows-tests-for-touched-files). Order across texts is not tracked: a lint inside a substitution
+    counts when any other text of the call runs a commit or a push."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    texts = [_pipelines(text) for text, _in_message in texts]
+    for pipelines in texts:
+        for stages in pipelines:
+            hit = _pipeline_hit(stages, background)
+            if hit:
+                return hit
+    for number, pipelines in enumerate(texts):
+        outer = number == len(texts) - 1   # the last text is the command itself
+        for at, stages in enumerate(pipelines):
+            hit = _pipeline_hit(stages, background, lint_stage, any_later=True)
+            if not hit:
+                continue
+            after = list(pipelines[at + 1:])
+            if not outer:
+                others = texts[:number] + texts[number + 1:]
+                after += [stages for text in others for stages in text]
+            if any(_commits_or_pushes(segment) for later in after for segment in later):
+                return hit + " then a commit or push"
     return ""
 
 
