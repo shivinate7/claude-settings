@@ -365,7 +365,7 @@ GREEN = [
     ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
     ("prose with the word secret before a name", "the secret santa list"),
     # A letters-only value of 12 or more characters after a credential name refuses today. These three are placeholder and
-    # label text, not secrets, so each is red on main. The RED rows above hold a random value after the same names.
+    # label text, not secrets, so each must be allowed. The RED rows above hold a random value after the same names.
     ("api_key set to an upper-case placeholder with underscores", "api_key: REPLACE_WITH_YOUR_KEY"),
     ("Key set to a lower-case label word", "Key: infrastructure"),
     ("--key-color set to a CSS keyword before a semicolon", "--key-color: currentcolor;"),
