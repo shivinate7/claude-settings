@@ -225,10 +225,24 @@ RED_CASES = []
 CASE_COUNT = [0]
 
 CENTRAL = re.compile(r"Local time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
-# The printed line may carry a pointer to now-central after it, on the same line: the same suffix as LINE_PRINTED
-# in hooks/test_local_time.py. This suite does not import that file, since its import runs every case there.
-# The stamps (HEADER, STAMP and the inbox lines) stay exact.
-CENTRAL_PRINTED = re.compile(CENTRAL.pattern + r"(?: [^\n]*now-central[^\n]*)?")
+# The printed line ends with the pointer hooks/local_time.py emits: the constant itself, read from that file, never a
+# copy (building-allow-list-is-the-constant). Its import has no side effect; its cases stay in test_local_time.py.
+# Without the constant nothing matches, so no printed line passes. The stamps (CENTRAL, HEADER, STAMP) stay exact.
+
+
+def _pointer_from_local_time():
+    try:
+        spec = importlib.util.spec_from_file_location("local_time_for_inbox", LT_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return getattr(module, "NOW_CENTRAL_POINTER", None)
+    except Exception:
+        return None
+
+
+POINTER = _pointer_from_local_time()
+CENTRAL_PRINTED = (re.compile(CENTRAL.pattern + re.escape(POINTER)) if isinstance(POINTER, str)
+                   else re.compile(r"(?!)"))
 HEADER = re.compile(r"### (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (CDT|CST) \(UTC-0[56]:00\)")
 STAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
