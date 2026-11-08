@@ -1632,7 +1632,9 @@ def is_test_config_rel(rel: str) -> bool:
 def builder_test_rel(rel: str) -> bool:
     """True when a repository-relative path is one a builder may not change whatever the change: a test
     path or a whole-file test config. A partly-owned file is judged by its owned parts."""
-    return is_test_rel(rel) or bool(WHOLE_FILE_TEST_CONFIG.match(basename(rel)))
+    # A document that is named like a config (`docs/jest.config.md`) is a document, as in `_in_test_dir`.
+    return is_test_rel(rel) or (bool(WHOLE_FILE_TEST_CONFIG.match(basename(rel)))
+                                and os.path.splitext(rel)[1].lower() not in SPEC_DOC_EXTENSIONS)
 
 
 def author_path_ok(rel: str) -> bool:
@@ -2182,7 +2184,7 @@ def package_json_parts(text: str):
     """(owned, rest) of a manifest: owned is the `jest` key and the test scripts, rest is every other
     key and script. None when the text is no JSON object."""
     try:
-        manifest = json.loads(text)
+        manifest = json.loads(text.lstrip("﻿"))
     except Exception:
         return None
     if not isinstance(manifest, dict):
@@ -2266,7 +2268,7 @@ def ini_owned_parts(text: str):
     `[testenv:*]` whose body names a test runner. `[tox]` and a lint env are not owned."""
     sections, name = {}, None
     for line in text.splitlines():
-        found = re.match(r"^\[([^\]]+)\]\s*$", line)
+        found = re.match(r"^\[([^\]]+)\]\s*(?:[#;].*)?$", line)
         if found:
             name = found.group(1).strip()
             sections.setdefault(name, [])
