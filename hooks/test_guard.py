@@ -8442,6 +8442,42 @@ sh("env: interpreter code follow-ups: deny, node -e, a negated name test joined 
    "if (!f.startsWith(\"" + ENV + "\") || a) console.log(fs.readFileSync(f,\"utf8\"))'",
    "deny", "env-file", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups: a loop over the folder's files that
+# reads each file its condition keeps. The `node -e` script is single-quoted, so its strings are double-
+# quoted JS. Names start "env: interpreter code follow-ups", so MUTATE_ONLY="env: interpreter code" runs them.
+def node_loop(cond, decls=""):
+    """A `node -e` script that reads each file in the folder `cond` keeps. `decls` runs first."""
+    return ("node -e '" + decls + 'for (const f of require("fs").readdirSync(".")) if (' + cond
+            + ') console.log(require("fs").readFileSync(f,"utf8"))' + "'")
+
+
+# The control for the five below: the same loop with a plain name test is denied on head.
+sh("env: interpreter code follow-ups: deny, node -e, a plain name test, the control for the negated shapes",
+   node_loop('f.startsWith("' + ENV + '")'), "deny", "env-file", cwd=NOGIT)
+for shape, cond, decls in (
+    ("a name test negated twice", '!(!(f.startsWith("' + ENV + '")))', ""),
+    ("a name test negated inside a negated conjunction", '!(!(f.startsWith("' + ENV + '")) && a)',
+     "const a = true; "),
+    ("a ternary that negates the name test", '!(f.startsWith("' + ENV + '")) ? false : true', ""),
+    ("a ternary over a name test and a grouped or", '!f.startsWith("' + ENV + '") && (a || b) ? false : true', ""),
+    ("a comma expression that ends in a grouped or", '!f.startsWith("' + ENV + '"), (a || b)', ""),
+):
+    sh("env: interpreter code follow-ups: deny, node -e, " + shape + ", then a read of each file",
+       node_loop(cond, decls), "deny", "env-file", cwd=NOGIT)
+
+# Scanner traps (building-scanner-respects-strings): an or, a template literal, a regex and a block comment
+# opener inside strings, or a block comment after the name test, must not change what the condition is.
+for shape, cond, decls in (
+    ("a compare holding an or in a string", '!f.startsWith("' + ENV + '") && s !== "a || b"', 'const s = "x"; '),
+    ("a compare holding a template literal with an or", '!f.startsWith("' + ENV + '") && t !== `(a || b)`', ""),
+    ("a regex literal holding an or", '!f.startsWith("' + ENV + '") && !/\\|\\|/.test(f)', ""),
+    ("a block comment after the name test, holding an or", '!(f.startsWith("' + ENV + '")) /* || x */', ""),
+    ("a compare holding a block comment opener in a string", '!f.startsWith("' + ENV + '") && s !== "/* x"',
+     'const s = "x"; '),
+):
+    sh("env: interpreter code follow-ups: allow, node -e, " + shape + ", then a read of each file the name test keeps",
+       node_loop(cond, decls), "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
