@@ -5136,6 +5136,183 @@ default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
 # Optional case filter: `sh hooks/test_install_src.sh caseF4 caseF6` runs only those cases.
 # No arguments runs every case. lint/check_unknown_reads_contract.py uses it.
 ONLY=" $* "
+# A fixed /tmp path races between parallel runs: one run's rm lands before another run's wc. This case reads
+# the script's own source and fails on a line that redirects to or removes a fixed /tmp/ path. The scan blanks
+# comments, quoted spans and heredoc bodies before it looks for a redirect, so it reads code only. It skips
+# heredoc bodies itself: guard_core.strip_heredoc_bodies keeps some unquoted-body lines, whose quotes do not pair.
+caseTmp1() {
+  name="caseTmp1: no line of this script redirects to or removes a fixed /tmp/ path"
+  res=$(python3 -I - "$HERE/test_install_src.sh" <<'PY'
+import re, sys
+
+RM =re.compile(r"(?:^|[;&|(])[ \t]*rm[ \t]", re.M)
+REDIR = re.compile(r"\d?(?:>>?|<)\|?[ \t]*")
+WORD = re.compile(r"""("[^"]*"|'[^']*'|[^\s;&|()<>]+)""")
+SEP = re.compile(r"[;&|()\n]")
+HEREDOC = re.compile(r"""<<(-?)[ \t]*(["']?)(\w+)\2""")
+
+
+def unquote(word):
+    if len(word) >= 2 and word[0] == word[-1] and word[0] in "\"'":
+        return word[1:-1]
+    return word
+
+
+def is_tmp(word):
+    value = unquote(word)
+    return value == "/tmp" or value.startswith("/tmp/")
+
+
+def code_only(text):
+    """text with comments, quoted spans and heredoc bodies blanked to spaces. Newlines and offsets stay. A $( inside double quotes is code."""
+    out = list(text)
+    n = len(text)
+    frames = [["top", 0]]  # [kind, paren depth]; kinds: top, sub (inside $( ), dq, sq
+    pending = []  # (<<- form, terminator) of each heredoc whose header the scan has passed
+
+    def blank(i):
+        if out[i] != "\n":
+            out[i] = " "
+
+    def skip_body(i, dash, term):
+        """Blank a heredoc body from offset i through its terminator line. -> the offset after that line."""
+        while i < n:
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            line = text[i:end]
+            for j in range(i, end):
+                blank(j)
+            i = end + 1
+            if (line.lstrip("\t") if dash else line) == term:
+                break
+        return min(i, n)
+
+    i = 0
+    while i < n:
+        kind = frames[-1][0]
+        c = text[i]
+        if kind == "sq":
+            blank(i)
+            if c == "'":
+                frames.pop()
+            i += 1
+        elif kind == "dq":
+            if c == "\\":
+                blank(i)
+                if i + 1 < n:
+                    blank(i + 1)
+                i += 2
+            elif c == '"':
+                frames.pop()
+                blank(i)
+                i += 1
+            elif text.startswith("$(", i):
+                blank(i)
+                blank(i + 1)
+                frames.append(["sub", 0])
+                i += 2
+            else:
+                blank(i)
+                i += 1
+        else:  # code: top or sub
+            if c == "\\":
+                i += 2
+                continue
+            if c == "\n":
+                i += 1
+                while pending:
+                    dash, term = pending.pop(0)
+                    i = skip_body(i, dash, term)
+                continue
+            if c == "#" and (i == 0 or text[i - 1] in " \t\n;&|("):
+                end = text.find("\n", i)
+                end = n if end < 0 else end
+                for j in range(i, end):
+                    blank(j)
+                i = end
+                continue
+            head = HEREDOC.match(text, i) if text.startswith("<<", i) else None
+            if head:
+                pending.append((head.group(1) == "-", head.group(3)))
+                i = head.end()
+                continue
+            if c == "'":
+                frames.append(["sq", 0])
+                blank(i)
+            elif c == '"':
+                frames.append(["dq", 0])
+                blank(i)
+            elif c == "(":
+                frames[-1][1] += 1
+            elif c == ")":
+                if frames[-1][1] > 0:
+                    frames[-1][1] -= 1
+                elif frames[-1][0] == "sub":
+                    frames.pop()
+            i += 1
+    if len(frames) > 1:
+        raise ValueError("a quote or a $( is open at the end of the text")
+    return "".join(out)
+
+
+def hits_in(text):
+    """The line numbers that redirect to or remove a fixed /tmp/ path, read from the code of `text`."""
+    code = code_only(text)
+    found = []
+    for m in REDIR.finditer(code):
+        target = WORD.match(text, m.end())
+        if target and is_tmp(target.group(1)):
+            found.append(text.count("\n", 0, m.start()) + 1)
+    for m in RM.finditer(code):
+        end = SEP.search(code, m.end())
+        args = text[m.end(): end.start() if end else len(text)]
+        if any(is_tmp(word) for word in args.split()):
+            found.append(text.count("\n", 0, m.start()) + 1)
+    return sorted(set(found))
+
+
+FIXTURES = [
+    ("a comment opener inside a string does not hide a redirect", 'printf "%s\\n" "# x" 2>/tmp/a\n', [1]),
+    ("a lone quote in a comment does not hide the next redirect", "# don't do this\nsh x 2>/tmp/b\n", [2]),
+    ("a multi-line string that holds redirect text is no redirect", 'printf "a\n> /tmp/c\n"\n', []),
+    ("rm of a fixed path", 'rm -f "/tmp/d"\n', [1]),
+    ("rm of a run-folder path", 'rm -rf "$work/e"\n', []),
+    ("input from a fixed path", 'wc -c < /tmp/f\n', [1]),
+    ("a comment that names a redirect", '# sh x 2>/tmp/g\n', []),
+    ("a heredoc body that names a redirect", "cat <<'EOF'\nsh x 2>/tmp/h\nEOF\n", []),
+    ("a redirect to a run-folder path", 'sh x 2>"$work/i"\n', []),
+    ("a redirect inside a multi-line command substitution", 'out=$(sh x \\\n  2>/tmp/j)\n', [2]),
+    ("a redirect inside $( ) inside double quotes", 'x="$(sh y 2>/tmp/k)"\n', [1]),
+    ("an empty script", "", []),
+]
+
+if __name__ == "__main__":
+    failed = [label for label, text, want in FIXTURES if hits_in(text) != want]
+    if failed:
+        print("the scan failed its own fixtures: " + "; ".join(failed))
+        sys.exit(2)
+    text = open(sys.argv[1], encoding="utf-8").read()
+    try:
+        found = hits_in(text)
+    except ValueError as err:
+        print("the scan could not read the script: " + str(err))
+        sys.exit(2)
+    if found:
+        first = text.split("\n")[found[0] - 1].strip()
+        print("%d line(s) redirect to or remove a fixed /tmp/ path; first at line %d: %s" % (len(found), found[0], first))
+        sys.exit(1)
+PY
+  )
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    ok "$name"
+  elif [ $rc -eq 1 ]; then
+    bad "$name" "$res"
+  else
+    bad "$name" "the scan did not run (exit $rc): $res"
+  fi
+}
+
 run() { [ "$ONLY" = "  " ] || case "$ONLY" in *" $1 "*) ;; *) return 0 ;; esac; "$1"; }
 
 run case1
@@ -5291,6 +5468,7 @@ run mergepin2
 run mergepin3
 run mergepin4
 run mergepin5
+run caseTmp1
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
