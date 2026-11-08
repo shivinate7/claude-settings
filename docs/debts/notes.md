@@ -1508,3 +1508,5 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- lane-lint-worktree-add-no-beat: the worktree add in merge --lane-lint runs before ci-job writes any beat, so it can be quiet; unmeasured (merge/merge.py). Decision: stall-watch.
+- ci-job-timeout-kills-only-ci-job: ci_job_run's timeout (LINT_SECONDS) kills only ci-job, which may leave verdict and the step shell running; unverified (merge/merge.py). Decision: stall-watch.
