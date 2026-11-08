@@ -9330,6 +9330,21 @@ def build_envwalk_types():
 
 lazy_fixture((ENVWALK_SUB_CLEAN, ENVWALK_TYPE_MD, ENVWALK_TYPE_JAVA), build_envwalk_types)
 
+# A glob that picks an env file by its suffix. Each folder holds one env file with a suffix, and a README. No sample
+# env name ends in .yaml or .json, so the sample names alone pick neither file.
+ENVWALK_STEM_YAML = os.path.join(ROOT, "envwalk-stem-yaml")  # an env file that ends .yaml, and a README
+ENVWALK_STEM_JSON = os.path.join(ROOT, "envwalk-stem-json")  # an env file that ends .json, and a README
+
+
+def build_envwalk_stems():
+    write(os.path.join(ENVWALK_STEM_YAML, ENV + ".yaml"), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_STEM_YAML, "README.md"), "stem\n")
+    write(os.path.join(ENVWALK_STEM_JSON, ENV + ".json"), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_STEM_JSON, "README.md"), "stem\n")
+
+
+lazy_fixture((ENVWALK_STEM_YAML, ENVWALK_STEM_JSON), build_envwalk_stems)
+
 
 def build_envwalk_local():
     # A glob with no slash matches a name at any depth, so `*.local` names both files. The top folder holds
@@ -9792,9 +9807,10 @@ def env_cap_positive_glob_case():
 FIXTURELESS_CHECKS.update((env_cap_glob_allowed_case, env_cap_gitignored_bulk_case, env_cap_positive_glob_case))
 
 # A search that a shell runs from a string (`bash -c`, `sh -c`, `eval`) is a command of its own, and it walks
-# the folder it names. The guard does not read it yet, so each form is allowed over a folder that holds an env
-# file. Each form is refused over the folder that holds one, and allowed over a folder with none and an empty one.
-_SHELL_STRINGS = ("bash -c 'grep -r K .'", "sh -c 'grep -r K .'", "eval 'grep -r K .'")
+# the folder it names. Each form is refused over a folder that holds an env file, and allowed over a folder with
+# none and over an empty one. `bash -c --` runs the same string after its `--`.
+_SHELL_STRINGS = ("bash -c 'grep -r K .'", "sh -c 'grep -r K .'", "eval 'grep -r K .'",
+                  "bash -c -- 'grep -r K .'")
 for _cmd in _SHELL_STRINGS:
     sh("env: walk safety hole, a shell string runs a recursive grep of a folder that holds an env file, refused: "
        + _cmd, _cmd, "deny", "env-file", cwd=ENVWALK_HELD)
@@ -9828,6 +9844,57 @@ sh("env: walk control, cd into the env folder, then a search of its src folder w
 _CD_OUT_TO_CLEAN = "cd " + slash(ENVWALK_CLEAN) + " && grep -r K ."
 sh("env: walk, cd out of a folder that holds an env file into one with none, then a recursive grep, allowed: "
    + _CD_OUT_TO_CLEAN, _CD_OUT_TO_CLEAN, "allow", cwd=ENVWALK_HELD)
+
+# A glob that names an env file by its suffix is judged on the sample names alone, and no sample ends in .yaml or
+# .json. So the walk is skipped and the search is allowed, though the glob picks the file. Each deny row searches
+# the folder that holds that file. Each control is a glob that picks no env file in its folder, and stays allowed.
+_STEM_YAML = "grep -rn --include='*.yaml' KEY ."
+_STEM_JSON = "rg -g '*.json' KEY"
+sh("env: glob walk safety hole, --include picks an env file with a .yaml suffix, refused: " + _STEM_YAML,
+   _STEM_YAML, "deny", "env-file", cwd=ENVWALK_STEM_YAML)
+sh("env: glob walk safety hole, rg -g picks an env file with a .json suffix, refused: " + _STEM_JSON,
+   _STEM_JSON, "deny", "env-file", cwd=ENVWALK_STEM_JSON)
+for _cmd, _cwd in (
+    (_STEM_YAML, ENVWALK_CLEAN),
+    (_STEM_JSON, ENVWALK_CLEAN),
+    (_STEM_YAML, ENVWALK_HELD),
+    (_STEM_JSON, ENVWALK_HELD),
+    ("grep -rn --include='*.md' KEY .", ENVWALK_STEM_YAML),
+    ("rg -g '*.md' KEY", ENVWALK_STEM_JSON),
+):
+    sh("env: glob walk control, the glob picks no env file in its folder, allowed: " + _cmd, _cmd, "allow",
+       cwd=_cwd)
+
+# A `cd` inside a command substitution moves the folder that search runs in, as a plain `cd` moves a later search.
+_CD_SUB_INTO_HELD = "cd " + slash(ENVWALK_HELD) + " && x=$(rg --hidden K)"
+sh("env: walk safety hole, cd into a folder that holds an env file, then a search in a substitution, refused: "
+   + _CD_SUB_INTO_HELD, _CD_SUB_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+# The flip for a substitution: the cd leaves the held folder for one with none, so the search there is allowed.
+_CD_SUB_OUT_TO_CLEAN = "cd " + slash(ENVWALK_CLEAN) + " && x=$(rg --hidden K)"
+sh("env: walk, cd out of a folder that holds an env file into one with none, then a search in a substitution, "
+   "allowed: " + _CD_SUB_OUT_TO_CLEAN, _CD_SUB_OUT_TO_CLEAN, "allow", cwd=ENVWALK_HELD)
+# Control: the same substitution with no cd, in the folder that holds the env file, is refused already.
+sh("env: walk control, a search in a substitution, folder holds an env file, refused: x=$(rg --hidden K)",
+   "x=$(rg --hidden K)", "deny", "env-file", cwd=ENVWALK_HELD)
+
+# `test -f x && cd D; rg` searches D only when the test passes. When the test fails, the search runs in the folder the
+# shell started in. So the walk judges both folders, and an env file in either one refuses the search.
+_COND_START_HELD = "test -f x && cd src; rg --hidden K"
+sh("env: walk safety hole, conditional cd, the start folder holds an env file, refused: " + _COND_START_HELD,
+   _COND_START_HELD, "deny", "env-file", cwd=ENVWALK_HELD)
+_COND_INTO_HELD = "test -f x && cd " + slash(ENVWALK_HELD) + "; rg --hidden K"
+sh("env: walk safety hole, conditional cd into a folder that holds an env file, refused: " + _COND_INTO_HELD,
+   _COND_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+# Controls. An unconditional cd always moves the search, and src holds no env file, so that search is allowed.
+# Where neither folder holds an env file, the conditional form is allowed. The sub folder that holds an env file is
+# refused already, since the start folder's walk reaches it: a pin.
+sh("env: walk control, unconditional cd into a folder with no env file, allowed: cd src; rg --hidden K",
+   "cd src; rg --hidden K", "allow", cwd=ENVWALK_HELD)
+_COND_NO_ENV = "test -f x && cd sub; rg --hidden K"
+sh("env: walk control, conditional cd, neither folder holds an env file, allowed: " + _COND_NO_ENV,
+   _COND_NO_ENV, "allow", cwd=ENVWALK_SUB_CLEAN)
+sh("env: walk, conditional cd into a sub folder that holds an env file, refused: " + _COND_NO_ENV,
+   _COND_NO_ENV, "deny", "env-file", cwd=ENVWALK_NESTED)
 
 
 # =========================================================================== git env set
