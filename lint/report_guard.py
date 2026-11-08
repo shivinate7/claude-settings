@@ -105,6 +105,10 @@ transcript read of its own on a plain Stop (it shares main's read). Only when a 
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
 override read.
 
+Closed-item check (rule `questions-go-to-owner`, incident: a coordinator listed closed waiting-page items under Input Needed as
+waiting on the owner): an Input Needed line that cites a closed page item (`item N`, `items N, M and K`, `page:N`) blocks, on landed and
+unlanded turns alike; see closed_item_problem for the exemptions, the UNKNOWN case and the cost.
+
 Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
 matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
 "refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
@@ -744,6 +748,72 @@ def report_section(text, label):
 def input_needed_section(text):
     """The Input Needed item's text from the report block, else ''."""
     return report_section(text, "Input Needed")
+
+
+# A cite of a page item: `item 214`, `page item 214`, a list `items 214, 381 and 383` (comma, "and", "&" or "or"), `page:214`.
+# `#214` is a PR number, so it is no cite.
+_ITEM_JOIN = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s*&\s*|\s+(?:and|or)\s+)"
+ITEM_CITE_RE = re.compile(r"\b(?:items?\s+(\d+(?:" + _ITEM_JOIN + r"\d+)*)|page:(\d+))(?!\d)", re.IGNORECASE)
+# A ref followed by an option letter or "pick"/"note" cites the owner's ruling on it, not an open question.
+RULING_AFTER_RE = re.compile(r"[\s:,;(\-]*(?:(?:pick|note)\b|\(?[a-z]\)?(?=\s*(?:$|[.,;:)\]])))", re.IGNORECASE)
+CLOSED_WORD_RE = re.compile(r"\bclosed\b", re.IGNORECASE)
+BASED_ON_RE = re.compile(r"(?:based on|departs from)\b", re.IGNORECASE)
+LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+CLOSED_ITEM_UNKNOWN = ("Closed-item guard: UNKNOWN, the waiting copy could not be read, so the items Input Needed cites "
+                       "were not checked against the page.")
+
+
+def cited_items(section):
+    """The page item numbers (ints) that the Input Needed lines in `section` cite as waiting on the owner. A line
+    is skipped when it starts (after a list marker and bold) with "Based on" or "Departs from", or says "closed";
+    a ref followed by an option letter, "pick" or "note" is a ruling cite and is skipped."""
+    found = set()
+    for line in section.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1)
+        head = LIST_MARKER_RE.sub("", body, count=1).lstrip("*_ ")
+        if BASED_ON_RE.match(head) or CLOSED_WORD_RE.search(body):
+            continue
+        for m in ITEM_CITE_RE.finditer(body):
+            if RULING_AFTER_RE.match(body, m.end()):
+                continue
+            found.update(int(n) for n in re.findall(r"\d+", m.group(1) or m.group(2)))
+    return found
+
+
+def closed_item_problem(text, cwd):
+    """(reason, note) for an Input Needed item that cites a closed waiting-page item (rule `questions-go-to-owner`:
+    every question reaches the owner through the page, so an item the page has closed is no question). `reason` is
+    '' unless a cited number is closed on the waiting copy; it names only the closed numbers. `note` says UNKNOWN
+    when the copy cannot be read, and never blocks. A cited number the readable copy does not hold passes. A repo
+    that names no waiting page is not checked and gets no note.
+
+    Cost: one `git grep` per Stop (feedback_guard.waiting_statuses), only when Input Needed cites an item that
+    is no ruling cite; a report with no cite reads nothing and imports nothing. No new process kept, file, log or
+    timer (rule `outcomes-mechanize-rules`). The copy is read as of the last fetch of origin, so a stale copy can
+    only miss a closed item, never name an open one closed. Errors in the reader fail open (the caller's try)."""
+    cited = cited_items(input_needed_section(text))
+    if not cited:
+        return "", ""
+    root = repo_root(cwd)
+    try:
+        if root is None or layout.waiting_page(root) == "unknown":
+            return "", ""
+    except layout.LayoutError:
+        return "", CLOSED_ITEM_UNKNOWN
+    hooks = os.path.join(HERE, "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)
+    import feedback_guard
+    statuses = feedback_guard.waiting_statuses(root)
+    if statuses is None:
+        return "", CLOSED_ITEM_UNKNOWN
+    closed = sorted(n for n in cited if str(statuses.get(n, "")).strip().lower() == "closed")
+    if not closed:
+        return "", ""
+    return owner_line(
+        "Closed-item guard (rule questions-go-to-owner)",
+        "Input Needed cites page item%s %s, closed on the waiting page, as of the last fetch of the waiting copy"
+        % ("s" if len(closed) > 1 else "", ", ".join(str(n) for n in closed))), ""
 
 
 def offers_a_pick(text):
@@ -2155,6 +2225,12 @@ def main():
         relay = relay_reasons(after, text, hook.get("cwd"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+        except Exception:
+            pass
+        try:
+            closed, closed_note = closed_item_problem(text, hook.get("cwd"))
+            relay.append(closed)
+            note = " ".join(filter(None, [note, closed_note]))
         except Exception:
             pass
     if last_human_idx is None or not turn_landed(after):

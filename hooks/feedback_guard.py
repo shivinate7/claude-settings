@@ -357,6 +357,56 @@ def waiting_copy(layout, root):
     return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
 
 
+def _read_waiting_copy(layout, root, branch, folder):
+    """(statuses, why): {int n: status} for every item of the waiting copy, one `git grep` of the `items/` folder of
+    origin/<branch>. `statuses` is None with `why` set when the copy cannot be read: no ref, no items folder, git
+    failed, or any item file that is not a JSON object (the whole copy is then unknown). An item with no readable
+    number is left out; a missing or non-text status reads as ''."""
+    ref = "refs/remotes/origin/" + branch
+    try:
+        run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", ref, "--", folder + "/items/"])
+    except ruling_home._GitFailure as e:
+        return None, " ".join(str(e).split()) or type(e).__name__
+    if run.returncode != 0 or not run.stdout.strip():
+        return None, "no waiting copy at origin/%s under %s/items" % (branch, folder)
+    files, prefix = {}, ref + ":"
+    for ln in run.stdout.split("\n"):
+        if ln.startswith(prefix):
+            path, _, text = ln[len(prefix):].partition(":")
+            files.setdefault(path, []).append(text)
+    statuses = {}
+    for lines in files.values():
+        try:
+            found = json.loads("\n".join(lines))
+        except ValueError:
+            found = None
+        if not isinstance(found, dict):
+            return None, "an item file in the waiting copy at origin/%s is not a JSON object" % branch
+        v = found.get("n")
+        if isinstance(v, str) and v.isdigit():
+            v = int(v)
+        if isinstance(v, int) and not isinstance(v, bool):
+            status = found.get("status")
+            statuses[v] = status if isinstance(status, str) else ""
+    return statuses, ""
+
+
+def waiting_statuses(root):
+    """{int n: status} for every item of the waiting copy of the repo at `root` (the copy waiting_copy names, read
+    as of the last fetch), or None when it cannot be read: the layout or git fails, no ref or items folder, or any
+    item file that is not a JSON object. The one reader of the copy, shared with Homes.filed_numbers. Cost: one
+    `git grep`, no file written."""
+    try:
+        import layout
+    except ImportError:
+        return None
+    try:
+        branch, folder = waiting_copy(layout, root)
+    except (layout.LayoutError, ruling_home._GitFailure):
+        return None
+    return _read_waiting_copy(layout, root, branch, folder)[0]
+
+
 class Homes:
     """Checks ruling and task homes against the layout. `skip` holds the reason the check stood
     down, once, for the systemMessage line."""
@@ -495,9 +545,9 @@ class Homes:
 
     def filed_numbers(self):
         """(numbers, branch, folder): the item numbers, as digit strings, that the waiting copy holds. `numbers`
-        is None when the check does not apply or could not run. The copy is the `items/` folder of the waiting
-        export on origin/<record branch>, read with one `git grep`. None with `skip_filing` unset: the repo
-        names no waiting page. None with `skip_filing` set: the copy is unreadable, so the filing is unknown."""
+        is None when the check does not apply or could not run. The copy is read by waiting_statuses (one
+        `git grep`). None with `skip_filing` unset: the repo names no waiting page. None with `skip_filing` set:
+        the copy is unreadable, so the filing is unknown."""
         if self._filed is not None:
             return self._filed
         self._filed = (None, None, None)
@@ -511,34 +561,14 @@ class Homes:
             if root is None or layout.waiting_page(root) == "unknown":
                 return self._filed
             branch, folder = waiting_copy(layout, root)
-            ref = "refs/remotes/origin/" + branch
-            run = ruling_home._run_git(root, ["grep", "-I", "-e", ".", ref, "--", folder + "/items/"])
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             self.skip_filing = " ".join(str(e).split()) or type(e).__name__
             return self._filed
-        if run.returncode != 0 or not run.stdout.strip():
-            self.skip_filing = "no waiting copy at origin/%s under %s/items" % (branch, folder)
+        statuses, why = _read_waiting_copy(layout, root, branch, folder)
+        if statuses is None:
+            self.skip_filing = why
             return self._filed
-        files, prefix = {}, ref + ":"
-        for ln in run.stdout.split("\n"):
-            if ln.startswith(prefix):
-                path, _, text = ln[len(prefix):].partition(":")
-                files.setdefault(path, []).append(text)
-        numbers = set()
-        for lines in files.values():
-            try:
-                found = json.loads("\n".join(lines))
-            except ValueError:
-                found = None
-            if not isinstance(found, dict):
-                self.skip_filing = "an item file in the waiting copy at origin/%s is not a JSON object" % branch
-                return self._filed
-            v = found.get("n")
-            if isinstance(v, int) and not isinstance(v, bool):
-                numbers.add(str(v))
-            elif isinstance(v, str) and v.isdigit():
-                numbers.add(str(int(v)))
-        self._filed = (numbers, branch, folder)
+        self._filed = ({str(n) for n in statuses}, branch, folder)
         return self._filed
 
     def homes_line(self):
