@@ -130,11 +130,12 @@ class TopLevelIndentedBlockTests(unittest.TestCase):
                             "the prose after a list-item fence is read as part of the fence's unit")
 
 
-def masked(text):
-    """word_runs.mask_code_spans of `text`. The name is checked first, so a missing name fails with its own message."""
+def masked(text, only=None):
+    """word_runs.mask_code_spans of `text`, with `only` passed on. The name is checked first, so a missing name fails
+    with its own message."""
     if not hasattr(word_runs, "mask_code_spans"):
         raise AssertionError("word_runs has no mask_code_spans")
-    return word_runs.mask_code_spans(text)
+    return word_runs.mask_code_spans(text, only=only)
 
 
 def assert_same_shape(case, text, expected, cause):
@@ -193,6 +194,23 @@ class MaskCodeSpansTests(unittest.TestCase):
         runs = re.findall(r"[a-z]+|\0+", masked("builder `x` sonnet"))
         self.assertEqual(runs, ["builder", "\0" * 3, "sonnet"],
                          "the span does not stand between its two words as a run of its own")
+
+    def test_an_only_pattern_masks_a_span_in_a_gloss_after_a_span_that_holds_no_match(self):
+        # `foo` holds no match, so it stays readable. The span in its gloss holds one, so it is masked.
+        self.assertEqual(masked("`foo` (see `reviewer opus`)", only=re.compile("reviewer")),
+                         "`foo` (see " + "\0" * 15 + ")",
+                         "a span in the gloss after a span that holds no match was not masked")
+
+    def test_a_gloss_with_no_inner_span_is_returned_unchanged(self):
+        self.assertEqual(masked("`foo` (see the reviewer)", only=re.compile("reviewer")), "`foo` (see the reviewer)",
+                         "a gloss with no inner span changed under an only pattern")
+        self.assertEqual(masked("`foo` (see the reviewer)"), "\0" * 5 + " (see the reviewer)",
+                         "a gloss with no inner span changed")
+
+    def test_a_leading_span_that_holds_a_match_is_masked_whole_with_its_gloss_kept(self):
+        self.assertEqual(masked("`reviewer opus` (see the reviewer)", only=re.compile("reviewer")),
+                         "\0" * 15 + " (see the reviewer)",
+                         "a leading span that holds a match was not masked whole, or its gloss changed")
 
 
 class FenceCallersTests(unittest.TestCase):
