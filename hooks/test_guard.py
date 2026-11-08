@@ -10358,6 +10358,12 @@ NPR_PULL_WORD = "Review pull request #1864 and report PASS or FAIL."
 NPR_PULL_URL = "Review https://github.com/shivinate7/claude-settings/pull/1864 and report PASS or FAIL."
 NPR_ISSUE_NUMBER = "Review #12 and report PASS or FAIL."
 NPR_ISSUE_URL = "Review https://github.com/owner/repo/issues/12 and report PASS or FAIL."
+NPR_ISSUE_URL_1908 = "Review https://github.com/owner/repo/issues/1908 and report PASS or FAIL."
+NPR_ISSUE_NUMBER_1908 = "Review #1908 and report PASS or FAIL."
+NPR_PR_WORD_NO_NUMBER = "Run a PR review of the diff on branch lane-x and report PASS or FAIL."
+NPR_PRS = "Review PRs #1908 and #1909 and report PASS or FAIL."
+NPR_PR_DASH = "Review PR-1908 and report PASS or FAIL."
+NPR_PULL_REQUESTS = "Review pull requests #1908 and report PASS or FAIL."
 
 
 def npr_path(name):
@@ -10433,6 +10439,12 @@ npr_refuse("a brief that names only #12, an issue-like number with no PR word, i
            "Agent", npr_spawn("reviewer", NPR_ISSUE_NUMBER, "haiku"), npr_path("github-https"))
 npr_refuse("a brief that names a github issue URL is no pull request and is refused",
            "Agent", npr_spawn("reviewer", NPR_ISSUE_URL, "haiku"), npr_path("github-https"))
+npr_refuse("a brief that names a github issue URL with the number 1908 is no pull request and is refused",
+           "Agent", npr_spawn("reviewer", NPR_ISSUE_URL_1908, "haiku"), npr_path("github-https"))
+npr_refuse("a brief that names #1908 with no PR word is refused",
+           "Agent", npr_spawn("reviewer", NPR_ISSUE_NUMBER_1908, "haiku"), npr_path("github-https"))
+npr_refuse("a brief that says PR review with no number is refused",
+           "Agent", npr_spawn("reviewer", NPR_PR_WORD_NO_NUMBER, "haiku"), npr_path("github-https"))
 npr_refuse("a github remote in scp form counts: a brief that names no pull request is refused",
            "Agent", npr_spawn("reviewer", NPR_NO_PR, "haiku"), npr_path("github-scp"))
 npr_refuse("a github remote behind a gitlab origin counts: a brief that names no pull request is refused",
@@ -10462,6 +10474,12 @@ npr_allow("a design-reviewer brief that names PR #1864 is allowed",
           "Agent", npr_spawn("design-reviewer", NPR_PR, "opus"), npr_path("github-https"))
 npr_allow("a brief that names PR 1864 with no `#` is allowed",
           "Agent", npr_spawn("reviewer", NPR_PR_NO_HASH, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PRs #1908 and #1909 in the plural is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PRS, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names PR-1908 with a dash is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PR_DASH, "haiku"), npr_path("github-https"))
+npr_allow("a brief that names pull requests #1908 in the plural is allowed",
+          "Agent", npr_spawn("reviewer", NPR_PULL_REQUESTS, "haiku"), npr_path("github-https"))
 # A blind design-review brief names pages only and carries no round marker: the rule does not judge it.
 npr_allow("a reviewer brief with no round marker, a blind design-review brief that names pages only, is allowed",
           "Agent", npr_spawn("reviewer", NPR_PAGES, "haiku", round_line=None), npr_path("github-https"))
