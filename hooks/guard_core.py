@@ -249,6 +249,21 @@ def split_segments(cmd: str, ends=None):
     return segments
 
 
+def _interpreter_text_spans(cmd: str):
+    """Character spans (start, end) of each body that a Python, Node or Perl script reads from a quoted-delimiter
+    heredoc. Bash never runs that text, the interpreter reads its quotes: a backslash escapes a `'` in a
+    single-quoted string there, where bash's own reading would close the string."""
+    if "<<" not in cmd or "\\'" not in cmd:
+        return ()
+    found = []
+    _walk_heredocs(cmd, text_bodies=found)
+    offsets, at = [], 0
+    for line in cmd.split("\n"):
+        offsets.append(at)
+        at += len(line) + 1
+    return tuple((offsets[first], offsets[last] - 1 if last < len(offsets) else len(cmd)) for first, last in found)
+
+
 def _split_reading(cmd: str, ends, contractions_are_text: bool):
     """One reading of split_segments: (segments, the quote open at the end, whether an unquoted
     `'` has a contraction's shape). The first reading is bash's own: every unquoted `'` opens a
@@ -261,10 +276,15 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
     quote = ""
     shaped = False
     powershell = is_powershell(cmd)
+    spans = () if powershell else _interpreter_text_spans(cmd)
     index = 0
     length = len(cmd)
     while index < length:
         char = cmd[index]
+        if quote == "'" and char == "\\" and any(a <= index < b for a, b in spans):
+            current.append(cmd[index:index + 2])   # a script's escaped quote: the string goes on
+            index += 2
+            continue
         if quote == BLIND:   # PowerShell text the walk cannot read: no quote, escape or comment
             if char in ("'", '"', "`", "#", "<", "@"):
                 current.append(char)
@@ -755,7 +775,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, text_bodies: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +784,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it. One that passes
+    `text_bodies` gets (first line, end line) of each quoted-delimiter body that a non-shell interpreter reads."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -785,6 +806,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
+            if text_bodies is not None and quote and _INTERPRETER_FIRST(header_line) and not SHELL_HEREDOC(header_line):
+                text_bodies.append((start, index))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
             else:

@@ -482,6 +482,7 @@
 - plain-diff-untracked-files: The plain-diff mod diffs against HEAD or the empty tree. untracked files are not shown. Decision: plain-diff-mod-limits
 - impeccable-guard-limits: The impeccable-review-only guard allows 'audit then polish' in one call and does not read through the launchers pnpx, bun x, timeout N, cmd /c or powershell -Command. Decision: design-skills
 - waiter-monitor-failures-unmeasured: Unmeasured whether Monitor still errors. reopen on a counted rise of Monitor failures in agent reports, or a waiter count in the guard-log table that does not fall. Decision: agents-wait-with-monitor
+- waiter-monitor-background-untested: no case or mutant pins `timeout_ms` with `run_in_background: true` as judged in the background (the guard reads no Monitor then). Fix: none — note until an incident. Until: 2026-11-22. Decision: agents-wait-with-monitor
 - waiter-subshell-bodies-unparsed: bash -c bodies and subshells such as (sleep 30) and $(sleep 30) are not parsed. the owner accepted this. Decision: agents-wait-with-monitor
 - waiter-sleep-multi-arg-reads-first: sleep 20 20 reads as 20 s, not 40 s, and passes. an agent may still burn up to 25 s per call on one pause. Decision: agents-wait-with-monitor
 - waiter-loop-flag-spans-command: the loop flag spans the whole command, so a pause after any unrelated loop is refused. a loop with no loop word, such as a PowerShell ForEach with Start-Sleep, is unseen. Decision: agents-wait-with-monitor
