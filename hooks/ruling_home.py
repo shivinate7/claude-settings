@@ -6,7 +6,7 @@ closes: an orchestrator's auto-memory can hold an owner ruling that reaches no t
 the repo. This hook is that mechanism. It matches that section's 9 numbered items exactly.
 
 WHAT IT CHECKS. The memory folder is `<dirname(transcript_path)>/memory`. If that folder does
-not exist, this hook does nothing. It keys on an ACT, not on prose
+not exist, the memory check does nothing; the handoff check below still runs. It keys on an ACT, not on prose
 (`docs/decisions/predicate-is-the-act.md`): a `.md` file in the folder (`MEMORY.md`, the index,
 excepted) counts as written THIS SESSION when a `Write`, `Edit`, or `MultiEdit` tool use since
 the last human message names it, OR a `Bash` tool use since the last human message names the
@@ -43,8 +43,10 @@ is after that message. This check runs with or without a memory folder. Each lin
 <b>)` and some ref is branch `<b>`, or when `feedback_guard.Homes.problem` accepts `<v>` as a ruling
 home (a tracked decision, rule or CLAUDE.md path, never `step:<slug>`; that import is lazy, as
 feedback_guard imports this module). The reason names the labels (a P-id, or `NO HOME YET line <n>`),
-never a value. Cost per turn: one stat of the handoff; it is opened, and git asked, only on a turn
-that wrote it. No process starts, file is written or timer runs beyond that. A git failure stands the
+never a value. Cost per Stop: the transcript tail is read and `precompact_handoff` imported; the handoff is
+stat-ed, and opened only on a turn that wrote it. Git is asked only on such a turn: about 3 calls per
+path-homed ruling, one ref list for a branch-homed one.
+No process starts, file is written or timer runs beyond that. A git failure stands the
 whole check down, as below. Out of reach: prose in other sections, rules sent by message, and whether a
 `[ruling]` was truly the owner's. `docs/decisions/premise-format.md` names the line form.
 
@@ -103,9 +105,10 @@ HOME_RE = re.compile(r"^\s*[-*]?\s*home:\s*(.+?)\s*$", re.IGNORECASE)
 PROCESS_ONLY = "process-only"
 # A handoff ruling line ends with `Home: <v>`: a one-word path, or the branch form. The token follows
 # whitespace, so a `Home:` inside a backtick span never counts.
-HANDOFF_HOME_RE = re.compile(r"(?:^|[ \t])Home:[ \t]*(NO HOME YET \(branch [^)\s]+\)|\S+)[ \t]*$")
+# One trailing period after the value is ignored, in the branch form too (feedback_guard.home_path does
+# the same for a path).
+HANDOFF_HOME_RE = re.compile(r"(?:^|[ \t])Home:[ \t]*(NO HOME YET \(branch [^)\s]+\)|\S+?)\.?[ \t]*$")
 NO_HOME_YET_BRANCH_RE = re.compile(r"NO HOME YET \(branch ([^)\s]+)\)")
-NO_HOME_YET_LINE = "NO HOME YET line"  # label of a P-id-less line under the handoff's NO HOME YET heading
 
 REMEDY = (
     "Each written section needs a home: line, plain text, in the section body: "
@@ -557,7 +560,8 @@ def run(hook):
     # The shared early exit is the tail reader, not the git predicate: this hook fires on a
     # tool use that names a memory file "regardless of mtime", and the memory folder sits
     # outside the work tree, so dirty or committed work in `cwd` says nothing about it.
-    # Only this turn's records are parsed; an idle turn names no memory file and ends here.
+    # Only this turn's records are parsed. An idle turn names no memory file; the handoff is opened only
+    # when this turn wrote it.
     human, after = read_turn(path)
     baseline = _last_human_baseline([human] if human else [])
 
@@ -568,7 +572,8 @@ def run(hook):
     reason = ("Ruling home: this turn's handoff has ruling lines with no home a branch holds: %s. "
               "End each with `Home: <ruling record path>` or `Home: NO HOME YET (branch <name>)`. "
               "A pick the owner did not rule is [read] or [assumed], with its source." % ", ".join(unhomed))
-    if any(label.startswith(NO_HOME_YET_LINE) for label in unhomed):
+    import precompact_handoff  # lazy, and already loaded by handoff_findings
+    if any(label.startswith(precompact_handoff.NO_HOME_LABEL) for label in unhomed):
         reason += " Lines under `## Rulings with NO HOME YET` count from 1."
     reason += " (decision premise-format)"
     return (memory + " " + reason).strip()

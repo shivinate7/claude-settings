@@ -44,8 +44,8 @@ The handoff holds these sections, in this order:
 
   Each such line, and each `[ruling]` premise below, ends with `Home: <ruling record path>`,
   or with `Home: NO HOME YET (branch <name>)` naming the branch that writes it. The Stop
-  check refuses a line whose home is neither. File every other ruling and task at once, in a
-  decision record, a rule, or the repo's todo or debt store. The handoff is never their home.
+  check refuses a line whose home is neither. File every other ruling at once, in a decision
+  record or a rule. File each task in the repo's todo or debt store, or a step. The handoff is never their home.
   A pick the owner did not rule is `[read]` or `[assumed]`, with its source.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).

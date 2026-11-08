@@ -111,11 +111,14 @@ DEFAULT_WINDOW = 500_000
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 _PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
-_PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
+# The id may be bold (`**P3**`) or followed by a colon (`P3:`) before its `[kind]`.
+_PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+\**(P\d+)\b\**:?(?:[ \t]*\[([^\]\n]*)\])?", re.M)
 # The handoff's first section, the fixed heading step 4 of the prompt file gives it.
 _NO_HOME_HEAD = re.compile(r"^##[ \t]+Rulings with NO HOME YET[ \t]*$", re.I | re.M)
-_LIST_LINE = re.compile(r"^[ \t]*[-*][ \t]+(\S.*)$")
+# A line under the NO HOME YET heading, minus its bullet (`-`, `*`, `+`) or number (`4.`, `4)`).
+_NO_HOME_ITEM = re.compile(r"^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?(.*?)[ \t]*$")
 _NONE_LINE = re.compile(r"none\.?", re.I)
+NO_HOME_LABEL = "NO HOME YET line"  # label of a P-id-less line there, followed by its number from 1
 
 
 def config_dir():
@@ -512,14 +515,29 @@ def inbox_note(session_id):
             " repo's todo or debt store." % ", ".join(ids))
 
 
+def _fence_markers():
+    """FENCE_MARKERS, the one home of what opens a code fence (hooks/ruling_home.py). Lazy: a sibling hook
+    is imported only when a handoff section is read."""
+    from ruling_home import FENCE_MARKERS
+    return FENCE_MARKERS
+
+
 def _section_body(text, head):
-    """The text under the `head` heading up to the next `#` or `##` heading, or None when the heading is absent."""
+    """The text under the `head` heading up to the next `#` or `##` heading, or None when the heading is
+    absent. A `# ` line inside a code fence is prose and ends nothing."""
     found = head.search(text)
     if not found:
         return None
-    body = text[found.end():]
-    end = re.search(r"^#{1,2}[ \t]", body, re.M)
-    return body[:end.start()] if end else body
+    markers = _fence_markers()
+    fenced = False
+    body = []
+    for line in text[found.end():].splitlines(True):
+        if line.startswith(markers):
+            fenced = not fenced
+        elif not fenced and re.match(r"#{1,2}[ \t]", line):
+            break
+        body.append(line)
+    return "".join(body)
 
 
 def handoff_premises(path):
@@ -541,32 +559,32 @@ def handoff_premises(path):
 
 
 def handoff_ruling_lines(text):
-    """[(label, line)] of each handoff line that claims a ruling, in order: every list line under
-    `## Rulings with NO HOME YET` bar `- none` (label its P-id, else `NO HOME YET line <n>`, n counting
-    that section's list lines from 1), then every `[ruling]` premise in Working premises (label its
+    """[(label, line)] of each handoff line that claims a ruling, in order: every non-blank line under
+    `## Rulings with NO HOME YET` bar `none` (label its P-id, else NO_HOME_LABEL and its number, counting
+    that section's non-blank lines from 1), then every `[ruling]` premise in Working premises (label its
     P-id). A line in a code fence is prose. The caller checks each line's `Home:` token
     (hooks/ruling_home.py)."""
-    from ruling_home import FENCE_MARKERS  # lazy: a sibling hook, imported only when the Stop check runs
+    markers = _fence_markers()
     out = []
 
     def unfenced(body):
         fenced = False
         for line in (body or "").splitlines():
-            if line.startswith(FENCE_MARKERS):
+            if line.startswith(markers):
                 fenced = not fenced
             elif not fenced:
                 yield line
 
     n = 0
     for line in unfenced(_section_body(text, _NO_HOME_HEAD)):
-        item = _LIST_LINE.match(line)
-        if not item:
+        if not line.strip():
             continue
         n += 1
-        if _NONE_LINE.fullmatch(item.group(1).strip()):
+        item = _NO_HOME_ITEM.match(line).group(1)
+        if _NONE_LINE.fullmatch(item):
             continue
-        pid = re.match(r"P\d+\b", item.group(1))
-        out.append((pid.group(0) if pid else "NO HOME YET line %d" % n, line))
+        pid = re.match(r"\**(P\d+)\b", item)
+        out.append((pid.group(1) if pid else "%s %d" % (NO_HOME_LABEL, n), line))
     for line in unfenced(_section_body(text, _PREMISES_HEAD)):
         m = _PREMISE_LINE.match(line)
         if m and (m.group(2) or "").strip().lower() == "ruling":
