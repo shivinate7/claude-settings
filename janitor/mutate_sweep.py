@@ -29,8 +29,8 @@ scaffold makes `import sweep` and `import guard` resolve to whichever copies -- 
 real -- this mutation test placed next to it. The real `janitor/test_sweep.py` on disk is never
 touched, and nothing is left behind: see `run_mutant` and `main`'s `finally`.
 
-A MUTATION WHOSE ANCHOR TEXT IS NOT FOUND is STALE and fails loudly, the same rule
-hooks/mutate_guard.py enforces, checked for every mutation before any suite runs.
+A MUTATION WHOSE ANCHOR TEXT IS NOT FOUND, OR IS FOUND TWICE, is STALE and fails loudly, the
+same rule hooks/mutate_guard.py enforces, checked for every mutation before any suite runs.
 
 A RED SUITE IS NOT ENOUGH. `janitor/test_sweep.py` runs as plain `unittest.main(verbosity=2)`,
 which prints its per-case progress and its failure headings to STDERR, not STDOUT. Both streams
@@ -1573,20 +1573,23 @@ def precheck_errors() -> list:
     Each anchor must be found exactly once in its target's own file, through the one finder
     (hooks/mutate_shared.find_anchor), so a doubled anchor is refused here as a stale one is: the
     apply step replaces the first match, and a second copy would break the wrong spot unseen. Each
-    entry must also carry a required case name. `lint/check_mutant_anchors.py` calls this too, so
+    entry must also be well formed, with a required case name: `mutation_parts` refuses a bad row
+    and its message becomes the row's one error. `lint/check_mutant_anchors.py` calls this too, so
     `merge --lane-lint` refuses a bad sweep anchor before review.
     """
     errors = []
     for entry in MUTATIONS:
-        label, target, old, _new, required, _only_on = mutation_parts(entry)
+        try:
+            label, target, old, _new, _required, _only_on = mutation_parts(entry)
+        except ValueError as error:  # a bad row (no case name, bad field count, unknown target)
+            errors.append("ERROR %s" % error)  # mutation_parts' message already names the row
+            continue
         try:
             mutate_shared.find_anchor(REPO_ROOT, old, files=[os.path.relpath(SOURCES[target], REPO_ROOT)])
         except mutate_shared.StaleMutant:
             errors.append("ERROR stale mutation, anchor text not found in %s: %s" % (target, label))
         except mutate_shared.AmbiguousMutant as error:
             errors.append("ERROR ambiguous mutation, %s: %s" % (error, label))
-        if not required:
-            errors.append("ERROR mutation carries no required case name: %s" % label)
     return errors
 
 
