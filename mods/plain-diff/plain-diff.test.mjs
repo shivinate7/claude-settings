@@ -560,9 +560,9 @@ await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is 
   const L = need('makeLimiter')(1, { timeoutMs: 20 })
   const hung = L.run('a', () => new Promise(() => {}))
   assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
-  await new Promise(r => setTimeout(r, 60))
+  // The slot is freed when the hung call settles, so wait for that settle (a 5 s hang guard caps it), then admit c.
+  assert.equal(await Promise.race([hung, new Promise(r => setTimeout(() => r('still hung'), 5000))]), null)
   assert.equal(await L.run('c', async () => 'C'), 'C')
-  assert.equal(await Promise.race([hung, new Promise(r => setTimeout(() => r('still hung'), 100))]), null)
 })
 
 // R2-6 control characters in notes: ESC, BEL, bidi overrides removed from turn and model notes.
