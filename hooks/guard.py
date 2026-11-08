@@ -2850,10 +2850,12 @@ def brief_claim_hit(tool: str, tool_input) -> list:
 # tool under any launcher, ci-job under either launcher, or the code check script itself.
 BUILDER_CODE_CHECK = re.compile(
     r"\bmerge(?:\.cmd|\.py)?\s+--lane-lint|\bci-job(?:\.cmd)?\s+checks\s+--lint|\bcode_check\.py")
-# A done-check label opens the section that counts; the section ends at the next blank line or heading.
+# A done-check label opens the section that counts. A bare label line (the bold close `**` may follow the colon) skips
+# the blank lines under it; the section then ends at the next blank line or heading, and a fenced block is read whole.
 BUILDER_DONE_LABEL = re.compile(
-    r"^[ \t]*[-*#]*[ \t]*(?:Done check|Done when|Proof|Check that proves)[ \t]*(?:\*\*)?[ \t]*:", re.I | re.M)
-BUILDER_SECTION_END = re.compile(r"\n[ \t]*\n|\n[ \t]*#{1,6}[ \t]")
+    r"^[ \t]*[-*#]*[ \t]*(?:Done check|Done when|Proof|Check that proves)[ \t]*(?:\*\*)?[ \t]*:(?:\*\*)?", re.I | re.M)
+BUILDER_SECTION_END = re.compile(r"[ \t]*$|[ \t]*#{1,6}[ \t]")
+BUILDER_FENCE = re.compile(r"[ \t]*(?:```|~~~)")
 BUILDER_CHECKS_JOB = re.compile(r"""(["']?)checks\1[ \t]*:(?:[ \t]|#|$)""")
 BUILDER_CODE_CHECK_REASON = (
     "This builder brief names no code check, and the repo's checks job lints every head (Code check, comment "
@@ -2863,13 +2865,30 @@ BUILDER_CODE_CHECK_REASON = (
 )
 
 
+def _builder_section_end(prompt: str, start: int) -> int:
+    """The offset where the done-check section that starts at `start`, just past its label, ends."""
+    lines = prompt[start:].split("\n")
+    pos = start + len(lines[0])
+    skipping = not lines[0].strip()
+    fenced = False
+    for line in lines[1:]:
+        if skipping and not line.strip():
+            pos += 1 + len(line)
+            continue
+        skipping = False
+        if not fenced and BUILDER_SECTION_END.match(line):
+            return pos
+        if BUILDER_FENCE.match(line):
+            fenced = not fenced
+        pos += 1 + len(line)
+    return len(prompt)
+
+
 def _builder_done_text(prompt: str) -> str:
     """The brief's done-check sections joined, or the whole brief when it carries no done-check label."""
     prompt = prompt.replace("\r\n", "\n")
-    sections = []
-    for label in BUILDER_DONE_LABEL.finditer(prompt):
-        end = BUILDER_SECTION_END.search(prompt, label.end())
-        sections.append(prompt[label.start():end.start() if end else len(prompt)])
+    sections = [prompt[label.start():_builder_section_end(prompt, label.end())]
+                for label in BUILDER_DONE_LABEL.finditer(prompt)]
     return " ".join(" ".join(sections).split()) if sections else " ".join(prompt.split())
 
 
