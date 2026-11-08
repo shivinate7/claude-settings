@@ -3,14 +3,18 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
+import sys
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    GIT_WORK_TREE_RE, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
+    command_root, dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base,
+    segment_tokens, shell_abs, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -325,7 +329,9 @@ def undrafted_pr_create(segment: str) -> bool:
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
 # command word is `hook_catalog.py`, or a python interpreter whose script is `hook_catalog.py`, rewrites
-# the page unless it has `--check` or `--print`. A later commit that reaches the page is then refused
+# the page unless its own parser reads `-h`, `--check`, `--print` or a usage error, or its `--root`, read
+# from the run's directory (after `cd` and `env -C`), names another repo. Redirects and a closing `)` are the
+# shell's, so they are dropped before the parser reads the arguments. A later commit that reaches the page is then refused
 # with no page id compared, while the base has a page. The rule acts only when the base tip's page
 # opens with the generated header, so a hand-written page is no hit. Any read that fails is no hit. Limits: a
 # `sh -c` script and `python -m` are not read, and `commit --include` is judged as `commit <paths>`.
@@ -344,11 +350,72 @@ _COMMIT_VALUE_FLAGS = {"--message", "--file", "--reuse-message", "--reedit-messa
 _ADD_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
 
 
+_REDIRECT_OP = re.compile(r"(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[&|]?|<{1,3})|&>>?)")   # a redirect operator, its target not attached
+
+
+def _redirect_length(tokens, index):
+    """How many words of `tokens` from `index` the shell consumes as one redirect, 0 when the word is none.
+    An operator word takes the next word as its target (`> "my out.txt"` is two words); an operator with its
+    target attached (`>f`, `2>&1`, `>"a b"`) is one. A process substitution target (`> >(tee x)`) runs on to
+    its closing parenthesis. The one home of this read: a word the shell spends never reaches the command."""
+    match = _REDIRECT_OP.match(tokens[index])
+    if not match:
+        return 0
+    end, target = index + 1, tokens[index][match.end():]
+    if not target:
+        if end >= len(tokens):
+            return end - index
+        target, end = tokens[end], end + 1
+    substitution = target.lstrip("<>").startswith("(")   # `>(tee x)`, or `(tee x)` after an attached operator
+    depth = target.count("(") - target.count(")") if substitution else 0
+    while depth > 0 and end < len(tokens):
+        depth += tokens[end].count("(") - tokens[end].count(")")
+        end += 1
+    return end - index
+
+
+def _split_glued_redirects(tokens):
+    """`tokens` with a redirect glued to the end of a word cut into its own word (`.>out.txt` becomes `.` and
+    `>out.txt`), so `_redirect_length` reads it. A word that starts with an operator, a digit or `{name}` file
+    descriptor, or holds no `<` or `>` is left whole. Shlex has spent the quotes, so a quoted `a>b` is cut too:
+    the guard fails toward reading a redirect."""
+    out = []
+    for token in tokens:
+        at = next((i for i, char in enumerate(token) if char in "<>"), 0)
+        if at and token[at - 1] == "&" and token[:at - 1]:
+            at -= 1   # `x&>out`: the `&` belongs to the operator
+        if at and not re.fullmatch(r"\d+|\{[A-Za-z_]\w*\}|&", token[:at]):
+            out += [token[:at], token[at:]]
+        else:
+            out.append(token)
+    return out
+
+
+def _strip_redirects(tokens):
+    """`tokens` without the words the shell consumes as redirects (`_redirect_length`), a redirect glued to a
+    word read as its own."""
+    tokens = _split_glued_redirects(tokens)
+    out, index = [], 0
+    while index < len(tokens):
+        step = _redirect_length(tokens, index)
+        if step:
+            index += step
+        else:
+            out.append(tokens[index])
+            index += 1
+    return out
+
+
 def _commit_shape(args):
     """Return (all_flag, pathspecs) of a `git commit` call: `-a` or `--all` (also in a short
-    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec."""
+    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec, and a
+    redirect is no pathspec."""
     all_flag, specs, index, only_paths = False, [], 0, False
     while index < len(args):
+        step = _redirect_length(args, index)   # read before the flags: a value flag's own branch skips its value
+        if step:
+            index += step
+            continue
         arg = args[index]
         index += 1
         if only_paths:
@@ -375,7 +442,8 @@ def _commit_shape(args):
 
 def _add_shape(args):
     """Return (whole_tree, pathspecs) of a `git add` call. Whole tree: `-A`, `--all`, `-u` or
-    `--update` with no pathspec."""
+    `--update` with no pathspec. A redirect is no pathspec."""
+    args = _strip_redirects(args)
     flags = [a for a in args if a.startswith("-") and a != "--"]
     specs = [a for a in args if not a.startswith("-") and a != "--"]
     whole = any(f in _ADD_ALL_FLAGS or (not f.startswith("--") and set(f[1:]) & set("Au")) for f in flags)
@@ -415,8 +483,78 @@ def _page_tracked(top):
 
 
 _GENERATOR = "hook_catalog.py"
-_GENERATOR_READS = {"--check", "--print"}   # the two modes that write no page
 _PYTHON_VALUE_FLAGS = {"-X", "-W"}
+
+
+def _generator_parser():
+    """The generator's own argparse parser (lint/hook_catalog.py build_parser, the one home of its options),
+    or None when it cannot be imported. The import is lazy: only a command that runs the generator pays it."""
+    try:
+        lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import hook_catalog
+        return hook_catalog.build_parser()
+    except Exception:   # a parser that cannot be read leaves the old rule: every run counts
+        return None
+
+
+def _generator_root(args):
+    """None when the generator's `args` write no page: -h or --help, --check, --print (each by any prefix
+    argparse accepts), or a command line argparse refuses. Else the --root it names, "" for none (the
+    generator then writes the repo it is in). The generator's own parser reads the arguments, so a prefix or a
+    `--root=` form is read as the generator reads it."""
+    parser = _generator_parser()
+    if parser is None:
+        return ""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:   # -h, --help, or a usage error: argparse exits before the generator writes
+            return None
+    if parsed.show or parsed.check:
+        return None
+    return parsed.root or ""
+
+
+def _page_redirect_root(tokens):
+    """The folder above `docs/records.md` ("" for the page in the current folder) when the words redirect
+    their stdout into a file of that name, else None. A redirect writes the page whatever the command prints, so
+    `--print > docs/records.md` writes it though `--print` alone does not. Only a plain write counts: stdout (no
+    fd, or 1, or `&>`), not a read, a duplicated descriptor (`>&2`) or another descriptor (`2>`, `{fd}>`). The words are
+    read through `_redirect_length`, the one reader of a redirect."""
+    tokens, index = _split_glued_redirects(tokens), 0
+    while index < len(tokens):
+        step = _redirect_length(tokens, index)
+        if not step:
+            index += 1
+            continue
+        op = _REDIRECT_OP.match(tokens[index]).group()
+        target = tokens[index][len(op):] or (tokens[index + 1] if step > 1 else "")
+        index += step
+        if ">" not in op or op[0] in "23456789{" or op.endswith("&"):
+            continue
+        path = os.path.normpath(target.strip("'\""))
+        if path == RECORDS_PAGE or path.endswith("/" + RECORDS_PAGE):
+            return os.path.dirname(os.path.dirname(path))
+    return None
+
+
+def _root_is_repo(named, ran_in, top):
+    """True when the --root `named` may be the repo whose top is `top`. `ran_in` is the directory the run was
+    in, None when that cannot be told. Only a root that provably names another existing repo is not this one:
+    no --root, a shell expansion (`$`, backtick, glob, brace list, `~+`, `~-`, `~user`), a relative root with no
+    known directory, and a root with no `.git` all count as this repo."""
+    if not named or re.search(r"[$`*?\[{]", named):
+        return True
+    if named.startswith("~") and not (named == "~" or named.startswith("~/")):
+        return True
+    if not os.path.isabs(os.path.expanduser(named)) and not ran_in:
+        return True
+    resolved = os.path.realpath(_absolute(named, ran_in))
+    if not os.path.exists(os.path.join(resolved, ".git")):
+        return True
+    return os.path.normcase(resolved) == os.path.normcase(os.path.realpath(top))
 
 
 def _is_python(word):
@@ -425,25 +563,54 @@ def _is_python(word):
     return word in ("py", "python") or (word.startswith("python") and word[6:].replace(".", "").isdigit())
 
 
+def _env_chdir(tokens, where):
+    """The directory a segment's command runs in: `where` (the shell's, or None when unknown), moved by each
+    `env -C <dir>` or `env --chdir <dir>` wrapper in turn. None when a move cannot be told (a relative dir from
+    an unknown place, or a shell expansion)."""
+    for wrapper, flags in _walk_wrappers(tuple(tokens))[1]:
+        for flag, value in flags:
+            if wrapper == "env" and flag in ("-C", "--chdir"):
+                where = None if re.search(r"[$`%]", value) else shell_abs(value, where)
+    return where
+
+
 def _runs_generator(segment):
-    """True when the segment's command word is lint/hook_catalog.py, or a python interpreter whose
-    script argument is it, and it has neither `--check` nor `--print`. The caller passes no git call."""
-    tokens = list(segment_tokens(segment) or [])
+    """None when the segment is no run of lint/hook_catalog.py that writes a page. Else (the --root the run
+    names, "" for none; the segment's tokens, for `_env_chdir`). A run is the command word being the generator,
+    or a python interpreter whose script argument is it, with arguments that `_generator_root` reads as a
+    write. The shell consumes a redirect (`_strip_redirects`, read on shlex words, so a quoted target with a
+    space is one) and a closing subshell `)`, so neither reaches the generator's parser: a token the shell
+    consumes never turns a run into no run. A segment shlex cannot read that names the generator and holds a
+    redirect counts as a run with no --root: the guard fails toward a hit. The caller passes no git call."""
+    read = segment_tokens(segment)
+    if read is None:
+        return ("", []) if _GENERATOR in segment and re.search(r"[<>]", segment) else None
+    redirected = list(read)
+    tokens = _strip_redirects(redirected)
+    while tokens and tokens[-1].strip(")") == "":
+        tokens.pop()
+    if tokens and tokens[-1].endswith(")"):
+        tokens[-1] = tokens[-1].rstrip(")")   # `--root ..)`: the `)` closes the subshell, unquoted
     index = resolve_command(tokens) if tokens else None
     if index is None:
-        return False
+        return None
     word, rest = basename(tokens[index]), tokens[index + 1:]
     if _is_python(word):
         while rest and rest[0].startswith("-"):
             flag = rest.pop(0)
             if flag in ("-c", "-m", "-"):
-                return False
+                return None
             if flag in _PYTHON_VALUE_FLAGS and rest:
                 rest.pop(0)
         if not rest:
-            return False
+            return None
         word, rest = basename(rest[0]), rest[1:]
-    return word == _GENERATOR and not _GENERATOR_READS & set(rest)
+    if word != _GENERATOR:
+        return None
+    named = _generator_root(rest)
+    if named is None:
+        named = _page_redirect_root(redirected)
+    return None if named is None else (named, tokens)
 
 
 def _commit_page_id(top, working):
@@ -465,14 +632,23 @@ def _commit_page_id(top, working):
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
     and origin/<base>'s, else ''. Each segment is judged from its own command word."""
-    staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
-    for segment in split_segments(stripped):
+    staged = False        # an earlier `git add` reaches the page
+    generated = []        # (--root, directory the run was in) of each earlier segment that runs the generator
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] not in ("add", "commit"):
-            generated = generated or (call is None and bool(segment.strip()) and _runs_generator(segment))
+            run = _runs_generator(segment) if call is None and segment.strip() else None
+            if run is not None:
+                generated.append((run[0], _env_chdir(run[1], dir_before_segment(segments, number, cwd, ends))))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        root = command_root(stripped, cwd)
+        # The segment's own directory (a `cd` inside `( ... )` ends with the parenthesis), moved by its own
+        # `--work-tree`. The chain's `command_root` stands in only when that directory cannot be told.
+        root, work_tree = dir_before_segment(segments, number, cwd, ends), GIT_WORK_TREE_RE.search(segment)
+        root = command_root(stripped, cwd) if root is None else (
+            _absolute(work_tree.group(2), root) if work_tree else root)
         where = _absolute(c_target, root) if c_target is not None else root
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
@@ -497,7 +673,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         opens = _git(top, "cat-file", "-p", base_id)   # a hand-written page is no generated page: no hit
         if opens is None or opens.returncode != 0 or not opens.stdout.startswith(RECORDS_HEADER):
             continue
-        if generated and working:
+        if working and any(_root_is_repo(named, ran_in, top) for named, ran_in in generated):
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):

@@ -452,7 +452,7 @@
 - ste-lint-gloss-collapse: no test pins that a title holding inline code collapses whole. Decision: none
 - install-sh-mv-retries: the 25 x 0.1 s retry budget in install.sh has no test and no pin to Move-OverFile in install.ps1. Decision: none
 - git-rm-cached-false-alarm: The push-delete guard refuses `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
-- records-page-gen-false-alarm: The records-page guard refuses a commit after a generator run in one call even when the page is unchanged, and reads `--root <other>`, `-h` and `--che` as runs. Where: hooks/guard_merge.py _runs_generator. Decision: records-index-at-merge
+- records-page-gen-false-alarm: The records-page guard refuses a commit after a generator run for this repo even when the page is unchanged, and it does not read `HOOK_CATALOG_ROOT`. Where: hooks/guard_merge.py records_page_hit. Decision: records-index-at-merge
 - report-on-empty-turn-unchecked: The report guard returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_guard.py. Decision: claude-md-shrink
 - slug-cite-gloss-unchecked: The report guard checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_guard.py. Decision: claude-md-shrink
 - stash-reminder-text-outside-repo: The harness worktree reminder still tells an agent to push a tagged stash entry, which guard_shared_tree.py now refuses. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
@@ -788,8 +788,6 @@
 - question-departs-edges: `lint/report_guard.py` LABEL_RE skips a bold "**Departs from:**" line, so one outside Input Needed can give a Done item its PR ref or sit before Done. A change side of only "<what changes>." with a period passes. A `str_replace` with no label in old or new is not judged. A label in mid-line is refused. Decision: port-keeps-behaviour.
 - trust-card-in-build-same-message-order: a `get_session` and a `set_session_tags` in one message can be read in the wrong order, so the guard misjudges the tags. Decision: session-tiers.
 - trust-card-in-build-denial-no-cause: a fail-closed denial logs no cause in guard.log, so the reason is lost. Decision: session-tiers.
-- set-waiting-page-usage-exit: `layout.py set-waiting-page` with the wrong number of arguments exits 1, the code that also means "already set". Decision: session-tiers.
-- set-waiting-page-new-root: a mistyped root makes `<root>/.claude/layout-extras.json` in a new folder and exits 0. Decision: session-tiers.
 - record-branch-null-stops: `record-branch: null` stops the roadmap build, while `waiting-page: null` counts as unset. Decision: session-tiers.
 - reap-log-done-by-margin: janitor/agent_end_reap.py LOG_DONE_BY 58 leaves 2 s, but the hook's 60 s timer starts before `started` (shell, interpreter start, stdin read); 55 was proposed. Decision: c95.
 - log-lock-retries-every-oserror: _log_lock retries on every OSError, so a non-contention error (ENOLCK, EOPNOTSUPP) waits to the deadline; a contention-only retry was proposed but its Windows errno pair (13, 36) for msvcrt.locking is unverified. Decision: c95.

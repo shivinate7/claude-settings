@@ -86,6 +86,16 @@ class Tree(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
+    def git(self, *args, input=None, env=None):
+        """One git step of this case's tree. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def init_repo(self):
+        """Make the tree a git repository, as the repo a waiting page is set in is one."""
+        self.git("init", "-q")
+
     def roll_out(self, kinds=None):
         self.put(EXTRAS, json.dumps({"kinds": kinds or {}, "rolled-out": True}))
 
@@ -400,12 +410,6 @@ class WaitingCopy(Tree):
         self.git("add", "-A", "-f")
         self.git("commit", "-q", "-m", "base")
 
-    def git(self, *args, input=None, env=None):
-        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
-        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
-        return done.stdout
-
     def extras(self, keys):
         data = {"kinds": {}, "rolled-out": True}
         data.update(keys)
@@ -521,6 +525,7 @@ class SetWaitingPage(Tree):
         super().setUp()
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
         self.extras = os.path.join(self.tree, *EXTRAS.split("/"))
+        self.init_repo()  # the root a waiting page is set in is a git repo, as a real repo root is
         self.sub = os.path.join(self.tree, "sub")  # a folder under the repo root, the CLI's working folder
         os.makedirs(self.sub)
 
@@ -614,7 +619,7 @@ class SetWaitingPage(Tree):
 
     def test_the_old_form_with_no_root_is_refused_and_writes_nowhere(self):
         code, out = run([os.path.join(LINT, "layout.py"), "set-waiting-page", self.URL], self.sub)
-        self.assertNotEqual(code, 0, out)
+        self.assertEqual(code, 2, out)
         self.assertFalse(os.path.exists(os.path.join(self.sub, ".claude")), "the old form wrote into the working folder")
         self.assertFalse(os.path.exists(self.extras))
 
@@ -649,6 +654,39 @@ class SetWaitingPage(Tree):
         self.assertEqual(code, 2, out)
         self.assertNotIn("Traceback", out)
         self.assertTrue(out.strip(), "the failure printed nothing")
+
+    def test_a_mistyped_root_is_an_error_and_makes_no_folder(self):
+        missing = os.path.join(self.tree, "no-such-repo")
+        self.assertFalse(os.path.exists(missing), "scope: the mistyped root exists before the call")
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.set_waiting_page(missing, self.URL)
+        self.assertFalse(os.path.exists(missing), "a mistyped root made a folder")
+
+    def test_a_folder_that_is_no_git_repo_is_an_error_and_gets_no_extras(self):
+        plain = tempfile.mkdtemp(prefix="layout_plain_", dir=RUN_FOLDER)  # outside the git repo of self.tree
+        self.addCleanup(tracked_tree.rm_tree, plain)
+        probe = subprocess.run(["git", "-C", plain, "rev-parse", "--git-dir"], capture_output=True, text=True)
+        self.assertNotEqual(probe.returncode, 0, "scope: the folder is inside a git repo before the call")
+        with self.assertRaises(self.layout.LayoutError):
+            self.layout.set_waiting_page(plain, self.URL)
+        self.assertFalse(os.path.exists(os.path.join(plain, ".claude")), "a folder that is no repo got a .claude folder")
+
+    def test_a_linked_worktree_root_is_a_git_repo_and_is_accepted(self):
+        # A lane's root is a linked worktree, where .git is a file and not a folder.
+        self.git("commit", "--allow-empty", "-q", "-m", "base")
+        lane = os.path.join(self.tree, "lane")
+        self.git("worktree", "add", "-q", "--detach", lane)
+        self.assertTrue(os.path.isfile(os.path.join(lane, ".git")), "scope: the lane's .git is not a file")
+        self.assertTrue(self.layout.set_waiting_page(lane, self.URL), "a linked worktree root was refused")
+        self.assertEqual(self.layout.waiting_page(lane), self.URL)
+
+    def test_cli_mistyped_root_exits_2_and_makes_no_folder(self):
+        missing = os.path.join(self.tree, "no-such-repo")
+        self.assertFalse(os.path.exists(missing), "scope: the mistyped root exists before the call")
+        code, out = self.cli(root=missing)
+        self.assertEqual(code, 2, "a mistyped root did not exit 2: %s" % out)
+        self.assertNotIn("Traceback", out)
+        self.assertFalse(os.path.exists(missing), "a mistyped root made a folder")
 
 
 class Registry(Tree):
@@ -747,6 +785,7 @@ class Registry(Tree):
         self.assertEqual([e["id"] for e in self.artifacts()], [long_id], "an id of 32 characters was refused")
 
     def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
+        self.init_repo()  # the root a waiting page is set in is a git repo, as a real repo root is
         self.registry([self.queue_entry()])
         self.assertTrue(self.layout.set_waiting_page(self.tree, self.OLD), "set_waiting_page did not write the key")
         with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:

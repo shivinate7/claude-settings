@@ -2372,6 +2372,33 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # _redirect_length (hooks/guard_merge.py) is the one reader of a shell redirect for the records-page clause,
+    # and `_page_redirect_root` reads a write of the page through it. Each branch below lets a write of the
+    # records page go unseen when dropped. REDIRECTION (hooks/guard_core.py) still reads the push arguments.
+    ("redirect: the noclobber override `>|` is no longer read",
+     r'(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[&|]?|<{1,3})|&>>?)',
+     r'(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?&?|<{1,3})|&>>?)',
+     "guard", "a chain that runs the generator with >| out.txt"),
+    ("redirect: the named descriptor `{fd}>` is no longer read",
+     r'(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[&|]?|<{1,3})|&>>?)',
+     r'(?:(?:\d*)(?:>>?[&|]?|<{1,3})|&>>?)',
+     "guard", "a chain that runs the generator with {fd}>out.txt"),
+    ("redirect: an escaped space ends the target",
+     r'(?P<target>(?:\\.|[^\s\\])+)',
+     r'(?P<target>\S+)',
+     "guard", "a redirect to a name with an escaped space is allowed"),
+    ("records-page: a redirect into the page no longer makes a --print run a write",
+     "        named = _page_redirect_root(redirected)",
+     "        named = None",
+     "guard", "a chain that runs the generator with --print into the page"),
+    ("records-page: a redirect glued to the --print word is no longer cut from it",
+     "    tokens, index = _split_glued_redirects(tokens), 0\n",
+     "    index = 0\n",
+     "guard", "a chain that runs the generator with --print glued to a redirect into the page"),
+    ("records-page: a redirect glued to an add pathspec stays part of the pathspec",
+     "    tokens = _split_glued_redirects(tokens)\n    out, index = [], 0\n",
+     "    out, index = [], 0\n",
+     "guard", "add . with a redirect glued to its path"),
 ]
 
 

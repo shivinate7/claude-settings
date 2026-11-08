@@ -9790,6 +9790,16 @@ record_allow("a lane's push to roadmap-notes, another branch, is allowed", VCS +
              LANE_TRANSCRIPT)
 record_allow("a lane's bare push from the feat checkout is allowed", VCS + " push", LANE_TRANSCRIPT)
 record_allow("a lane's HEAD push from the feat checkout is allowed", VCS + " push origin HEAD", LANE_TRANSCRIPT)
+# A redirect's target is no push argument. A quoted target with a space is blanked before the push reader runs.
+# An unquoted target is cut by the redirect reader, so an escaped space leaves its second word behind as an argument.
+record_allow("a lane's push of HEAD to x with a redirect to a quoted name with a space is allowed",
+             VCS + ' push origin HEAD:x > "my out.txt"', LANE_TRANSCRIPT)
+record_allow("a lane's push of HEAD to x with a redirect to a name with an escaped space is allowed",
+             VCS + " push origin HEAD:x > my\\ roadmap", LANE_TRANSCRIPT)
+record_allow("a lane's push of HEAD to x with a redirect to a plain name is allowed",
+             VCS + " push origin HEAD:x > out.txt", LANE_TRANSCRIPT)
+record_refuse("a lane's push to roadmap with a redirect to a quoted name with a space is still refused",
+              VCS + ' push origin roadmap > "my out.txt"', LANE_TRANSCRIPT)
 # Text that names the push is text, in quotes, a heredoc body, a comment and a commit message.
 record_allow("a push to roadmap named in single quotes is text", "echo '" + VCS + " push origin roadmap'",
              LANE_TRANSCRIPT)
@@ -10830,7 +10840,7 @@ lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.value
               REC_ADOPT_LANE, *REC_PLAIN_LANES.values()], _build_records_more)
 
 
-def records_deny(name, command, lane, **kw):
+def records_refusal(name, command, lane, **kw):
     sh("records-page: %s is refused" % name, command, "deny", RECORDS_RULE, cwd=REC_LANES.get(lane, lane),
        carries=RECORDS_SAYS, lacks=RECORDS_NEVER, **kw)
 
@@ -10840,25 +10850,28 @@ def records_allow(name, command, cwd, **kw):
 
 
 # 1. A staged page that is not the base's page: refused, under Bash and PowerShell, and for a builder.
-records_deny("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
-records_deny("a lane commit of a staged page that differs from the base's, under PowerShell",
+records_refusal("a lane commit of a staged page that differs from the base's", VCS + " commit -m x", "staged")
+records_refusal("a lane commit of a staged page that differs from the base's, under PowerShell",
              VCS + " commit -m x", "staged", tool="PowerShell")
-records_deny("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
+records_refusal("a builder's commit of a staged page that differs from the base's", VCS + " commit -m x",
              "staged", agent_id="bld1", agent_type="builder")
 # A merge commit is no exemption: only the base's own page rides in on a merge.
-records_deny("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
+records_refusal("a merge commit whose page was rebuilt by hand", VCS + " commit -m x", "merge-rebuilt")
 # Stage then commit in one call (beyond the brief's five cases): the page is staged when the commit runs.
-records_deny("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
-records_deny("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
+records_refusal("stage then commit: commit -am with an edited page", VCS + ' commit -am x', "unstaged")
+records_refusal("stage then commit: commit -am with an edited page, under PowerShell", VCS + " commit -am x",
              "unstaged", tool="PowerShell")
-records_deny("stage then commit: add -A and commit with an edited page",
+records_refusal("stage then commit: add -A and commit with an edited page",
              VCS + " add -A && " + VCS + " commit -m x", "unstaged")
-records_deny("stage then commit: add -A and commit with an edited page, under PowerShell",
+records_refusal("stage then commit: add -A and commit with an edited page, under PowerShell",
              VCS + " add -A; " + VCS + " commit -m x", "unstaged", tool="PowerShell")
-records_deny("stage then commit: add . and commit with an edited page",
+records_refusal("stage then commit: add . and commit with an edited page",
              VCS + " add . && " + VCS + " commit -m x", "unstaged")
-records_deny("stage then commit: add of the page and commit with an edited page",
+records_refusal("stage then commit: add of the page and commit with an edited page",
              VCS + " add docs/records.md && " + VCS + " commit -m x", "unstaged")
+
+records_refusal("stage then commit: add . with a redirect glued to its path, and commit with an edited page",
+             VCS + " add .>out.txt && " + VCS + " commit -m x", "unstaged")
 
 # 2. No staged change to the page: allowed, though the base's page moved after the lane was cut.
 records_allow("a commit that stages no page change, with the base's page moved on", VCS + " commit -m x",
@@ -10912,11 +10925,11 @@ for _name, _command in (
 # ---- the same two readings of a lone quote, a multi-line quoted message and a comment opener in a
 # string, building-scanner-respects-strings: the guard reads the command for a commit, so a quote or an
 # opener inside a message must neither hide a commit of the page nor invent one.
-records_deny("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
+records_refusal("a commit of a staged page after a lone apostrophe", "echo don't\n" + VCS + " commit -m x",
              "staged")
-records_deny("a commit of a staged page after a comment opener inside a string",
+records_refusal("a commit of a staged page after a comment opener inside a string",
              'echo "# note // /* x"\n' + VCS + " commit -m x", "staged")
-records_deny("a commit of a staged page with a multi-line quoted message",
+records_refusal("a commit of a staged page with a multi-line quoted message",
              VCS + ' commit -m "first line\nsecond line"', "staged")
 records_allow("an echo of a commit inside a multi-line quoted string, with a staged page",
               'echo "first\n' + VCS + ' commit -m x\nlast"', REC_LANES["staged"])
@@ -10933,7 +10946,7 @@ for _name, _command, _kw in (
     ("--records-only, under PowerShell", GEN + " --records-only; " + ADD_A + "; " + COMMIT_X,
      {"tool": "PowerShell"}),
 ):
-    records_deny("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
+    records_refusal("a chain that runs the generator with %s, then add -A and commit, the page on disk equal to HEAD's"
                  % _name, _command, "product", **_kw)
 records_allow("a chain that runs the generator with --check, then add -A and commit",
               GEN + " --check && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
@@ -10957,7 +10970,7 @@ records_allow("add -A and commit after a merge of origin/main when origin/HEAD d
               ADD_A + " && " + COMMIT_X, _dl["merge"])
 records_allow("a merge --no-commit of origin/main and a commit in one chain, origin/HEAD dangling",
               VCS + " merge --no-commit origin/main && " + COMMIT_X, _dl["fresh"])
-records_deny("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
+records_refusal("a hand-rebuilt page after a merge when origin/HEAD dangles", COMMIT_X, _dl["rebuilt"])
 
 # The page is untracked at HEAD (the base added it after the lane was cut). `commit -a` never stages an
 # untracked file, so it commits no page. `add -A` and an add of the page do.
@@ -10965,8 +10978,8 @@ records_allow("commit -am when the page is untracked at HEAD", VCS + " commit -a
 records_allow("commit -am when the page is untracked at HEAD, under PowerShell", VCS + " commit -am x",
               REC_NEW_LANE, tool="PowerShell")
 records_allow("a plain commit when the page is untracked at HEAD", COMMIT_X, REC_NEW_LANE)
-records_deny("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
-records_deny("add of the page and commit when the page is untracked at HEAD",
+records_refusal("add -A and commit when the page is untracked at HEAD", ADD_A + " && " + COMMIT_X, REC_NEW_LANE)
+records_refusal("add of the page and commit when the page is untracked at HEAD",
              VCS + " add docs/records.md && " + COMMIT_X, REC_NEW_LANE)
 
 # A commit that names its paths (`--` or --only) commits those paths and ignores the other staged
@@ -10975,8 +10988,8 @@ records_allow("a commit of src/app.py by path, with the page staged earlier", CO
               REC_LANES["staged-edit"])
 records_allow("a commit with --only of src/app.py, with the page staged earlier",
               VCS + " commit --only -m x src/app.py", REC_LANES["staged-edit"])
-records_deny("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
-records_deny("a commit by path that names the page, with the page staged earlier",
+records_refusal("a plain commit with the page staged earlier and src/app.py edited", COMMIT_X, "staged-edit")
+records_refusal("a commit by path that names the page, with the page staged earlier",
              COMMIT_X + " -- src/app.py docs/records.md", "staged-edit")
 
 # First adoption: the base has no page, and the lane creates it. Allowed (the rule reads a base with no
@@ -10996,9 +11009,132 @@ records_allow("a chain that logs the generator's history, then add -A and commit
               VCS + " log --oneline -- lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
 records_allow("a chain that runs the generator with --print, then add -A and commit",
               GEN + " --print && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
-records_deny("a chain that runs the generator as its own command word, then add -A and commit",
+# --print writes the page to stdout, so a redirect into the page is a write of it.
+records_refusal("a chain that runs the generator with --print into the page, then add -A and commit",
+             GEN + " --print > docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --print glued to a redirect into the page, then add -A and commit",
+             GEN + " --print>docs/records.md && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a chain that runs the generator with --print into another file, then add -A and commit",
+              GEN + " --print > out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+
+# argparse reads a flag by any unambiguous prefix, and -h or --help exits before any write. So -h, --help,
+# --che (a prefix of --check) and --pri (a prefix of --print) read the generator and write no page. A --root
+# names the repo a run writes, so a run aimed at another repo writes none of this repo's page, in either form.
+# A run of this repo's generator still counts, whichever way it names this repo's root.
+OTHER_REPO = os.path.join(RECMORE, "other-repo")   # another repo: the --root target that is not this repo
+
+
+def _build_other_repo():
+    make_repo(OTHER_REPO, {"README.md": "another repo\n"})
+
+
+lazy_fixture([OTHER_REPO], _build_other_repo)
+for _flag in ("-h", "--help", "--che", "--pri"):
+    records_allow("a chain that runs the generator with %s, then add -A and commit" % _flag,
+                  GEN + " " + _flag + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root at another repo, then add -A and commit",
+              GEN + " --root " + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a chain that runs the generator with --root=another repo, then add -A and commit",
+              GEN + " --root=" + OTHER_REPO + " && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_refusal("a chain that runs the generator with --root at this repo, then add -A and commit",
+             GEN + " --root " + REC_LANES["product"] + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --root . in this repo, then add -A and commit",
+             GEN + " --root . && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A relative --root resolves from the directory the run is in, and a leading `cd` moves that directory. So a
+# run from this repo's lint folder with `--root ..` writes this repo's page, and is refused, whether the commit
+# follows with a plain git or with `git -C`. A --root the guard cannot resolve (`~+`, `~-`) or that names no
+# repo it can find (`/x/...`) may name this repo, so it is refused too.
+RUN_FROM_LINT = "python3 hook_catalog.py --root .."
+LANE = REC_LANES["product"]
+records_refusal("a chain that runs the generator from lint with --root .., then cd back, add -A and commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator from lint with --root .., then cd back and git -C commit",
+             "cd " + os.path.join(LANE, "lint") + " && " + RUN_FROM_LINT + " && cd " + LANE + " && " + ADD_A
+             + " && " + VCS + " -C " + LANE + " commit -m x", "product")
+records_refusal("a chain that runs the generator with --root ~+, then add -A and commit",
+             GEN + " --root ~+ && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --root ~-, then add -A and commit",
+             GEN + " --root ~- && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --root=/x/other, then add -A and commit",
+             GEN + " --root=/x/other && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with --root=/x/<this repo's name>, then add -A and commit",
+             GEN + " --root=/x/" + os.path.basename(LANE) + " && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A token the generator's parser refuses does not make the run no run: argparse exits on it, but the shell
+# still runs the generator, which writes this repo's page. Redirections and a trailing & are such tokens; so
+# are a subshell that moves the run into lint, and an `env -C` that runs the generator in this repo from
+# another folder.
+# A noclobber override (`>|`) and a named descriptor (`{fd}>`) are redirects too, spaced or glued: the run still writes.
+for _name, _run in (
+    ("2>&1", GEN + " 2>&1"),
+    ("> /dev/null", GEN + " > /dev/null"),
+    (">/dev/null 2>&1", GEN + " >/dev/null 2>&1"),
+    ("&> /dev/null", GEN + " &> /dev/null"),
+    ("--root . > /dev/null", GEN + " --root . > /dev/null"),
+    (">| out.txt", GEN + " >| out.txt"),
+    (">|out.txt", GEN + " >|out.txt"),
+    ("{fd}>out.txt", GEN + " {fd}>out.txt"),
+    ("a glued target >out.txt", GEN + " >out.txt"),
+):
+    records_refusal("a chain that runs the generator with %s, then add -A and commit" % _name,
+                 _run + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("a noclobber redirect of echo, with no generator run, then add -A and commit",
+              "echo x >| out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+records_allow("a named-descriptor redirect of echo, with no generator run, then add -A and commit",
+              "echo x {fd}>out.txt && " + ADD_A + " && " + COMMIT_X, REC_LANES["product"])
+# A trailing & detaches the run, which detached-launch refuses before records-page reads it: a control, not a red.
+sh("a chain that runs the generator with a trailing &, then add -A and commit is refused",
+   GEN + " & " + ADD_A + " && " + COMMIT_X, "deny", cwd=LANE)
+
+# A redirect is one shell word, and its target may hold a space or a quote (`> "my out.txt"`). The generator run
+# still writes this repo's page with such a target, and a commit that carries a redirect (`2>&1 | tail`, `> out.txt`)
+# still commits with -a. The controls already refuse without the fix: a bare target, and a commit with no redirect.
+# A `--help` run writes no page, so it is allowed.
+COMMIT_AM = VCS + " commit -am x"
+for _rd_name, _rd_command in (
+    ('a spaced target on the generator run, > "my out.txt"', GEN + ' > "my out.txt" && ' + COMMIT_AM),
+    ('a spaced quoted target on the generator run, >"/tmp/a b/x"', GEN + ' >"/tmp/a b/x" && ' + COMMIT_AM),
+    ('a spaced target on stderr, 2> "err log.txt"', GEN + ' 2> "err log.txt" && ' + COMMIT_AM),
+    ('a process-substitution target, > >(tee x)', GEN + " > >(tee x) && " + COMMIT_AM),
+    ('a commit piped to tail, commit -am x 2>&1 | tail -5', GEN + " && " + VCS + " commit -am x 2>&1 | tail -5"),
+    ('a commit redirected to a file, commit -am x > out.txt', GEN + " && " + VCS + " commit -am x > out.txt"),
+):
+    records_refusal("redirect-judged: a chain with %s" % _rd_name, _rd_command, "product")
+records_refusal("redirect-judged control: a chain that runs the generator, then commit -am",
+             GEN + " && " + COMMIT_AM, "product")
+records_refusal("redirect-judged control: a chain with a bare target on the generator run, then commit -am",
+             GEN + " > out.txt && " + COMMIT_AM, "product")
+records_allow("redirect-judged: a --help run with a spaced target, then commit -am",
+              GEN + ' --help > "my out.txt" && ' + COMMIT_AM, REC_LANES["product"])
+# An `add` that carries a redirect still stages the files its words name. `_add_shape` reads the redirect's
+# operator and target as pathspecs, so `add -A > /dev/null` is no whole-tree add, and the page it stages goes
+# unseen. Each shape must refuse like a plain `add -A` after the generator run. The controls keep today's verdict:
+# a plain add -A, and an add of one other file with its output discarded, which names no page.
+ADD_REDIRECT_CASES = (
+    ("add -A > /dev/null", VCS + " add -A > /dev/null"),
+    ("add -A 2>&1", VCS + " add -A 2>&1"),
+    ("add -A > out.txt", VCS + " add -A > out.txt"),
+)
+for _name, _add in ADD_REDIRECT_CASES:
+    records_refusal("add-redirect: a generator run, then git %s, then commit" % _name,
+                 GEN + " && " + _add + " && " + COMMIT_X, "product")
+records_refusal("add-redirect pin: a generator run, then git add . > out.txt, then commit",
+             GEN + " && " + VCS + " add . > out.txt && " + COMMIT_X, "product")
+records_refusal("add-redirect control: a generator run, then plain add -A, then commit",
+             GEN + " && " + ADD_A + " && " + COMMIT_X, "product")
+records_allow("add-redirect control: a generator run, then git add lint/other.py > /dev/null, then commit",
+              GEN + " && " + VCS + " add lint/other.py > /dev/null && " + COMMIT_X, REC_LANES["product"])
+records_allow("add-redirect control: git add lint/other.py > /dev/null, then commit",
+              VCS + " add lint/other.py > /dev/null && " + COMMIT_X, REC_LANES["product"])
+records_refusal("a chain that runs the generator in a subshell from lint with --root .., then add -A and commit",
+             "( cd lint && " + RUN_FROM_LINT + " ) && " + ADD_A + " && " + COMMIT_X, "product")
+records_refusal("a chain that runs the generator with env -C into this repo, from another folder, then git -C commit -am",
+             "env -C " + LANE + " " + GEN + " --root . && " + VCS + " -C " + LANE + " commit -am x", OTHER_REPO)
+records_refusal("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
-records_deny("a chain that runs the generator through env, then add -A and commit",
+records_refusal("a chain that runs the generator through env, then add -A and commit",
              "env python3 lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 
 # The rule acts only when the base page opens with the generated header. A hand-written base page is no
