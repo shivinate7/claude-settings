@@ -21,6 +21,28 @@ tier_line() {
   fi
 }
 
+# Cloud containers leave TMPDIR unset, so `$TMPDIR/x` lands at `/x` (incident 2026-11-07, /base_run.txt).
+# The written lines are conditional, so a shell that already has TMPDIR keeps it.
+# CLAUDE_SETTINGS_TMP_CANDIDATE is the seam for the /tmp default.
+if [ -z "${TMPDIR:-}" ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  tmpdir_pick="${CLAUDE_SETTINGS_TMP_CANDIDATE:-/tmp}"
+  if ! { [ -d "$tmpdir_pick" ] && [ -w "$tmpdir_pick" ]; }; then
+    tmpdir_pick=$(python3 -c 'import tempfile; print(tempfile.gettempdir())' 2>/dev/null)
+  fi
+  # Only an absolute, writable dir that is neither `/` nor the cwd, resolved. A path with a single quote is
+  # skipped, so the quoted export stays valid.
+  case "$tmpdir_pick" in
+    *"'"*) ;;
+    /?*)
+      tmpdir_real=$(cd "$tmpdir_pick" 2>/dev/null && pwd -P)
+      if [ -n "$tmpdir_real" ] && [ "$tmpdir_real" != / ] && [ "$tmpdir_real" != "$(pwd -P)" ] && [ -w "$tmpdir_pick" ]; then
+        # The export has its own line inside the `if`, so the env file reads `export TMPDIR=` on a line start.
+        { printf 'if [ -z "${TMPDIR:-}" ]; then\nexport TMPDIR='"'%s'"'\nfi\n' "$tmpdir_pick" >>"$CLAUDE_ENV_FILE"; } 2>/dev/null
+      fi
+      ;;
+  esac
+fi
+
 command -v git >/dev/null 2>&1 || { tier_line; exit 0; }
 
 # bounded_git <dir> <outfile> <git args...>: runs git in <dir>, stdout to <outfile>, killed after
