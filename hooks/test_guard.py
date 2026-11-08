@@ -12327,6 +12327,15 @@ sh("frozen form gap: python -c that writes a frozen path on the second pass of a
    "json.load(open(p))'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# THE SAME LOOP THROUGH += . The first binding is the home folder, so pass one writes a file outside the
+# frozen folder. The += then moves the name into the frozen folder, so pass two writes a frozen path.
+sh("frozen form gap: python -c that writes a frozen path on the second pass of a += loop, after a start at home, is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h\n"
+   "for i in range(2): open(p + \"/x.py\", \"w\"); p += \"/.claude/hooks\"'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
 # A FORMAT CALL THAT RAISES. A str.format with more slots than arguments raises while the scanner reads
 # it, so the write on the next line must still be judged. The control row is that write with no format
 # line before it, and it is denied already.
@@ -12335,6 +12344,10 @@ sh("frozen form gap: python -c that opens a frozen hook after a format call with
    "h = os.path.expanduser(\"~\")\n"
    "a = \"x\"\n"
    "\"{}{}{}\".format(a)\n"
+   "open(h + \"/.claude/hooks/x.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook after a format call on one line with too few arguments is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); a = \"x\"; \"{}{}{}\".format(a); "
    "open(h + \"/.claude/hooks/x.py\", \"w\")'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 sh("frozen form gap: python -c that opens a frozen hook joined from expanduser, with no format line, is denied",
@@ -12365,6 +12378,10 @@ sh("frozen form gap: python -c that runs file -C -m on a frozen hook through sub
 # string is a write. The control row is the same redirect run directly, and it is denied already.
 sh("frozen form gap: python -c that runs sh -c with a redirect onto a frozen hook through subprocess is denied",
    "python3 -c 'import subprocess; subprocess.run([\"sh\", \"-c\", \"cat x > ~/.claude/hooks/x.py\"])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs sh -c with a redirect onto a frozen hook joined from expanduser is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run([\"sh\", \"-c\", \"cat x > \" + h + \"/.claude/hooks/x.py\"])'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 sh("frozen form gap: a plain cat redirect onto a frozen hook through ~ is denied",
    "cat x > ~/.claude/hooks/x.py", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
