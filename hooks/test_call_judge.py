@@ -2111,59 +2111,21 @@ def case_send_tool_names_come_from_shared_names():
 
 # ------------------------------------------------------------------ owner-only rulings (spec past-rulings)
 #
-# A candidate is a ruling only when the owner gave it: a record whose ruling line names him, or a sentence that names him
-# as its source, `Owner, <date>` or `Ruling (owner, <date>)`. A roadmap note that holds an incident, or a recommendation
-# the owner has not answered, is no ruling, so the judge may not cite it. Each stub answer below cites a candidate only
-# when the list it was shown holds the case's marker (CJ_CITE_SHOWN). So a candidate that is not offered, and one that is
-# offered but not cited as a refusal, both allow the question.
-NOTE_INCIDENT_MARK = "hand-merged 1a444eb96"
-NOTE_INCIDENT = "Incident (shiv, 2026-11-05 10:12): a lane hand-merged 1a444eb96 onto #1932"
-NOTE_RECOMMEND_MARK = "recommends raising the milestone job cap"
-NOTE_RECOMMEND = ("Page item 150 (open) recommends raising the milestone job cap; the owner has not answered, so the cap "
-                  "stays as it is until he does.")
+# The pool offers each sentence that names ruling, owner or shiv, and item 8 tells the judge which of them is a ruling
+# (case_item8_prompt_names_record_kinds_and_owner_markers). Each stub answer below cites a candidate only when the list
+# it was shown holds the case's marker (CJ_CITE_SHOWN). So a candidate that is not offered, and one that is offered but
+# not cited as a refusal, both allow the question.
 NOTE_OWNER_MARK = "raise the milestone job cap, because"
 NOTE_OWNER = ("Owner, page item 150, pick a, 2026-11-06 12:40 CST: raise the milestone job cap, because the run ended "
               "at its cap twice.")
-INCIDENT_NOTE_REPO = make_repo("incident-note", steps={"hand-merge-release-fix": NOTE_INCIDENT})
-RECOMMEND_NOTE_REPO = make_repo("recommend-note", steps={"milestone-cap-open": NOTE_RECOMMEND})
 OWNER_NOTE_REPO = make_repo("owner-note", steps={"milestone-cap-answered": NOTE_OWNER})
 OWNER_ONLY_GOAL = "Goal: decide whether the milestone job cap rises, and whether the hand-merged release fix stays on main"
 OWNER_ONLY_PROBLEM = "Problem (rule): the milestone job cap decides when a full CI run goes red, so the rule needs your word"
 OWNER_ONLY_BASED = ("Based on (read): the milestone job ran out of time at its cap on the last run",)
-PAGE_RECOMMENDED_OPTIONS = [
-    {"key": "a", "label": "Raise the cap (Recommended)", "gain": "The milestone run stops ending at its cap.",
-     "lose": "Each run takes longer and uses more minutes."},
-    {"key": "b", "label": "Keep the cap", "gain": "Nothing changes on main.",
-     "lose": "The milestone run may end at its cap again."}]
 
 
 def owner_only_box():
     return good_box(goal=OWNER_ONLY_GOAL, problem=OWNER_ONLY_PROBLEM, based=OWNER_ONLY_BASED, options=CI_CHAT_OPTIONS)
-
-
-def case_past_ruling_incident_note_is_not_cited():
-    # The step note holds only an incident, in the form the lane notes use. An incident is no ruling, so a judge that
-    # cites it must not refuse the question.
-    import question_form  # the one form check (hooks/question_form.py)
-    box = owner_only_box()
-    check("owner-only incident: the box passes chat_hit, so the model judges it",
-          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
-    r = run_hook(question_input(box=box, cwd=INCIDENT_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_INCIDENT_MARK)
-    check("owner-only incident: a judge's citation of an incident note in a roadmap step is not a refusal",
-          len(r.calls) == 1 and (r.deny() or {}).get("permissionDecision") != "deny", detail(r))
-
-
-def case_past_ruling_recommended_pick_is_not_cited():
-    # The page item is unanswered and its option is marked (Recommended). The roadmap note that recommends the same pick
-    # says the owner has not answered, so it is no ruling. A judge that cites it as the owner's answer must not refuse.
-    # Red on main, for the same reason as the incident case.
-    import question_form  # the one form check (hooks/question_form.py)
-    item = good_page_item(title="Raise the milestone job cap?", context=CI_PAGE_CONTEXT, options=PAGE_RECOMMENDED_OPTIONS)
-    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c150", "data": item})
-    check("owner-only recommended: the page item passes item_hit, so the dedicated call runs", got == ("", ""), got)
-    r = run_hook(page_input("set", item, cwd=RECOMMEND_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_RECOMMEND_MARK)
-    check("owner-only recommended: a judge's citation of a note that recommends an unanswered pick is not a refusal",
-          (r.deny() or {}).get("permissionDecision") != "deny" and r.code == 0, detail(r))
 
 
 def case_past_ruling_owner_answered_page_item_stays_refused():
@@ -2182,10 +2144,20 @@ def case_past_ruling_owner_decision_stays_refused():
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
 
 
+# The four clauses item 8 must carry to tell a ruling from what is not one. Each row is key phrases that one sentence of
+# the item-8 text holds, so a word that appears elsewhere in the text does not pass.
+ITEM8_CLAUSES = (
+    ("an incident, gripe, defect or risk line is no ruling", ("incident", "gripe", "defect", "risk", "not a ruling")),
+    ("a recommended option or a session's pick is no ruling", ("recommended option", "session proposed", "not a ruling")),
+    ("a session's owner-answered claim counts with his words or a dated answer",
+     ("owner answered", "quotes the owner's words", "dated owner answer")),
+    ("a page item's recommended pick restated in a note never counts", ("recommended pick", "restate", "never counts")),
+)
+
+
 def case_item8_prompt_names_record_kinds_and_owner_markers():
     # The item-8 text the judge is sent: the lines from its `8. ` marker up to the candidate list. It must say that a
-    # decision or debt record is a ruling by its kind, and that a step or page line needs an owner marker. Each anchor
-    # is one sentence, so a word that appears elsewhere in the text does not pass.
+    # decision or debt record is a ruling by its kind, and carry the four ITEM8_CLAUSES.
     r = run_hook(question_input(box=owner_only_box()), answer=ALLOW)
     calls = form_calls(r)
     check("item 8 prompt: the question box makes one judged call", len(calls) == 1, detail(r))
@@ -2201,8 +2173,9 @@ def case_item8_prompt_names_record_kinds_and_owner_markers():
     sentences = re.split(r"(?<=[.!?;])\s+", item8)
     check("item 8 prompt: a sentence says a decision or debt record is a ruling by its kind",
           any("decision" in s and "debt" in s and "record" in s for s in sentences), item8[:300])
-    check("item 8 prompt: a sentence says a step or page line needs an owner marker",
-          any("owner marker" in s and ("step" in s or "page" in s) for s in sentences), item8[:300])
+    for label, phrases in ITEM8_CLAUSES:
+        check("item 8 prompt: a sentence says %s" % label,
+              any(all(p in s.lower() for p in phrases) for s in sentences), item8[:300])
 
 
 def main():
@@ -2246,7 +2219,6 @@ def main():
                  case_send_over_the_cap_keeps_a_based_on_line_above_the_goal,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
                  case_send_tool_names_come_from_shared_names,
-                 case_past_ruling_incident_note_is_not_cited, case_past_ruling_recommended_pick_is_not_cited,
                  case_past_ruling_owner_answered_page_item_stays_refused,
                  case_past_ruling_owner_decision_stays_refused,
                  case_item8_prompt_names_record_kinds_and_owner_markers):

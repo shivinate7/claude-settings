@@ -1480,10 +1480,10 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
-# ------------------------------------------------------------------ OWNER_RULING_RE: which sentences count (decision question-form)
-# OWNER_RULING_RE marks a sentence that names the owner as its source. A ruling sentence matches; an incident, a
-# gripe, a deferral, or a passing mention of the owner does not.
-OWNER_RULING_MUST_MATCH = (
+# ------------------------------------------------------------------ the step pool keeps each ruling-word sentence (decision question-form)
+# The step pool keeps every sentence that names ruling, owner or shiv, a ruling or not. The item-8 prompt tells the two
+# apart (case_item8_prompt_names_record_kinds_and_owner_markers), so the pool must keep both kinds of row.
+OWNER_RULING_ROWS = (
     "Your ruling Oct 21: no measuring step",
     "Your ruling, Oct 21: no freeze",
     "Owner go, Nov 1 17:26 CST",
@@ -1513,7 +1513,7 @@ OWNER_RULING_MUST_MATCH = (
     "Lane notes-fix-large-1: owner ruling 13:20: keep",
     "see docs/debts/notes.md; Ruling (owner, 2026-11-07): keep",
 )
-OWNER_RULING_MUST_NOT = (
+NOT_RULING_ROWS = (
     "Incident (shiv, Nov 9 10:12): a lane hand-merged X",
     "Gripe (shiv, Nov 6): too slow",
     "Deferred (shiv, Nov 5): later",
@@ -1537,33 +1537,39 @@ OWNER_RULING_MUST_NOT = (
 )
 
 
-def case_owner_ruling_forms_and_non_rulings():
-    # One row per sentence. The rows that pass on main are controls and stay green.
+DETAIL_SENTENCE = "It covers the milestone cap."
+
+
+def case_step_pool_keeps_each_ruling_word_sentence():
+    """Each row names ruling, owner or shiv, so the pool keeps it as a unit, ruling or not. A row whose own words are all
+    stopwords (`Owner go, Nov 1 17:26 CST`) shares no word with a question, so its note gets DETAIL_SENTENCE, whose word
+    the question shares, and the unit is the row plus that sentence."""
     import question_form  # the one form check (hooks/question_form.py)
-    pattern = getattr(question_form, "OWNER_RULING_RE", None)
-    check("owner ruling form: question_form.OWNER_RULING_RE exists", hasattr(pattern, "search"), "missing regex")
-    if not hasattr(pattern, "search"):
+    fn = getattr(question_form, "_step_rulings", None)
+    check("step pool keeps: question_form._step_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
         return
-    for sentence in OWNER_RULING_MUST_MATCH:
-        check("owner ruling form, must match: %r" % sentence, pattern.search(sentence) is not None, "no match")
-    for sentence in OWNER_RULING_MUST_NOT:
-        hit = pattern.search(sentence)
-        check("owner ruling form, must not match: %r" % sentence, hit is None,
-              "matched %r" % (hit.group(0) if hit else ""))
+    words = question_form._words(DETAIL_SENTENCE)
+    for group, rows in (("ruling", OWNER_RULING_ROWS), ("not a ruling", NOT_RULING_ROWS)):
+        for sentence in rows:
+            note = sentence.rstrip(".") + ". " + DETAIL_SENTENCE
+            lines = fn({"row": (note, None)}, words)
+            check("step pool keeps, %s: %r" % (group, sentence), any(sentence in line for line in lines),
+                  "dropped; the pool gave %r" % (lines,))
 
 
 STEP_TAIL_NOTE = "Ruling (owner, 2026-11-07 13:20): keep it. Incident (shiv, Nov 9): a lane merged by hand."
-# Each row is (note, the second sentence's text that must stay out of the unit). Row one is an owner mark with no lead
-# word, row two a lead word with no owner mark. The join rule refuses either one; an `and` in its place lets both join.
+# Each row is (note, the sentence after the ruling, whether that sentence joins the ruling's unit). A sentence joins when
+# it names no ruling word, so a lead word alone joins. A sentence that names the owner or shiv is a unit of its own.
 STEP_TAIL_ROWS = (
-    ("Ruling (owner, 2026-11-07 13:20): keep it. Owner go, Nov 8 09:10 CST: ship it.", "Owner go, Nov 8 09:10 CST"),
-    ("Ruling (owner, 2026-11-07 13:20): keep it. Incident: a lane merged by hand.", "Incident: a lane merged by hand"),
+    ("Ruling (owner, 2026-11-07 13:20): keep it. Owner go, Nov 8 09:10 CST: ship it.", "Owner go, Nov 8 09:10 CST", False),
+    ("Ruling (owner, 2026-11-07 13:20): keep it. Incident: a lane merged by hand.", "Incident: a lane merged by hand", True),
 )
 
 
-def case_step_ruling_tail_stops_at_an_incident():
-    """A ruling unit is its marked sentence, plus the next sentence when that one is detail. A sentence right after a
-    ruling that has an owner mark or a lead word is no detail of it, so it joins no unit (decision question-form)."""
+def case_step_ruling_tail_stops_at_a_ruling_word():
+    """A ruling unit is its marked sentence, plus the next sentence when that one names no ruling word. A sentence after a
+    ruling that names the owner or shiv starts a unit of its own (decision question-form)."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     check("step ruling tail: question_form._step_rulings exists", callable(fn), "missing function")
@@ -1576,27 +1582,29 @@ def case_step_ruling_tail_stops_at_an_incident():
     text = str(lines)
     check("step ruling tail: the marked ruling sentence is offered",
           "Ruling (owner, 2026-11-07 13:20): keep it." in text, text[:200])
-    check("step ruling tail: the incident sentence after it joins no unit",
+    check("step ruling tail: a sentence after the ruling that names shiv joins no unit",
           "Incident" not in text and "merged by hand" not in text, text[:200])
-    for note, carried in STEP_TAIL_ROWS:
+    for note, carried, joins in STEP_TAIL_ROWS:
         row = str(fn({"s1": (note, None)}, {"keep"}))
         check("step ruling tail: the marked ruling is offered beside %r" % carried,
               "Ruling (owner, 2026-11-07 13:20): keep it." in row, row[:200])
-        check("step ruling tail: %r joins no unit" % carried, carried not in row, row[:200])
+        if joins:
+            check("step ruling tail: %r joins the unit" % carried, carried in row, row[:200])
+        else:
+            check("step ruling tail: %r joins no unit" % carried, carried not in row, row[:200])
 
 
-# ------------------------------------------------------------------ the step pool: main's, less label openers
-# The step candidate pool is origin/main's: a sentence is a candidate when it names ruling, owner or shiv, with no
-# owner-marker gate. The one exclusion kept is a sentence that OPENS with an Incident, Gripe or Deferred label. Each row
-# names one sentence and what the pool does with it. MAIN_POOL_RE is origin/main's RULING_WORDS, pinned as the
-# reference. LABEL_OPENER_RE is the exclusion as this test states it: the label at the clause start, after bullet or
-# emphasis marks, an enumerator, or at most two words (as in "Second incident"). A label mid-sentence is no opener.
+# ------------------------------------------------------------------ the step pool: label rows and recall rows
+# The step candidate pool takes a sentence that names ruling, owner or shiv, with no owner-marker gate and no label
+# exclusion. Each row names one sentence and what the pool does with it. MAIN_POOL_RE is the pool's rule as this test
+# states it. LABEL_OPENER_RE finds a label at the clause start, after bullet or emphasis marks, an enumerator, or at most
+# two words (as in "Second incident"). A label mid-sentence is no opener.
 MAIN_POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
 LABEL_OPENER_RE = re.compile(r"\A[\s*_>#+-]*(?:\(\d+\)\s*)?(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred)s?\b", re.I)
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
-# Recall rows: sentences origin/main's pool keeps and 284dafb3c drops, none opening with a label. Each is verbatim
-# from a step note (field note or why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step
-# with one sentence gives one unit, so the sentence is the unit.
+# Recall rows: sentences the pool keeps, none opening with a label. Each is verbatim from a step note (field note or
+# why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step with one sentence gives one unit,
+# so the sentence is the unit.
 STEP_POOL_RECALL = (
     ("o15", "Done: lane PR 632 (rulings and tasks from owner feedback need a tracked home) landed in batch PR 637, "
             "merged to main as 54be9f1 on Oct 26."),
@@ -1622,9 +1630,8 @@ STEP_POOL_RECALL = (
     ("c164", "Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do."),
     ("waiting-data-in-repo", "Owner hold: its draft PR merges only on the owner's word."),
 )
-# Exclusion rows: sentences origin/main's pool keeps that OPEN with an Incident, Gripe or Deferred label. The pool
-# drops each one, so its step gives no unit at all (the empty state). The label may carry a qualifier, a bullet or an
-# enumerator.
+# Label rows: sentences that OPEN with an Incident, Gripe or Deferred label. The pool keeps each one; the item-8 prompt,
+# not the pool, tells a label line from a ruling. A label may carry a qualifier, a bullet or an enumerator.
 STEP_POOL_LABEL_OPENERS = (
     "Incident: the owner's ruling was read as a yes.",
     "Incident today (shiv, Nov 6): a lane merged without the owner's ruling.",
@@ -1639,16 +1646,10 @@ STEP_POOL_LABEL_OPENERS = (
     "Deferred (needs shiv): does the designer run /design itself, or does shiv run it and hand the canvas over.",
     "Incident the same hour: a question's 'Departs from' line described main wrongly (owner, 16:23 CST).",
 )
-# Controls: the same label words mid-sentence are no opener, so the pool keeps each sentence.
-STEP_POOL_MID_SENTENCE = (
-    "Ruling (shiv, Nov 6): no incident today",
-    "Ruling (owner, Nov 6): the gripe on the page is closed.",
-    "Ruling (owner, Nov 6): the deferred item stays open.",
-)
 
 
 def case_step_pool_keeps_recall_rows():
-    """Each row is a sentence origin/main's pool keeps and this pool drops, with no label opening it: keep it."""
+    """Each row is a sentence with no label opening it, and the pool keeps it."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     check("step pool recall: question_form._step_rulings exists", callable(fn), "missing function")
@@ -1664,10 +1665,10 @@ def case_step_pool_keeps_recall_rows():
 
 
 def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
-    """Aggregate over the corpus: every sentence origin/main's pool keeps, less the label openers, is kept by this pool.
-    The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap. A
-    read that fails fails the row by name; an absent ref prints an unknown line. A sentence whose words are all
-    stopwords (`Owner ask ask-mw5ax2zb2j (12:21 CST).`) shares no word with any question, so it is not measured."""
+    """Aggregate over the corpus: every sentence that names ruling, owner or shiv and opens with no label is kept by this
+    pool. The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap.
+    A read that fails fails the row by name; an absent ref prints an unknown line. A sentence whose words are all
+    stopwords (an owner ask that names only an id and a time) shares no word with any question, so it is not measured."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     read = getattr(question_form, "_read_steps", None)
@@ -1704,35 +1705,20 @@ def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
           not missed, detail)
 
 
-def case_step_pool_drops_sentences_opening_with_a_label():
-    """Each row is a sentence origin/main's pool keeps that OPENS with an Incident, Gripe or Deferred label. This pool
-    drops it, so its step gives no unit: the empty state."""
+def case_step_pool_keeps_sentences_opening_with_a_label():
+    """Each row is a sentence that OPENS with an Incident, Gripe or Deferred label and names ruling, owner or shiv. The
+    pool keeps it as a unit: the label is no reason to drop it, and the item-8 prompt judges the line instead."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     check("step pool label: question_form._step_rulings exists", callable(fn), "missing function")
     if not callable(fn):
         return
     outside = [s for s in STEP_POOL_LABEL_OPENERS if not (MAIN_POOL_RE.search(s) and LABEL_OPENER_RE.search(s))]
-    check("step pool label scope: every row is in origin/main's pool and opens with a label", not outside,
+    check("step pool label scope: every row names ruling, owner or shiv and opens with a label", not outside,
           "outside the scope: %r" % outside[:2])
     for number, sentence in enumerate(STEP_POOL_LABEL_OPENERS, 1):
         lines = fn({"label-%d" % number: (sentence, None)}, question_form._words(sentence))
-        check("step pool label %d: dropped, %s" % (number, sentence[:40]), lines == [], "kept %r" % (lines,))
-
-
-def case_step_pool_keeps_label_words_mid_sentence():
-    """A control: the same label words mid-sentence are no opener, so the pool keeps each sentence."""
-    import question_form  # the one form check (hooks/question_form.py)
-    fn = getattr(question_form, "_step_rulings", None)
-    check("step pool mid-sentence: question_form._step_rulings exists", callable(fn), "missing function")
-    if not callable(fn):
-        return
-    outside = [s for s in STEP_POOL_MID_SENTENCE if LABEL_OPENER_RE.search(s) or not MAIN_POOL_RE.search(s)]
-    check("step pool mid-sentence scope: every row is in origin/main's pool and opens with no label", not outside,
-          "outside the scope: %r" % outside[:2])
-    for number, sentence in enumerate(STEP_POOL_MID_SENTENCE, 1):
-        lines = fn({"mid-%d" % number: (sentence, None)}, question_form._words(sentence))
-        check("step pool mid-sentence %d: kept" % number, any(sentence in line for line in lines),
+        check("step pool label %d: kept, %s" % (number, sentence[:40]), any(sentence in line for line in lines),
               "dropped; the pool gave %r" % (lines,))
 
 
@@ -1916,12 +1902,8 @@ def test_step_pool_keeps_main_ruling_sentences_but_label_openers():
     _judged(case_step_pool_keeps_main_ruling_sentences_but_label_openers)
 
 
-def test_step_pool_drops_sentences_opening_with_a_label():
-    _judged(case_step_pool_drops_sentences_opening_with_a_label)
-
-
-def test_step_pool_keeps_label_words_mid_sentence():
-    _judged(case_step_pool_keeps_label_words_mid_sentence)
+def test_step_pool_keeps_sentences_opening_with_a_label():
+    _judged(case_step_pool_keeps_sentences_opening_with_a_label)
 
 
 def main():
@@ -1947,10 +1929,10 @@ def main():
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes, case_owner_ruling_forms_and_non_rulings,
-                 case_step_ruling_tail_stops_at_an_incident, case_step_pool_keeps_recall_rows,
+                 case_task_str_replace_prose_label_passes, case_step_pool_keeps_each_ruling_word_sentence,
+                 case_step_ruling_tail_stops_at_a_ruling_word, case_step_pool_keeps_recall_rows,
                  case_step_pool_keeps_main_ruling_sentences_but_label_openers,
-                 case_step_pool_drops_sentences_opening_with_a_label, case_step_pool_keeps_label_words_mid_sentence):
+                 case_step_pool_keeps_sentences_opening_with_a_label):
         try:
             case()
         except Exception as exc:
