@@ -12351,6 +12351,22 @@ add("cap: the clone's own settings file is asked, not denied", "ask", "agent-mod
     tool="Edit", cwd=CLONE, file_path=CLONE_SETTINGS,
     old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
     carries=(OPUS,))
+# THE CLONE'S SETTINGS, WRITTEN FROM ITS HOOKS FOLDER. A write to `../settings.json` from the clone's `hooks`
+# folder reaches the clone's own settings file, the SOURCE the install script copies into the config
+# directory, so a cap change there reaches the owner's settings at the next install. The folder such a write
+# names is the clone or its parent, never a `.claude` folder, the config directory or the working folder. So
+# the file's name alone must ask, from here as from the clone itself.
+CLONE_HOOKS = slash(os.path.join(CLONE, "hooks"))
+sh("cap: a sed -i of an opus model onto ../settings.json from the clone's hooks folder asks",
+   "sed -i 's/" + CAP_KEY + "=sonnet/" + CAP_KEY + "=" + OPUS + "/' ../settings.json",
+   "ask", "agent-model-cap", cwd=CLONE_HOOKS, carries=(CAP_KEY + " = " + OPUS,))
+sh("cap: an echo of an opus model onto ../settings.json from the clone's hooks folder asks",
+   "echo " + CAP_KEY + "=opus > ../settings.json",
+   "ask", "agent-model-cap", cwd=CLONE_HOOKS, carries=(CAP_KEY + " = opus",))
+add("cap: an Edit of the clone's settings file by absolute path, from its hooks folder, asks",
+    "ask", "agent-model-cap", tool="Edit", cwd=CLONE_HOOKS, file_path=CLONE_SETTINGS,
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"',
+    carries=(OPUS,))
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
