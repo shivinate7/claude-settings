@@ -763,7 +763,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
         walk = cd_walk(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
         if walk.skipped:
             continue   # a failed `cd` ended the `&&` chain: this segment never runs
-        where = walk.where or command_root(stripped, cwd)   # a segment the walk cannot read: the last cd, since the walk cannot name the folder
+        where = walk.where or command_root(stripped, cwd)   # a segment the walk cannot read: the last cd, as before
         if c_target is not None:
             where = _absolute(c_target, where or "")
             where = where if os.path.isabs(where) else None
