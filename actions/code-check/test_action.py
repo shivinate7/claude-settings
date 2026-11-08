@@ -11,7 +11,7 @@ astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Wi
 skip and say so, except under CI, where they fail.
 The action runs the ruling rule of lint/check_red_run.py against its base (--ruling-only): an uncited claim from the
 check's cutoff on fails it. The Red-run rule is not run in the action."""
-import functools, json, os, shlex, shutil, subprocess, sys, tempfile, unittest
+import functools, json, os, re, shlex, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -481,6 +481,12 @@ def one_line_with(out, *needles):
     return any(all(n in row for n in needles) for row in out.splitlines())
 
 
+def error_payloads(out):
+    """The payload of each ::error line the action printed: one per problem it reports."""
+    prefix = "::error title=code-check::"
+    return [row[len(prefix):] for row in out.splitlines() if row.startswith(prefix)]
+
+
 def path_with(*tools):
     """A PATH folder that links only the named tools from this machine. Returns the folder."""
     folder = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -634,10 +640,30 @@ class RulingCheck(unittest.TestCase):
     """The action's ruling check: a claim authored from the check's cutoff on fails the action unless it names a home
     and a time. The dates here are fixed, so no case reads the check's stamp."""
 
-    def run_head(self, body, when, files=None):
-        """A base with a README, then a head commit dated `when` whose message is a subject and the body."""
-        return check(files or {"docs/widget.md": "Widget docs.\n"}, base_files={"README.md": "# Widget\n"},
-                     head_message="Drop the widget docs\n\n" + body + "\n", head_date=when)
+    # Every tool a layer or a child process could start. A shim logs its call and exits 0.
+    TOOLS = ("npm", "npx", "pipx", "node", "tsc", "astro-check", "ruff", "mypy", "shellcheck")
+    PACKAGE_JSON = '{"name": "widget", "version": "1.0.0"}\n'
+
+    def run_head(self, body, when, files=None, base_files=None, main_files=None, **env):
+        """A base with a README, then a head commit dated `when` whose message is a subject and the body. base_files
+        replaces the base's files; main_files, when given, is a commit on main past the base, passed as --main; env
+        adds variables to the run."""
+        return check(files or {"docs/widget.md": "Widget docs.\n"},
+                     base_files=base_files or {"README.md": "# Widget\n"}, main_files=main_files,
+                     head_message="Drop the widget docs\n\n" + body + "\n", head_date=when, **env)
+
+    def run_docs_only_pr(self, body, when):
+        """A docs-only PR in a repo with a package.json and no node_modules. The base holds .code-check.json, so the
+        shrink check reads a list, and main has moved on past it. Returns (exit, output, log): the log exists only if a
+        tool shim ran."""
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "calls.log")
+        shims = os.pathsep.join(path_shim(tool, 'echo "%s $*" >> %s' % (tool, shlex.quote(log))) for tool in self.TOOLS)
+        rc, out = self.run_head(body, when,
+                                base_files={".code-check.json": config([]), "README.md": "# Widget\n",
+                                            "package.json": self.PACKAGE_JSON},
+                                main_files={"CHANGELOG.md": "Main moved on.\n"},
+                                PATH=shims + os.pathsep + os.environ["PATH"])
+        return rc, out, log
 
     def test_uncited_claim_after_the_cutoff_fails_the_action(self):
         rc, out = self.run_head("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00")
@@ -657,6 +683,29 @@ class RulingCheck(unittest.TestCase):
         rc, out = check({"tests/widgets.txt": "widget tests\n"}, base_files={"README.md": "# Widget\n"},
                         head_message="add widget tests\n", head_date="2026-11-20T10:00:00-06:00")
         self.assertEqual(rc, 0, out)
+
+    def test_docs_only_uncited_claim_fails_on_the_ruling_check_alone(self):
+        """On a .md-only PR the ruling FAIL is the only problem: no layer runs and no tool starts."""
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00")
+        self.assertFalse(os.path.exists(calls), "a tool started on a docs-only PR:\n" + out)
+        layer_rows = re.findall(r"^code-check: \S+ (?:typecheck|lint|format): .*$", out, re.M)
+        self.assertEqual(layer_rows, [], "a language layer ran on a docs-only PR:\n" + out)
+        self.assertIn("comment check: pass", out, "the comment check did not pass a docs-only PR:\n" + out)
+        self.assertEqual(rc, 1, "an uncited ruling claim on a docs-only PR passed the action:\n" + out)
+        fails = [row for row in out.splitlines() if row.startswith("check_red_run: FAIL:")]
+        self.assertEqual(len(fails), 1, "the docs-only PR did not print exactly one ruling FAIL line:\n" + out)
+        self.assertTrue(one_line_with(out, "check_red_run: FAIL:", "Drop the widget docs", "no home and no time"),
+                        "the ruling FAIL names another cause or subject:\n" + out)
+        others = [p for p in error_payloads(out) if not p.startswith("check_red_run:")]
+        self.assertEqual(others, [], "a problem from another check appeared on a docs-only PR:\n" + out)
+
+    def test_docs_only_cited_claim_passes_and_starts_no_tool(self):
+        rc, out, calls = self.run_docs_only_pr("Per the owner's ruling, step:x, 2026-11-08 13:00 CST, drop it.",
+                                               "2026-11-20T10:00:00-06:00")
+        self.assertFalse(os.path.exists(calls), "a tool started on a docs-only PR:\n" + out)
+        self.assertIn("comment check: pass", out, "the comment check did not pass a docs-only PR:\n" + out)
+        self.assertEqual(rc, 0, "a fully cited ruling claim on a docs-only PR failed the action:\n" + out)
+        self.assertIn("ruling check: pass", out, "the ruling check did not pass the cited commit:\n" + out)
 
 
 def tearDownModule():
