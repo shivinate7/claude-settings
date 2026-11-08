@@ -249,6 +249,9 @@ jobs:
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
 
+      - name: Stop-hook notification markup suite
+        run: python3 lint/test_report_guard_notification.py
+
       - name: Stop-hook owner-safe reason suite
         run: python3 lint/test_report_guard_remedy.py
 
