@@ -33,7 +33,7 @@
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
   merge --idle-lanes --live FILE
-                          one line per lane the roadmap's live file shows done and safe to archive, a `hold (` line per lane that can never be judged (never archive it: no cs-step tag, or a step off the record branch with no Step trailer on main), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
+                          lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane that can never be judged; never archive it: no cs-step tag, or a step off the record branch with no Step trailer on main), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
@@ -3401,7 +3401,7 @@ def kind_misfits(kind, files):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live):
-    """merge --idle-lanes: print one line per lane to archive, one `hold (` line per lane that can never be judged (never archived: no cs-step tag, or a step off the record branch with no Step trailer on main), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
+    """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane that can never be judged; never archived: no cs-step tag, or a step off the record branch with no Step trailer on main), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
@@ -3429,7 +3429,8 @@ def idle_lanes(live):
     unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
         held = f", {len(holds)} held" if holds else ""
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. Run get_session on each alone, then archive it."]
+        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
+        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 

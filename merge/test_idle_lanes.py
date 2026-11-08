@@ -36,8 +36,8 @@ SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then ar
 SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it."
 SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
-HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each alone, then archive it."
-MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each alone, then archive it."
+HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
