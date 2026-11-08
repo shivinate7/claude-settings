@@ -1,0 +1,11 @@
+{
+  "title": "report_guard reads its helper modules from the stamped guard.d/<id>/ copy, not the flat hooks copies",
+  "why": "Lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 16:26 CST Nov 8; Merge after: #2321 (step hooks-home-lookups). #2321 adds route_match.py and reply_judge.py to the guard-set lists, so a stamped copy of each lands in guard.d/<id>/. But lint/report_guard.py puts HERE/../hooks first on sys.path (about lines 166, 885, 1358 and 1457), so it still reads the flat copies, which are not installed as one unit. Harm: a half-installed hooks folder can pair a new report_guard with an old helper. The builder recorded the gap in decision install-hooks-whole. Fix shape: report_guard prefers the stamped guard.d/<id>/ folder. Red case: with a stamped copy and a different flat copy, report_guard loads the stamped one. Filed as a fix step under the gap-gets-a-fix ruling (owner, #1516).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 837,
+  "updatedAt": "2026-11-08T16:27:00-06:00"
+}
