@@ -20,10 +20,18 @@ or when MUTATE_FULL=1 asks for it.
 
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
+
+The fifth part pins the shard split: with MUTATE_SHARD=i/n, `run_mutants` runs only entries[i-1::n], so each
+mutant runs in exactly one shard. Each shard prints its slice size, and a malformed or empty shard exits 1.
+
+The sixth part pins the environment a suite gets: `run_suite_file` passes the caller's environment minus the
+mutation test's own variables, and a shard value must not reach a suite.
 """
+import collections
 import contextlib
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -505,6 +513,107 @@ class ErrorBlockReportTests(unittest.TestCase):
                         "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
         self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
                          "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
+
+
+SHARD_VAR = "MUTATE_SHARD"
+SHARD_LINE = re.compile(r"^MUTATE_SHARD=(\d+)/(\d+): (\d+) of (\d+) mutations run in this shard$")
+
+
+def run_sharded(entries, shard):
+    """`run_mutants(entries, stub)` with MUTATE_SHARD=shard (None leaves it unset). Return (code, printed lines, the
+    entries the stub was given). The stub kills every mutant it is given, so the code reads 0 unless the run itself
+    refuses the shard."""
+    given = []
+
+    def stub(entry):
+        given.append(entry)
+        return "mutant", 1, RED_RIGHT, REQUIRED, None
+
+    out = io.StringIO()
+    with mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
+        os.environ.pop("MUTATE_FULL", None)  # a developer's setting must not change the run
+        os.environ.pop(SHARD_VAR, None)
+        if shard is not None:
+            os.environ[SHARD_VAR] = shard
+        code = mutate_shared.run_mutants(entries, stub)
+    return code, out.getvalue().splitlines(), given
+
+
+class ShardSplitTests(unittest.TestCase):
+    """`run_mutants` reads MUTATE_SHARD=i/n and runs only entries[i-1::n] of its list, one shard per run. The slices
+    are read off the stub's calls, not off the code's own arithmetic. Named failures: a mutant runs in no shard or in
+    two, a shard runs the whole list or prints no slice size, or a malformed or empty shard does not stop the run."""
+
+    def test_every_mutant_runs_in_exactly_one_shard(self):
+        runs = {i: run_sharded(mutate_guard.MUTATIONS, "%d/3" % i) for i in (1, 2, 3)}
+        for i, (_code, lines, _given) in runs.items():  # scope first: each run was a shard run
+            self.assertTrue(any(SHARD_LINE.match(line) for line in lines),
+                            "shard %d/3 printed no MUTATE_SHARD line, so it did not run as a shard" % i)
+        ran = collections.Counter(id(entry) for _code, _lines, given in runs.values() for entry in given)
+        wrong = [entry[0] for entry in mutate_guard.MUTATIONS if ran[id(entry)] != 1]
+        self.assertEqual(len(wrong), 0, "%d of %d mutants do not run in exactly one shard of 3, first: %r"
+                         % (len(wrong), len(mutate_guard.MUTATIONS), wrong[:3]))
+
+    def test_each_shard_prints_its_slice_size_and_the_whole_count(self):
+        for i in (1, 2, 3):
+            with self.subTest(shard=i):
+                _code, lines, given = run_sharded(mutate_guard.MUTATIONS, "%d/3" % i)
+                matches = [m for m in map(SHARD_LINE.match, lines) if m]
+                self.assertTrue(matches, "shard %d/3 printed no 'MUTATE_SHARD=%d/3: k of M mutations run in this shard' line"
+                                % (i, i))
+                k, total = int(matches[0].group(3)), int(matches[0].group(4))
+                self.assertEqual(total, len(mutate_guard.MUTATIONS),
+                                 "shard %d/3 counts %d mutants in the list, want %d"
+                                 % (i, total, len(mutate_guard.MUTATIONS)))
+                self.assertEqual(k, len(given), "shard %d/3 reports %d mutants run, but ran %d" % (i, k, len(given)))
+
+    def test_a_malformed_shard_exits_one(self):
+        for bad in ("0/2", "4/3"):
+            with self.subTest(shard=bad):
+                code, _lines, _given = run_sharded(["a", "b"], bad)
+                self.assertEqual(code, 1, "MUTATE_SHARD=%s exits %d, want 1" % (bad, code))
+
+    def test_an_empty_shard_exits_one_with_nothing_ran(self):
+        # Two mutants over three shards: shard 3/3 is empty, the empty state a small list reaches.
+        code, lines, given = run_sharded(["a", "b"], "3/3")
+        self.assertEqual(code, 1, "the empty shard 3/3 exits %d, want 1" % code)
+        self.assertIn("Nothing ran", "\n".join(lines), "the empty shard 3/3 printed no 'Nothing ran'")
+        self.assertEqual(given, [], "the empty shard 3/3 ran %d mutants" % len(given))
+
+    def test_without_a_shard_every_mutant_runs_once(self):
+        # Control, green on the old code: an unset MUTATE_SHARD runs the whole list in one run.
+        code, _lines, given = run_sharded(mutate_guard.MUTATIONS, None)
+        self.assertEqual(code, 0, "an unset MUTATE_SHARD exits %d, want 0" % code)
+        ran = collections.Counter(id(entry) for entry in given)
+        wrong = [entry[0] for entry in mutate_guard.MUTATIONS if ran[id(entry)] != 1]
+        self.assertEqual(len(wrong), 0, "%d mutants do not run exactly once with no shard, first: %r"
+                         % (len(wrong), wrong[:3]))
+
+
+ENV_SUITE = ('import os\n'
+             'print("KEEP seen: %s" % ("KEEP" in os.environ))\n'
+             'print("MUTATE_SHARD seen: %s" % ("MUTATE_SHARD" in os.environ))\n')
+
+
+class SuiteEnvTests(unittest.TestCase):
+    """`run_suite_file` runs each suite with the caller's environment, minus the mutation test's own variables. A shard
+    value must not reach a suite: a suite run in a shard would read MUTATE_SHARD and could change its own cases."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        write_files(self.run, {"print_env.py": ENV_SUITE})
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ["MUTATE_SHARD"] = "1/3"
+        os.environ["KEEP"] = "1"
+
+    def test_a_suite_run_gets_no_shard_value(self):
+        output, _seconds = mutate_shared.run_suite_file(self.run, "print_env.py", 60,
+                                                        classify=lambda code, out, timed_out: out)
+        self.assertIn("KEEP seen: True", output, "the control: the suite did not read the caller's environment")
+        self.assertIn("MUTATE_SHARD seen: False", output, "a suite run by run_suite_file got MUTATE_SHARD")
 
 
 if __name__ == "__main__":

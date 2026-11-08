@@ -5,8 +5,8 @@ WindowsSplit proves: (1) each suite command in REQUIRED runs in exactly one `win
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
 slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
-Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
-job-level if, if any, holds only the draft guard; its scope condition sits in each step
+Linux job family (MUTATE_JOB and its -b, -c shards) and runs nowhere else; the guard and mutate jobs skip on the
+`guard` scope flag. A scoped job's job-level if, if any, holds only the draft guard; its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
 Why not rule_audit.py: it reads step names only. This needs job boundaries and `run:` lines.
@@ -309,11 +309,17 @@ def shard_base(name):
 # The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
+# The mutation test's family: MUTATE_JOB, then its -b and -c shard jobs. Each job's step carries MUTATE_SHARD=i/n,
+# and the i values cover 1/n..n/n once each. n is read from those values, never from a constant here.
+MUTATE_SHARD_VAR = "MUTATE_SHARD"
+MUTATE_FAMILY = re.compile(re.escape(MUTATE_JOB) + r"(-[a-z])?")
+MUTATE_SHARD_VALUE = re.compile(r"(\d+)/(\d+)")
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
 # The scope flag each job skips on when the flag is not its own name.
-FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos"}
+FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", MUTATE_JOB + "-b": "guard", MUTATE_JOB + "-c": "guard",
+           SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos"}
 # The lint jobs run on every PR with no scope condition: `checks` and its split half `checks-merge-install`.
 LINT_JOBS = ("checks", "checks-merge-install")
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
@@ -606,6 +612,14 @@ def hardening_problems(text):
         mentions = sum(strip_comment(line).count(var) for line in text.splitlines())  # a comment that names the var is no home
         if mentions != homes:
             problems.append(f"{var} appears {mentions} times in checks.yml, want {homes} (once per shard step's env)")
+    # MUTATE_SHARD is one step's env in the mutate family (mutate_problems). Any other mention (a job's env, a $GITHUB_ENV
+    # leak) would reach a run that is not its own, and a comment that names it is no home.
+    mutate_mentions = sum(strip_comment(line).count(MUTATE_SHARD_VAR) for line in text.splitlines())
+    mutate_homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
+                       if st.get("run") == MUTATE_CMD and isinstance(st.get("env"), dict) and MUTATE_SHARD_VAR in st["env"])
+    if mutate_mentions != mutate_homes:
+        problems.append(f"{MUTATE_SHARD_VAR} appears {mutate_mentions} times in checks.yml, want {mutate_homes} "
+                        "(once per mutate step's env)")
     for name, job in windows_jobs(text).items():
         steps = job["steps"]
         if not any(key(st) in REQUIRED for st in steps):
@@ -667,16 +681,117 @@ def guard_problems(text):
     return problems
 
 
+def runs_on_pull_request(job, st):
+    """True when the job's `if` and the step's `if` both hold on a pull request with the guard flag on. An `if` that
+    eval_if cannot read counts as not holding."""
+    conds = [c for c in (job["if"], step_if(st)) if c]
+    try:
+        return all(eval_if(c, "pull_request", "true") for c in conds)
+    except Exception:
+        return False
+
+
 def mutate_problems(text):
-    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
+    """The guard mutation test runs in the MUTATE_JOB family (MUTATE_JOB, then its -b and -c shards) on Linux, and in no
+    other job. Each family job runs the test once, on ubuntu, on pull_request: no job-level or step-level `if` may skip
+    it. Each step carries MUTATE_SHARD=i/n, and the i values cover 1/n..n/n once each, so each mutant runs in one shard.
+    n is the total those values name, read from checks.yml."""
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
+    if not homes:
+        return [f"{MUTATE_CMD!r} runs in no job, want the {MUTATE_JOB} family"]
+    family = [n for n in jobs if MUTATE_FAMILY.fullmatch(n)]
     problems = []
-    if homes != [MUTATE_JOB]:
-        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly [{MUTATE_JOB!r}]")
-    if MUTATE_JOB in jobs and not (jobs[MUTATE_JOB]["os"] or "").startswith("ubuntu"):
-        problems.append(f"{MUTATE_JOB} runs on {jobs[MUTATE_JOB]['os']}, want ubuntu-latest")
+    stray = [n for n in homes if n not in family]
+    if stray:
+        problems.append(f"{MUTATE_CMD!r} runs in {stray}, outside the {MUTATE_JOB} family")
+    shards = {}
+    for name in family:
+        job = jobs[name]
+        runs = [st for st in job["steps"] if st.get("run") == MUTATE_CMD]
+        if len(runs) != 1:
+            problems.append(f"{name} runs {MUTATE_CMD!r} {len(runs)} times, want once")
+            continue
+        if not (job["os"] or "").startswith("ubuntu"):
+            problems.append(f"{name} runs on {job['os']}, want ubuntu-latest")
+        if not runs_on_pull_request(job, runs[0]):
+            problems.append(f"{name} may skip pull_request: job if {job['if']}, step if {step_if(runs[0])}")
+        env = runs[0]["env"] if isinstance(runs[0].get("env"), dict) else {}
+        value = env.get(MUTATE_SHARD_VAR)
+        if value is None:
+            problems.append(f"{name} has no {MUTATE_SHARD_VAR} on its mutate step")
+            continue
+        m = MUTATE_SHARD_VALUE.fullmatch(value)
+        if not m:
+            problems.append(f"{name}: {MUTATE_SHARD_VAR} is {value!r}, want i/n")
+            continue
+        shards[name] = (int(m.group(1)), int(m.group(2)))
+    totals = {total for _i, total in shards.values()}
+    if len(totals) > 1:
+        return problems + [f"{MUTATE_SHARD_VAR} values name different totals: {sorted(totals)}"]
+    if not totals:
+        return problems
+    total = totals.pop()
+    picks = [i for i, _t in shards.values()]
+    for i in sorted(set(picks)):
+        if not 1 <= i <= total:
+            problems.append(f"shard {i}/{total} is out of range")
+    for i in range(1, total + 1):
+        runs_in = picks.count(i)
+        if runs_in == 0:
+            problems.append(f"no job runs shard {i}/{total}, so its mutants run nowhere")
+        elif runs_in > 1:
+            problems.append(f"shard {i}/{total} runs in {runs_in} jobs, so its mutants run more than once")
     return problems
+
+
+MUTATE_SCOPE = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"
+
+
+def mutate_job(name, shard=None, runs_on="ubuntu-latest", job_if=None, step_cond=MUTATE_SCOPE):
+    """One job of the mutation family in the checks-macos-b shape: `needs: scope`, no job-level `if`, and a step that
+    carries the scope condition and the shard value. Fixture text for mutate_problems."""
+    text = f"  {name}:\n    runs-on: {runs_on}\n    needs: scope\n"
+    if job_if:
+        text += f"    if: {job_if}\n"
+    text += "    steps:\n      - name: Guard mutation test\n"
+    if step_cond:
+        text += f"        if: {step_cond}\n"
+    if shard:
+        text += f"        env:\n          {MUTATE_SHARD_VAR}: {shard}\n"
+    return text + f"        run: {MUTATE_CMD}\n"
+
+
+def mutate_doc(*jobs):
+    return "jobs:\n" + "".join(jobs)
+
+
+def mutate_family(*shards):
+    """The family for `shards` (i/n values): MUTATE_JOB, then -b, -c, one job per shard, each on ubuntu and pull_request."""
+    names = [MUTATE_JOB] + [f"{MUTATE_JOB}-{letter}" for letter in "bcdefgh"[:len(shards) - 1]]
+    return mutate_doc(*(mutate_job(name, shard) for name, shard in zip(names, shards)))
+
+
+def family_names(text):
+    """The mutate family's job names, as checks.yml names them: MUTATE_JOB, then its -b, -c and any later shard."""
+    return [n for n in all_jobs(text) if MUTATE_FAMILY.fullmatch(n)]
+
+
+def scope_loop_problems(text, names):
+    """The scope loop: job_check_problems for each named job. A job the flag table does not list takes the family's
+    flag, since every shard of the family skips on the guard flag."""
+    jobs = all_jobs(text)
+    problems = []
+    for name in names:
+        if name not in jobs:
+            problems.append(f"no job named {name}")
+            continue
+        problems += job_check_problems(name, jobs[name], FLAG_OF.get(name, FLAG_OF[MUTATE_JOB]))
+    return problems
+
+
+# A scope condition with no push branch: on push, with every flag false, it reads false, so the job skips push.
+SKIPS_PUSH = "${{ needs.scope.outputs.guard == 'true' || github.event_name == 'pull_request' }}"
 
 
 def shoot_problems(text):
@@ -818,12 +933,21 @@ class WindowsSplit(unittest.TestCase):
 
     def test_scope_job_checks_every_other_job(self):
         self.assertEqual(scope_problems(self.text), [])
-        # The guard and mutate jobs skip on the
-        # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
-        jobs = all_jobs(self.text)
-        for name in (GUARD_JOB, MUTATE_JOB):
-            self.assertIn(name, jobs, f"no job named {name}")
-            self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
+        # The guard job, then every job of the mutate family as checks.yml names it, so a shard past -c is scope-checked too.
+        # The guard and mutate jobs skip on the guard flag. Named failure: a cut job runs or never runs on push, schedule
+        # and dispatch. The family must still hold the three shards the design names.
+        family = family_names(self.text)
+        self.assertTrue({MUTATE_JOB, MUTATE_JOB + "-b", MUTATE_JOB + "-c"} <= set(family), f"the mutate family is {family}")
+        self.assertEqual(scope_loop_problems(self.text, [GUARD_JOB] + family), [])
+
+    def test_a_shard_past_the_third_is_scope_checked(self):
+        # Control: the real file's family passes the loop.
+        self.assertEqual(scope_loop_problems(self.text, family_names(self.text)), [])
+        # Named failure: a 4th shard that skips push goes unchecked when the loop reads only the three named jobs.
+        four = self.text + "\n" + mutate_job(MUTATE_JOB + "-d", "4/4", step_cond=SKIPS_PUSH)
+        problems = scope_loop_problems(four, family_names(four))
+        self.assertTrue(any(p.startswith(f"{MUTATE_JOB}-d: scope condition skips on push") for p in problems),
+                        "the 4th shard that skips push is not reported, got %r" % problems)
 
     def test_the_check_form_sees_its_defects(self):
         scope_condition = "needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request'"
@@ -902,6 +1026,37 @@ class WindowsSplit(unittest.TestCase):
         for label, text in cases.items():
             with self.subTest(case=label):
                 self.assertTrue([p for p in hardening_problems(text) if "GUARD_SHARD appears" in p], label)
+
+    def test_a_mutate_shard_comment_is_no_home(self):
+        # Rows: a full-line comment, a trailing comment on a shard key, and a comment after a lone apostrophe.
+        # Named failure: a comment that names MUTATE_SHARD counts as a shard home, so checks.yml goes red for a comment.
+        text = mutate_family("1/3", "2/3", "3/3")
+        self.assertIn("          MUTATE_SHARD: 1/3\n", text)  # the fixture: a mutate step's shard key
+        cases = {
+            "a full-line comment": text + "# MUTATE_SHARD=1/3 sets the shard on the mutate step only\n",
+            "a trailing comment on a shard key": text.replace("          MUTATE_SHARD: 1/3\n",
+                                                              "          MUTATE_SHARD: 1/3  # MUTATE_SHARD\n", 1),
+            "a comment after a lone apostrophe": text + "      - run: echo Don't # MUTATE_SHARD=1/3\n",
+        }
+        baseline = hardening_problems(text)  # a comment changes no verdict, whatever the file's own verdict is
+        for label, doc in cases.items():
+            with self.subTest(case=label):
+                self.assertEqual(hardening_problems(doc), baseline, label)
+
+    def test_a_mutate_shard_in_quotes_or_after_a_lone_quote_is_a_leak(self):
+        # Rows: a comment opener inside quotes, a lone apostrophe before a leak, and a leak after an open quote above it.
+        # Named failure: a quote or an apostrophe hides a MUTATE_SHARD value that reaches $GITHUB_ENV, so it goes unflagged.
+        text = mutate_family("1/3", "2/3", "3/3")
+        cases = {
+            "a comment opener inside quotes": text + '      - run: echo "# x" && echo MUTATE_SHARD=1/3 >> "$GITHUB_ENV"\n',
+            "a lone apostrophe before the leak": text + "      - run: echo Don't; echo MUTATE_SHARD=1/3 >> \"$GITHUB_ENV\"\n",
+            "a leak after an open quote on the line above": text + ('      - run: |\n          echo "start\n'
+                                                                    '          echo MUTATE_SHARD=1/3 >> "$GITHUB_ENV"\n'
+                                                                    '          end"\n'),
+        }
+        for label, doc in cases.items():
+            with self.subTest(case=label):
+                self.assertTrue([p for p in hardening_problems(doc) if "MUTATE_SHARD appears" in p], label)
 
     def test_checker_sees_drop_and_duplicate(self):
         def doc(*jobs, slice_=True):
@@ -1027,7 +1182,8 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
-        checks = "jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
+        checks = ("jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
+                  "        env:\n          MUTATE_SHARD: 1/1\n")
         self.assertEqual(mutate_problems(checks), [])
         self.assertTrue(mutate_problems(checks.replace("checks-mutate-guard", "checks")))  # in the lint job
         self.assertTrue(mutate_problems(checks.replace("ubuntu-latest", "windows-latest")))  # on Windows
@@ -1035,6 +1191,43 @@ class WindowsSplit(unittest.TestCase):
                                         "      - run: python3 hooks/mutate_guard.py\n"
                                         "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
                                         "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+
+    def test_the_mutate_family_as_designed_is_clean(self):
+        # The family as the design names it: three ubuntu jobs, each on pull_request, shards 1/3, 2/3 and 3/3.
+        self.assertEqual(mutate_problems(mutate_family("1/3", "2/3", "3/3")), [])
+
+    def test_the_mutate_family_sees_its_shard_defects(self):
+        # Control, green on the old checker too: one job that runs the whole list as shard 1 of 1.
+        self.assertEqual(mutate_problems(mutate_doc(mutate_job(MUTATE_JOB, "1/1"))), [])
+        # Named failures: each defect reads as its one named problem, each in its own subtest.
+        off_pr = "${{ github.event_name != 'pull_request' }}"
+        bad = {
+            "a missing shard": (mutate_family("1/3", "2/3"), "no job runs shard 3/3"),
+            "a duplicated shard": (mutate_family("1/3", "2/3", "2/3"), "shard 2/3 runs in 2 jobs"),
+            "a shard off pull_request by its job if": (
+                mutate_doc(mutate_job(MUTATE_JOB, "1/3"), mutate_job(MUTATE_JOB + "-b", "2/3"),
+                           mutate_job(MUTATE_JOB + "-c", "3/3", job_if=off_pr)),
+                f"{MUTATE_JOB}-c may skip pull_request"),
+            "a shard off pull_request by its step if": (
+                mutate_doc(mutate_job(MUTATE_JOB, "1/3"), mutate_job(MUTATE_JOB + "-b", "2/3"),
+                           mutate_job(MUTATE_JOB + "-c", "3/3", step_cond=off_pr)),
+                f"{MUTATE_JOB}-c may skip pull_request"),
+            "a shard job with no shard value": (
+                mutate_doc(mutate_job(MUTATE_JOB, "1/2"), mutate_job(MUTATE_JOB + "-b")),
+                f"{MUTATE_JOB}-b has no MUTATE_SHARD"),
+            "a shard value outside its total": (mutate_family("0/2", "2/2"), "shard 0/2 is out of range"),
+            "a shard job on macOS": (
+                mutate_doc(mutate_job(MUTATE_JOB, "1/2"), mutate_job(MUTATE_JOB + "-b", "2/2", runs_on="macos-latest")),
+                f"{MUTATE_JOB}-b runs on macos-latest"),
+            "a shard job outside the family": (
+                mutate_doc(mutate_job(MUTATE_JOB, "1/2"), mutate_job(MUTATE_JOB + "-2", "2/2")),
+                f"outside the {MUTATE_JOB} family"),
+        }
+        for label, (text, fragment) in bad.items():
+            with self.subTest(defect=label):
+                problems = mutate_problems(text)
+                self.assertTrue(any(fragment in p for p in problems),
+                                "%s: want a problem naming %r, got %r" % (label, fragment, problems))
 
 
 def split_doc(jobs):

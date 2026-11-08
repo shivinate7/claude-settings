@@ -3427,7 +3427,8 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     ERROR lines from `mutate_shared.diagnostic_lines`).
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
-    to know whether stage 1 ran the required case."""
+    to know whether stage 1 ran the required case. MUTATE_SHARD is dropped from the suite's env: it
+    only picks which mutants this run starts."""
     env = dict(os.environ)
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
@@ -3437,6 +3438,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
     env[variable] = copy_path
     env["CLAUDE_CONFIG_DIR"] = config_dir
     env.pop("MUTATE_ONLY", None)
+    env.pop("MUTATE_SHARD", None)  # the shard picks mutants for this run; a suite must not read it
     if only:
         env["MUTATE_ONLY"] = only  # the suites run just the cases whose name holds this
     # stderr goes to a temp file, not a pipe: test_guard.py leaves a `sleep 300` that holds the suite's
