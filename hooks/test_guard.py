@@ -3764,7 +3764,7 @@ sh("pointer: no global rules file at all fires nothing",
 FAMILY = "hand-made-worktree"
 #
 # A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
-# (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real
+# (decision predicate-is-the-act). The act refused is a real
 # `git worktree add` whose NEW TREE path resolves outside `<primary>/.claude/worktrees/`. The
 # primary is the one of the repo the call acts on. A repo that sits under the guard's temp folder is
 # a throwaway and passes: the rule judges the REPO, never the target, so a non-temp repo adding a
@@ -12589,6 +12589,28 @@ add("cap: a Write of ../settings.json, inner's own install folder file, from inn
     content=cap_settings(), carries=(OPUS,))
 add("cap: a Write of ../../settings.json that sets no model variable, from inner's hooks folder, stays allowed", "allow",
     tool="Write", cwd=NEST_HOOKS, file_path="../../settings.json", content=json.dumps({"theme": "dark"}))
+# A SETTINGS FILE AT A CHECKOUT'S ROOT OR AN INSTALL FOLDER'S ROOT ASKS FROM ANY FOLDER. The place is the folder the
+# file sits in, marked by `.git` or `install.ps1`, not the folder the write runs from. `CHECK` (`.git` alone) and
+# `EXPORT` (`install.ps1` alone) each hold a settings.json at the root. The fixture named settings.json in a scratch
+# folder (CAP_FIXTURE, above) stays allowed: no marker names its folder.
+CHECK_SETTINGS = slash(os.path.join(CHECK, "settings.json"))
+EXPORT_SETTINGS = slash(os.path.join(EXPORT, "settings.json"))
+add("cap: a Write of a checkout's root settings.json from a folder outside the checkout asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path=CHECK_SETTINGS, content=cap_settings(), carries=(OPUS,))
+add("cap: an Edit of a checkout's root settings.json from a folder outside the checkout asks", "ask",
+    "agent-model-cap", tool="Edit", cwd=NOGIT, file_path=CHECK_SETTINGS,
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"', carries=(OPUS,))
+add("cap: a Write of an install folder's settings.json from a folder outside it asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path=EXPORT_SETTINGS, content=cap_settings(), carries=(OPUS,))
+add("cap: an Edit of an install folder's settings.json from a folder outside it asks", "ask",
+    "agent-model-cap", tool="Edit", cwd=NOGIT, file_path=EXPORT_SETTINGS,
+    old_string='"' + CAP_KEY + '": "sonnet"', new_string='"' + CAP_KEY + '": "' + OPUS + '"', carries=(OPUS,))
+# A FARTHER ROOT IS A PLACE TOO. `MIXED` is a checkout (`.git`), and `sub` in it holds the install script. From `sub`'s
+# hooks folder the nearest marker is `sub`, but `MIXED/settings.json` sits one folder above `sub`, at the checkout's
+# root. A walk that stops at the nearest marker of either kind never reaches `MIXED`, so it allows this write.
+add("cap: a Write of a checkout's root settings.json from a hooks folder under an install.ps1 folder asks", "ask",
+    "agent-model-cap", tool="Write", cwd=MIXED_HOOKS, file_path=slash(os.path.join(MIXED, "settings.json")),
+    content=cap_settings(), carries=(OPUS,))
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
