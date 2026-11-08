@@ -13518,7 +13518,7 @@ sendto_allow("an empty transcript names no spawn, so a builder's id passes", SEN
 # Allowed: mutation tests (hooks/mutate_*.py) stay a builder's. A builder adds a mutant.
 sendto_allow("a mutant added to hooks/mutate_guard.py, sent to a builder, is allowed",
              SENDTO_BUILDER, "Add a mutant to hooks/mutate_guard.py.", T_SENDTO_BUILDER)
-# Review round 2. Each case here is a gap the guard leaves open today: a negated verb, a green word before a path, a
+# Each case here pins one edge: a negated verb, a green word before a path, a
 # nodeid with `::`, a noun `fix` and a read verb, a reference path after a clause, and a path carried across a sentence.
 sendto_allow("a negated change to a test is no edit, and a fix to guard.py is allowed to a builder",
              SENDTO_BUILDER, "Do not change tests/test_app.py. Fix guard.py.", T_SENDTO_BUILDER)
@@ -13544,7 +13544,7 @@ sendto_refuse("a test path read in one clause and fixed in the next, to a builde
 sendto_refuse("a path read in one sentence is carried to Replace it in the next, to a builder, naming test-author",
               SENDTO_BUILDER, "Read tests/x.py. Replace it with the fix.", T_SENDTO_BUILDER, "test-author",
               lacks=("tests/x.py",))
-# Review round 3. A `make sure` is no edit, a run verb's path is not carried to a later fix, and a product path
+# A `make sure` is no edit, a run verb's path is not carried to a later fix, and a product path
 # is not cleared by a green word that follows `to`.
 sendto_allow("a make-sure request for a test to pass is no edit, for a builder",
              SENDTO_BUILDER, "Make sure tests/x.py passes.", T_SENDTO_BUILDER)
@@ -13553,7 +13553,7 @@ sendto_allow("a run of a test, then a fix of guard.py, is allowed to a builder",
 sendto_refuse("a product fix whose goal is a test passing, to a test-author, is refused, naming builder",
               SENDTO_AUTHOR, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_AUTHOR, "builder",
               lacks=("guard.py",))
-# Review round 4. A path in a clause that names a reference (`the case in X`, `as X says`, `agree with X`), or a read
+# A path in a clause that names a reference (`the case in X`, `as X says`, `agree with X`), or a read
 # path carried only to an anaphor (`it`, `that`, `them`, `the/that assert|case|test`), and a negated edit clause.
 sendto_allow("make guard.py handle a case that a test path holds is allowed to a builder",
              SENDTO_BUILDER, "Make guard.py handle the case in tests/x.py.", T_SENDTO_BUILDER)

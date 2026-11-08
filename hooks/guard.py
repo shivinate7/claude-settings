@@ -2208,7 +2208,7 @@ def _message_spawn_role(transcript: str, agent: str) -> str:
     uses, role = {}, ""
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
-            if '"subagent_type"' not in line and agent not in line:
+            if '"subagent_type"' not in line and agent not in line:  # glossary-ok: subagent_type is Claude Code's own field name
                 continue
             try:
                 record = json.loads(line)
