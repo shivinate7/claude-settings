@@ -7,6 +7,7 @@ checkout, a tree's status, the default branch, a branch's proof, session livenes
 git_reads.py, shared with the janitor: a test or the janitor that patches one of them patches it
 there, on the one object that every caller reads.
 """
+import ast
 import errno
 import functools
 import json
@@ -481,6 +482,30 @@ def decode_ansi_c(text: str) -> str:
     return "".join(out) + text[last:] if out else text
 
 
+# A PowerShell call operator whose command is a parenthesized run of plain string literals joined
+# by `+`: `& ('gi'+'t') push`. The literals hold no escape, no variable and no quote of the other kind.
+_PS_LITERAL = r"""'[^'`\\]*'|"[^"`$\\]*\""""
+_PS_CALL_FOLD = re.compile(
+    r"&\s*\(\s*((?:%s)(?:\s*\+\s*(?:%s))*)\s*\)" % (_PS_LITERAL, _PS_LITERAL))
+_PS_LITERAL_RE = re.compile(_PS_LITERAL)
+
+
+def fold_call_operator(segment: str) -> str:
+    """`segment` with each PowerShell `& ('a'+'b')` read as `& 'ab'`, the command word PowerShell
+    runs. Only a `&` outside quotes folds, and only when every part is a plain literal. A command
+    word built any other way stays as written, as the guard reads it today."""
+    if "&" not in segment:
+        return segment
+    outside = {i for i, char, quote in walk_quotes(segment) if char == "&" and not quote}
+    out, last = [], 0
+    for found in _PS_CALL_FOLD.finditer(segment):
+        folded = "".join(part[1:-1] for part in _PS_LITERAL_RE.findall(found.group(1)))
+        if found.start() in outside and "'" not in folded:
+            out.append(segment[last:found.start()] + "& '" + folded + "'")
+            last = found.end()
+    return type(segment)("".join(out) + segment[last:]) if out else segment
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 
@@ -491,6 +516,7 @@ def segment_tokens(segment: str):
     # keeps posix shlex from eating it (`C:\\repo` would read as `C:repo`).
     source = ""
     if is_powershell(segment):
+        segment = fold_call_operator(segment)
         segment = segment.replace("\\", "\\\\")
         if "''" in segment or '""' in segment or "`" in segment:
             segment = _powershell_values(segment)
@@ -1926,11 +1952,69 @@ def bare_words(segment: str):
     return words, {i for i, (_, b) in enumerate(spans) if b}
 
 
+PYTHON_NAME = re.compile(r"^(?:python|py)(?:\d+(?:\.\d+)*)?(?:\.exe)?$")
+_SUBPROCESS_RUNNERS = {"run", "call", "check_call", "check_output", "Popen"}
+
+
+def _folded_string(node):
+    """The string a constant, or constants joined by `+`, make; else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_string(node.left), _folded_string(node.right)
+        return None if left is None or right is None else left + right
+    return None
+
+
+def _python_runs(code: str):
+    """The command text of each process a Python `-c` body starts: `subprocess.run`, `call`,
+    `check_call`, `check_output` or `Popen` with a list of foldable strings, and `os.system` with a
+    foldable string. Read with Python's own parser, so text that only names a command, such as a
+    `print`, runs nothing. A call with an argument that does not fold, or a body that does not
+    parse, is no read."""
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return []
+    found = []
+    for node in ast.walk(tree):
+        func = node.func if isinstance(node, ast.Call) else None
+        if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+            continue
+        keys = {kw.arg: kw.value for kw in node.keywords}
+        arg = node.args[0] if node.args else keys.get("args" if func.value.id == "subprocess" else "command")
+        if func.value.id == "subprocess" and func.attr in _SUBPROCESS_RUNNERS and isinstance(
+                arg, (ast.List, ast.Tuple)):
+            words = [_folded_string(item) for item in arg.elts]
+            if words and None not in words:
+                found.append(PosixScript(shlex.join(words)))
+        elif func.value.id == "os" and func.attr == "system" and arg is not None:
+            text = _folded_string(arg)
+            if text:
+                found.append(PosixScript(text))
+    return found
+
+
+def python_script_runs(tokens):
+    """The command texts a `python -c BODY` segment starts (`_python_runs`), else []."""
+    at = resolve_command(tokens)
+    if at is None or not PYTHON_NAME.match(basename(tokens[at])):
+        return []
+    for index in range(at + 1, len(tokens)):
+        token = tokens[index]
+        if not token.startswith("-"):
+            return []   # a script file, not a body
+        if re.fullmatch(r"-[A-Za-z]*c", token):
+            return _python_runs(tokens[index + 1]) if index + 1 < len(tokens) else []
+    return []
+
+
 def inner_commands(tokens):
     """Every command text one segment hands on, for a rule that judges the command word: what a
-    shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
-    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
-    found = [nested_script(tokens), ssh_remote_script(tokens)]
+    shell, `eval` or `ssh` gets (nested_script, ssh_remote_script), what a runner starts
+    (wrapped_commands) and what a `python -c` body runs (python_script_runs), at each command in the
+    segment. The one reader of these wrappers."""
+    found = [nested_script(tokens), ssh_remote_script(tokens), *python_script_runs(tokens)]
     for at in command_indexes(tokens):
         found.extend(wrapped_commands(tokens, at))
     return [text for text in found if text]
