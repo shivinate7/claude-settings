@@ -5329,6 +5329,80 @@ caseM10() {
   if msg=$(m10_run stalekeep); then ok "$name"; else bad "$name" "$msg"; fi
 }
 
+# ---- routecopy: a guard.d/<id>/ copy of route_match finds the install's route rows ----
+# The probe loads route_match from the copy's folder and reads the rows, with only a temp HOME in its
+# environment. The copy is judged on what read_rows() returns, so the fixture install's rows are the
+# expected answer, whatever the install lands beside the copy.
+ROUTE_PROBE="$work/route-rows-probe.py"
+ROUTE_PROBE_ROW="routecopy-probe-row"
+
+# routecopy_install CASE: a fixture install of this repo's hooks, run as install.sh --cloud into a temp config
+# dir. Its route_rows.json holds one probe row. Sets rc_h (temp HOME), rc_cfg (config dir) and rc_set (the
+# guard.d folder the install stamps). Returns 1, after a bad line, when the install does not land.
+routecopy_install() {
+  rc_h=$(new_home); rc_cfg="$rc_h/.claude-cfg"; rc_co="$work/$1-checkout"
+  mkdir -p "$rc_co/hooks"
+  cp "$INSTALL_SH" "$rc_co/install.sh"
+  cp "$REPO_ROOT/landed-dirs.txt" "$rc_co/landed-dirs.txt"
+  printf '# %s fixture CLAUDE.md\n' "$1" > "$rc_co/CLAUDE.md"
+  printf '{}\n' > "$rc_co/settings.json"
+  copy_folder hooks "$rc_co/hooks" || { bad "$1" "could not copy the hooks folder into the fixture"; return 1; }
+  printf '{"rows": [{"id": "%s", "act": "probe", "route": "probe", "surface": "local", "outcome": "works", "measured": "fixture", "cc_version": "fixture", "evidence": "fixture", "by": "test", "pattern": "^probe$"}]}\n' "$ROUTE_PROBE_ROW" > "$rc_co/hooks/route_rows.json"
+  cat > "$ROUTE_PROBE" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import route_match
+rows = route_match.read_rows()
+print("module " + route_match.__file__)
+print("rows " + ("none" if rows is None else json.dumps(sorted(str(row.get("id")) for row in rows))))
+PY
+  rc_out=$( cd "$rc_co" && env -i PATH="$PATH" HOME="$rc_h" CLAUDE_CONFIG_DIR="$rc_cfg" bash ./install.sh --cloud 2>&1 ); rc_rc=$?
+  if [ "$rc_rc" -ne 0 ]; then bad "$1" "install.sh --cloud exited $rc_rc: $(printf '%s' "$rc_out" | tail -n 3)"; return 1; fi
+  if ! grep -q "$ROUTE_PROBE_ROW" "$rc_cfg/hooks/route_rows.json" 2>/dev/null; then
+    bad "$1" "the install did not land hooks/route_rows.json with the probe row"; return 1
+  fi
+  rc_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$rc_cfg/hooks/guard.py" 2>/dev/null | head -n1)
+  rc_set="$rc_cfg/hooks/guard.d/$rc_id"
+  if [ -z "$rc_id" ] || [ ! -f "$rc_set/route_match.py" ]; then
+    bad "$1" "the install landed no route_match.py in guard.d/<id>/ (id=$rc_id)"; return 1
+  fi
+  return 0
+}
+
+# routecopy_verdict CASE OUTPUT: the probe's output, read in scope order. Scope first: route_match must load
+# from the copy's folder. Then the subject: read_rows() must hold the probe row.
+routecopy_verdict() {
+  rc_mod=$(printf '%s\n' "$2" | sed -n 's/^module //p' | head -n1)
+  rc_rows=$(printf '%s\n' "$2" | sed -n 's/^rows //p' | head -n1)
+  case $rc_mod in
+    "$rc_set/route_match.py") ;;
+    *) bad "$1" "route_match did not load from guard.d/<id>/: $(printf '%s' "$2" | tail -n 1)"; return ;;
+  esac
+  case $rc_rows in
+    none) bad "$1" "route_match, loaded from guard.d/<id>/, reads no route rows: read_rows() returns None" ;;
+    *"\"$ROUTE_PROBE_ROW\""*) ok "$1" ;;
+    *) bad "$1" "route_match, loaded from guard.d/<id>/, reads route rows that are not the install's: $rc_rows" ;;
+  esac
+}
+
+routecopy1() {
+  name="routecopy1: a guard.d/<id>/ copy of route_match finds the install's route rows"
+  routecopy_install routecopy1 || return
+  got=$(env -i PATH="$PATH" HOME="$rc_h" python3 -I -B "$ROUTE_PROBE" "$rc_set" 2>&1)
+  routecopy_verdict "$name" "$got"
+  rm -rf "$rc_h"
+}
+
+# The control: the same probe, with the seam that names the install's rows. It is green on the code as it is,
+# so a red row comes from the lookup and not from the probe or the rows file.
+routecopy1c() {
+  name="routecopy1c (control): with GUARD_ROUTE_ROWS naming the install's rows, the guard.d/<id>/ copy reads them"
+  routecopy_install routecopy1c || return
+  got=$(env -i PATH="$PATH" HOME="$rc_h" GUARD_ROUTE_ROWS="$rc_cfg/hooks/route_rows.json" python3 -I -B "$ROUTE_PROBE" "$rc_set" 2>&1)
+  routecopy_verdict "$name" "$got"
+  rm -rf "$rc_h"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -5497,6 +5571,8 @@ run mergepin2
 run mergepin3
 run mergepin4
 run mergepin5
+run routecopy1
+run routecopy1c
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
