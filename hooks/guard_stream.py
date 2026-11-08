@@ -195,7 +195,7 @@ def _walk_pipelines(stripped: str, find_stage, any_filter: bool = False) -> str:
             if hit:
                 return hit
             stages = []
-    return _pipeline_hit(stages, find_stage, any_filter)
+    return _pipeline_hit(stages, find_stage)
 
 
 def check_tail_hit(stripped: str, background: bool) -> str:
