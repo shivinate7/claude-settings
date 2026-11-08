@@ -8636,7 +8636,7 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
 # in-place write of it, a folder that a commit or a printer reads, or a folder entered by cd or pushd
 # (the next word reads from it). jq, gojq and yq read -C as a
 # colour switch, so the word after it is the program or a file, never a value. ag's --file-search-regex
-# picks the files it reads by name, and its -p names a file of ignore patterns it reads.
+# picks the files it reads by name only with a hidden flag, and its -p names a file of ignore patterns it reads.
 FLAG_FALSE_ALARM_ALLOW = (
     "ag -f " + ENV + " src",
     "ack -f " + ENV,
@@ -8665,6 +8665,10 @@ FLAG_FALSE_ALARM_REFUSE = (
     "ag -f K " + ENV,
     "ag -t K " + ENV,
     "rg -tpy K " + ENV,
+    # rg with a hidden flag searches dotfiles, and -T py excludes only python files, so `.env` is searched.
+    "rg --hidden -T py " + ENV,
+    "rg -uu -T py " + ENV,
+    "rg -. -T py " + ENV,
     "yq -i .x=1 " + ENV,
     "yq " + ENV,
     "yq e " + ENV,
@@ -8682,8 +8686,9 @@ FLAG_FALSE_ALARM_REFUSE = (
     "gojq . " + ENV,
     "yq eval .x " + ENV,
     "grep --exclude-from " + ENV + " foo .",
-    "ag --file-search-regex " + ENV + " K",
     "ag -fp " + ENV + " K",
+    # -p names an ignore file that ag reads, so it is judged as --exclude-from is. Decision env-file-stays-unread.
+    "ag -p " + ENV + " K",
     "cd " + ENV + "s",
     "pushd " + ENV + "s",
     "cd " + ENV + ".d",
@@ -8712,11 +8717,28 @@ sh("env: folder move: PowerShell Set-Location into .envs, alone", "Set-Location 
 sh("env: flag-false-alarm: ag -fG takes .env as its -G glob, and the glob reads it",
    "ag -fG " + ENV + " K", "deny", "env-file", cwd=NOGIT)
 # A hidden search reads a dotfile whose name matches its -G regex. `-G e` matches `.env`, and the search
-# reads that file while `.env` is the pattern. The guard judged `.env` as the pattern and let each row through.
+# reads that file while `.env` is the pattern.
+# The guard tries the regex on a few sample env file names. A suffix outside that sample (.production,
+# .development, .test, .staging) is an env file too. Inside double quotes the shell turns `\\.` into `\.`,
+# the regex ag reads. A regex that will not compile is refused: the guard cannot tell what it matches.
 for _cmd in (
     "ag --hidden -G e " + ENV,
     "ag -u -G e " + ENV,
     "ag --hidden --file-search-regex e " + ENV,
+    "ag --unrestricted -G e " + ENV,
+    "ag --hidden --file-search-regex=e " + ENV,
+    "ag --hidden -Ge " + ENV,
+    r"ag --hidden -G '\.env\.production' K",
+    "ag --hidden -G prod K",
+    r"ag --hidden -G '\.development' K",
+    r"ag --hidden -G '\.test' K",
+    r"ag --hidden -G '\.staging' K",
+    r'ag --hidden -G "\\.(env|rc)$" K',
+    r'ag --hidden -G "\\.e" K',
+    "ag --hidden -G 'rc$' K",
+    "ag --hidden -G local K",
+    r"ag --hidden -G '^\./\.env' K",
+    "ag --hidden -G '(' K",
 ):
     sh("env: ag hidden: refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
 # The controls. A hidden search whose -G regex names no env file reads none, so it stays allowed. The last
@@ -8724,6 +8746,10 @@ for _cmd in (
 # a file. ag reads `.env` as the pattern, and without a hidden flag it skips dotfiles, so no env file is read.
 for _cmd in ("ag --hidden -G '\\.py$' KEY", "ag -G e " + ENV):
     sh("env: ag hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# With no hidden flag, ag does not search dotfiles, so a -G or --file-search-regex that names `.env` reads
+# no env file. Decision env-file-stays-unread judges the file regex only with a hidden flag.
+for _cmd in ("ag -G " + ENV + " K", "ag --file-search-regex " + ENV + " K"):
+    sh("env: ag no hidden: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
 
 
 def incident_write_strip_case():
