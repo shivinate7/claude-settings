@@ -5342,6 +5342,17 @@ sh("git-after-cd: a check, then ; an if ! exit tail on make lint, then a git pus
 sh("git-after-cd: a check, then ; a make lint protected by || a braced exit 1, then a git push -u, is refused",
    "pytest -q; make lint || { echo bad; exit 1; }; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# A `||` CHAIN AND A PIPE CLEAR ONLY THEIR OWN COMMANDS. A `|| exit 1` that ends a `||` chain protects the chain's
+# commands, and a `|` pipe in the chain is covered the same way. Neither clears a check joined by `;` before the
+# chain, so the push after it is refused. The chain with no check before it is its control: it passes.
+sh("git-after-cd: a check, then ; a make a || make b || exit 1 chain, then a git push -u, is refused",
+   "pytest -q; make a || make b || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a make a piped to tee, protected by || exit 1, then a git push -u, is refused",
+   "pytest -q; make a | tee l || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a make a || make b || exit 1 chain, then ; a git push -u, passes",
+   "make a || make b || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
