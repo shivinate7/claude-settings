@@ -834,6 +834,16 @@ _STDIN_FILE = re.compile(r"(?<![<\d&])\d*<(?![<(&])[ \t]*[\"']?([^\s;&|<>()\"'`]
 _SUBSTITUTION = re.compile(r"\$\(|`|<\(")
 
 
+# A command that only reads or lists the file it is given, so a wrapper before it runs no file; and the closed set
+# of Python modules (`-m`) that only read, check or serve the files they are given. Any other module may run its
+# file (streamlit, coverage, flask, a project's own pkg.mod), so an unknown module counts as a run, as a wrapper's
+# unknown operand does: a module missing here costs a false alarm, never a hidden run.
+# tox (its config's commands) and timeit (its statement text) run code, so they stay out.
+_READERS = frozenset("cat tac nl wc ls head tail less more grep egrep fgrep rg diff cmp file stat od xxd hexdump strings "
+                     "md5sum sha1sum sha256sum cksum sort uniq cut du touch chmod rm mv cp tee".split())
+_READ_ONLY_MODULES = frozenset("json.tool py_compile pip http.server black mypy ruff".split())
+
+
 def _runner(word) -> bool:
     return bool(_RUNNER(word.rsplit("/", 1)[-1]))
 
@@ -867,7 +877,8 @@ def _runs_by_flag(words, runner, at, fed) -> bool:
 def _follows_runner(words, at, fed=False) -> bool:
     """True when words[at] is the file a runner earlier in its stage runs: the nearest runner before it has no
     operand between it and the file. A flag, the word after a flag (`-o pipefail`, `--env-file .env`) and a
-    duration are no operand; the word after `-m` is a module, so it is one. An operand such as `check.py` or
+    duration are no operand; the word after `-m` is a module, so it is one, and it runs the file unless it
+    only reads it. An operand such as `check.py` or
     `cat` is the command the runner runs, and the file is its argument: `python3 check.py f` and `sudo cat f`
     read f. A shell or Python runs the file past its operands after `-c` (the file is named in the text it runs),
     and after `-s` or `-` when the file is `fed` to it by `< f`."""
@@ -877,15 +888,24 @@ def _follows_runner(words, at, fed=False) -> bool:
     if runner is None:
         return False
     after_flag = False
-    for word in words[runner + 1:at]:
+    taker = _WRAPPER(words[runner].rsplit("/", 1)[-1]) or words[runner].rsplit("/", 1)[-1] == "exec"
+    for index in range(runner + 1, at):
+        word = words[index]
         if _FLAG(word):
             after_flag = word != "-m"
         elif _DURATION(word):
             after_flag = False
         elif after_flag:
             after_flag = False
+        elif taker:
+            # A wrapper's operand is the command it starts, and that command may take the file as a script
+            # (`nohup php f`, `timeout 30 npx ts-node f.ts`). Main counted every such file as run; only a command
+            # that reads its argument (`sudo cat f`) is let go, so an unknown command stays a run.
+            return word.rsplit("/", 1)[-1] not in _READERS
         else:
-            return False
+            # An interpreter's operand is its script, and the file is the script's argument (`python3 check.py f`).
+            # A module after `-m` runs the file unless it is one that only reads it (`python3 -m json.tool f`).
+            return words[index - 1] == "-m" and word.rsplit("/", 1)[-1] not in _READ_ONLY_MODULES
     return True
 
 
@@ -1132,7 +1152,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1140,14 +1160,28 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+    `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
+    leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
+    fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
+        end = ends[at] if at < len(ends) else ""
         if at == number:
-            return where
+            return None if skipping else where
+        if skipping:
+            skipping = end in ("&&", "|")
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev = stack.pop()
+                    skipping = False
+            continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
@@ -1164,8 +1198,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
             elif any(mark in move for mark in "$%`"):
                 where = None
             else:
-                where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                target = shell_abs(move or "~", where)
+                if target and os.path.isdir(target):
+                    where = target
+                elif target and failed_cd_stays:
+                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                else:
+                    where = None
             prev = old
         for _ in range(marks.count(")")):
             if stack:

@@ -197,8 +197,9 @@ CHANGE_AFTER = re.compile(r"\b(?:adds?|added|mov(?:es?|ed)|remov(?:es?|ed)"
 CHANGE_NEGATOR = re.compile(r"\b(?:not|never|nothing|none|no)\b|n['\u2019]t\b", re.I)
 CHANGE_CLAUSE_END = re.compile(r";|,|\b(?:and|but)\b", re.I)
 # A negator as the verb's object cancels it too: "changes nothing", "removes nothing", "drops no field". "no-op"
-# is a thing the verb acts on ("adds a no-op flag"), not a negator.
-CHANGE_NEGATED_OBJECT = re.compile(r"\s+(?:nothing|none|no)\b(?!-)", re.I)
+# is a thing the verb acts on ("adds a no-op flag"), not a negator. A colon may stand between them ("changes:
+# none"), and "not at all" after the verb negates it as well ("the header changes not at all").
+CHANGE_NEGATED_OBJECT = re.compile(r"(?:\s*:\s*|\s+)(?:nothing|none|no)\b(?!-)|\s+not\s+at\s+all\b", re.I)
 
 
 def _real_change(change, start) -> bool:
@@ -485,24 +486,46 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# A clause whose subject is the session ("The session merges it after your pick.", "Claude merges it ...") and that names
 # no `you`, no owner who acts ("the owner clicks Approve", "Shivam approves it") and no other press
 # verb ("after clicking Approve"): the session makes that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
-SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge"), or names a
+# press that is not past ("after your click on Merge", "after the owner's press"), hands the press on, so it is
+# never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
+SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
+# SESSION_PRESS_OWN is the session's own press verb right after its subject ("The session clicks Merge"): it is
+# no hand-on, so it is cut before SESSION_HANDS_ON reads the clause. "after your click" still hands on.
+SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
+                               r"\s+(?:clicks|presses|taps)\b", re.I)
+# "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
-OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
-# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
+# The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
+# between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
+# Approve" (the button's name, after a past act) does not.
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
-                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
@@ -511,33 +534,21 @@ def _owner_acts(clause) -> bool:
     return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
 
 
-# The verb a session clause's own subject presses ("the session clicks Merge"), and a past press by the owner
+# The verb a session clause's own subject, the session or Claude, presses ("the session clicks Merge"), and a past press by the owner
 # ("the owner clicked Approve", "he has already pressed it"), which asks him for nothing.
-_SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
+_SESSION_SUBJECT = re.compile(r"\b(?:session|claude)\s+(?:\w+ly\s+)?$", re.I)
 _PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
 _PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
-# In a session clause, "by clicking Merge" is the means of the clause's own subject, the session, and "a click"
-# or "one press" after "with" or "without" is how the session acts, not a press asked of anyone ("without a
-# click"). "after clicking Approve", "approved by clicking Approve", "after a click on Approve" and "after your
-# Merge click" name no such means, so they stay presses.
-_GERUND_PRESS = re.compile(r"(?:press|click|tap)(?:ing|ping)\b", re.I)
-_SESSION_MEANS = re.compile(r"(?<!ed )\b(?:by|via)\s+$", re.I)   # "approved by clicking" names no subject
-_NOUN_PRESS = re.compile(r"(?:press(?:es)?|clicks?|taps?)\b", re.I)
-_PRESS_COUNT = re.compile(r"\bwith(?:out)?\s+(?:(?:a|an|one|no|any|a\s+single)\s+)?$", re.I)
 
 
 def _owner_press_in(clause) -> bool:
     """True when `clause` holds a press verb that the session does not make: one the session's own subject
-    is not directly before, no past press by the owner, no "by clicking" means and no counted press noun.
+    is not directly before and no past press by the owner.
     "after clicking Approve", "after Approve is clicked", "after your Merge click" and "after the owner has to
     click Approve" each hold one."""
     for m in PRESS_VERB.finditer(clause):
         before = clause[:m.start()]
         if _SESSION_SUBJECT.search(before) or (_PAST_PRESS.match(m.group()) and _PAST_OWNER_PRESS.search(before)):
-            continue
-        if _GERUND_PRESS.fullmatch(m.group()) and _SESSION_MEANS.search(before):
-            continue
-        if _NOUN_PRESS.fullmatch(m.group()) and _PRESS_COUNT.search(before):
             continue
         return True
     return False
@@ -552,10 +563,12 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c) and not _owner_press_in(c)]
+               and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)
+               and not _owner_press_in(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
@@ -573,7 +586,7 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -863,6 +876,7 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
@@ -880,14 +894,17 @@ def task_check_hit(op: str, data) -> str:
 
 
 def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
+    """The matched text when a str_replace on `context` removes the Why yours line or its label. It carries
+    no `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it judges a
+    context edit that touches the line, whatever the item's kind. An edit that removes only the reason
+    after the label passes: the stored line is unseen, so old_str is no different from any prose."""
     if entry.get("field") != "context":
         return ""
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
         return "context edit that removes the Why yours line"
+    if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
+        return "context edit that removes the Why yours label"
     return ""
 
 

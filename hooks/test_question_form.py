@@ -168,7 +168,10 @@ def call(name, *args):
 
 
 def guard_hit(op, entry):
-    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    try:
+        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+    except Exception as exc:  # a crash is a wrong verdict, shown by name, as call() shows it
+        return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
 def verdict(name, got, want):
@@ -503,6 +506,11 @@ HIDDEN_OWNER_PRESS = [
     "The session merges PR #374 after the owner needs to click Approve.",
     "The session merges PR #374 after the owner is asked to click Approve.",
     "The session merges PR #374 after he himself clicks Approve.",
+    # A session clause that names a click or a press as a noun, or after "by" or "with", is not excused: SESSION_HANDS_ON
+    # refuses each click or press word that is not the session's own press verb right after its subject.
+    "The session merges PR #374 without a click.",
+    "The session merges PR #374 by clicking Merge in the batch tool.",
+    "The session merges PR #374 with one press.",
 ]
 # A session clause with no press in it, and a press the session makes after the pick: both pass. An owner
 # word (the owner, he, Shivam) in a clause with no press verb asks the owner for nothing, so it passes too.
@@ -511,11 +519,7 @@ SESSION_ONLY = ["The session merges PR #374.", "After the pick, the session merg
                 "The session merges PR #374 once the owner's approval is in.",
                 "The session merges PR #374 as he asked.",
                 "The session merges PR #374 after Shivam's OK.",
-                "The session merges PR #374 so CI reruns.",
-                # A session clause that names a click or a press the session makes itself, with no owner in it, passes.
-                "The session merges PR #374 without a click.",
-                "The session merges PR #374 by clicking Merge in the batch tool.",
-                "The session merges PR #374 with one press."]
+                "The session merges PR #374 so CI reruns."]
 # The how-text of an option labelled "Go": a split cuts the mark-ready press, so it is refused. The waiting
 # page's own button, or a past act, asks the owner for no web press: each passes, with the label "Merge the PR".
 GO_SPLIT_PRESS = [
@@ -532,6 +536,56 @@ PAGE_BUTTON_OR_PAST_ACT = [
     "The session merges it after he has merged the base PR.",
     "The session merges it after the owner approved the plan.",
 ]
+# A Claude clause that names a press not yet made, as a noun or behind a possessive ("after your click", "after the
+# owner's click"), hands the press to the owner, so it is refused: the option needs a link.
+CLAUDE_NAMES_OWNER_PRESS = [
+    "Claude merges them after your click on Merge.",
+    "Claude merges them after the owner's click on Merge.",
+]
+# A session clause that clicks or presses Merge after the owner's pick is the session's own act, as "merges" is.
+# The owner presses nothing, so the option needs no link.
+SESSION_PRESSES_AFTER_PICK = [
+    "The session clicks Merge after your pick.",
+    "The session presses Merge after your pick.",
+]
+# A Claude clause is a session clause, as "The session ..." is (SESSION_PRESS takes "Claude"): the press or mark
+# Claude makes right after its subject is its own act, so the owner presses nothing. Each passes with no link. The
+# label names the same act as its clause, since a label's press verb must be one the clause also makes.
+CLAUDE_OWN_ACT_NEEDS_NO_LINK = [
+    ("Merge PR #374", "Claude clicks Merge on PR #374."),
+    ("Mark PR #374 ready", "Claude marks PR #374 ready."),
+    ("Mark PR #374 ready", "Claude quietly marks PR #374 ready after the pick."),
+]
+# A Claude clause with a click after "after" is not excused: SESSION_HANDS_ON refuses the click word. It stays refused.
+CLAUDE_CLICK_AFTER_STAYS_REFUSED = ["Claude merges PR #374 after clicking Approve."]
+# A Claude clause that waits for, or needs, an owner's press ("the owner's merge", "the owner has to approve it",
+# "the owner reviews and approves it") leaves that press to the owner, so it is refused: the option needs a link.
+CLAUDE_WAITS_ON_OWNER_PRESS = [
+    "Claude waits for the owner's merge.",
+    "Claude merges once the owner has to approve it.",
+    "Claude merges after the owner reviews and approves it.",
+]
+# A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
+# or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
+SESSION_LEAVES_OWNER_PRESS = [
+    "The session merges PR #374 and approve on GitHub.",
+    "The session clicks Merge and approve it.",
+    "Claude merges PR #374 after the review and approve it.",
+    "The session clicks Merge after the owner's approval.",
+]
+# "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
+SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
+# The owner's rights, access, queue or method, and a press he has already made ("has hit Merge"), name no press he
+# makes now: the session merges, and he presses nothing. Each passes.
+SESSION_NAMES_OWNER_RIGHTS = [
+    "The session merges PR #374 because the owner has merge rights.",
+    "The session merges PR #374 because Shivam has merge access.",
+    "The session merges PR #374 after the owner has hit Merge.",
+    "The session merges PR #374 through the owner's merge queue.",
+    "The session merges PR #374 with the owner's merge method.",
+]
+# A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
+LABEL_ASKS_CLICK_SESSION_HOW = [("Click Merge on GitHub", "The session clicks Merge after your pick.")]
 
 
 def case_session_press_needs_no_link():
@@ -576,6 +630,51 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_NAMES_OWNER_PRESS:
+        page("a Claude clause that names an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that names an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_PRESSES_AFTER_PICK:
+        page("a session clause that clicks or presses after the pick, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that clicks or presses after the pick, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in CLAUDE_OWN_ACT_NEEDS_NO_LINK:
+        page("a Claude clause that is its own act, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, label=label, how=how), keep])), None)
+        chat("a Claude clause that is its own act, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), None)
+    for how in CLAUDE_CLICK_AFTER_STAYS_REFUSED:
+        page("a Claude clause with a click after 'after', %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause with a click after 'after', %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_WAITS_ON_OWNER_PRESS:
+        page("a Claude clause that waits for an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that waits for an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_LEAVES_OWNER_PRESS:
+        page("a session clause that leaves an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that leaves an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_KEEPS_OWNER_MERGE:
+        page("a session clause that keeps the owner's merge commit, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that keeps the owner's merge commit, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in SESSION_NAMES_OWNER_RIGHTS:
+        page("a session clause that names the owner's rights or a past press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that names the owner's rights or a past press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in LABEL_ASKS_CLICK_SESSION_HOW:
+        page("a label %r that asks him to click, with how %r, with no link, is refused as press-link" % (label, how),
+             "set", entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+        chat("a label %r that asks him to click, with how %r, with no url, is refused as press-link" % (label, how),
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
@@ -591,6 +690,51 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
         chat("a page-button press or a past act, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
+
+
+# ------------------------------------------------------------------ the session's own merge, named as Claude
+
+def case_claude_own_merge_needs_no_link():
+    # Decision act-in-place: an option whose how says Claude makes the press after the owner's pick is the
+    # session's act, as "The session merges ..." is, so the owner presses nothing and it needs no link. A press in
+    # another clause, an owner's own act, and a label that asks him to click still need one.
+    claude = {"key": "a", "label": "Merge the lane PRs into one batch.", "how": "Claude merges them after your pick.",
+              "gain": "One batch lands at once.", "lose": "A second CI run."}
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    hold = {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}
+    page("Claude's own merge after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[claude, keep])), None)
+    chat("Claude's own merge after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge the lane PRs into one batch.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         None)
+    # Claude asking the owner to press is the owner's press, however the clause starts with Claude, and however
+    # an adverb, "to", "please" or "for a click" stands between the owner's name and the act.
+    for how in ("Claude merges them after your pick, then you click Merge on GitHub.",
+                "Shivam merges the lane PRs on GitHub.",
+                "Claude asks the owner to press Merge on GitHub.",
+                "Claude asks Shivam to click Merge on GitHub.",
+                "Claude asks the owner to just click Merge.",
+                "Claude asks the owner to please click Merge.",
+                "Claude asks him to press Merge.",
+                "Claude asks the user to press Merge.",
+                "Claude asks the owner for a click on Merge."):
+        page("%r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(claude, how=how), keep])), ("press-link", None))
+        chat("%r, with no url, is refused as press-link" % how,
+             chat_box(options=[{"label": claude["label"],
+                                "description": "%s Gain: one batch lands at once. Lose: a second CI run." % how},
+                               hold]),
+             ("press-link", None))
+    page("a label that clicks Merge on GitHub, with Claude's merge as the how, is refused as press-link", "set",
+         entry_of(page_item(options=[dict(claude, label="Click Merge on GitHub."), keep])), ("press-link", None))
+    chat("a label that clicks Merge on GitHub, with Claude's merge in the description, is refused as press-link",
+         chat_box(options=[{"label": "Click Merge on GitHub.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         ("press-link", None))
 
 
 # ------------------------------------------------------------------ a press in the how-text only
@@ -956,6 +1100,9 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — no change; sets no new cap",
     "Departs from: lint/stamp.py:run_stamp — same as main; the set of fields is the same",
     "Departs from: lint/stamp.py:run_stamp — already set to 5",
+    # A kept part whose change side then says nothing changes ("changes: none", "changes not at all") restates main.
+    "Departs from: lint/stamp.py:run_stamp — keeps the layout; changes: none",
+    "Departs from: lint/stamp.py:run_stamp — keeps the menu, the header changes not at all",
 ]
 # A line with an empty side, no separator, or nothing after the colon. Each is refused.
 MALFORMED = [
@@ -1502,11 +1649,107 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
+#
+# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
+# its test, by the check's name, so one runner and main() judge the same cases.
+
+def _judged(case):
+    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
+    before = len(FAILED)
+    case()
+    assert len(FAILED) == before, "; ".join(FAILED[before:])
+
+
+def case_press_link_links_not_a_list_on_a_step():
+    """`links` set to true or to a number is no list of links. The step's press has no valid link, so the hit fires as it
+    does for a missing link. It must not crash or fail open."""
+    for links in (True, 5):
+        page("a task step that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(task_item(["Press Merge in GitHub on the pull request."], links=links)),
+             ("press-link", "no link to the page"))
+
+
+def case_press_link_links_not_a_list_on_an_option():
+    """The same for an option's links: true or a number is no valid link, so the press is refused as press-link."""
+    for links in (True, 5):
+        press = copy.deepcopy(ITEM92["options"])
+        press[1].update(label="Press Merge in GitHub", how="Do it by hand.", links=links)
+        page("an option that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(page_item(options=press)), ("press-link", "no link to the page"))
+
+
+def case_task_str_replace_removes_only_the_label():
+    """A str_replace that removes only the Why yours label leaves a line with no label. It is refused as task-names-check."""
+    page("a str_replace that removes only the Why yours label is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": ""},
+         ("task-names-check", None))
+
+
+def case_str_replace_blank_prose_line_passes():
+    """A str_replace that blanks one plain prose line of a decision's context passes. The guard cannot read the stored
+    item, so a blank replacement that removes no Why yours line is no task-names-check fault."""
+    page("a str_replace that blanks one plain prose line in a decision's context passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "The lane merge-role-allow would do it.", "new_str": ""}, None)
+
+
+def case_task_str_replace_rewords_the_reason():
+    """A control: an edit that keeps the label and rewords the text after it keeps the line, so it passes."""
+    page("a str_replace that rewords the Why yours reason and keeps the label passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "Why yours: a session on your computer was asked first",
+          "new_str": "Why yours: a session on your desk was asked first"}, None)
+
+
+def case_task_str_replace_renames_the_label():
+    """A str_replace that renames the Why yours label to Why mine takes the label away, so it is refused as task-names-check."""
+    page("a str_replace that renames the Why yours label to Why mine is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": "Why mine:"},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_prose_label_passes():
+    """A prose mention of the label, not at a line start, is no Why yours line. Editing that prose passes."""
+    page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
+
+
+def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_a_step)
+
+
+def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_an_option)
+
+
+def test_task_str_replace_removing_only_the_label_is_refused():
+    _judged(case_task_str_replace_removes_only_the_label)
+
+
+def test_str_replace_blank_prose_line_in_a_decision_passes():
+    _judged(case_str_replace_blank_prose_line_passes)
+
+
+def test_task_str_replace_rewording_the_reason_passes():
+    _judged(case_task_str_replace_rewords_the_reason)
+
+
+def test_task_str_replace_renaming_the_label_is_refused():
+    _judged(case_task_str_replace_renames_the_label)
+
+
+def test_task_str_replace_prose_label_mention_passes():
+    _judged(case_task_str_replace_prose_label_passes)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
+                 case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
@@ -1520,7 +1763,11 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_key_overlap_inline_keys_clash, case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
+                 case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
+                 case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
+                 case_task_str_replace_prose_label_passes):
         try:
             case()
         except Exception as exc:
