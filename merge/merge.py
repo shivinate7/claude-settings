@@ -1752,7 +1752,7 @@ _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read afte
 
 def body_env(env, body_file=None):
     """`env` for a ci-job run: any PR body file the caller's env names is dropped, so only the PR in hand reaches ci-job; `body_file`, when
-    given, is the one that names its body. The one home of that rule: lane_lint, the merge's own lint and the ready checks call it."""
+    given, is the one that names its body. The one home of that rule: ci_job_run (lane_lint, the ready checks) and small_base_move call it."""
     out = {k: v for k, v in env.items() if k != BODY_FILE_VAR}
     if body_file:
         out[BODY_FILE_VAR] = body_file
@@ -1763,6 +1763,13 @@ def write_pr_body(path, body):
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(body)
 
+def body_file_beside(tmp, body):
+    """-> the path of `body` written to `tmp`/pr-body.md: beside the worktree `tmp`/tree, so a lint never sees it as a change.
+    drop_worktree removes it with `tmp`. The one home of that file: lane_lint and the draft step call it."""
+    path = os.path.join(tmp, "pr-body.md")
+    write_pr_body(path, body)
+    return path
+
 def small_base_move(wt, base_ref, sha, before_run=None, body=None):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T.
     It stands with no run at all when main's diff from the merge base M is empty (the merge of sha and T is sha's tree). Otherwise
@@ -1771,7 +1778,7 @@ def small_base_move(wt, base_ref, sha, before_run=None, body=None):
     for main's paths, and on that merge the `checks` lint steps pass and so does each other suite of the `checks` jobs (CHECKS_SUITE_JOBS) that names one of
     main's paths (hit_suites). Anything unread refuses. The worktree goes back to its HEAD.
     Cost per call: about 10 git starts, one ci-scope.sh run, two ci-job runs (a plan, and the lints at two starts per
-    step) and one start per hit suite; one temp output file, one temp PR body file (when `body` is not None), and one ci-job log, kept only on a failure.
+    step) and one start per hit suite; one temp output file, one temp PR body file (when `body` is not empty), and one ci-job log, kept only on a failure.
     `body` is the pull request's body, which the lint run reads as ${{ github.event.pull_request.body }}, as lane_lint hands it."""
     c, tip = git(wt, "rev-parse", base_ref)
     if c:
@@ -1811,7 +1818,7 @@ def small_base_move(wt, base_ref, sha, before_run=None, body=None):
     fd, log = tempfile.mkstemp(prefix="merge-lint-", suffix=".log")
     os.close(fd)
     body_file = None
-    if body is not None:
+    if body:  # ci-job reads an empty body and no body file alike, so an empty body needs no file
         fd, body_file = tempfile.mkstemp(prefix="merge-body-")
         os.close(fd)
     keep = False
@@ -1821,8 +1828,9 @@ def small_base_move(wt, base_ref, sha, before_run=None, body=None):
             return False, f"the head does not merge cleanly with {base_ref}"
         if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
             return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
-        # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
-        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
+        # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none.
+        # body_env drops a body file the caller's env names, for every run below; only the lint run adds the PR's own file
+        env = body_env({**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file})
         c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
@@ -2484,10 +2492,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        body_file = None
-        if body is not None:
-            body_file = os.path.join(tmp, "pr-body.md")  # beside the tree, so the lint never sees it as a change; dropped with tmp
-            write_pr_body(body_file, body)
+        body_file = None if body is None else body_file_beside(tmp, body)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", body_file=body_file)
     finally:
         drop_worktree(root, tmp, wt)
@@ -2803,11 +2808,12 @@ def stale_page_remedy(n, claim=""):
 
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-def run_ready_checks(wt, n, base, checks):
+def run_ready_checks(wt, n, base, checks, body_file=None):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
-    would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
+    would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
+    `body_file` names the file holding the PR body, as lane_lint hands it (CI_JOB_PR_BODY_FILE); with none, ci-job sees no body file."""
     args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
-    state, lines, log, _ = ci_job_run(wt, *args)
+    state, lines, log, _ = ci_job_run(wt, *args, body_file=body_file)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
         raise Stop("\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
@@ -2830,13 +2836,14 @@ def draft_step(root, cfg, n, host, info):
     if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
+            body_file = body_file_beside(tmp, info.get("body") or "") if checks else None  # removed with tmp
             if not default:
-                run_ready_checks(wt, n, base, checks)
+                run_ready_checks(wt, n, base, checks, body_file)
             else:
                 claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
                 if claim:
                     if checks:
-                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                        run_ready_checks(wt, n, base, checks, body_file)  # before the remedy: it has the session mark ready by hand, past the checks
                     raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
                                f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
                 # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
@@ -2848,7 +2855,7 @@ def draft_step(root, cfg, n, host, info):
                 rebuilt = rebuild_records(wt)
                 sha = commit_claim(wt, None) if rebuilt else None
                 if checks:
-                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+                    run_ready_checks(wt, n, base, checks, body_file)  # on the page commit when there is one, so what is checked is what is pushed
                 if rebuilt:
                     push_branch(wt, info["branch"])
                     say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
