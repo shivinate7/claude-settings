@@ -377,7 +377,7 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, ROLE_DEFAULT, role_key, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -2937,7 +2937,6 @@ ROLE_TABLE_MAX = 256 * 1024
 ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
-ROLE_DEFAULT = "general-purpose"
 # One point the owner has not ruled yet, one line to flip. A reviewer brief with a `Round N of 3` marker, N in
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
@@ -3096,13 +3095,6 @@ def role_list_drift(pointer_root):
         for role in sorted(want - have):
             lines.append("%s lacks %s, which the role table puts on %s (%s)" % (name, role, row, home))
     return lines
-
-
-def role_key(subagent_type) -> str:
-    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
-    normaliser in this file: role_name and opus_spawn_hit's Explore grant both read the role through it.
-    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
-    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
 def role_name(table, subagent_type) -> str:
