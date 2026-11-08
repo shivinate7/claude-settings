@@ -360,10 +360,11 @@ def git(where, *args, env=None, stdin=None):
     return cp.stdout.decode("utf-8", "replace")
 
 
-def make_repo(name, tracked=(), untracked=(), extras=None):
+def make_repo(name, tracked=(), untracked=(), extras=None, unreadable=False):
     """A git repo under this run's scratch folder. `tracked` files are committed on main, with
     the text "x"; `untracked` files are written and never added. `extras` (a string) is the
-    repo's .claude/layout-extras.json, committed."""
+    repo's .claude/layout-extras.json, committed. `unreadable` writes a packed-refs file git cannot
+    parse: rev-parse still names the repo, and for-each-ref, the repo-wide ref listing, exits 128."""
     root = os.path.join(ROOT, "repos", name)
     os.makedirs(root)
     git(root, "init", "-q")
@@ -376,6 +377,8 @@ def make_repo(name, tracked=(), untracked=(), extras=None):
     git(root, "commit", "-q", "-m", "fixture")
     for rel in untracked:
         write_file(os.path.join(root, *rel.split("/")), "x\n")
+    if unreadable:
+        write_file(os.path.join(root, ".git", "packed-refs"), "garbage line here\n")
     return root
 
 
@@ -2729,12 +2732,17 @@ def tree_of(cfg):
     return out
 
 
-def guard_parse(text):
-    """feedback_guard.parse, from GUARD_PATH so an override works: the Stop guard's reader."""
+def guard_module():
+    """feedback_guard loaded from GUARD_PATH in this process, so an override works. Each call loads it afresh."""
     spec = importlib.util.spec_from_file_location("feedback_guard_under_test", GUARD_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.parse(text)
+    return mod
+
+
+def guard_parse(text):
+    """feedback_guard.parse, from GUARD_PATH so an override works: the Stop guard's reader."""
+    return guard_module().parse(text)
 
 
 def case_page_note_get_saves_one_block():
@@ -3612,6 +3620,268 @@ def table_reorient_forms():
               case_reorient_nothing_when_no_open_items))
 
 
+SPACED_MARK = " repeats inbox:a1b2c3d4@2026-11-07 14:11"  # an inbox ref holds a space: inbox:<sid8>@<date> <hh:mm>
+ONE_SHOT_TEXT = "go ahead and merge PR 12"
+ONE_SHOT_HOME = "- fb-0958-1 [note] -> once:merge-pr-12"
+REPO_ID = "fb-0958-21"  # the id of REPO_ITEM
+
+
+def case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging():
+    """An inbox ref holds a space. A line already marked with one is marked: a Stop that judges the item
+    again (no turn state file, so no judged ids) must leave the line with its one mark."""
+    root = repeat_repo("repeat-spaced", step=True)
+    cfg, sid = new_cfg(), "repeat-spaced"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid, ITEM_LINE + SPACED_MARK)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("spaced mark: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("spaced mark: the line keeps its one mark",
+          inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + SPACED_MARK, inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_repeat_repo_item_is_never_judged_as_a_repeat():
+    """A [repo] item is feedback for another repo. The repeat check reads this repo's roadmap and backlog,
+    so a [repo] item is never sent to the model and never marked. A [note] beside it is still judged."""
+    root = repeat_repo("repeat-repo", step=True)
+    cfg, sid = new_cfg(), "repeat-repo"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid, REPO_ITEM)
+    add_item(cfg, sid, ITEM_LINE_2)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(REPO_ID, ITEM_ID_2))
+    check("repo item: one model call, for the note beside it", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if calls else ""
+    check("repo item: the prompt holds no [repo] item", "[%s]" % REPO_ID not in prompt, prompt[-300:])
+    check("repo item: the note beside it is in the prompt", "[%s]" % ITEM_ID_2 in prompt, prompt[-300:])
+    check("repo item: its line gets no mark", " repeats " not in inbox_line(cfg, sid, REPO_ID),
+          inbox_line(cfg, sid, REPO_ID))
+
+
+def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
+    """A one-shot approval ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
+    The same words with no home still block (debt one-shot-grant-label)."""
+    mod = guard_module()
+    homed = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(ONE_SHOT_HOME,))), "")
+    check("one-shot grant: a note homed to once:<act> passes", homed == [], homed)
+    bare = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT)), "")
+    check("one-shot grant: the same words with no home still block",
+          len(bare) == 1 and "has no home" in bare[0], bare)
+
+
+def case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in():
+    """The inbox was saved from repo A, so its sidecar binds A. The Stop runs from repo B, which has no
+    layout homes. A ruling home tracked in A is no alarm: it is judged where the session worked, not in B."""
+    home = make_repo("session-home", tracked=("decisions/a-ruling.md",))
+    elsewhere = make_repo("stop-elsewhere", tracked=("README.md",))
+    cfg, sid = new_cfg(), "r-session-home"
+    capture(cfg, sid, "the rule is settled\nkeep it as written\nthanks", cwd=home)
+    add_item(cfg, sid, "- fb-7 [ruling] -> decisions/a-ruling.md")
+    expect_silent("ruling home: a home tracked in the session's repo is no alarm from another cwd",
+                  guard(cfg, sid, cwd=elsewhere))
+
+
+def case_step_path_is_derived_from_override_step_dir():
+    """feedback_guard takes the step file template from override.STEP_DIR, not a second spelling (debt
+    step-dir-spelled-twice). With the folder moved, a fresh load of the guard takes the new folder."""
+    override = importlib.import_module("override")
+    saved = override.STEP_DIR
+    try:
+        override.STEP_DIR = "elsewhere/steps/"
+        moved = guard_module().STEP_PATH
+    finally:
+        override.STEP_DIR = saved
+    check("step path: feedback_guard.STEP_PATH follows override.STEP_DIR",
+          moved == "elsewhere/steps/%s.json", "STEP_PATH is %r with STEP_DIR moved" % (moved,))
+    check("step path: the default still names roadmap/data/steps/<slug>.json",
+          guard_module().STEP_PATH == "roadmap/data/steps/%s.json", guard_module().STEP_PATH)
+
+
+def case_one_shot_home_does_not_pass_a_standing_grant():
+    """A message with a standing word ("always") is a standing grant, not a one-shot approval. A `once:<act>` note
+    is no home for it: the message still has no home, as it has none on main."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-green-prs"
+    out = mod.problems(mod.parse(render_block("approved, always merge green PRs", items=(line,))), "")
+    check("standing grant: a once: home does not pass a message with a standing word",
+          any("has no home" in s for s in out), out)
+
+
+def case_closed_once_note_is_no_home_for_a_grant():
+    """A closed `once:<act>` note is no home. A closed note needs a tracked file, a step, a page or not-a-grant, so the
+    one-shot approval still has no home."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-pr-12 [closed]"
+    out = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(line,))), "")
+    check("closed once note: the grant still has no home, the closed note is no home",
+          any("has no home" in s for s in out), out)
+
+
+def case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another():
+    """The sidecar binds the session to repo A. The Stop runs from repo B, and the ruling home is tracked only in B.
+    Either repo's tree may hold the home, so it passes."""
+    bound = make_repo("bound-a", tracked=("README.md",))
+    stop_repo = make_repo("stop-b", tracked=("decisions/b-ruling.md",))
+    cfg, sid = new_cfg(), "r-bound-a"
+    write_file(sidecar_of(cfg, sid), bound)
+    write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
+                                                items=("- fb-8 [ruling] -> decisions/b-ruling.md",)))
+    expect_silent("either repo: a home tracked only in the Stop's repo passes when the sidecar names another",
+                  guard(cfg, sid, cwd=stop_repo))
+
+
+def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
+    """A home is judged in every repo that resolves among the sidecar's repo and the Stop's cwd. The sidecar names a
+    folder in no git repo, so only the Stop's repo resolves, and an untracked home there blocks. The check stands
+    down only when neither resolves."""
+    plain = os.path.join(ROOT, "sidecar-no-git-folder")
+    os.makedirs(plain)
+    cwd = make_repo("sidecar-no-git-stop", tracked=("decisions/a-ruling.md",))
+    cfg, sid = new_cfg(), "r-sidecar-no-git"
+    write_file(sidecar_of(cfg, sid), plain)
+    write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
+                                                items=("- fb-9 [ruling] -> decisions/untracked.md",)))
+    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks",
+                 guard(cfg, sid, cwd=cwd), named=("fb-9",))
+
+
+def unreadable_sidecar_repo():
+    """The sidecar repo git cannot read: its packed-refs file is garbage, so for-each-ref fails there and a home
+    judged in it raises _GitFailure. The one home of this fixture; the cases that name it share it."""
+    return shared_repo("unreadable-sidecar", lambda: make_repo(
+        "unreadable-sidecar", tracked=("decisions/b-ruling.md",), unreadable=True))
+
+
+def expect_unreadable_sidecar(bad):
+    """Scope of the unreadable-sidecar cases: git must fail to list the refs of the sidecar repo. If a git version
+    parsed the garbage file, the cases would pass on head and stop guarding the read."""
+    rc = subprocess.run(["git", "-C", bad, "for-each-ref"], capture_output=True).returncode
+    check("unreadable sidecar repo: git for-each-ref fails there", rc != 0, "rc=%s" % rc)
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
+    """The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
+    the whole home check down: the Stop's repo still judges the home, and an untracked home there blocks. The
+    control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
+    cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
+    bad = unreadable_sidecar_repo()
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar"
+    write_file(sidecar_of(cfg, sid), bad)
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-12 [ruling] -> decisions/untracked.md",)))
+    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks",
+                 guard(cfg, sid, cwd=cwd), named=("fb-12",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-13 [ruling] -> decisions/a-ruling.md",)))
+    p = guard(cfg, sid, cwd=cwd)
+    check("unreadable sidecar repo, control: a home tracked in the Stop's repo passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
+    """The sidecar names a repo git cannot read, so a read of its refs raises _GitFailure. A task homed to
+    `step:<slug>` with no step file on any branch of the Stop's repo still blocks. The control, the same sidecar
+    with the step file on a lane branch of the Stop's repo, passes. Red on the base `Homes._held`: the unreadable
+    repo's error stands the step check down, so the untracked step home passes."""
+    cwd = step_repo()
+    bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
+    expect_step_on_lane_only("unreadable sidecar step home", cwd)
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-step"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-14 [task] -> step:no-such-step",), cwd=cwd, text=text)
+    expect_block("unreadable sidecar repo: a task homed to a step with no file on any branch still blocks", p,
+                 named=("fb-14",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-step-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-15 [task] -> step:%s" % STEP_SLUG,), cwd=cwd, text=text)
+    check("unreadable sidecar repo, step control: a task homed to a step on a lane branch of the Stop's repo passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
+def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home():
+    """The sidecar names a repo git cannot read. A closed note homed to `decisions/nowhere.md`, a file no branch
+    tracks, still blocks: the Stop's repo judges it. The control, a closed note homed to the file the Stop's repo
+    tracks, passes. Red on the base `Homes._held`: the unreadable repo's error stands the closed-note check down,
+    so the untracked home passes."""
+    cwd = step_repo()
+    bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
+    text = "the rule is settled\nkeep it\nthanks"
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-close"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-16 [note] -> decisions/nowhere.md [closed]",), cwd=cwd, text=text)
+    expect_block("unreadable sidecar repo: a closed note homed to an untracked file still blocks", p, named=("fb-16",))
+    cfg, sid = new_cfg(), "r-unreadable-sidecar-close-control"
+    write_file(sidecar_of(cfg, sid), bad)
+    p = homed(cfg, sid, ("- fb-17 [note] -> decisions/a-ruling.md [closed]",), cwd=cwd, text=text)
+    check("unreadable sidecar repo, closed-note control: a closed note homed to a tracked file passes",
+          p.code == 0 and block_reason(p) is None, p.desc())
+
+
+UNCOVERED_STANDING_TEXTS = (  # standing grants, with no standing word from ACT's list
+    "approved to merge PRs whenever green, going forward",
+    "approved, merge it. Do this each time.",
+    "approved: merge all open PRs",
+)
+
+
+def case_once_home_does_not_pass_a_standing_grant_however_worded():
+    """A standing grant gets no `once:<act>` home, whatever words state the standing scope. Each text still has no
+    home. The control, a one-shot approval with the same home, passes."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-prs"
+    for text in UNCOVERED_STANDING_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(line,))), "")
+        check("standing grant %r: a once: home does not pass it" % text, any("has no home" in s for s in out), out)
+    out = mod.problems(mod.parse(render_block("approved, merge PR 12", items=(line,))), "")
+    check("one-shot control, approved, merge PR 12: a once: home passes", out == [], out)
+
+
+STANDING_ONCE_TEXT = "approved, always merge green PRs"
+
+
+def case_standing_grant_reason_names_the_once_bar():
+    """When a standing word bars a `once:` home, the reason says so, and names the homes that fit a standing grant:
+    a ruling home or the page."""
+    mod = guard_module()
+    line = "- fb-0958-1 [note] -> once:merge-green-prs"
+    out = mod.problems(mod.parse(render_block(STANDING_ONCE_TEXT, items=(line,))), "")
+    reason = next((s for s in out if "has no home" in s), "")
+    check("standing once bar: the reason says a standing word bars the once: home",
+          "standing" in reason.lower() and "once:" in reason, reason)
+    check("standing once bar: the reason names a ruling home and the page for a standing grant",
+          "[ruling]" in reason and "page" in reason, reason)
+    check("standing once bar: the reason does not offer the once: home itself",
+          bool(reason) and "-> once:" not in reason, reason)
+
+
+ONE_SHOT_TEXT = "approved, merge PR 12"
+
+
+def case_one_shot_grant_reason_offers_the_once_home():
+    """An unhomed one-shot grant gets the reason that offers `once:<act>`, and no standing word bars it. The barred
+    reason runs only when a standing word bars the home, so a guard that bars every grant fails here."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT)), "")
+    reason = next((s for s in out if "has no home" in s), "")
+    check("one-shot control, approved, merge PR 12: the reason offers the -> once: home",
+          "-> once:" in reason, reason)
+    check("one-shot control, approved, merge PR 12: no standing word bars the once: home",
+          bool(reason) and "bars" not in reason and "standing" not in reason.lower(), reason)
+
+
+def case_standing_grant_without_a_once_item_keeps_today_reason():
+    """Standing text with no once: item gets the reason the guard gives today. This pins that reason and does not
+    judge it."""
+    mod = guard_module()
+    blocks = mod.parse(render_block(STANDING_ONCE_TEXT))
+    out = mod.problems(blocks, "")
+    want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
+        blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
+    check("standing control, no once: item: the reason is today's, pinned", want in out, out)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3771,6 +4041,22 @@ CASES = (
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
+    case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
+    case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
+    case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
+    case_step_path_is_derived_from_override_step_dir,
+    case_one_shot_home_does_not_pass_a_standing_grant,
+    case_closed_once_note_is_no_home_for_a_grant,
+    case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
+    case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home,
+    case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home,
+    case_once_home_does_not_pass_a_standing_grant_however_worded,
+    case_standing_grant_reason_names_the_once_bar,
+    case_one_shot_grant_reason_offers_the_once_home,
+    case_standing_grant_without_a_once_item_keeps_today_reason,
 )
 
 

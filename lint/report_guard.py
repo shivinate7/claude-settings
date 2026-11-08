@@ -148,6 +148,9 @@ from _transcript import (  # noqa: E402
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
 # and past the pre-subcommand options that take a value (`-C <dir>`, `--git-dir=<path>`, and
@@ -659,7 +662,6 @@ LANE_REFUSAL = (
     "(send_message session_id @parent) now."
 )
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-LANE_TAG = "cs-build:lane"
 PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight

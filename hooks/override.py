@@ -75,11 +75,21 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags
+# Stdlib only: the one home of the machine-text tags. With no helper, or one that lacks MACHINE_TAGS or
+# NOTICE_FRAMES, NOTICE_TAGS is empty: the keyword grants still run, and the plain ask grants nothing, as grant_opus_ask
+# refuses on an empty tuple. A helper that has both lists but lacks config_dir keeps them (the next import is its own),
+# so the plain ask still grants, with owner text and the judge call still required, as in hooks/local_time.py.
+try:
     from shared_names import MACHINE_TAGS, NOTICE_FRAMES
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
-except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
+except ImportError:
     NOTICE_TAGS = ()
+
+try:  # its own import, so a helper that lacks config_dir keeps the tags above
+    from shared_names import config_dir
+except ImportError:
+    def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
@@ -169,8 +179,7 @@ def _path(session_id, *folder):
     cannot name a file."""
     if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id) or session_id[0] == ".":
         return None
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "state", "override", *folder, session_id + ".json")
+    return os.path.join(config_dir(), "state", "override", *folder, session_id + ".json")
 
 
 def _write(path, data):
