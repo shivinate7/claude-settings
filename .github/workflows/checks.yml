@@ -553,7 +553,9 @@ jobs:
       - name: Playwright setup action suite
         run: python3 actions/playwright-setup/test_action.py
 
-      # Its own 4 min watchdog reads a hang red, names the hung test and prints the process tree.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
+      # with the hung test named and its process tree killed. A process the suite started and left
+      # running reads red too, killed and named; so does a sweep that could not read.
       - name: Record stamp engine fixture suite
         run: node actions/stamp/test_stamp.mjs
 
@@ -1023,8 +1025,12 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/check_unknown_reads_contract.py
 
-      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
-      # prints the process tree and kills it. timeout-minutes is the backstop.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
+      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
+      # tree killed. A process the suite started and left running reads red too, killed and named with its
+      # pid and command line, even on a normal finish; so does a sweep that could not read. Worst case,
+      # with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call + 10 s
+      # kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
@@ -1716,8 +1722,13 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_install_schtasks.py
 
-      # This suite takes 1.5 min at most. Its own 4 min watchdog reads a hang red, names the hung test,
-      # prints the process tree and kills it. timeout-minutes is the backstop.
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
+      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
+      # tree killed. A process the suite started and left running reads red too, killed and named with its
+      # pid and command line, even on a normal finish; so does a sweep that could not read. It runs the
+      # tests in a Job Object, and a run that cannot get one fails with "FAIL - no job object". Worst
+      # case, with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call
+      # + 10 s kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
       - name: Record stamp engine fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         timeout-minutes: 5
