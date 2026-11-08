@@ -148,8 +148,8 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"\b[Tt]ypefaces?\b(?:(?::|\s+(?:is|are))\s+|[^\S\n]+)(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
     # After the bare word and a line break, a capital word then an article starts a new line ("font" / "Uses a
     # magnifier."), not a font name.
-    r"\b[Ff]onts?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)",
-    r"\b[Tt]ypefaces?[ \t]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)")]
+    r"\b[Ff]onts?[^\S\n]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)",
+    r"\b[Tt]ypefaces?[^\S\n]*\n\s*(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)(?!\s+(?:a|an|the)\b)")]
 IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
 DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
