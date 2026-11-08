@@ -32,7 +32,7 @@ With no origin, only shas are judged.
 ## Fail open
 
 - No git repo, no origin, or git fails: allowed.
-- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries a line that names each ref it could not check, so the sender reads it in the tool result. No log is written.
+- `ls-remote` or `gh` fails, times out (5 s each), or is missing: allowed. The guard's answer carries `additionalContext` that names each ref it could not check, so the sender reads it in the tool result. The answer holds no `permissionDecision`, since an explicit allow would skip a permission prompt that main shows. No log is written.
 - Only a clear answer refuses: no `refs/pull/N/head` in a good `ls-remote`, or a 404 from `gh api`.
 - A shallow clone with a missing sha: allowed, logged `report-sha-shallow`.
 
