@@ -1,11 +1,11 @@
 {
   "title": "A test pins that a bare (<id>, round 3) gloss is still flagged",
   "why": "lint/check_comment_narration.py:61 requires the word \"decision\" or backticks when a gloss opens with the id, and no test pins that (round 3 of #1840, lane comment-shell-round2-fixes, 03:01 CST Nov 8).",
-  "note": "Fix: add a case where a bare `(<id>, round 3)` is flagged, and show it red on a mutant that drops the \"decision\"-or-backticks test. Starts after #1840 merges (same file). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 03:03 CST Nov 8.",
+  "note": "Fix: add a case where a bare `(<id>, round 3)` is flagged, and show it red on a mutant that drops the \"decision\"-or-backticks test. Built as a follow-up from #1840's head in lane comment-check-scans-shell (coordinator, 03:02 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 03:03 CST Nov 8.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 576,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T03:01:00-06:00"
+  "lane": "session_013NEJL37UFXTQuAcox7s8fD",
+  "updatedAt": "2026-11-08T03:02:00-06:00"
 }
