@@ -27,6 +27,11 @@ Four more rules read the notes file (decision notes-name-their-fix):
     after the reason: a backticked command, then a colon, comma, semicolon, dash, double dash, en or em dash, or arrow, then a verdict word
     (pass, fail, ok, red, green), which may follow a count ("12 passed"). Read with the Until check; each refused note
     prints one FAIL line with its slug.
+  Body: the same cite rule reads the PR body (cite_claim, the one home of the test). Each `Fix: none` line of the body, with
+    a free reason or a listed one, whose text after `none --` names a commit or a cost with no check output prints one FAIL
+    line and fails the run. The body is `--pr-body TEXT`, else env PR_BODY (CI and `merge --lane-lint` set it, as for
+    lint/check_silent_undo.py), read as a reader sees it (fenced blocks and comments dropped, check_silent_undo.body_prose),
+    every line, not only the last paragraph. A step or already-fixed Fix is no free reason and is skipped.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
@@ -44,11 +49,11 @@ Cost, every git read of a run with no file argument, per notes file path (the la
   - three per already-fixed sha (fixed_on_main: a rev-parse of origin/main, a rev-parse of the sha, a merge-base);
   - the ratchet, only when the branch touches the notes file: an ls-tree and a show of HEAD, and, when HEAD has a
     bullet with no valid Fix, a merge-base plus an ls-tree and a show of the merge base.
-No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
+The body read adds no process: it reads the text in memory, once per run, files given or not. No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
 of one commit, one process.
 
-    python3 lint/check_record_slugs.py [file ...]
-        # files given: check those, skip git
+    python3 lint/check_record_slugs.py [--pr-body TEXT] [file ...]
+        # files given: check those, skip git (the PR body is still read)
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -60,6 +65,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import check_silent_undo  # noqa: E402  the one home of the PR body's fence strip (body_prose)
 
 MAX = 32
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -345,6 +351,15 @@ CHECK_OUTPUT = re.compile(r"`[^`]+`[ \t]*(?:->|=>|--|[:,;\u2013\u2014\u2192-])?[
                           re.I)
 
 
+def cite_claim(rest):
+    """Why the text `rest`, read after a `Fix: none` reason, fails the cite rule, else ''. The one home of the test: a
+    commit or a cost named with no check output beside it. cite_problem (notes) and body_cite_failures (PR body) call it."""
+    named = "a commit" if COMMIT.search(rest) else "a cost" if COST.search(rest) else ""
+    if not named or CHECK_OUTPUT.search(rest):
+        return ""
+    return "has Fix: none naming %s with no check output" % named
+
+
 def cite_problem(line):
     """Why the note `line` fails the cite rule, else ''. A `Fix: none` note whose text after the reason names a commit or
     a cost needs check output (a backticked command, then a verdict word). The gap text before the Fix is not read."""
@@ -352,11 +367,30 @@ def cite_problem(line):
     fix = parse_fix(line)
     if not fix or fix[0] != "none":
         return ""
-    rest = line[FIX_BODY.match(line, marks[-1].end()).end():]
-    named = "a commit" if COMMIT.search(rest) else "a cost" if COST.search(rest) else ""
-    if not named or CHECK_OUTPUT.search(rest):
-        return ""
-    return "has Fix: none naming %s with no check output" % named
+    return cite_claim(line[FIX_BODY.match(line, marks[-1].end()).end():])
+
+
+NONE_FREE = re.compile(r"none\s*" + DASH + r"\s*")  # the lead of a `Fix: none` line whose reason is free text
+BODY_LABEL = 60  # characters of a refused body line that its FAIL line quotes
+
+
+def body_cite_failures(pr_body):
+    """[(label, why)] for each `Fix: none` line of the PR body that fails the cite rule. A body line has a free reason
+    (any text), so the text after `none --` is read, or after a listed reason. The body reads as a reader sees it:
+    fenced blocks and comments drop out, then every line counts, not only the last paragraph. A step or already-fixed
+    Fix names no free reason and is skipped."""
+    bad = []
+    for line in check_silent_undo.body_prose(pr_body).splitlines():
+        marks = list(FIX_MARK.finditer(line))
+        fix = parse_fix(line)
+        if not marks or (fix and fix[0] != "none"):
+            continue
+        m = FIX_BODY.match(line, marks[-1].end()) or NONE_FREE.match(line, marks[-1].end())
+        why = m and cite_claim(line[m.end():])
+        if why:
+            text = " ".join(line.split())
+            bad.append((text[:BODY_LABEL] + ("..." if len(text) > BODY_LABEL else ""), why))
+    return bad
 
 
 def until_failures(root, now):
@@ -472,11 +506,37 @@ def too_long(files, dirs):
             and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 
 
+def read_body_option(args):
+    """(rest, body) from `args`: `--pr-body TEXT` or `--pr-body=TEXT` is taken out, wherever it stands, so a body that starts
+    with `-` is never read as an option. With no flag the body is env PR_BODY, as lint/check_silent_undo.py reads it.
+    Raises ValueError when the flag has no text."""
+    rest, body, i = [], None, 0
+    while i < len(args):
+        if args[i] == "--pr-body":
+            if i + 1 >= len(args):
+                raise ValueError("--pr-body needs the body text")
+            body, i = args[i + 1], i + 2
+        elif args[i].startswith("--pr-body="):
+            body, i = args[i].split("=", 1)[1], i + 1
+        else:
+            rest.append(args[i])
+            i += 1
+    return rest, body if body is not None else os.environ.get("PR_BODY", "")
+
+
 def main(args):
+    try:
+        args, pr_body = read_body_option(args)
+    except ValueError as err:
+        print("check_record_slugs: FAIL: %s" % err)
+        return 1
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a file name, an unknown option would skip git and check nothing
         print("check_record_slugs: FAIL: unknown option: %s" % " ".join(unknown))
         return 1
+    body_bad = body_cite_failures(pr_body)
+    for label, why in body_bad:
+        print('check_record_slugs: FAIL: "%s" %s: PR body' % (label, why))
     try:
         dirs = record_dirs(ROOT)
     except layout.LayoutError as err:  # a check that cannot read its folders is red, never green
@@ -499,7 +559,7 @@ def main(args):
         return 1
     except Unknown as err:
         print("check_record_slugs: UNKNOWN, " + str(err))
-        return 1 if os.environ.get("CI") else 0  # CI exit code is a verdict: unknown is red there
+        return 1 if os.environ.get("CI") or body_bad else 0  # CI exit code is a verdict: unknown is red there
     bad = too_long(files, dirs)
     for f in bad:
         print("check_record_slugs: FAIL: slug over %d characters: %s" % (MAX, f))
@@ -521,7 +581,7 @@ def main(args):
         grown = head > base
         print("check_record_slugs: %s: notes with no valid Fix: %d now, %d at the merge base%s: %s"
               % ("FAIL" if grown else "ok", head, base, " (the count may not grow)" if grown else "", path))
-    return 1 if bad or feel or unfixed or dated or grown else 0
+    return 1 if bad or feel or unfixed or dated or grown or body_bad else 0
 
 
 if __name__ == "__main__":

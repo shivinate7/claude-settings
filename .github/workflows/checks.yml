@@ -370,6 +370,8 @@ jobs:
         run: python3 lint/check_hook_stubs.py
 
       - name: Record slug length
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: python3 lint/check_record_slugs.py
 
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
