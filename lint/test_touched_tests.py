@@ -38,8 +38,29 @@ SCRIPT = os.environ.get("TOUCHED_TESTS") or os.path.join(HERE, "..", ".github", 
 HEAVY_KEY = re.compile(r"heavy|shard", re.IGNORECASE)
 NEEDS_SETUP_KEY = re.compile(r"needs", re.IGNORECASE)
 WINDOWS_KEY = re.compile(r"windows", re.IGNORECASE)
+MACOS_KEY = re.compile(r"macos", re.IGNORECASE)
+NO_JOB_KEY = re.compile(r"no CI job runs it", re.IGNORECASE)
 # The per-OS output names: one JSON list for the Windows job and one for the macOS job.
 OS_KEYS = ("files_windows", "files_macos")
+CI_PATH = ".github/workflows/checks.yml"
+# The checks.yml the derivation cases commit in place of the real one. Each runner names one test: the Windows job
+# test_a, the Linux job test_b, the macOS job test_c. A test named by none of them is in no job.
+FIXTURE_CI = """name: fixture checks
+on: pull_request
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: python3 lint/test_a.py
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 lint/test_b.py
+  macos:
+    runs-on: macos-latest
+    steps:
+      - run: python3 lint/test_c.py
+"""
 
 
 def git(cwd, *args):
@@ -64,6 +85,19 @@ def covers(entries, path):
 def named(stdout, path, key):
     """True when one line of the selector's stdout names `path` and carries the reason key `key`."""
     return any(path in line and key.search(line) for line in stdout.splitlines())
+
+
+def skipped_on(stdout, path, key):
+    """True when a skip line names `path` and the reason key `key`. A run or touched line never counts as a skip."""
+    return any(path in line and key.search(line) and not line.startswith(("run ", "touched "))
+               for line in stdout.splitlines())
+
+
+def with_ci(base):
+    """`base` with the fixture checks.yml added, so the selector reads it in place of the real one."""
+    out = dict(base)
+    out[CI_PATH] = FIXTURE_CI
+    return out
 
 
 class Selector(unittest.TestCase):
@@ -152,17 +186,46 @@ class Selector(unittest.TestCase):
         self.assertIsInstance(value, list, f"{key}= is not a JSON list: {text!r}")
         return value
 
-    def per_os(self, base, change=None, delete=()):
-        """Run the selector on a fixture with a readable diff. -> (sorted files_windows, sorted files_macos, stdout).
-        The scope is checked first: the run exited 0 and wrote both per-OS outputs."""
+    def json_value(self, text, key):
+        """The JSON value one output line holds. A value that does not parse fails the case by name."""
+        try:
+            return json.loads(text)
+        except ValueError:
+            self.fail(f"{key}= is not JSON: {text!r}")
+
+    def run_outputs(self, base, change=None, delete=()):
+        """Run the selector on a fixture with a readable diff. -> (outputs, stdout). The scope is checked first: exit 0."""
         repo, sha, out = self.fixture(base, change, delete)
         r, outputs = self.select(repo, sha, out)
         self.assertEqual(r.returncode, 0, f"the selector exited {r.returncode} on a readable diff:\n{r.stdout}{r.stderr}")
+        return outputs, r.stdout
+
+    def os_lists(self, outputs):
+        """-> (sorted files_windows, sorted files_macos). Fails by name when the selector wrote no per-OS list."""
         lists = {}
         for key in OS_KEYS:
             self.assertIn(key, outputs, f"the selector writes no {key}= line, so the per-OS lists are not built: {outputs}")
-            lists[key] = self.json_list(outputs[key], key)
-        return sorted(lists["files_windows"]), sorted(lists["files_macos"]), r.stdout
+            lists[key] = sorted(self.json_list(outputs[key], key))
+        return lists["files_windows"], lists["files_macos"]
+
+    def per_os(self, base, change=None, delete=()):
+        """-> (sorted files_windows, sorted files_macos, stdout) for a fixture with a readable diff."""
+        outputs, stdout = self.run_outputs(base, change, delete)
+        windows, macos = self.os_lists(outputs)
+        return windows, macos, stdout
+
+    def include_entries(self, matrix_text):
+        """The matrix's include entries, each as {os, files} with files a sorted list read from its JSON text."""
+        matrix = self.json_value(matrix_text, "matrix")
+        self.assertIsInstance(matrix, dict, f"matrix= is not a JSON object: {matrix_text!r}")
+        include = matrix.get("include")
+        self.assertIsInstance(include, list, f"matrix has no include list: {matrix_text!r}")
+        entries = []
+        for entry in include:
+            self.assertIsInstance(entry, dict, f"a matrix entry is not an object: {entry!r}")
+            self.assertIsInstance(entry.get("files"), str, f"a matrix entry's files is not JSON text: {entry!r}")
+            entries.append({"os": entry.get("os"), "files": sorted(self.json_list(entry["files"], "matrix files"))})
+        return sorted(entries, key=lambda e: str(e["os"]))
 
     def test_control_the_fixture_diff_names_the_changed_path(self):
         """Green control: with no selector, the fixture's own diff still holds the path it changed, so each red case
@@ -273,13 +336,57 @@ class Selector(unittest.TestCase):
         self.assertEqual(files, [test], "a touched install_from_main.sh did not list its sibling test_install_from_main.sh")
 
     def test_a_test_no_windows_job_runs_is_left_out_of_files_windows_with_a_reason(self):
+        """The real checks.yml runs these two on no Windows job (a Linux job, and the macOS job for one), so they are not
+        in files_windows, and the log names each one as skipped on Windows."""
         paths = ["merge/test_install_from_main.sh", "hooks/test_cloud_setup.sh"]
         windows, _, stdout = self.per_os({p: "old\n" for p in paths}, {p: "new\n" for p in paths})
-        not_on_windows = self.constant("NOT_ON_WINDOWS")
         for path in paths:
-            self.assertTrue(covers(not_on_windows, path), f"the selector's NOT_ON_WINDOWS constant does not cover {path}")
             self.assertNotIn(path, windows, f"{path} is in files_windows, though no Windows job runs it")
-            self.assertTrue(named(stdout, path, WINDOWS_KEY), f"the log does not name {path} with a Windows reason")
+            self.assertTrue(skipped_on(stdout, path, WINDOWS_KEY), f"the log does not name {path} as skipped on Windows")
+
+    # The derivation cases commit FIXTURE_CI, so the lists follow that checks.yml, not a list in the selector.
+    def test_windows_list_follows_checks_yml_not_a_hand_list(self):
+        """A test only the Linux job runs is not in files_windows, and the log names it as skipped on Windows."""
+        a, b = "lint/test_a.py", "lint/test_b.py"
+        windows, _, stdout = self.per_os(with_ci({a: "old\n", b: "old\n"}), {a: "new\n", b: "new\n"})
+        self.assertEqual(windows, [a], "files_windows is not the Windows job's tests: a Linux-only test is in it")
+        self.assertTrue(skipped_on(stdout, b, WINDOWS_KEY), f"the log does not name {b} as skipped on Windows")
+
+    def test_a_test_no_ci_job_runs_is_left_out_of_both_lists_with_a_reason(self):
+        """A test named by no job is in neither list, and the log says no CI job runs it. It is not dropped silently."""
+        d = "lint/test_d.py"
+        windows, macos, stdout = self.per_os(with_ci({}), {d: "new\n"})
+        self.assertEqual(windows, [], "files_windows lists a test no CI job runs")
+        self.assertEqual(macos, [], "files_macos lists a test no CI job runs")
+        self.assertTrue(skipped_on(stdout, d, NO_JOB_KEY), f"the log does not name {d} with the reason no CI job runs it")
+
+    def test_matrix_has_one_entry_per_os_with_files(self):
+        """The matrix is the include entries built from files_windows and files_macos: one per OS with a non-empty list."""
+        a, c = "lint/test_a.py", "lint/test_c.py"
+        outputs, _ = self.run_outputs(with_ci({a: "old\n", c: "old\n"}), {a: "new\n", c: "new\n"})
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows names a test no Windows job runs")
+        self.assertEqual(macos, [c], "files_macos names a test no macOS job runs")
+        self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
+        built = [{"os": name, "files": listed} for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
+        self.assertEqual(self.include_entries(outputs["matrix"]), sorted(built, key=lambda e: e["os"]),
+                         "matrix is not the include entries built from files_windows and files_macos")
+
+    def test_matrix_is_empty_when_nothing_is_selected(self):
+        """A touched test no CI job runs selects nothing, so the matrix is {"include": []}."""
+        outputs, _ = self.run_outputs(with_ci({}), {"lint/test_d.py": "new\n"})
+        self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
+        self.assertEqual(self.json_value(outputs["matrix"], "matrix"), {"include": []},
+                         "a touched test no CI job runs still put an entry in the matrix")
+
+    def test_a_test_only_a_windows_job_runs_is_absent_from_files_macos(self):
+        """A test only the Windows job runs is in files_windows, is absent from files_macos, and the log names it as
+        skipped on macOS."""
+        a = "lint/test_a.py"
+        windows, macos, stdout = self.per_os(with_ci({a: "old\n"}), {a: "new\n"})
+        self.assertIn(a, windows, "a Windows-only test is not in files_windows")
+        self.assertNotIn(a, macos, "a Windows-only test is in files_macos, though no macOS job runs it")
+        self.assertTrue(skipped_on(stdout, a, MACOS_KEY), f"the log does not name {a} as skipped on macOS")
 
 
 if __name__ == "__main__":
