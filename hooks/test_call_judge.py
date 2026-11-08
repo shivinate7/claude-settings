@@ -182,6 +182,20 @@ import json, os, subprocess
 _real_run = subprocess.run
 
 
+def _cite_shown(prompt, mark):
+    # A model that cites only what it was shown: the first candidate line (`<id>: <text>`) after the past-ruling
+    # header that holds `mark`, as a refusal naming its id. "" when no shown line holds it. The header's own line is
+    # skipped, and the list is the lines after it.
+    head = "Past rulings (item 8)"
+    if head not in prompt:
+        return ""
+    for line in prompt.split(head, 1)[1].splitlines()[1:]:
+        if mark in line and ": " in line:
+            rid = line.split(": ", 1)[0].strip()
+            return json.dumps({"ok": False, "reason": rid + ": ruled by the owner, so it is settled."})
+    return ""
+
+
 def _fake_run(argv, **kwargs):
     if not (isinstance(argv, (list, tuple)) and argv
             and os.path.basename(str(argv[0])).lower() in ("claude", "claude.exe", "claude.cmd")):
@@ -202,6 +216,9 @@ def _fake_run(argv, **kwargs):
         if os.environ.get("CJ_PAST_FAIL"):
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub past-ruling failure")
         answer = os.environ.get("CJ_PAST_ANSWER") or answer
+    # CJ_CITE_SHOWN names a marker: the answer cites the shown candidate that holds it, and allows when none does.
+    if os.environ.get("CJ_CITE_SHOWN"):
+        answer = _cite_shown(prompt, os.environ["CJ_CITE_SHOWN"]) or '{"ok": true}'
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
@@ -292,10 +309,12 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False,
+             cite_shown=None):
     """One hook run. `answer` is the canned model answer. `past` is the dedicated past-ruling call's answer, and
     `past_fail` makes only that call fail; unset, the dedicated call takes `answer`. `form_fail` makes only the form call
-    fail."""
+    fail. `cite_shown` is a marker: the model then cites the first shown candidate line that holds it, and allows
+    otherwise (the stub's _cite_shown), so a case reads what the judge may cite from the list it was shown."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -316,6 +335,8 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, 
         env["CJ_PAST_FAIL"] = "1"
     if form_fail:
         env["CJ_FORM_FAIL"] = "1"
+    if cite_shown:
+        env["CJ_CITE_SHOWN"] = cite_shown
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -2088,6 +2109,80 @@ def case_send_tool_names_come_from_shared_names():
         check("%s: imports SEND_TOOLS from shared_names" % label, imports_send_tools(path), label)
 
 
+# ------------------------------------------------------------------ owner-only rulings (spec past-rulings)
+#
+# A candidate is a ruling only when the owner gave it: a record whose ruling line names him, or a sentence that names him
+# as its source, `Owner, <date>` or `Ruling (owner, <date>)`. A roadmap note that holds an incident, or a recommendation
+# the owner has not answered, is no ruling, so the judge may not cite it. Each stub answer below cites a candidate only
+# when the list it was shown holds the case's marker (CJ_CITE_SHOWN). So a candidate that is not offered, and one that is
+# offered but not cited as a refusal, both allow the question.
+NOTE_INCIDENT_MARK = "hand-merged the release fix"
+NOTE_INCIDENT = ("Incident, 2026-11-05: a lane hand-merged the release fix onto #1488 before the owner's review, so the "
+                 "milestone check never ran.")
+NOTE_RECOMMEND_MARK = "recommends raising the milestone job cap"
+NOTE_RECOMMEND = ("Page item 150 (open) recommends raising the milestone job cap; the owner has not answered, so the cap "
+                  "stays as it is until he does.")
+NOTE_OWNER_MARK = "raise the milestone job cap, because"
+NOTE_OWNER = ("Owner, page item 150, pick a, 2026-11-06 12:40 CST: raise the milestone job cap, because the run ended "
+              "at its cap twice.")
+INCIDENT_NOTE_REPO = make_repo("incident-note", steps={"hand-merge-release-fix": NOTE_INCIDENT})
+RECOMMEND_NOTE_REPO = make_repo("recommend-note", steps={"milestone-cap-open": NOTE_RECOMMEND})
+OWNER_NOTE_REPO = make_repo("owner-note", steps={"milestone-cap-answered": NOTE_OWNER})
+OWNER_ONLY_GOAL = "Goal: decide whether the milestone job cap rises, and whether the hand-merged release fix stays on main"
+OWNER_ONLY_PROBLEM = "Problem (rule): the milestone job cap decides when a full CI run goes red, so the rule needs your word"
+OWNER_ONLY_BASED = ("Based on (read): the milestone job ran out of time at its cap on the last run",)
+PAGE_RECOMMENDED_OPTIONS = [
+    {"key": "a", "label": "Raise the cap (Recommended)", "gain": "The milestone run stops ending at its cap.",
+     "lose": "Each run takes longer and uses more minutes."},
+    {"key": "b", "label": "Keep the cap", "gain": "Nothing changes on main.",
+     "lose": "The milestone run may end at its cap again."}]
+
+
+def owner_only_box():
+    return good_box(goal=OWNER_ONLY_GOAL, problem=OWNER_ONLY_PROBLEM, based=OWNER_ONLY_BASED, options=CI_CHAT_OPTIONS)
+
+
+def case_past_ruling_incident_note_is_not_cited():
+    # The step note holds only an incident. It names no owner as its source, so it is no ruling, and a judge that cites it
+    # must not refuse the question. Red on main: the note is offered as a ruling, and the cited note refuses the box.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = owner_only_box()
+    check("owner-only incident: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=INCIDENT_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_INCIDENT_MARK)
+    check("owner-only incident: a judge's citation of an incident note in a roadmap step is not a refusal",
+          len(r.calls) == 1 and (r.deny() or {}).get("permissionDecision") != "deny", detail(r))
+
+
+def case_past_ruling_recommended_pick_is_not_cited():
+    # The page item is unanswered and its option is marked (Recommended). The roadmap note that recommends the same pick
+    # says the owner has not answered, so it is no ruling. A judge that cites it as the owner's answer must not refuse.
+    # Red on main, for the same reason as the incident case.
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title="Raise the milestone job cap?", context=CI_PAGE_CONTEXT, options=PAGE_RECOMMENDED_OPTIONS)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c150", "data": item})
+    check("owner-only recommended: the page item passes item_hit, so the dedicated call runs", got == ("", ""), got)
+    r = run_hook(page_input("set", item, cwd=RECOMMEND_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_RECOMMEND_MARK)
+    check("owner-only recommended: a judge's citation of a note that recommends an unanswered pick is not a refusal",
+          (r.deny() or {}).get("permissionDecision") != "deny" and r.code == 0, detail(r))
+
+
+def case_past_ruling_owner_answered_page_item_stays_refused():
+    # Control, green today: the owner's answer to page item 150 is recorded in a roadmap note with his name as its source.
+    # A question that the answer settles is still refused as past-ruling.
+    r = run_hook(question_input(box=owner_only_box(), cwd=OWNER_NOTE_REPO), answer=ALLOW, cite_shown=NOTE_OWNER_MARK)
+    check("owner-only control: a question that a recorded owner answer to a page item settles is refused as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
+
+
+def case_past_ruling_owner_decision_stays_refused():
+    # Control, green today: a decision whose ruling line names the owner ("Owner, 2026-10-27: ...") is still refused.
+    box = good_box(goal=CAPS_GOAL, problem=CAPS_PROBLEM, based=CAPS_BASED, options=CAPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, cite_shown="generous on purpose")
+    check("owner-only control: a decision whose ruling line names the owner still refuses a question it settles",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2128,7 +2223,10 @@ def main():
                  case_send_over_the_cap_keeps_the_goal_and_problem,
                  case_send_over_the_cap_keeps_a_based_on_line_above_the_goal,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
-                 case_send_tool_names_come_from_shared_names):
+                 case_send_tool_names_come_from_shared_names,
+                 case_past_ruling_incident_note_is_not_cited, case_past_ruling_recommended_pick_is_not_cited,
+                 case_past_ruling_owner_answered_page_item_stays_refused,
+                 case_past_ruling_owner_decision_stays_refused):
         try:
             case()
         except Exception as exc:
