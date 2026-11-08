@@ -1,11 +1,11 @@
 {
   "title": "The other-checkout guard does not read a read-only command's quoted pattern as shell text",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 641,
   "owner": "coordinator",
   "lane": "session_013NEJKzJxDxuXzuwNe7fhYn",
   "why": "The other-checkout guard refused a read-only grep whose quoted pattern held a delete of a parent-folder path (guard.log 06:55 CST Nov 8, lane guard-relative-write-escape). Same root cause as step guard-python-quoted-redirect, which fixes python and node only; perl and ruby have it too. Triage hit it again at 07:00 CST: a quoted heredoc to python3 that held that text in a step note was refused.",
-  "note": "Done check: red tests where grep, perl and ruby read-only calls, and a quoted heredoc body, pass when a quoted argument holds a parent-folder delete or redirect, and a control where an unquoted write still refuses. Merge after guard-python-quoted-redirect's PR. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Doing in lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn; coordinator, 07:03 CST Nov 8). A split with #1906 is proposed; guard-python-quoted-redirect rebases onto #1906 and merges after it.",
-  "updatedAt": "2026-11-08T07:05:00-06:00"
+  "note": "Done check: red tests where grep, perl and ruby read-only calls, and a quoted heredoc body, pass when a quoted argument holds a parent-folder delete or redirect, and a control where an unquoted write still refuses. Merge after guard-python-quoted-redirect's PR. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Doing in lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn; coordinator, 07:03 CST Nov 8). A split with #1906 is proposed; guard-python-quoted-redirect rebases onto #1906 and merges after it. Lane 13:04 CST Nov 8: #2234 (quoted-args-unresolved, head 21dd26d8e) passed its second fix check after round 3 (reviewer sonnet); net value positive against main, zero against #1906. Handed to runner 8, Merge after: #1906. Item 429 a done. All lane PRs with runner 8: #1984, #2197, #2097, #2234.",
+  "updatedAt": "2026-11-08T13:04:00-06:00"
 }
