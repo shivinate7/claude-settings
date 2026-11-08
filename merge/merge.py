@@ -751,6 +751,10 @@ class GhLock(Lock):
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
+def pull_state(d):
+    """-> OPEN, CLOSED or MERGED for a pull request `d` as `pulls/<n>` answers it: the one home of the mapping (Host.pr and the Findings read)."""
+    return "MERGED" if d.get("merged") else d["state"].upper()
+
 class Host:
     """The GitHub half: `gh` for the pull request, the required checks, the wait and the merge.
     Tests pass a fake with the same pr, wait_checks and merge, or a `gh` shim on PATH."""
@@ -865,7 +869,7 @@ class Host:
         d = json.loads(out)
         self.base = d["base"]["ref"]  # the PR's own base drives required_names
         return {"head": d["head"]["sha"], "branch": d["head"]["ref"], "base": d["base"]["ref"],
-                "state": "MERGED" if d.get("merged") else d["state"].upper(),
+                "state": pull_state(d),
                 "mergeable": self.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at")}
 
@@ -2879,7 +2883,7 @@ def units_of(info, bases):
         return d
     return sorted((sorted(g, key=lambda n: (depth(n), n)) for g in groups.values()), key=min)
 
-def build_batch(root, h, base, push=""):
+def build_batch(root, h, base, push="", findings_ok=""):
     """merge --build-batch: build an integration branch from pull request state alone. -> 0 when the build ran (a PR left out is no failure), 2 when a
     read failed (nothing printed), else raises Stop (a refused --push, a failed fetch or push).
     The candidates are the open PRs whose ledger act (pr_acts) is `batch`: a done review record for the live head, and no `Lint: red` line for it.
@@ -2890,7 +2894,10 @@ def build_batch(root, h, base, push=""):
     it makes the new branch `push`, and refuses the base or a branch that exists.
     Output, printed at the end: the cap line, `skipped lint:` lines, a `joins: #n branch sha` line per joined PR in merge order, a `left out: #n
     branch: why` line per PR left out in PR order, and `batch: N PRs`.
-    Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the open list, one fetch
+    A done record whose Findings read could not run (`findings unknown` in pr_acts) is left out, and its line names the reason flag
+    --findings-unknown-ok "<reason>", which lets it join with the reason logged; a record whose Findings are not met is no candidate at all.
+    Cost: the open-pull list and the repo's comments (one read each), the Findings reads of pr_acts for each done record that has a Findings line other than
+    `none` (its files, or one `pulls/<x>` per named follow-up), one `pulls/<n>` read per merge-after target outside the open list, one fetch
     of the base and one per candidate branch, two worktrees (the batch tree and a probe tree at the base) and one more per running lint, one or two
     merges per candidate (onto the base and onto the batch) and a replay of the joined ones when one was left out, one lint run per candidate not
     skipped, one comment POST per red lint, and with --push one ls-remote and one push. The lint skip (BatchBuild.lint_skip) adds one full `git log`
@@ -2907,7 +2914,8 @@ def build_batch(root, h, base, push=""):
         pulls = h.pages("pulls", fields={"state": "open"})
         by_num = {d["number"]: d for d in pulls}
         acts = pr_acts(h, pulls, holds=False) if pulls else {}  # holds off: only the batch act matters, so a held PR costs no events read; the labels are read below
-        cands = [n for n in sorted(acts) if acts[n][2] == "batch"]
+        unknown = [n for n in sorted(acts) if acts[n][2] == FINDINGS_UNKNOWN]  # a done record whose Findings read could not run: out of the batch, unless the reason flag lifts it
+        cands = [n for n in sorted(acts) if acts[n][2] == "batch" or (n in unknown and findings_ok.strip())]
         after = {n: merge_after_targets(by_num[n].get("body")) for n in cands}
         on_main = {t for t in sorted({t for ts in after.values() for t in ts if t not in by_num}) if merged_into(h, t, base)}
         stacks = stack_heads(pulls)
@@ -2921,6 +2929,10 @@ def build_batch(root, h, base, push=""):
         return 2
     cap = max(1, (os.cpu_count() or 1) - 2)
     out, left, joined = [], {}, []
+    for n in unknown:  # the lift is logged like the silent-undo one; with no reason the pull request stays out and the line says how to lift it
+        why = acts[n][1].split(": ", 1)[-1]
+        out.append(f"merge: #{n} Findings read UNKNOWN ({why}). {FINDINGS_FLAG}, reason: {' '.join(findings_ok.split())}" if findings_ok.strip()
+                   else f"merge: #{n} left out, Findings read UNKNOWN ({why}). If the cause is known, run again with the reason flag {FINDINGS_FLAG} \"<reason>\". {UNKNOWN_CITE}")
     info = {}
     holds = tuple(k for k in HOLD_LABELS if k != BATCH_LABEL)  # a hold stands in for a review, so a held PR is no candidate even with a done record
     for n in cands:
@@ -3551,20 +3563,28 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+# The value of the Findings line (and of --findings): none, a count filed in this pull request, or a count filed in follow-up pull requests (decision pr-review-record).
+REVIEW_FINDINGS = r"none|[1-9][0-9]*, this PR|[1-9][0-9]*, follow-up #[1-9][0-9]*(?:, #[1-9][0-9]*)*"
+FILING_DIR, FILING_NOTES = "docs/debts/", "docs/debts/notes.md"  # where a finding is filed: a new debt file under the folder, or lines added to the notes file
+FINDINGS_UNKNOWN = "findings unknown"  # the kind of a ledger line whose Findings read could not run
+FINDINGS_FLAG = "--findings-unknown-ok"  # the reason flag of --build-batch that lets such a line join the batch; Claude may type it with a reason (decision pr-review-record, as UNDO_FLAG)
 
-def review_body(n, head, kind, guard, rounds, net, fix=None):
+def review_body(n, head, kind, guard, rounds, net, fix=None, findings=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
-    fix check (reviewed head, role, model, verdict), printed after the rounds and before Net value."""
+    fix check (reviewed head, role, model, verdict), printed after the rounds. `findings` is None or the Findings value (REVIEW_FINDINGS), printed
+    after the fix check and before Net value."""
     return "\n".join([REVIEW_MARKER, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
                       *(f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in rounds),
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
+                      *([f"Findings: {findings}"] if findings is not None else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
 def parse_review(text):
-    """-> {n, head, kind, guard, rounds, net, fix}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
+    """-> {n, head, kind, guard, rounds, net, fix, findings}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `fix` is None, or the one optional
     `Fix check: <40-hex reviewed head>, reviewer, <model>, PASS|FAIL` line (after the rounds, before Net value) as a (head, role, model, verdict)
-    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. Trailing blank lines are allowed. The
+    tuple; a malformed line, a second one, a round after it, or a reviewed head equal to Head is None. `findings` is None, or the value of the one
+    optional `Findings: <REVIEW_FINDINGS>` line, the last before Net value; a record without it is a legacy record and keeps its verdict. Trailing blank lines are allowed. The
     record ends at the first line that is exactly `---`; it and everything after it (the GitHub attribution footer) are ignored."""
     lines = text.splitlines()
     if "---" in lines:
@@ -3583,9 +3603,15 @@ def parse_review(text):
         return None
     if kind == "docs-only" and guard == "yes":  # docs-only means no guard or check (decision docs-only-prs-skip-review)
         return None
-    rounds, last, fix = [], 0, None
+    rounds, last, fix, findings = [], 0, None, None
     for line in lines[5:-2]:
-        if fix:  # nothing follows the fix check line
+        if findings is not None:  # nothing follows the Findings line
+            return None
+        f = re.fullmatch(rf"Findings: ({REVIEW_FINDINGS})", line, re.ASCII)
+        if f:
+            findings = f.group(1)
+            continue
+        if fix:  # nothing but the Findings line follows the fix check line
             return None
         f = re.fullmatch(rf"Fix check: ({REVIEW_SHA}), ({REVIEW_ROLES[0]}), ({REVIEW_MODEL}), ({'|'.join(REVIEW_FIX_VERDICTS)})", line, re.ASCII)
         if f:
@@ -3601,7 +3627,7 @@ def parse_review(text):
             return None
         rounds.append((i, *m.group(2, 3, 4)))
         last = i
-    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
+    return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "findings": findings}
 
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
@@ -3701,12 +3727,45 @@ def label_names(d):
     """-> the label names of an open pull request `d` as `pages("pulls")` lists it: the one read of them, for pr_acts and build_batch."""
     return {x["name"] for x in d.get("labels") or []}
 
+def findings_read(h, n, findings):
+    """-> (state, why) of the Findings line `findings` (REVIEW_FINDINGS, not `none`) of pull request `n`'s record: `done`, `open` or `unknown`; `why` is
+    "" or text for the ledger line. `N, this PR` is done when the pull request's files (every page) add a file under FILING_DIR or add lines to
+    FILING_NOTES. `N, follow-up #X, ...` is done when each named pull request exists, is not `n`, and is open or merged; the first one that is not
+    ends the read (one that could not be read does not). A 404 is open and names the number. Any other failed read, a network stop or a reply that does not parse, is unknown, never open or done.
+    Cost: one list read of `pulls/<n>/files` per page, or one `pulls/<x>` read per named pull request until one is not done; none for `none`, and
+    no call to Host.pr, which sets the host's base."""
+    if findings.endswith("this PR"):
+        try:
+            rows = h.pages(f"pulls/{n}/files")
+            filed = any(r["status"] == "added" and r["filename"].startswith(FILING_DIR) or r["filename"] == FILING_NOTES and r["additions"] > 0 for r in rows)
+        except Stop:
+            return "unknown", f"the files of #{n} could not be read"
+        return ("done", "") if filed else ("open", "")
+    unknown = ""
+    for x in dict.fromkeys(int(m) for m in re.findall(r"#(\d+)", findings)):
+        if x == n:
+            return "open", ""
+        try:
+            c, out = h.api(f"pulls/{x}")
+            if c and re.search(r"HTTP 404", out):
+                return "open", f"follow-up #{x} does not exist"
+            if c:
+                raise ValueError("the read failed")
+            state = pull_state(json.loads(out))
+        except (Stop, ValueError, KeyError, TypeError, AttributeError):  # NetStop is a Stop
+            unknown = unknown or f"follow-up #{x} could not be read"
+            continue
+        if state == "CLOSED":
+            return "open", ""
+    return ("unknown", unknown) if unknown else ("done", "")
+
 def pr_acts(h, pulls, holds=True):
     """-> {n: (branch, act text, kind or None for no next act, since, the number it is blocked on)} for the open `pulls`, the one home of the next-act
     rules in `_reviewed_lines` (its docstring lists them). Reads the repo's comments since the oldest pull request (one list read) and, only when
     `holds` and a pull request reaches the hold rule, its issue events. `holds` False skips the hold rule, so a pull request with a hold label and no
     record reads as blocked, the first `lane round` (a draft) or NO NEXT ACT. One with a done record still reads `batch`, because the record rule runs first:
-    a caller that wants no held pull request checks the labels itself (build_batch does)."""
+    a caller that wants no held pull request checks the labels itself (build_batch does). A done record with a Findings line other than `none` and no
+    red lint line is read by `findings_read`, which costs its reads per such pull request: the pull request's files, or each named follow-up."""
     records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
     for c in h.issue_comments(min(d["created_at"] for d in pulls)):
         m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
@@ -3725,14 +3784,20 @@ def pr_acts(h, pulls, holds=True):
             rec = parse_review(body)
             rec = rec if rec and rec["n"] == n else None
             state = review_state(rec, sha)[0]
+            owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND) if rec else 1
             if state == "done":
                 act = ("batch", "batch", at, None)
                 red = next(((t, m) for t, text in reversed(plain.get(n, [])) for m in [LINT_RED.fullmatch((text.splitlines() or [""])[0])]
                             if m and m.group(1) == sha), None)  # the newest red line for the live head; a line for an older head is stale
                 if red:  # the lint of the head the record passed is red: the pull request is no candidate, whatever its record says
                     act = (f"lane lint red: {red[1].group(2)}", "lane lint red", red[0], None)
+                elif rec["findings"] not in (None, "none"):  # after the lint line, so a red head costs no Findings read
+                    found, why = findings_read(h, n, rec["findings"])
+                    if found == "open":
+                        act = (f"lane round {owed}" + (f": {why}" if why else ""), "lane round", at, None)
+                    elif found == "unknown":
+                        act = (f"{FINDINGS_UNKNOWN}: {why}", FINDINGS_UNKNOWN, at, None)
             elif state in ("open", "stale"):
-                owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
                 if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane, so n is the first round
                     owed = 1
                 act = (f"lane round {owed}", "lane round", at, None)
@@ -3760,7 +3825,9 @@ def pr_acts(h, pulls, holds=True):
 def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch` (`lane lint red: <steps>` instead, when
-    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); the record is open or for another
+    the newest `Lint: red <live head> <steps>` comment of the pull request names the live head); a done record whose Findings line is not met (see
+    `findings_read`: `none` is met with no read) is `lane round n`, with the follow-up number named when it does not exist, or `findings unknown: <why>`
+    when the read could not run, which holds like any unknown and counts against the batch limit; the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
     is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, the first `lane round`;
@@ -3772,7 +3839,8 @@ def _reviewed_lines(h, root):
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
     request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base, plus, for a run that did not succeed, its jobs
-    and the jobs and workflow files of runs that may clear it (host.base_state holds the count). No GraphQL, no head or check read, no timer, file or log."""
+    and the jobs and workflow files of runs that may clear it (host.base_state holds the count), and, for each done record with a Findings line other than
+    `none` and no red lint line, the reads of `findings_read` (its docstring has the count). No GraphQL, no head or check read, no timer, file or log."""
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
@@ -3795,7 +3863,7 @@ def _reviewed_lines(h, root):
             return True
         if kind == "blocked":  # no limit of its own: it inherits the red of the pull request it waits on
             return blocker not in seen and red_of(blocker, (*seen, n))
-        return hours(since) > PR_STATE_AGE_HOURS["batch" if kind == "batch run" else kind]  # a batch run counts against the batch limit
+        return hours(since) > PR_STATE_AGE_HOURS["batch" if kind in ("batch run", FINDINGS_UNKNOWN) else kind]  # a batch run, or a done record whose Findings read failed, counts against the batch limit
     lines, reds = [], 0
     for n in sorted(acts):
         branch, act, kind, since, _ = acts[n]
@@ -3805,6 +3873,35 @@ def _reviewed_lines(h, root):
     done = [hours(a[3]) for a in acts.values() if a[2] == "batch"]
     lines.append(summary(max(done, default=0), sum(a[2] is None for a in acts.values())))
     return lines, bool(reds)
+
+def fix_filing_refusal(root, reviewed, head, findings):
+    """-> None when the push `reviewed..head` only files findings in this pull request, else the reason a PASS fix check is refused (decision
+    pr-review-record, owner ruling item 394 a). The reviewed record's `findings` must be `N, this PR`, and every changed path must be a file added
+    under FILING_DIR or lines added to FILING_NOTES; each path wider than that is named, a deleted notes line too. Raises Stop when the diff cannot
+    be read, never a pass: a filing that cannot be seen is not shown to be filing-only.
+    Cost: two local reads of the diff (name-status, numstat) in `root`, no GitHub call, no file or log. The caller runs it only for a PASS fix check
+    whose reviewed record carries a Findings line, so a legacy record reads no diff."""
+    base = ("-c", "core.quotepath=false", "diff", "--no-renames", "--no-ext-diff", "-z")
+    c, names = git(root, *base, "--name-status", f"{reviewed}..{head}")
+    c2, counts = git(root, *base, "--numstat", f"{reviewed}..{head}")
+    if c or c2:
+        raise Stop(f"the diff {reviewed[:9]}..{head[:9]} could not be read, so the fix check cannot be shown to file findings only: {names if c else counts} " + REVIEW_CITE)
+    parts = names.split("\0")
+    status = {path: st for st, path in zip(parts[0::2], parts[1::2])}
+    deleted = {}
+    for row in counts.split("\0"):
+        if row.count("\t") == 2:
+            _added, gone, path = row.split("\t")
+            deleted[path] = int(gone) if gone.isdigit() else None  # a binary file prints "-": its lines are not countable, so it never counts as deletion-free
+    wider = sorted(path for path, st in status.items()
+                   if not (st == "A" and path.startswith(FILING_DIR) or st == "M" and path == FILING_NOTES and deleted.get(path) == 0))
+    if not status:
+        return "the push changes no file, so it files no finding"
+    if wider:
+        return "the push changes more than a filing: " + ", ".join(wider)
+    if not re.fullmatch(r"[1-9][0-9]*, this PR", findings):
+        return f"the reviewed record says Findings: {findings}, which cannot carry a push that files: " + ", ".join(sorted(status))
+    return None
 
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
@@ -3818,6 +3915,12 @@ def round_arg(text):
     if not m:
         raise argparse.ArgumentTypeError(f"{text!r} is not N:ROLE:MODEL:VERDICT, with ROLE {'|'.join(REVIEW_ROLES)} and VERDICT {'|'.join(REVIEW_VERDICTS)}")
     return (int(m.group(1)), *m.group(2, 3, 4))
+
+def findings_arg(text):
+    """argparse type of --findings -> the value, which is the Findings line's value (REVIEW_FINDINGS)."""
+    if not re.fullmatch(REVIEW_FINDINGS, text, re.ASCII):
+        raise argparse.ArgumentTypeError(f"{text!r} is not none, N, this PR or N, follow-up #PR[, #PR...], with N and each PR a positive number")
+    return text
 
 def fix_check_arg(text):
     """argparse type of --fix-check REVIEWED_HEAD:reviewer:MODEL:PASS|FAIL -> (head, role, model, verdict)."""
@@ -3924,11 +4027,15 @@ def main(argv, host=None, lock=None):
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
+    p.add_argument("--findings", type=findings_arg, metavar="VALUE", help="with --review-record: the Findings line, required: none, N, this PR, or N, follow-up #PR[, #PR...]")
+    p.add_argument("--findings-unknown-ok", default="", metavar="REASON", help="with --build-batch: let a pull request whose Findings read could not run join the batch; logged")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
-        p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
+    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.findings is not None or a.net_value != "not owed") and not a.review_record:
+        p.error("--head, --kind, --guard, --round, --fix-check, --findings and --net-value go with --review-record")
+    if a.findings_unknown_ok and not a.build_batch:
+        p.error("--findings-unknown-ok goes with --build-batch")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.push is not None and not a.build_batch:
@@ -3962,13 +4069,13 @@ def main(argv, host=None, lock=None):
             p.error("--review-record needs a pull request number")
         if a.confirm or a.unlock is not None:
             p.error("--review-record takes no --confirm and no --unlock")
-        if a.head is None or a.kind is None or a.guard is None:
-            p.error("--review-record needs --head, --kind and --guard")
+        if a.head is None or a.kind is None or a.guard is None or a.findings is None:
+            p.error("--review-record needs --head, --kind, --guard and --findings")
         if a.kind == "docs-only" and a.guard == "yes":
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
-        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
+        if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, findings=a.findings)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3")
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
@@ -3981,7 +4088,7 @@ def main(argv, host=None, lock=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             h = host or Host()
             with release_on_signals():  # a signal ends the run through build_batch's `finally`, which removes the trees
-                return build_batch(root, h, a.base or h.base, a.push or "")  # before the role check and any lock: it reads, and moves a ref only under --push
+                return build_batch(root, h, a.base or h.base, a.push or "", a.findings_unknown_ok)  # before the role check and any lock: it reads, and moves a ref only under --push
         if a.lane_lint:
             c, root = sh(["git", "rev-parse", "--show-toplevel"])
             if c:
@@ -4020,7 +4127,12 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
+                if a.fix_check[3] == "PASS" and last["findings"] is not None:  # a legacy record has no Findings line, so its fix check reads no diff
+                    why = fix_filing_refusal(root, a.fix_check[0], a.head, last["findings"])
+                    if why:
+                        print(f"merge: --fix-check: {why}. {REVIEW_CITE}", file=sys.stderr)
+                        return 2
+            say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, findings=a.findings).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
         if not a.reviewed:
