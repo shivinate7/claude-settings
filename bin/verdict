@@ -4,7 +4,7 @@
 # While it runs, print "verdict: still running, <elapsed>, log=<path>" to stderr every $VERDICT_HEARTBEAT s (default 120), and append it to $STALL_WATCH_BEAT when set.
 # Why stderr: a pipe on stdout (`verdict ... | grep`) hides the line, and the background output file keeps stderr. A quiet verdict over 300 s then draws a false STALL (decision stall-watch, "Tools that are quiet by design"). Why the file too: `2>&1 | grep` or `2>/dev/null` hides stderr as well, and the stall watch reads that file.
 # Exit 0 is FAIL if the output holds a runner marker, no test ran, or a test run read no test count (a test success marker at a line start, or `xcodebuild test` or `swift test` as typed), else SKIP (`SKIP <cmd>, N skipped (<secs>s)`, exit 0) if N > 0 tests skipped, else PASS.
-# N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP ` or `SKIPPED`. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
+# N is the larger of two counts: the sum of the runner summaries in the run (`skipped=N`, `N skipped`, node's `# skipped N` and `ℹ skipped N`), and the lines that start `SKIP `, `SKIPPED` or `SKIP:`. A summary line `SKIP: N check` is not one of them, so it never counts on top of its cases. XCTest `Executed N tests, with M tests skipped` lines nest (class, bundle, All tests), so their max is one term of the sum. Colour codes (SGR) are ignored. A count of 10 or more digits reads as 10**9. A count of 0 is PASS. Why: a test that always skips must not read as a pass.
 # A run with no $VERDICT_LOG deletes verdict-*.log files older than 7 days from the temp folder: regular files whose first line is our own header only; errors skipped.
 # Killed by signal N: exit 128+N. Ctrl-C: exit 130. Windows: bin/verdict.cmd.
 import os, re, shutil, subprocess, sys, tempfile, time
@@ -31,7 +31,7 @@ def test_argv(argv):  # read from the argv as typed, before which() rewrites arg
     return (exe == "xcodebuild" and any(a in ("test", "test-without-building") for a in argv[1:])) or (exe == "swift" and argv[1:2] == ["test"] and not SWIFT_INFO.intersection(argv[2:]))
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
-SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED)", re.M)  # a runner may print one such line per skip, with or without a summary
+SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?! *\d+ check(?:s|\(s\))?(?![A-Za-z])))", re.M)  # a runner may print one such line per skip, with or without a summary; `SKIP: <case>` counts, a `SKIP: N check` summary does not
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:
