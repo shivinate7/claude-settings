@@ -1090,8 +1090,9 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
     def test_a_part_with_no_regex_makes_every_defect_need_its_install_so_a_failed_part_b_reads_unknown(self):
-        # Ruling of 2026-11-07 15:01 CST: when any part has no regex, every defect needs every install. Part c has no
-        # regex, so the defect in x/1.py needs a, b and c. Part b's install failed, and the defect must not run.
+        # A part with no regex could catch any defect, so every defect needs every install (decision
+        # `mutation-ci-report-and-replay`). Part c has no regex, so the defect in x/1.py needs a, b and c. Part b's
+        # install failed, and the defect must not run.
         code, out, err = mixed_defect_run((PASSING_INSTALL, FAILING_INSTALL, PASSING_INSTALL))
         self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
                          "with a part that has no regex, every defect needs every install, so part b's failed install "
