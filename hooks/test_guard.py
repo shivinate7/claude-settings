@@ -5674,6 +5674,27 @@ sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
    "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
 
+# A filter of any kind between a lane-lint or review-record run and the pipeline's end is refused, not
+# only tail and head. A separator ends the pipeline, so a tail after `;` reads no check.
+sh("check-tail: merge --lane-lint through sed -n, with no tail or head, is refused",
+   "merge --lane-lint 7 | sed -n 1,5p", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through grep -m1, with no tail or head, is refused",
+   "merge --lane-lint 7 | grep -m1 FAIL", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --review-record through awk, with no tail or head, is refused",
+   "merge --review-record 7 | awk 'END{print}'", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint with no pipe is allowed",
+   "merge --lane-lint 7", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint with output to a file is allowed",
+   "merge --lane-lint 7 > lint.log", "allow", cwd=NOGIT)
+sh("check-tail: a verdict call of merge --lane-lint with no pipe is allowed",
+   "verdict merge --lane-lint 7", "allow", cwd=NOGIT)
+sh("check-tail: grep of the saved lint log with no check in the pipe is allowed",
+   "grep -m1 FAIL lint.log", "allow", cwd=NOGIT)
+sh("check-tail: a separator ends the pipeline, so tee then tail after merge --confirm is allowed",
+   "merge --confirm 7 | tee x; tail -3 x", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane-lint piped to tail, then a background &, is refused",
+   "merge --lane-lint 7 | tail & echo $!", "deny", "check-tail", cwd=NOGIT)
+
 # =========================================================================== 2c. waiter loops
 #
 # Rule 9, approved by the owner. A pause between polls turns waiting into a loop of turns that
