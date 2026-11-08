@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T12:03:00Z",
+  "context": "Goal: a guard refuses a subagent's message to a finished reviewer, so no work is lost to a reviewer that is already gone.\nProblem (rule): no record says which transcript a subagent's PreToolUse `transcript_path` names, so the guard cannot be built without guessing. A settings write needs words you type in the acting session's chat, and the auto-mode classifier refused the lane's probe (\"[Self-Modification]\").\nBased on (read): the hooks docs describe the split only for SubagentStop, and no log on any machine records a subagent PreToolUse payload (coordinator, 06:01 CST Nov 8).\nBased on (measured): the classifier refused the probe's write to /root/.claude/settings.json in the lane's own throwaway cloud container. Nothing was written (coordinator, 06:01 CST Nov 8).\nBased on (ruling): item 222 a (owner, Nov 3) granted a one-shot hook-allow probe for grant-reaches-lanes, in the same shape.\nDeparts from: main, which has no record of a subagent's PreToolUse payload \u2014 adds a one-shot probe: a temporary PreToolUse hook logs one subagent payload and one Workflow agent payload, and then the hook is removed.\nMeanwhile: both resume-guard steps wait. #1917 goes on without them.",
+  "home": "resume-guard-subagent-sends",
+  "id": "subagent-payload-probe",
+  "kind": "decision",
+  "n": 412,
+  "options": [
+    {
+      "gain": "A real measure, and the guard gets built on it. No change on your computer.",
+      "how": "In lane resume-finished-reviewer-no-tree's cloud container (session_013NEJL3qSsV2LJ6R1a1HMCB), the lane adds the hook, spawns one subagent and one Workflow agent, logs both payloads, then removes the hook. You type the grant in that lane's chat.",
+      "key": "a",
+      "label": "Grant the probe in the lane's throwaway cloud container",
+      "lose": "One approval prompt for a settings write in a container that is thrown away, and a line you type in that lane's chat."
+    },
+    {
+      "gain": "A real measure, on the machine where most lanes run.",
+      "how": "A session on your computer adds the hook, spawns the two agents, logs both payloads, then removes the hook.",
+      "key": "b",
+      "label": "Run the same probe in a session on your computer",
+      "lose": "A settings change on your machine, which needs your grant and your session."
+    },
+    {
+      "gain": "No settings change anywhere.",
+      "how": "Steps resume-guard-subagent-sends and resume-guard-workflow-agents are parked until 2026-11-21. Their notes already say a subagent's message to a finished reviewer is unchecked.",
+      "key": "c",
+      "label": "Park both resume-guard steps",
+      "lose": "A subagent's message to a finished reviewer stays unchecked, so work sent to a gone reviewer can still be lost."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "steps resume-guard-subagent-sends, resume-guard-workflow-agents, resume-finished-reviewer-no-tree; item 409; #1917",
+  "short": "One-shot probe of a subagent's hook payload",
+  "status": "open",
+  "title": "May a lane's throwaway cloud container add a temporary hook to log one subagent's tool-call payload, then remove it?"
+}

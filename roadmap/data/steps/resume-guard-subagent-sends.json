@@ -1,0 +1,11 @@
+{
+  "title": "The resume guard refuses a subagent's message to a finished reviewer",
+  "why": "A subagent can message a reviewer whose worktree is gone, and the work sent is lost. The guard for the orchestrator case (resume-finished-reviewer-no-tree, #1917) does not see a subagent's sends.",
+  "note": "Held on page item 412 (subagent-payload-probe): no record says which transcript a subagent's PreToolUse transcript_path names, and the lane's probe was refused by the auto-mode classifier. Lane resume-finished-reviewer-no-tree (session_013NEJL3qSsV2LJ6R1a1HMCB) runs the probe on pick a. Until 2026-11-21. Filed 06:03 CST Nov 8 (coordinator, 06:01 CST).",
+  "order": 628,
+  "phase": "now",
+  "owner": "triage",
+  "status": "todo",
+  "lane": "session_013NEJL3qSsV2LJ6R1a1HMCB",
+  "updatedAt": "2026-11-08T06:02:00-06:00"
+}
