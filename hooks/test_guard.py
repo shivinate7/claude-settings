@@ -13797,9 +13797,9 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --re
 # closing line in the text, so every line after it is judged as the command it is. Class 1 is the re-walk invariant,
 # class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (a harmless run of a file a
 # body writes), class 3b the reads of a data body, class 4 the true refusals that stay, class 5b the readers that
-# class 5 does not name, class 7 the pins for forms with no case. Red on main: class 3, and the class 7 pins for a
-# run after `then` or `do`, and for a pipe into check.py. Red on the held fix (the closing line dropped): class 1,
-# the detached-launch forms of class 2, class 3b and class 5b.
+# class 5 does not name, class 7 the pins for forms with no case. Main refuses class 3 and a pipe into check.py, and
+# allows a run after `then` or `do`. A kept body that drops its closing line fails class 1 and the detached-launch
+# forms of class 2.
 FAMILY = "heredoc-keep"
 HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
 HK_DATA = "cat > notes.md <<'EOF'\nhello\nEOF\n"   # a data body: no command in its call runs it
@@ -13840,9 +13840,8 @@ for _label, _cmd in HK_INVARIANT_INPUTS:
     _heredoc_keep_invariant(_label, _cmd)
 
 
-# CLASS 2. A refused command after a kept body stays refused. The detached-launch forms are the held fix's hole: its
-# kept body drops the closing line, so the launch after it reads as body. The draft-pr and destructive forms deny on
-# the held fix too; they stay as controls that a fix must not loosen.
+# CLASS 2. A refused command after a kept body stays refused. A kept body that drops its closing line makes the
+# launch after it read as body. The draft-pr and destructive forms are controls that a fix must not loosen.
 sh("heredoc-keep: a kept body, then nohup of the file, a detached launch, denies",
    HK_KEPT + "nohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
 sh("heredoc-keep: a kept body, a bash run, then a background npm start, denies",
@@ -13921,7 +13920,7 @@ sh("heredoc-keep: a real gh pr create after a data body, with no --draft, denies
 
 # CLASS 5. A body that a kept run file reads stays in view: a body in a file a run file sources or names, a body that
 # an interpreter reads through a substitution or a pipe, and a body written to a .sh file that no command in the
-# call runs. Each denies on the builder's keep. Each is judged red on a mutant that keeps no body (see the commit).
+# call runs. Each is refused only while that body stays in view.
 sh("heredoc-keep: reader, a body in b.sh that a.sh sources, then a.sh runs, denies",
    "cat > b.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > a.sh <<'EOF'\nsource b.sh\nEOF\nbash a.sh",
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
