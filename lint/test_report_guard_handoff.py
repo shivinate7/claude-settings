@@ -73,7 +73,10 @@ WITH_ROUTE = WHY % (" (route %s)" % ROUTE_ID)
 DEAD_ROUTE = WHY % " (route r-missing)"
 ASKS_CITE = WHY % " (route r-asks)"
 # An Input Needed item with no Why yours label. Layer (a) does not judge it, even with a dead cite.
-UNLABELLED = "I can't push from here (route r-missing)."
+UNLABELLED = "The builder can't push from here (route r-missing)."
+# A prose line with a capability verb and no Why yours label. The hand-off guard leaves it alone. Its subject is the
+# trailer check, a third party, so the cannot-claim check does not read it as the session's own claim.
+NOT_HAND_OFF = "The trailer check can't run here, so it is open."
 TOOL_CITE = "Why yours: I can't push from here, since `%s` was refused this session." % TOOL
 # Pick Q1 (b): a capability reason needs a cite (a route row that is refused or asks, a refusal of this session, or a
 # measured premise with a date). A reason with no capability verb needs none.
@@ -362,7 +365,7 @@ class HandOffTests(unittest.TestCase):
 
     def test_hd_green_a_reply_with_no_hand_off_is_not_touched(self):
         # Catches: a "can't" sentence, or "why yours" mid-line, read as a hand-off line.
-        prose = ("I can't run check_red_run here, so the trailer check is open.",
+        prose = (NOT_HAND_OFF,
                  "The note says why yours is open.")
         for landed in (False, True):
             with self.subTest(landed=landed):
@@ -484,7 +487,7 @@ class HandOffTests(unittest.TestCase):
 
     def test_hd_cost_a_reply_with_no_why_yours_does_not_import_route_match(self):
         # Catches: the fast path importing route_match, the rows reader, on every Stop. A Why yours line may import it.
-        reply = report(prose=("I can't run check_red_run here, so the trailer check is open.",))
+        reply = report(prose=(NOT_HAND_OFF,))
         self.assertFalse(self.imported_after(reply, "route_match"),
                          "a reply with no Why yours line imported route_match")
 
@@ -660,7 +663,7 @@ class HandOffTests(unittest.TestCase):
 
     def test_hd_cost_a_reply_with_no_hand_off_opens_only_the_transcript(self):
         # Catches: the hand-off check reading the rows file or the refusals file on every Stop.
-        reply = report(prose=("I can't run check_red_run here, so the trailer check is open.",))
+        reply = report(prose=(NOT_HAND_OFF,))
         with mock.patch.dict(os.environ, {ROUTE_ROWS_ENV: self.rows}):
             out, opened, transcript = self.guard_opens(reply)
         self.assertEqual(out, "", "a reply with no hand-off was judged: %s" % out)
