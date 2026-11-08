@@ -133,11 +133,12 @@ PAST_RULING_ITEM = (
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
-# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
-PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
-# The one retry of that call after a timeout (owner ask ask-mw6pwif5wv, coordinator pick, 2026-11-07 12:33 CST). It is
-# shorter than the first try so 15 + 10 plus an unmeasured start-up allowance fits the Stop hook's 35 s timeout.
-PAST_RULING_RETRY_TIMEOUT = 10
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 25 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 25
+# The one retry of that call after a timeout (owner ask ask-mw6pwif5wv). The owner picked 25 s and 15 s with a 50 s Stop
+# hook (page item 379, past-ruling-check-time, 2026-11-07 21:33 CST). The worst case is 25 + 15 s plus python start,
+# git reads and `_judge_isolation`, inside 50 s; that allowance is unmeasured.
+PAST_RULING_RETRY_TIMEOUT = 15
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
