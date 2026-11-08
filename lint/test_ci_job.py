@@ -28,6 +28,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -90,6 +92,18 @@ class Job(unittest.TestCase):
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
+
+    def seen_after(self, *steps, args=(), env=None):
+        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job. ci-job relays
+        no step output, so a step writes the value it sees to seen.txt."""
+        path = os.path.join(self.root, "seen.txt")
+        if os.path.exists(path):
+            os.remove(path)
+        rc, lines, out = self.run_job(*steps, args=args, env=env)
+        if not os.path.exists(path):
+            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
+        with open(path, encoding="utf-8") as f:
+            return self.verdicts(lines), f.read(), out
 
 
 class Steps(Job):
@@ -442,17 +456,6 @@ class GithubBaseRef(Job):
 
     SEEN = "printf '%s' \"${GITHUB_BASE_REF-<unset>}\" > seen.txt"
 
-    def seen_after(self, *steps, args=(), env=None):
-        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job."""
-        path = os.path.join(self.root, "seen.txt")
-        if os.path.exists(path):
-            os.remove(path)
-        rc, lines, out = self.run_job(*steps, args=args, env=env)
-        if not os.path.exists(path):
-            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
-        with open(path, encoding="utf-8") as f:
-            return self.verdicts(lines), f.read(), out
-
     def test_a_pull_request_run_sets_github_base_ref_to_the_base_without_its_remote(self):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
@@ -482,6 +485,18 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+
+class PinNoteEnv(Job):
+    """ci-job sets the pin note's variable on its ste-lint step only (decision action-pins-follow-sessions). A caller that
+    exports it must not reach any other step: ci-job strips it from each step's env. The step writes what it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"${" + PIN_NOTE_ENV + "-<unset>}\" > seen.txt"
+
+    def test_a_caller_export_of_the_pin_note_variable_never_reaches_another_step(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
 
 
 def mapped(parent, body):
