@@ -14638,7 +14638,7 @@ def _own_then_clean_merge(w):
     write(os.path.join(w, "src/app.py"), "x = 4\n")
 
 
-def _author_merge_checkout(w):
+def _test_author_merge_checkout(w):
     """Cut at main. In the main checkout, the test-author merges a feature branch into mergeA. Main has
     moved on, so the merge conflicts in the test file and the product file, and the test-author resolves
     both by hand and commits the merge there (reflog `commit (merge)` in its own checkout). The builder's
@@ -15081,7 +15081,7 @@ sh("builder-refuse: a builder's merge of main that conflicts in a test file, res
 # product file). Checkout hands that merge over, so the builder's product edit is judged on the builder's
 # own commits only, and is allowed at commit, push and stop. The commit case is the one the role-diff
 # mutant in mutate_guard.py names.
-_bd_author_merge = diff_repo("bd-author-merge-checkout", _author_merge_checkout)
+_bd_author_merge = diff_repo("bd-author-merge-checkout", _test_author_merge_checkout)
 sh("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at commit",
    COMMIT, "allow", cwd=_bd_author_merge, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder in a fresh worktree that checks out a test-author's merge commit is allowed at push",
