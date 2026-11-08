@@ -167,7 +167,14 @@ def shared_deadline(seconds):
     finally:
         _READ_DEADLINE = prior
 
+def lists_refs(args):
+    """True for `git -C <dir> ls-remote ...`, the only call `sh` reads stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
+    Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
+    args, so each caller and each stand-in for `sh` that passes the args on gets it."""
+    return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
+
 def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+    stdout_only = lists_refs(args)
     args = [resolve_program(args[0], env), *args[1:]]
     limits = [t for t in (SH_TIMEOUT, timeout) if t is not None]
     timeout = max(0.05, _READ_DEADLINE - time.monotonic()) if _READ_DEADLINE is not None else min(limits) if limits else None
@@ -175,6 +182,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
         r = _nowindow.run(args, cwd=cwd, input=input, env=env, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=timeout)
         return r.returncode, r.stdout.strip()
     r =_nowindow.run(args, cwd=cwd, input=input, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if stdout_only and r.returncode == 0:  # a failure keeps both streams, for the network-error read
+        return r.returncode, r.stdout.strip()
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None):
@@ -569,6 +578,8 @@ class Lock:
             self.until = None  # no lock is held after this: a later rate wait extends nothing
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
+SHA_HEX = r"[0-9a-f]{40}"  # a full git object id; GitLock.listed and REVIEW_SHA check against it
+
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. Each push is leased on the sha it read (empty: create only), so a ref that moved since the read refuses the push."""
     def __init__(self, root, now=time.time, pause=time.sleep):
@@ -579,7 +590,13 @@ class GitLock(Lock):
         c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
-        return out.split()[0] if out else None
+        if not out:
+            return None
+        # Only stdout lists refs. A first token that is no sha is a listing this run cannot read: a Stop, never a lock sha and never no lock.
+        sha = out.split()[0]
+        if not re.fullmatch(SHA_HEX, sha):
+            raise Stop("cannot read the merge lock " + LOCK_CITE + ": ls-remote listed no sha: " + out)
+        return sha
 
     def commit_text(self, ref, sha):
         """-> (code, text): the message of the listed `sha`, or a non-zero code when it cannot be read. NetStop on a network error."""
@@ -3146,7 +3163,7 @@ REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL"
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
 REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
-REVIEW_SHA = r"[0-9a-f]{40}"
+REVIEW_SHA = SHA_HEX
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
