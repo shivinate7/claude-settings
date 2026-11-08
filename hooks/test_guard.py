@@ -3777,9 +3777,9 @@ RSM_A, RSM_B = os.path.join(RSM, "a"), os.path.join(RSM, "b")
 ES = os.path.join(STDIR, "estree")          # the stale pair: b's stale f.txt is edited and staged
 ES_B = os.path.join(ES, "b")
 EU = os.path.join(STDIR, "eutree")          # the pair: b's f.txt is synced, then edited in the tree only
-EU_B = os.path.join(EU, "b")
+EU_A, EU_B = os.path.join(EU, "a"), os.path.join(EU, "b")
 DL = os.path.join(STDIR, "dltree")          # the pair: the move deletes f.txt, b's stale index keeps it
-DL_B = os.path.join(DL, "b")
+DL_A, DL_B = os.path.join(DL, "a"), os.path.join(DL, "b")
 KP = os.path.join(STDIR, "kptree")          # the pair: b's f.txt is synced, and g.txt (kept by the move) is staged
 KP_B = os.path.join(KP, "b")
 PF = os.path.join(STDIR, "pftree")          # a clean clone: one pull changes n2.txt, then that file is staged
@@ -4156,8 +4156,8 @@ lazy_fixture([RF_B], _build_rfmtree)
 lazy_fixture([RE_B], _build_rfetree)
 lazy_fixture([RSM_B], _build_rsmtree)
 lazy_fixture([ES_B], _build_estree)
-lazy_fixture([EU_B], _build_eutree)
-lazy_fixture([DL_B], _build_dltree)
+lazy_fixture([EU_A, EU_B], _build_eutree)
+lazy_fixture([DL_A, DL_B], _build_dltree)
 lazy_fixture([KP_B], _build_kptree)
 lazy_fixture([PF_D], _build_pftree)
 
@@ -4208,6 +4208,12 @@ _st_allow("control: a cd into the fresh checkout before the commit is allowed",
           "cd " + slash(ST_A) + " && " + VCS + " commit -m x", NOGIT)
 _st_allow("control: -C naming the fresh checkout is judged there and allowed",
           VCS + " -C " + slash(ST_A) + " commit -m x", ST_B)
+_st_allow("control: commit -- F of the edited file, in its fresh checkout, is allowed",
+          VCS + " commit -m x -- f.txt", EU_A)
+_st_allow("control: commit -o -m x F of the edited file, in its fresh checkout, is allowed",
+          VCS + " commit -o -m x f.txt", EU_A)
+_st_allow("control: commit -- F of the deleted file, in its fresh checkout, is allowed",
+          VCS + " commit -m x -- f.txt", DL_A)
 
 # THE PASSES. Each act that leaves no X, or an X the index does not hold, and the reads that must not refuse.
 _st_allow("a commit after git pull --ff-only in the same tree is allowed", VCS + " commit -m x", PL_B)
