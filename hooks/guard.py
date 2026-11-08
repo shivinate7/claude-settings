@@ -822,7 +822,7 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
     runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
     and passes, so the repo is judged, never the target. A call whose PAYLOAD carries a valid
-    `agent_id` is refused inside that folder too, unless the tree is the agent's recorded home
+    `agent_id`, or an `agent_type` alone, is refused inside that folder too, unless the tree is the agent's recorded home
     (`agent_worktree_home` status "home") or its own red-run folder (`_own_red_run`); a "no-record"
     agent has no home to match. Anything unreadable allows."""
     tokens = segment_tokens(segments[number])
@@ -854,9 +854,14 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=(), payload=Non
     if path_is_inside(tree, os.path.join(primary, ".claude", "worktrees")) is not True:
         return target
     status, home, _ = agent_worktree_home(payload, drive_form_cwd(cwd))
-    if status in ("none", "unknown") or _own_red_run(payload, primary, tree):
+    if status == "unknown":   # a gone cwd reads unknown: ask again from the readable repo
+        status, home, _ = agent_worktree_home(payload, where)
+    if status == "none" and isinstance(payload, dict) and payload.get("agent_type"):
+        status = "no-record"   # an agent_type with no agent_id is an agent with no record
+    flat = os.path.normpath(tree)   # `agent-<me>-red/../lane9` must not match by its unflattened name
+    if status in ("none", "unknown") or _own_red_run(payload, primary, flat):
         return ""
-    own = path_is_inside(tree, home) is True and path_is_inside(home, tree) is True
+    own = path_is_inside(flat, home) is True and path_is_inside(home, flat) is True
     return "" if own else target
 
 
