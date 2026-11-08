@@ -1321,7 +1321,7 @@ def review_needs_pr_hit(tool: str, tool_input, cwd: str, agent: bool = False):
     is an agent's and is not judged. No cwd, or a repo with no readable github remote, allows."""
     if agent or tool not in RECORD_SPAWN_TOOLS or not isinstance(tool_input, dict) or not cwd:
         return "", ""
-    role = str(tool_input.get("subagent_type") or "").strip().lower()
+    role = role_key(tool_input.get("subagent_type"))
     if role not in RECORD_REVIEWER_ROLES:
         return "", ""
     prompt = tool_input.get("prompt")
