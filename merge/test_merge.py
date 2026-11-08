@@ -11837,7 +11837,7 @@ def hand_built(*lines):
     return "\n".join(lines) + "\n"
 
 def without_stamp(text):
-    """The record with its Stamp line taken out: the shape of a body typed by hand, as the body of PR #1512 was."""
+    """The record with its Stamp line taken out: the shape of a body typed by hand, with no stamp to say the merge tool printed it."""
     return "\n".join(line for line in text.splitlines() if not line.startswith("Stamp: ")) + "\n"
 
 def stamp_index(test, text):
@@ -12070,7 +12070,7 @@ class ReviewRecordForm(unittest.TestCase):
 
 class ReviewStampForm(unittest.TestCase):
     """The Stamp line (decision pr-review-record): review_body prints one `Stamp: <16 hex>` line after Net value and just above the CI line. The
-    stamp hashes the lines above it, so parse_review refuses a body with no stamp (typed by hand, as PR #1512's was) and a stamped body whose
+    stamp hashes the lines above it, so parse_review refuses a body with no stamp (typed by hand, with no stamp) and a stamped body whose
     lines were edited. Each refusal edits one field and sits beside a good record that parses."""
 
     SIX_ROUNDS = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, FAIL",
@@ -12090,7 +12090,7 @@ class ReviewStampForm(unittest.TestCase):
                 self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
 
     def test_a_body_typed_without_a_stamp_is_not_a_record(self):
-        # PR #1512: the body was typed, so no stamp says the merge tool printed it. Its fields are well formed, so only the stamp is missing.
+        # A body typed by hand has no stamp, so the merge tool did not print it. Its fields are well formed, so only the stamp is missing.
         parse_text(self, record_text(rounds=REVIEW_PASS))  # control: the stamped record parses
         text = without_stamp(record_text(rounds=REVIEW_PASS))
         self.assertIsNone(review_fn(self, "parse_review")(text), "parse_review accepted a body with no Stamp line:\n" + text)
@@ -12394,6 +12394,14 @@ class ReviewEnv(Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
     its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
 
+    def setUp(self):
+        super().setUp()
+        # --review-record holds a PASS record until merge --lane-lint passes. Here lint passes, so a case reaches the record. ReviewLaneLint
+        # patches lane_lint again for its own verdict, and this patch returns once that one ends.
+        lint = unittest.mock.patch.object(merge, "lane_lint", lambda *a, **k: 0)
+        lint.start()
+        self.addCleanup(lint.stop)
+
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
         return (*REVIEW_FLAGS, "--head", self.head(), *extra)
@@ -12638,7 +12646,7 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_a_newest_earlier_record_typed_without_a_stamp_is_refused_as_the_base(self):
-        # PR #1512: the newest earlier record was typed by hand, so it is not a record and names no reviewed head for the fix diff to start from
+        # The newest earlier record was typed by hand, so it is not a record and names no reviewed head for the fix diff to start from
         typed = review_comment(1, 7, without_stamp(record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(typed))
         self.assert_refused(rc, out, err)

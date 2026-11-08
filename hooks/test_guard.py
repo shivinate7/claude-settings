@@ -9983,7 +9983,7 @@ RECORD_BODY_FILES = {"trailing.md": REVIEW_TRAILING, "full-trailing.md": REVIEW_
 FORM_TEXT = ("a line exactly `---`", "footer")
 REVIEW_COMMENT_ID = 4417
 API_EDIT_CMD = "gh api -X PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
-# A well-formed record at the live head with its Stamp line taken out: the shape of a body typed by hand (PR #1512).
+# A well-formed record at the live head with its Stamp line taken out: the shape of a body typed by hand.
 REVIEW_NO_STAMP = "\n".join(line for line in review_record().splitlines() if not line.startswith("Stamp:")) + "\n"
 
 
