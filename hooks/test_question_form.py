@@ -341,8 +341,8 @@ def case_older_rules_keep_their_ids():
 # ------------------------------------------------------------------ a press link needs a string label
 
 def case_press_link_label_is_a_string():
-    # Row press-link-unlabelled-link (the notes file): a link counts when it has a url, but the page draws a link
-    # only when its label is a string too (skills/waiting-page/page.html isLink). A press whose only link has no
+    # A link counts when it has a url, but the page draws a link only when its label is a string too
+    # (skills/waiting-page/page.html isLink). A press whose only link has no
     # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
     # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
     # the page beside it does not save the press.
@@ -1084,8 +1084,9 @@ def ps_task(ps, mac="git log -1"):
 
 
 def case_powershell_bash_forms():
-    # Row ps-command-misses-bash (the debt file): PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export, so a
-    # bash form in a PowerShell string passes. Each bash form is refused, and its PowerShell twin passes. The traps
+    # A bash form in a PowerShell command is refused: PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export,
+    # and PS_BASH_FORMS reads the rest with strings and comments blanked. Each bash form is refused, and its
+    # PowerShell twin passes. The traps
     # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
     # backslash path that ends a line.
     for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
@@ -1122,10 +1123,75 @@ def case_powershell_bash_forms():
         page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
 
 
+def case_powershell_hashtable_is_no_bash_form():
+    # The NAME=value form in PS_BASH_FORMS ran its value past a `;`, so the second pair of a hashtable read as a
+    # `NAME=value tool` line and was refused. A hashtable with `;` between its pairs passes. A leading NAME=value
+    # before a command is still refused, and so is one after a `;`.
+    for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
+                     ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for ps in ("FOO=1 tool run", "tool run;FOO=1 tool run"):
+        page("a PowerShell command %s is refused as a bash operator" % ps, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+
+
+def case_powershell_comment_quote_ends_at_its_line():
+    # The quote walk reads `<#` block comments but not `#` line comments, so an unpaired quote in a line comment
+    # opened a quote that ran to the end of the text, and a bash form on the next line was blanked out. A quote in a
+    # line comment is text, so the next line is read as it stands. A contraction in a comment is text too, and a
+    # comment opener inside a string opens no comment.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell comment with an unpaired single quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task("# the 'main branch\ngit log | head -5")), refused)
+    page("a PowerShell comment with an unpaired double quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task('# the "main branch\ngit log | head -5')), refused)
+    page("a PowerShell comment with a contraction, then Get-ChildItem, passes", "set",
+         entry_of(ps_task("# it's fine\nGet-ChildItem")), None)
+    page("a PowerShell block comment with a contraction, then a pipe to head, is refused", "set",
+         entry_of(ps_task("<# it's #>\ngit log | head -5")), refused)
+    page("a PowerShell string holding a comment opener, then a pipe to head on the next line, is refused", "set",
+         entry_of(ps_task('Write-Host "# ok"\ngit log | head -5')), refused)
+
+
+def case_powershell_bash_prefix_braced_expansion():
+    # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
+    # so each is refused. A `$` inside the expansion and one nested expansion are refused too. The hashtable controls
+    # pass: their `}` closes the hashtable, not an expansion.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
+    page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
+         entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    page("a PowerShell command, PORT=${PORT:-$DEFAULT} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-$DEFAULT} node server.js")), refused)
+    page("a PowerShell command, PORT=${A:-${B}} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${A:-${B}} node server.js")), refused)
+    for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
+                     ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
+                     ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hash_mid_token_is_no_comment():
+    # A `#` opens a line comment only at a token start (guard_core.token_start), so a `#` inside a word is text, and
+    # the bash form after it on the same line is read. The next-line and here-string pins hold the refusal too.
+    # Neither depends on that condition: a line comment ends at its newline, and a here-string body is quoted text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, a#b | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("a#b | head")), refused)
+    page("a PowerShell command, https://x/#frag | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("https://x/#frag | head")), refused)
+    page("a PowerShell command, $x#y | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("$x#y | head")), refused)
+    page("a PowerShell command, $x#y then | head on the next line, is refused", "set",
+         entry_of(ps_task("$x#y\n| head")), refused)
+    page("a PowerShell here-string holding # x 'y, then git log | head on a later line, is refused", "set",
+         entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
+
+
 def case_step_shell_programs_partial():
-    # Row step-shell-programs-partial (the debt file): a single-span step is a shell line only when its first word is in
-    # SHELL_PROGRAMS, so a cloud CLI, a span with a flag after its word, or chmod passes. Each of the six spans the debt
-    # names is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
+    # A single-span step is a shell line only when its first word is in SHELL_PROGRAMS, so a cloud CLI, a span with a
+    # flag after its word, or chmod passes. Each of the six spans below is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
     # stays refused, as on main.
     for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x"):
         page("a step holding `%s` is refused as a shell line" % span, "set",
@@ -1788,7 +1854,9 @@ def main():
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
                  case_press_link_label_is_a_string, case_str_replace_rework_is_refused,
-                 case_powershell_bash_forms, case_step_shell_programs_partial,
+                 case_powershell_bash_forms, case_powershell_hashtable_is_no_bash_form,
+                 case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
+                 case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
