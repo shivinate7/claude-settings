@@ -308,7 +308,7 @@ class CannotClaimTests(unittest.TestCase):
 
     def test_cc_green_agent_result_relaying_a_403_passes(self):
         # Catches: a try an agent made, reported in its result text, read as no try because it is not this session's
-        # own call. The spawn names no subagent type, and the turn lands on nothing, so only the relay can back the line.
+        # own call. The spawn names no agent type, and the turn lands on nothing, so only the relay can back the line.
         spawn = use("Agent", {"description": "open the PR", "prompt": "open the PR and report the result"}, "tu_a")
         relay = done("tu_a", "mcp__github__create_pull_request returned HTTP 403 Forbidden")
         line = "I cannot open the PR: `mcp__github__create_pull_request` returned HTTP 403."
