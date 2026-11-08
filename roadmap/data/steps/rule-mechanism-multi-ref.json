@@ -1,0 +1,11 @@
+{
+  "title": "A rule's mechanism row lists every guard that holds part of it",
+  "why": "lint/rule_mechanisms.json maps rule shared-trees-archive-then-delete to guard shared-tree only, and a row takes one ref, so the new archive-then-delete guard from #1796 has no row (coordinator, 23:49 CST Nov 7).",
+  "note": "Held under the item 384 hold. Two forms: a row lists every guard that holds part of the rule, or the row names the new archive-then-delete guard. No departure from a ruling, so no page item (coordinator). Title from the coordinator's message. Filed 23:51 CST Nov 7.",
+  "phase": "now",
+  "status": "todo",
+  "order": 538,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-07T23:51:00-06:00"
+}
