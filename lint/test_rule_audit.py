@@ -2149,6 +2149,16 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(src, "unbound-id"), ["not resolved"],
                          "no binding of hit reaches this refusal, so its reason must not resolve")
 
+    def test_a_cited_binding_in_a_sibling_branch_does_not_reach_a_refusal(self):
+        src = branch_src('    if seg == "a":\n'
+                         '        hit = helper(seg)\n'
+                         '        return hit\n'
+                         '    elif seg == "b":\n'
+                         '        refuse(tool, "deny", "sibling-id", hit[1], hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "sibling-id"), ["not resolved"],
+                         "the cited hit is bound in a sibling branch, which does not reach this refusal")
+
     def test_a_branch_whose_only_reaching_binding_is_run_time_stays_not_resolved(self):
         src = branch_src('    if seg == "a":\n'
                          '        hit = helper(seg)\n'
