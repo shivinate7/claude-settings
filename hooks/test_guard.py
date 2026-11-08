@@ -277,7 +277,7 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, no_permission_key=False, **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
@@ -328,6 +328,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "guard": guard,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
+        # An allow whose output must hold additionalContext and no permissionDecision key (see decide).
+        "no_permission_key": no_permission_key,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
         "temp": TEMP_DIR,
         "tool_input": tool_input,
@@ -15704,15 +15706,16 @@ def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
     })
 
 
-def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None):
-    """One send_message case, added once for the main session and once for an agent (decision send-message-refs-resolve)."""
+def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None, context=False):
+    """One send_message case, added once for the main session and once for an agent (decision send-message-refs-resolve).
+    `context` asks for an allow whose output holds additionalContext and no permissionDecision key."""
     env = {"FAKE_GH_LOG": MRF_GH_LOG}
     if mode:
         env["FAKE_GH_MODE"] = mode
     for who, agent in (("main session", None), ("agent", MRF_AGENT)):
         add("message-ref-missing: %s, %s" % (name, who), expected, MRF_RULE if expected == "deny" else None,
             tool=SEND_MESSAGE, cwd=cwd, env_path=MRF_PATH, env=env, agent_id=agent,
-            agent_type="builder" if agent else None, carries=carries, message=message)
+            agent_type="builder" if agent else None, carries=carries, no_permission_key=context, message=message)
 
 
 mrf_case("a made-up commit sha is refused", "deny", "Record link: commit 8c1f0e2a7 has the fix.",
@@ -15732,11 +15735,13 @@ mrf_case("a pull URL of another repo is not judged", "allow",
 mrf_case("a made-up sha on a line that names x/y is not judged", "allow", "x/y: fixed in 8c1f0e2a7 on main.")
 mrf_case("a PR in a repo with no origin is not judged", "allow", "PR #8 has the fix.", cwd=MRF_NOORIGIN)
 mrf_case("a message with no ref is allowed", "allow", "Verdict: pass, nothing to name.")
-# Fail open: the call is allowed, and the output names each ref it could not check.
+# Fail open: the call is allowed, and the output names each ref it could not check in additionalContext,
+# with no permissionDecision key, so the sender sees the note and no permission prompt is skipped.
 mrf_case("a gh error on comment 222 is allowed, and the output names 222", "allow",
-         "See https://github.com/o/r/pull/7#issuecomment-222 for the reply.", carries=("222",), mode="error")
+         "See https://github.com/o/r/pull/7#issuecomment-222 for the reply.", carries=("222",), mode="error",
+         context=True)
 mrf_case("an ls-remote that fails is allowed, and the output names PR #7", "allow", "PR #7 has the fix.",
-         cwd=MRF_BADREMOTE, carries=("#7",))
+         cwd=MRF_BADREMOTE, carries=("#7",), context=True)
 
 
 def mrf_lines(path):
@@ -18438,11 +18443,14 @@ def decide(case):
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
+    if case.get("no_permission_key") and '"permissionDecision"' in result.stdout:
+        return "permissionDecision present", read_decision(result.stdout)[1]
     return read_decision(result.stdout)
 
 
 def read_decision(stdout):
-    """The (decision, reason) a guard run printed. Empty output is an allow."""
+    """The (decision, reason) a guard run printed. Empty output is an allow. An answer that carries
+    additionalContext and no permissionDecision is an allow whose reason is that context."""
     out = stdout.strip()
     if not out:
         return "allow", ""
@@ -18451,6 +18459,8 @@ def read_decision(stdout):
         if parsed.get("decision") == "block":   # a SubagentStop block, not a PreToolUse answer
             return "deny", parsed["reason"]
         block = parsed["hookSpecificOutput"]
+        if "permissionDecision" not in block and "additionalContext" in block:
+            return "allow", block["additionalContext"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
         return "unparsable", out[:200]
