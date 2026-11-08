@@ -18,9 +18,11 @@
                           line must name every handed lane PR (open, newest review record done): on that line, or on a `Dropped`, `Held` or
                           `Next batch` line with a reason; one not named refuses, nothing pushed, locked or marked ready. A body with no `Lanes:`
                           line makes no gh read: a head that merges lanes (local git, in the worktree the path already opens) refuses.
-                          Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), plus
-                          one compare per handed PR against the integration head and one against the base. Without one, one local `git log`.
-                          No new process, file or timer.
+                          --undo-check-unknown-ok "REASON" also lifts a failed lane read of the no-Lanes check (one line names it).
+                          Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then
+                          one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
+                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, one `git log` process in the worktree and
+                          no gh call. No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -2916,7 +2918,7 @@ def run_ready_checks(wt, n, base, checks):
                               f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_CHECKS_CITE}"]))
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
-def draft_step(root, cfg, n, host, info):
+def draft_step(root, cfg, n, host, info, unknown_ok=""):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
@@ -2935,7 +2937,7 @@ def draft_step(root, cfg, n, host, info):
     if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
-            handed_local(wt, f"origin/{base}", n, info)  # before any push or ready check
+            handed_local(wt, f"origin/{base}", n, info, unknown_ok)  # before any push or ready check
             if not default:
                 run_ready_checks(wt, n, base, checks)
             else:
@@ -2977,7 +2979,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
-        return draft_step(root, cfg, n, host, info)
+        return draft_step(root, cfg, n, host, info, unknown_ok)
     counted = handed_check(host, n, info)  # before the lock, any claim or any merge; a body with no Lanes line is read in the worktree, below
     if counted:
         say(counted)
@@ -2994,7 +2996,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
-            return draft_step(root, cfg, n, host, info)
+            return draft_step(root, cfg, n, host, info, unknown_ok)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         busy = batch_refusal(host, n, base, info["head"])
@@ -3398,20 +3400,31 @@ def reviewed_block(h):
 
 _PR_REF = re.compile(r"#(\d+)(?:\s*\(((?:[^()]|\([^()]*\))*)\))?")  # `#12`, then its reason in parentheses when one follows
 
+def label_colon(line):
+    """The index of the first colon outside parentheses, or -1: the colon that ends a left-out line's label. A colon inside a reason's
+    parentheses (`Dropped (see note: lint): #8`, a URL) does not end it."""
+    depth = 0
+    for i, ch in enumerate(line):
+        depth += (ch == "(") - (ch == ")" and depth > 0)
+        if ch == ":" and depth == 0:
+            return i
+    return -1
+
 def body_lanes(body):
     """-> (lanes, left_out) read from an integration PR body. lanes: the numbers on the BATCH_LANES line, or None when the body has none.
-    left_out: {number: has a reason}, from each line that starts with a BATCH_LEFT_OUT prefix. Only the numbers after the first colon
+    The Lanes line may start with a list marker (`- ` or `* `) or bold (`**Lanes:**`), in any case. left_out: {number: [has a reason, ...]},
+    one entry per time the number is on a line that starts with a BATCH_LEFT_OUT prefix. Only the numbers after the label's colon (label_colon)
     count. A reason is a `(...)` right after the number, or a `(...)` in the label before the colon."""
     lanes, left = None, {}
     for line in body.splitlines():
-        if line.startswith(BATCH_LANES):
-            lanes = (lanes or []) + [int(m.group(1)) for m in _PR_REF.finditer(line[len(BATCH_LANES):])]
-        elif line.startswith(BATCH_LEFT_OUT):
-            label, colon, rest = line.partition(":")
-            if colon:
-                labelled = bool(re.search(r"\([^()]*\S[^()]*\)", label))
-                for m in _PR_REF.finditer(rest):
-                    left[int(m.group(1))] = left.get(int(m.group(1)), False) or labelled or bool(m.group(2) and m.group(2).strip())
+        text = line.lstrip(" \t-*>")
+        if text[:len(BATCH_LANES)].lower() == BATCH_LANES.lower():
+            lanes = (lanes or []) + [int(m.group(1)) for m in _PR_REF.finditer(text[len(BATCH_LANES):])]
+        elif line.startswith(BATCH_LEFT_OUT) and label_colon(line) >= 0:
+            i = label_colon(line)
+            labelled = bool(re.search(r"\([^()]*\S[^()]*\)", line[:i]))
+            for m in _PR_REF.finditer(line[i + 1:]):
+                left.setdefault(int(m.group(1)), []).append(labelled or bool(m.group(2) and m.group(2).strip()))
     return lanes, left
 
 def handed_check(host, n, info):
@@ -3421,8 +3434,9 @@ def handed_check(host, n, info):
     head the base already holds. One whose head the integration head holds is in the batch and must be on the Lanes line; any other must be
     on a left-out line with a reason; each PR on the Lanes line must be in the head. A finding raises Unnamed, one line per PR.
     A failed read raises Stop: unknown is never a pass. -> the count line when every handed PR is named.
-    Cost: reviewed_read's reads (two list reads and three gh calls per ready PR with a record), one compare per handed PR against the
-    integration head and one against the base. No new process, file or timer."""
+    Cost: reviewed_read's reads (two list reads and three gh calls per ready PR with a record); each compare is one gh api call: one per open PR
+    on the base that reads done, other than `n` (against the base), one per handed PR and one per Lanes-named open PR not in the batch (against the
+    integration head). No long-lived process, file or timer."""
     lanes, left = body_lanes(info.get("body") or "")
     if lanes is None:
         return None
@@ -3432,20 +3446,22 @@ def handed_check(host, n, info):
     handed = [m for m in sorted({m for m, b in done[1] if b == base}) if m != n and m in rows and not host.holds_head(rows[m], base)]
     in_batch = {m for m in handed if host.holds_head(rows[m], head)}
     named = set(lanes)
-    found = {}
+    found = {}  # PR number -> every fact found about it
+    def find(m, why):
+        found.setdefault(m, []).append(why)
     for m in handed:
         if m in in_batch and m not in named:
-            found[m] = "is in the batch head but not on the Lanes line"
+            find(m, "is in the batch head but not on the Lanes line")
         elif m not in in_batch and m not in named and m not in left:
-            found[m] = "is handed but not named in the body"
+            find(m, "is handed but not named in the body")
     for m in sorted(named - {n}):
         if m not in in_batch and m in rows and not host.holds_head(rows[m], head):
-            found[m] = "is named on Lanes but not in the head"
+            find(m, "is named on Lanes but not in the head")
     for m in sorted(left):
-        if not left[m]:
-            found[m] = "is on a left-out line with no reason"
+        if not all(left[m]):
+            find(m, "is on a left-out line with no reason")
     if found:
-        named_lines = "\n".join(f"#{m} {why} of #{n}." for m, why in sorted(found.items()))
+        named_lines = "\n".join(f"#{m} {' and '.join(whys)} of #{n}." for m, whys in sorted(found.items()))
         raise Unnamed(f"{named_lines}\nName each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
                       f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
     return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
@@ -3454,7 +3470,7 @@ def handed_local(wt, base_ref, n, info, unknown_ok=""):
     """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
     lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
     unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
-    and the reason is returned, for record_lift. A body with a Lanes line is handed_check's. Cost: one `git log`."""
+    and the reason is returned, for record_lift. A body with a Lanes line is handed_check's. Cost: one `git log` process, no gh call."""
     if body_lanes(info.get("body") or "")[0] is not None:
         return None
     try:
@@ -3630,7 +3646,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
-    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
+    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history, or the lane read of the dropped-lane check or of the handed-lane check on a body with no Lanes line cannot; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
