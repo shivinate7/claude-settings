@@ -5702,12 +5702,12 @@ for _label, _command in (
 
 # ------------------------------------------------------------------ wait-until: a wait for a clock time
 #
-# Owner ask, waiting page item ask-mw74y9cw3z: a session waits until a clock time, then runs one command.
-# Two forms of that wait were refused: a pause of 600 s under run_in_background, and a loop whose test
-# reads the clock, under run_in_background. A loop whose test compares `date` output with a literal time
-# ends at that time, so it is allowed under run_in_background. Every loop with no clock bound, every
-# foreground loop and every foreground pause stays refused. The one helper for a wait on a time is
-# `bin/wait-until TIME [--timeout SECS]` (its own cases: lint/test_wait_until.py).
+# A session waits until a clock time, then runs one command. Two forms of that wait are allowed under
+# run_in_background: a pause of 600 s, and a loop whose test reads the clock. A loop whose test compares
+# `date` output with a literal time ends at that time, so it is a deadline, not a wait with no end.
+# Every loop with no clock bound, every foreground loop and every foreground pause stays refused. The
+# one helper for a wait on a time is `bin/wait-until TIME [--timeout SECS]` (its own cases:
+# lint/test_wait_until.py).
 WAIT_UNTIL_TIME = "2026-11-06T22:48:00Z"
 WAIT_UNTIL_CLOCK_LOOP = (r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; '
                          r'do sleep 15; done; node tool.mjs')
