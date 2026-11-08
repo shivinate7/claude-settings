@@ -1480,10 +1480,12 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_red_pr_source_without_a_hash_is_no_source(self):
         # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   3" (spaces), "PR 978", "GitHub PR 978",
-        # "pr 2 of the plan" and "the PR 3 times". The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs
-        # "#<n>". The green control is "PR #3" (test_cc_green_spaced_pr_hash_is_a_source).
+        # "pr 2 of the plan", "the PR 3 times", and "PR 978 on the page", where the word "page" is a source of its own
+        # and the bare PR still passes. The pick (coordinator, 2026-11-08 07:54 CST): a PR source needs "#<n>". The
+        # green controls are "PR #3" and "PR #978 on the page" (test_cc_green_spaced_pr_hash_is_a_source).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
-                 "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times"]
+                 "ruling X from GitHub PR 978", "ruling X from pr 2 of the plan", "ruling X from the PR 3 times",
+                 "ruling X from PR 978 on the page"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
@@ -1518,9 +1520,11 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_green_spaced_pr_hash_is_a_source(self):
         # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
-        # only the no-space forms must leave it a source.
-        reply = report_lines("Recovered: ruling X from PR #3", "Handoff gave: none")
-        self.assertIsNone(self.stop(self.compacted_turn(reply)), "'PR #3' is refused as a source")
+        # only the no-space forms must leave it a source. "PR #978 on the page" is the control for the page-word case.
+        for item in ("ruling X from PR #3", "ruling X from PR #978 on the page"):
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "'%s' is refused as a source" % item)
 
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
