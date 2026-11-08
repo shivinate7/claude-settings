@@ -1610,6 +1610,14 @@ CANNOT_ACTS = (
         re.I)),
 )
 # A passive form that names the PR elsewhere in its clause: "the PR can't be opened".
+# The nouns that, as the object of open, merge, close, comment or update, name no PR: "merge the config files" and "update
+# the docs for PR 12" merge and update files. A PR named in the object (not as a possessor) keeps the claim: "open the CI
+# logs and PR".
+CANNOT_NON_PR_OBJECTS = ("file", "files", "config", "configs", "doc", "docs", "document", "documents", "log", "logs",
+                         "diff", "diffs", "tag", "tags", "readme")
+_PR_WORDS = ("pr", "prs", "pull-request", "pull-requests", "pull", "request", "requests")
+# The route a run names: "run gh pr create", "run `git push`".
+CANNOT_RUN_ROUTE_RE = re.compile(r"^run\s+`?(?=gh pr |git (?:push|merge)(?![\w-]))", re.I)
 CANNOT_PASSIVE_ACTS = (
     ("pr-open", re.compile(r"^be\s+(?:opened|created|raised|filed|submitted)\b", re.I)),
     ("pr-edit", re.compile(r"^be\s+(?:closed|edited|updated|marked)\b", re.I)),
@@ -1695,18 +1703,30 @@ def _mask(text):
     return QUOTED_RE.sub(blank, CODE_SPAN.sub(blank, text))
 
 
+def _non_pr_object(window):
+    """True when the object of the verb that starts `window` is a file, doc, log or the like and names no PR of its own."""
+    found = _clause.head_objects(_clause.words(window), 1)
+    return bool(found) and found[-1][0] in CANNOT_NON_PR_OBJECTS and not any(
+        word in _PR_WORDS and not possessive for word, possessive in found)
+
+
 def _window_act(window, clause):
     """The table act the verb at the start of `window` names, else None. `clause` is the phrase's whole clause, where a
-    passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open."""
+    passive form looks for the PR. A code span at the start is read as a route: `gh pr create` is pr-open, and so is a
+    run of that route. An object that names a file, doc or log and no PR is no PR act (_non_pr_object)."""
     window = _clause.strip_adverbs(window)
     span = CANNOT_VERB_SPAN_RE.match(window)
     window = span.group(1) + window[span.end():] if span else window
     if window.startswith("`"):
         acts = sorted(_text_acts(window[1:].split("`", 1)[0]))
         return acts[0] if acts else GITHUB_REACH if CANNOT_GITHUB_SPAN_RE.match(window) else None
+    if CANNOT_RUN_ROUTE_RE.match(window):
+        acts = sorted(_text_acts(window[3:].lstrip().lstrip("`")))
+        return acts[0] if acts else None
     for act, rx in CANNOT_ACTS:
         if rx.match(window):
-            return act
+            return None if act in ("pr-open", "pr-merge", "pr-edit") and not window.lower().startswith("be ") \
+                and _non_pr_object(window) else act
     for act, rx in CANNOT_PASSIVE_ACTS:
         if rx.match(window) and CANNOT_PR_RE.search(clause):
             return act
