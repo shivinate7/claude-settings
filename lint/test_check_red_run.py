@@ -15,6 +15,8 @@ exemption: every non-merge commit that is not a revert is judged.
 
 A commit message that cites a ruling (a claim form of RULING_CITE_RE, outside backticks) names a
 home and a time in the claim's paragraph, or in a `Ruling:` trailer line. Those cases are in RulingCiteCase.
+With --ruling-only the check runs the ruling rule alone. A repo whose HEAD lacks the check file judges a claim
+only under that flag, from the check's cutoff on.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit, then
 change commits on top. The check runs as the copy at lint/check_red_run.py in that repo. The cwd and
@@ -27,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -459,8 +462,8 @@ class RulingCiteCase(CheckCase):
     time, and a claim with a time and no home are red on main, where the check does not read ruling claims. Each assert
     names its cause. The controls pass on main as well."""
 
-    def assertRulingFlagged(self, sha, subject, cause):
-        rc, out = self.lint()
+    def assertRulingFlagged(self, sha, subject, cause, run=None):
+        rc, out = (run or self.lint)()
         self.assertEqual(rc, 1, cause + ":\n" + out)
         self.assertGap(out, sha, subject)
         line = next(line for line in out.splitlines() if sha[:7] in line and subject in line)
@@ -469,6 +472,35 @@ class RulingCiteCase(CheckCase):
     def ruling_commit(self, subject, message):
         """A commit that adds a test path, so the trailer rule is in play too. Returns its sha."""
         return self.commit(subject, {self.new_test_path(): TEST_TEXT}, message=message)
+
+    def ruling_only(self):
+        """The check run with --ruling-only: the copy named by MODULE, from the fixture repo, against its base."""
+        return self.lint(["--ruling-only", "--base", self.base_sha], script=MODULE, cwd=self.tree)
+
+    def assertRulingOnlyAccepted(self):
+        """The flag is known. Over an empty range (HEAD is the base, called right after base()) a run with it exits 0
+        and prints no usage line."""
+        rc, out = self.ruling_only()
+        self.assertNotIn("usage", out, "check_red_run does not accept --ruling-only:\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def since(self):
+        """The cutoff the check holds, read from its text, as an aware datetime."""
+        found = re.search(r"^RULING_CITE_SINCE\s*=\s*[\"']([^\"']+)[\"']", read_module(), re.M)
+        self.assertIsNotNone(found, "the check holds no RULING_CITE_SINCE stamp")
+        return datetime.fromisoformat(found.group(1))
+
+    def new_doc_path(self):
+        self.serial += 1
+        return "docs/widget_%d.md" % self.serial
+
+    def child_commit(self, subject, message, when, files=None):
+        """A commit on a child repo, authored at `when`. It adds one doc file unless `files` names others. Returns its sha."""
+        sha = self.commit(subject, files or {self.new_doc_path(): "Widget docs.\n"}, message=message,
+                          author_date=when.isoformat())
+        self.assertFalse(self.has_file("HEAD", CHECK_REL))  # scope: HEAD is a child repo, with no check file
+        self.assertEqual(self.git("log", "-1", "--format=%at"), str(int(when.timestamp())))  # the date took
+        return sha
 
     def test_incident_message_with_a_bare_claim_is_flagged(self):
         """The incident message, verbatim: the subject and the trailer cite a ruling with no home and no time."""
@@ -696,13 +728,92 @@ class RulingCiteCase(CheckCase):
                 self.ruling_commit(subject, ruling_message(subject, body=body))
                 self.assertClean()
 
-    def test_repo_without_the_check_file_judges_no_ruling_claim(self):
-        """A repo whose HEAD lacks the check file, such as the installed copy run in another repo, judges no claim."""
+    def test_repo_without_the_check_file_judges_a_claim_only_under_the_flag(self):
+        """A child repo, whose HEAD lacks the check file, judges an uncited claim under --ruling-only when the commit is
+        dated from the cutoff on. Without the flag the same commit is not judged."""
         self.base(check=False)
+        self.assertRulingOnlyAccepted()
         subject = "Drop the widget docs"
-        self.commit(subject, {"README.md": "Widget docs.\n"},
-                    message=ruling_message(subject, body="Per the owner's ruling, drop it."))
-        self.assertClean(script=MODULE, cwd=self.tree)
+        sha = self.child_commit(subject, ruling_message(subject, body="Per the owner's ruling, drop it."),
+                                self.since() + timedelta(days=1))
+        self.assertRulingFlagged(sha, subject, "a child repo's claim is not flagged under --ruling-only", run=self.ruling_only)
+        self.assertClean(script=MODULE, cwd=self.tree)  # no flag: the claim is not judged
+
+    def test_child_repo_claim_passes_without_the_flag_on_either_side_of_the_cutoff(self):
+        """Without the flag a child repo judges no claim, before the cutoff or after it. The dates are fixed, so this
+        case does not read the stamp."""
+        for when in ("2026-11-01T10:00:00-06:00", "2026-11-20T10:00:00-06:00"):
+            with self.subTest(when=when):
+                self.base(check=False)
+                subject = "Drop the widget docs"
+                self.child_commit(subject, ruling_message(subject, body="Per the owner's ruling, drop it."),
+                                  datetime.fromisoformat(when))
+                self.assertClean(script=MODULE, cwd=self.tree)
+
+    def test_child_repo_claim_one_second_before_the_cutoff_passes_under_the_flag(self):
+        self.base(check=False)
+        self.assertRulingOnlyAccepted()
+        subject = "Drop the widget docs"
+        self.child_commit(subject, ruling_message(subject, body="Per the owner's ruling, drop it."),
+                          self.since() - timedelta(seconds=1))
+        rc, out = self.ruling_only()
+        self.assertEqual(rc, 0, "a claim authored before the cutoff is judged:\n" + out)
+
+    def test_child_repo_claim_at_the_cutoff_is_flagged_under_the_flag(self):
+        """The cutoff is inclusive: a commit authored at the stamp is judged."""
+        self.base(check=False)
+        self.assertRulingOnlyAccepted()
+        subject = "Drop the widget docs"
+        sha = self.child_commit(subject, ruling_message(subject, body="Per the owner's ruling, drop it."), self.since())
+        self.assertRulingFlagged(sha, subject, "a claim authored at the cutoff is not flagged under --ruling-only",
+                                 run=self.ruling_only)
+
+    def test_only_the_commits_from_the_cutoff_on_are_judged(self):
+        """A range with a claim before the cutoff and one after it: only the later commit is named."""
+        self.base(check=False)
+        self.assertRulingOnlyAccepted()
+        since = self.since()
+        early, late = "Drop the widget docs", "Drop the gadget docs"
+        self.child_commit(early, ruling_message(early, body="Per the owner's ruling, drop it."), since - timedelta(days=1))
+        sha = self.child_commit(late, ruling_message(late, body="Per the owner's ruling, drop it."),
+                                since + timedelta(days=1))
+        rc, out = self.ruling_only()
+        self.assertEqual(rc, 1, out)
+        self.assertGap(out, sha, late)
+        self.assertNotIn(early, out, "a commit before the cutoff is named:\n" + out)
+
+    def test_child_repo_full_cite_passes_under_the_flag(self):
+        self.base(check=False)
+        self.assertRulingOnlyAccepted()
+        subject = "Drop the widget docs"
+        self.child_commit(subject, ruling_message(
+            subject, body="Per the owner's ruling, item 359 b, 2026-11-08 08:15 CST."), self.since() + timedelta(days=1))
+        rc, out = self.ruling_only()
+        self.assertEqual(rc, 0, out)
+
+    def test_child_repo_red_run_gap_passes_under_the_flag(self):
+        """A test commit with no trailer is not judged under the flag: the flag runs the ruling rule alone."""
+        self.base(check=False)
+        self.assertRulingOnlyAccepted()
+        rel = self.new_test_path()
+        message = "add widget tests\n\n" + "\n".join(ATTRIBUTION) + "\n"
+        self.child_commit("add widget tests", message, self.since() + timedelta(days=1), files={rel: TEST_TEXT})
+        self.assertTrue(self.has_file("HEAD", rel))  # scope: the commit adds test lines
+        self.assertNotIn("Red-run", self.git("log", "-1", "--format=%B"))  # scope: and carries no trailer
+        rc, out = self.ruling_only()
+        self.assertEqual(rc, 0, out)
+
+    def test_ruling_only_in_a_repo_that_tracks_the_check_skips_the_red_run_rule(self):
+        """In a repo whose HEAD holds the check, the flag runs the ruling rule alone: a test commit with no trailer passes.
+        Without the flag the same commit is flagged."""
+        self.base()
+        self.assertRulingOnlyAccepted()
+        rel = self.new_test_path()
+        self.commit("add widget tests", {rel: TEST_TEXT}, message="add widget tests\n\n" + "\n".join(ATTRIBUTION) + "\n")
+        self.assertTrue(self.has_file("HEAD^", CHECK_REL))  # scope: the parent holds the check, so the red rule judges it
+        self.assertFlagged(self.git("rev-parse", "HEAD"), "add widget tests", rel)
+        rc, out = self.ruling_only()
+        self.assertEqual(rc, 0, out)
 
     def test_head_without_the_check_file_after_its_removal_judges_no_claim(self):
         """A repo that tracked the check, and whose HEAD no longer does: a claim after the removal is not judged, because

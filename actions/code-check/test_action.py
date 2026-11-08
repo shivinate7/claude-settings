@@ -8,7 +8,9 @@ lines; with no base it is skipped with a reason, and with a base outside the clo
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
-skip and say so, except under CI, where they fail."""
+skip and say so, except under CI, where they fail.
+The action runs the ruling rule of lint/check_red_run.py against its base (--ruling-only): an uncited claim from the
+check's cutoff on fails it. The Red-run rule is not run in the action."""
 import functools, json, os, shlex, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,9 +34,9 @@ with open(STANDARD, encoding="utf-8") as f:
     TS_PIN = json.load(f)["tools"]["typescript"]
 
 
-def git(cwd, *a):
+def git(cwd, *a, input=None, env=None):
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, input=input, env=env)
 
 
 def put(root, files):
@@ -56,11 +58,13 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(),
+          head_message=None, head_date=None, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
+    unset names are dropped from the run env; env adds or replaces variables there. head_message and head_date,
+    when given, are the head commit's whole message and its author date. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -73,7 +77,12 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
             main = head(d)
             git(d, "checkout", "-q", base)
         put(d, files)
-        git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
+        git(d, "add", "-A")
+        if head_message is None:
+            git(d, "commit", "-qm", "head", "--allow-empty")
+        else:
+            git(d, "commit", "-q", "--allow-empty", "-F", "-", input=head_message.encode("utf-8"),
+                env=dict(os.environ, GIT_AUTHOR_DATE=head_date) if head_date else None)
         args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
         run_env = dict(os.environ, **env)
         for name in unset:
@@ -619,6 +628,35 @@ class CommentCheckLanguages(unittest.TestCase):
         rc, out = check({"app.js": JS_HIT}, base_files=base, path_tools=False, PATH=path_with("git"))
         self.assertEqual(rc, 1, out)
         self.assertIn("comment check could not run", out)
+
+
+class RulingCheck(unittest.TestCase):
+    """The action's ruling check: a claim authored from the check's cutoff on fails the action unless it names a home
+    and a time. The dates here are fixed, so no case reads the check's stamp."""
+
+    def run_head(self, body, when, files=None):
+        """A base with a README, then a head commit dated `when` whose message is a subject and the body."""
+        return check(files or {"docs/widget.md": "Widget docs.\n"}, base_files={"README.md": "# Widget\n"},
+                     head_message="Drop the widget docs\n\n" + body + "\n", head_date=when)
+
+    def test_uncited_claim_after_the_cutoff_fails_the_action(self):
+        rc, out = self.run_head("Per the owner's ruling, drop it.", "2026-11-20T10:00:00-06:00")
+        self.assertNotEqual(rc, 0, "the action passes an uncited claim after the cutoff:\n" + out)
+        self.assertTrue(one_line_with(out, "check_red_run: FAIL:", "Drop the widget docs", "no home and no time"), out)
+
+    def test_claim_before_the_cutoff_passes_the_action(self):
+        rc, out = self.run_head("Per the owner's ruling, drop it.", "2026-11-01T10:00:00-06:00")
+        self.assertEqual(rc, 0, out)
+
+    def test_cited_claim_after_the_cutoff_passes_the_action(self):
+        rc, out = self.run_head("Per the owner's ruling, item 359 b, 2026-11-08 08:15 CST.", "2026-11-20T10:00:00-06:00")
+        self.assertEqual(rc, 0, out)
+
+    def test_test_commit_with_no_trailer_passes_the_action(self):
+        """The action runs the ruling rule only. A test path with no trailer is not judged, so the commit passes."""
+        rc, out = check({"tests/widgets.txt": "widget tests\n"}, base_files={"README.md": "# Widget\n"},
+                        head_message="add widget tests\n", head_date="2026-11-20T10:00:00-06:00")
+        self.assertEqual(rc, 0, out)
 
 
 def tearDownModule():
