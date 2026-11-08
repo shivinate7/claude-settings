@@ -16580,6 +16580,28 @@ mrf_case("Acme/Widgets: PR #8 is judged against this repo and refused", "deny", 
          carries=("#8",))
 
 
+# Which repo (decision send-message-refs-resolve, "Which repo"): a branch with this repo's own prefix (lane/, archive/,
+# claude/, handoff/) is not another repo, so a PR number or a sha on its line is judged here. The green controls are the
+# `PR: #8` case and the `acme/widgets PR #9 is ready.` case above.
+mrf_case("a lane/ branch names PR #8, which the repo does not have, and is refused", "deny",
+         "lane/send-message-refs-resolve PR #8 is open.", carries=("#8",))
+mrf_case("an archive/ branch with a colon names PR #8 and is refused", "deny",
+         "archive/send-message-refs: PR #8 pushed.", carries=("#8",))
+mrf_case("a claude/ branch with a colon names PR #8 and is refused", "deny",
+         "claude/fix-foo: PR #8 is open.", carries=("#8",))
+mrf_case("a handoff/ branch names PR #8 and is refused", "deny", "handoff/x PR #8 ready.", carries=("#8",))
+mrf_case("an archive/ branch with a colon names sha 8c1f0e2a7 and is refused", "deny",
+         "archive/send-message-refs: pushed 8c1f0e2a7", carries=("8c1f0e2a7",))
+# What is judged (decision send-message-refs-resolve, "What is judged"): a number after PR with no # is no PR.
+mrf_case("PR: 2500 lines changed, with no #, is no PR and is allowed", "allow", "PR: 2500 lines changed.")
+mrf_case("PR (2500 lines) is big, with no #, is no PR and is allowed", "allow", "PR (2500 lines) is big.")
+# Fail open (decision send-message-refs-resolve, "Fail open"): twenty-one made-up shas in a shallow clone, where none
+# resolves, so each is unchecked. The twenty-first is named by the twenty-sha cap, not dropped.
+MRF_TWENTY_ONE_SHAS = "Shas: " + " ".join("d1e%04x" % number for number in range(1, 22))
+mrf_case("21 made-up shas are allowed, and the output names the 21st, d1e0015", "allow", MRF_TWENTY_ONE_SHAS,
+         cwd=MRF_SHALLOW, carries=("d1e0015",), context=True)
+
+
 # =========================================================================== failing open
 FAMILY = "paths"
 
