@@ -410,8 +410,9 @@ def parse_time(text):
 
 def scan_jobs(transcript):
     """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None,
-    is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
-    result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
+    is an agent)}, previous Stop time or None) for every job that is open. A job is open or closed by
+    transcript order: a launch or a resume (resumed_id) opens it; a terminal task notice or a TaskStop
+    result closes it; the last event wins. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
     previous Stop is the timestamp of the newest stop_hook_summary record the harness wrote after a
@@ -422,7 +423,7 @@ def scan_jobs(transcript):
     prev_stop, blocked = None, False
     with open(transcript, "rb") as f:
         for line in f:
-            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched") + NOTICE_KEY):
+            if not any(k in line for k in (b"backgroundTaskId", b"TaskStop", b"Successfully stopped", b"until:", b"tool_use", b"stop_hook_summary", b"async_launched", b"resumedAgentId") + NOTICE_KEY):
                 continue
             try:
                 rec = json.loads(line)
@@ -446,6 +447,12 @@ def scan_jobs(transcript):
                 continue
             tur = rec.get("toolUseResult")
             jid = None
+            rid = resumed_id(tur) if kind == "user" else None
+            if rid is not None:  # a resume: the agent runs again, from this record's time
+                done.discard(rid)
+                jobs.setdefault(rid, None)  # no launch in this transcript: its path is found beside the session
+                agents.add(rid)
+                began[rid] = when
             if isinstance(tur, dict) and isinstance(tur.get("backgroundTaskId"), str):
                 jid = tur["backgroundTaskId"]
                 m = RESULT_PATH.search(text)
@@ -457,6 +464,7 @@ def scan_jobs(transcript):
                 jobs.setdefault(jid, out if isinstance(out, str) else None)
                 agents.add(jid)
             if jid is not None:
+                done.discard(jid)
                 began.setdefault(jid, when)
                 if isinstance(content, list):
                     job_call.setdefault(jid, next(
@@ -494,6 +502,13 @@ def closed_by_notice(text):
         if tid and st and st.group(1).strip().lower() in TERMINAL:
             ids.append(tid.group(1).strip())
     return ids
+
+
+def resumed_id(tur):
+    """The agent id a resume record reopens: the toolUseResult dict of a SendMessage result that resumed
+    an agent holds resumedAgentId. A queued delivery has none, and text quoted in a tool result is never read."""
+    rid = tur.get("resumedAgentId") if isinstance(tur, dict) else None
+    return rid if isinstance(rid, str) and rid else None
 
 
 def stopped_ids(content):
