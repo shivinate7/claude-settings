@@ -47,7 +47,8 @@ Harm: a pipeline's exit status is its last stage's. `verdict` prints FAIL and ex
 
 Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8`. Its verdict was lost.
 
-- The lane said the stall watch ended the job. That cause is unverified: `hooks/stall_watch.py` only reports a quiet job and never kills it.
+- The lane said the stall watch ended the job. That holds for the wrapper, not the job. A background command runs inside a wrapper that relays its log through `hooks/stall_watch.py`. When the watch reports a quiet job, the wrapper exits 3 and stops relaying. The job keeps running, and its exit trap deletes the log when it ends. So the output after the stall reaches no reader, and `tail` kept nothing either. Read 2026-11-08 00:21 CST from the wrapper command of a stopped background task.
+- `verdict` avoids this: it writes a heartbeat to the beat file, so the watch sees no stall, and it keeps the full log in its own file.
 - The harm holds without that cause. `tail` holds all output until the command ends, then keeps 8 lines. A job that ends early, or is read early, shows nothing.
 
 ## Why a named roster
