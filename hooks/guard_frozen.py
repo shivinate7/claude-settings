@@ -275,7 +275,7 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=(), runs=None) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), reads_only=False) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -284,9 +284,9 @@ def writes_to(path: str, cmd: str, command=None, words=(), runs=None) -> bool:
     Reading the TARGET of the redirect is what separates
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
-    counting as a write to a path named in a comment. A caller that gives `runs` (the command name that
-    runs in the segment, `_commands_run`) has `sed -i` and `perl -i` count only when that command runs, so
-    `grep sed -i P` and `echo perl -i P` name an in-place edit and make none.
+    counting as a write to a path named in a comment. A caller that gives `reads_only` (every command the
+    segment runs is a known reader, `_reads_only`) has `sed -i` and `perl -i` read as text, so `grep sed -i P`
+    and `echo perl -i P` name an in-place edit and make none. Any other segment keeps the match-anywhere read.
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*&?\s*['\"]?" + target, cmd):   # `>` and `>&` redirect onto the path, with or without a space; `>&1` names no file
@@ -298,11 +298,9 @@ def writes_to(path: str, cmd: str, command=None, words=(), runs=None) -> bool:
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if (runs is None or runs.intersection(_SED_NAMES)) and re.search(_SED_IN_PLACE + target, cmd):
-        return True
-    if (runs is None or "perl" in runs) and re.search(_PERL_IN_PLACE + target, cmd):
-        return True
-    return False
+    if reads_only:
+        return False
+    return bool(re.search(_SED_IN_PLACE + target, cmd) or re.search(_PERL_IN_PLACE + target, cmd))
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -379,6 +377,10 @@ _QUIET = _PRINTERS | {"cd", "set-location"}
 # that set also makes a segment quiet (`_kind`), and `sort -o P` or `uniq in P` write. `_command_reads` drops
 # the forms of each tool that write.
 _READ_ONLY_TOOLS = frozenset(("head", "tail", "ls", "less", "sort", "uniq", "diff", "stat", "file", "find"))
+# A command that never runs another command, so a word of its that spells `sed -i` or `perl -i` is text. Every
+# other command word, listed or not, may run one, and `writes_to` keeps the match-anywhere read for it
+# (`_reads_only`). `find` is left out: `-exec` runs a command.
+_READERS = _PRINTERS | (_READ_ONLY_TOOLS - {"find"}) | frozenset(("rg", "ag", "test", "["))
 _FIND_WRITERS = frozenset(("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"))
 
 
@@ -1410,6 +1412,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             segments = [_copy_outer(segment) for segment in segments]
     scans = [_scan(segment) for segment in segments]
     parsed = [_quoted_words(segment) for segment in segments]
+    own = [_reads_only(raw) for raw in parsed]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
     scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
@@ -1434,10 +1437,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             # A perl script (the word after `-e`) that spells an in-place flag is text, as a sed script is.
             data = data | _perl_script_words(raw)
         if kinds[number] in ("printer", "message"):
-            last = number
-            while last + 1 < len(kinds) and ends[last] == "|":
-                last += 1
-            chain = range(number, last + 1)
+            chain = _pipe_chain(number, ends, len(kinds))
             runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
@@ -1482,7 +1482,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                                         predicate_command)
                 if hit:
                     return _from_cwd(hit, at, cwd) if follow_cd else hit
-        runs = _commands_run(raw)
+        reads_only = all(own[k] for k in _pipe_chain(number, ends, len(parsed)))
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
@@ -1491,8 +1491,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 continue
             if follow_cd and word == '""':
                 continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ()), runs=runs):
-                return _from_cwd(word, at, cwd) if follow_cd else word
+            # A `)` or backtick glued to the path closes a subshell or a substitution (`(sed -i s/a/b/ P)`): the
+            # path is the word without it.
+            for path in dict.fromkeys((word, word.rstrip(")`") or word)):
+                if (predicate(path, at, verb) if predicate_command else predicate(path, at)) and writes_to(path, text, *(_segment_command(script) if command_position else ()), reads_only=reads_only):
+                    return _from_cwd(path, at, cwd) if follow_cd else path
     return ""
 
 
@@ -1649,13 +1652,28 @@ def _sed_script_targets(script):
 def _commands_run(raw):
     """The command names that run in one segment's `raw` words, as a set: the command word after any `sudo`,
     `env` or `xargs` and after a glued `(` (`command_indexes`), plus each command a runner starts
-    (`wrapped_commands`: `find -exec`, `flock`, `stdbuf`), read the same way. None when no name is certain, so the
-    caller reads the segment as text that may hold any command: a quoted word holding a space may be a script the
-    shell runs (`sh -c 'sed -i s/a/b/ P'`, or JSON piped to an interpreter), and so may the text of `eval`, a
-    nested shell or `busybox`."""
-    if any(word[:1] in ("'", '"') and re.search(r"\s", _unquoted(word)) for word in raw):
-        return None
+    (`wrapped_commands`: `find -exec`, `flock`, `stdbuf`), read the same way. A name the code cannot read is
+    `''` (a word built from a variable or holding a glued `$(`). None when `eval`, `busybox` or a nested shell
+    runs text no name stands for."""
     return _names_run([_unquoted(word) for word in raw])
+
+
+def _reads_only(raw):
+    """True when every command the segment runs is a known reader (`_READERS`), so a quoted word that holds
+    a space is data, not a script. Fails closed: an unlisted runner, a leading redirect, a function call, an
+    unreadable name, or a backtick, `$(` or glued `(` outside single quotes in any word is no reader."""
+    if any(word[:1] != "'" and re.search(r"`|\$\(|(?<![\w\\])\(", word) for word in raw):
+        return False
+    runs = _commands_run(raw)
+    return bool(runs) and runs <= _READERS
+
+
+def _pipe_chain(number, ends, count):
+    """The segment indexes the segment at `number` feeds through pipes, itself included."""
+    last = number
+    while last + 1 < count and ends[last] == "|":
+        last += 1
+    return range(number, last + 1)
 
 
 def _names_run(tokens):
