@@ -12136,6 +12136,30 @@ add("frozen mirror: Write of the clone's CLAUDE.md beside the mirror is allowed"
 add("frozen mirror: Write of a sibling folder named with the mirror's name as a prefix is allowed",
     "allow", tool="Write", cwd=NOGIT, file_path=MAINLINE_IN_HOME, content="rules\n", env=MIRROR_ENV)
 
+# A SCRIPT THAT ONLY NAMES A FROZEN PATH IS NOT A WRITE. Each row prints, reads, checks or names the
+# frozen path in its `~/` form, and none writes it, so each is allowed. The deny row last is the control:
+# the same path opened for write in that form is still denied. Each case runs with HOME set to
+# MIRROR_HOME and CLAUDE_CONFIG_DIR unset, so the guard reads `~/.claude` as the frozen config dir. The
+# fixture otherwise points the config dir at CFG, where `~` is not a frozen path.
+TILDE_ENV = dict(MIRROR_ENV, CLAUDE_CONFIG_DIR=None)
+TILDE_HOOK = "~/.claude/hooks/guard.py"
+TILDE_VERDICT = "~/.claude/bin/verdict"
+sh("frozen: python -c that prints a frozen path in ~ form is allowed",
+   "python3 -c 'print(\"" + TILDE_HOOK + "\")'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: python -c that checks a frozen bin path in ~ form with os.path.exists is allowed",
+   "python3 -c 'import os; print(os.path.exists(os.path.expanduser(\"" + TILDE_VERDICT + "\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen: a python heredoc that prints and reads a frozen path in ~ form is allowed",
+   "python3 - <<'EOF'\nimport os\nprint(os.path.expanduser(\"" + TILDE_HOOK + "\"))\n"
+   "print(open(os.path.expanduser(\"" + TILDE_HOOK + "\")).read()[:9])\nEOF", "allow", cwd=NOGIT,
+   env=TILDE_ENV)
+sh("frozen: a cat heredoc whose text names a frozen hook in ~ form, written to scratch, is allowed",
+   "cat <<'EOF' > /tmp/x.md\nEdit " + TILDE_HOOK + " to change the rule.\nEOF", "allow", cwd=NOGIT,
+   env=TILDE_ENV)
+sh("frozen: python -c that opens a frozen hook in ~ form for write is denied",
+   "python3 -c 'open(os.path.expanduser(\"" + TILDE_HOOK + "\"),\"w\")'", "deny", "frozen-path",
+   cwd=NOGIT, env=TILDE_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
