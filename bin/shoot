@@ -26,8 +26,9 @@
 //   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
 //   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
 //   smaller PNG than a plain full-page capture.
-//   Tiles after the first hide position:fixed elements and fixed ::before and ::after, so each shows once, at its first-tile place.
-//   For the whole stitch, sticky elements sit in the flow, fixed backgrounds scroll, and the root does not scroll-snap. A canvas Chromium cannot read back fails that shot.
+//   Tiles after the first hide position:fixed elements, fixed ::before and ::after, and the images of fixed backgrounds (the colour
+//   stays), so each shows once, at its first-tile place. An element mixing fixed and scroll layers loses its scroll layers on those tiles.
+//   For the whole stitch, sticky elements sit in the flow and the root does not scroll-snap. A canvas Chromium cannot read back fails that shot.
 //   A desktop width takes the plain full-page capture.
 // Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). A stitched shot adds one screenshot per viewport tile
 //   (columns across the scroll width times rows down the scroll height) and one extra page for the join. No daemon, no watcher.
@@ -159,14 +160,13 @@ function isBlank(buf) {
 }
 
 // Runs in the page: for the whole stitch, sticky elements sit in the flow (a sticky one would otherwise jump per tile), as
-// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. A fixed
-// background scrolls with its element (a fixed one would repaint at each tile's viewport). The root does not snap (a snap point
-// would move a tile off its scroll offset). on false restores the inline values, each with its priority.
+// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. The root does
+// not snap (a snap point would move a tile off its scroll offset). on false restores the inline values, each with its priority.
 function settleForStitch(on) {
   const root = document.documentElement;
   if (on) { if (root.__shootSnap === undefined) root.__shootSnap = root.style.scrollSnapType; root.style.scrollSnapType = "none"; }
   else if (root.__shootSnap !== undefined) { root.style.scrollSnapType = root.__shootSnap; delete root.__shootSnap; }
-  const names = ["position", "top", "right", "bottom", "left", "background-attachment"];
+  const names = ["position", "top", "right", "bottom", "left"];
   const set = (el, prop, value) => {
     if (el.__shootInline === undefined) el.__shootInline = {};
     if (!(prop in el.__shootInline)) el.__shootInline[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
@@ -174,12 +174,9 @@ function settleForStitch(on) {
   };
   for (const el of document.querySelectorAll("*")) {
     if (on) {
-      const cs = getComputedStyle(el);
-      if (cs.position === "sticky") {
-        set(el, "position", "relative");
-        for (const side of ["top", "right", "bottom", "left"]) set(el, side, "auto");
-      }
-      if (cs.backgroundAttachment.includes("fixed")) set(el, "background-attachment", "scroll");
+      if (getComputedStyle(el).position !== "sticky") continue;
+      set(el, "position", "relative");
+      for (const side of ["top", "right", "bottom", "left"]) set(el, side, "auto");
     } else if (el.__shootInline !== undefined) {
       for (const prop of names) if (prop in el.__shootInline) el.style.setProperty(prop, ...el.__shootInline[prop]);
       delete el.__shootInline;
@@ -187,8 +184,9 @@ function settleForStitch(on) {
   }
 }
 
-// Runs in the page: hide (or restore) each fixed element and each fixed ::before or ::after, so a tile after the first repeats
-// none of them. A pseudo-element has no inline style, so its host carries a mark and one style element hides the marked ones.
+// Runs in the page: hide (or restore) each fixed element, each fixed ::before or ::after, and the images of each fixed background
+// (the colour stays), so a tile after the first repeats none of them. A pseudo-element has no inline style, so its host carries a
+// mark and one style element hides the marked ones. An element that mixes fixed and scroll layers loses its scroll layers too.
 function hideFixed(on) {
   const sides = ["before", "after"];
   const styleId = "shoot-fixed-pseudo-style";
@@ -198,9 +196,14 @@ function hideFixed(on) {
         if (el.__shootVis === undefined) el.__shootVis = el.style.visibility;
         el.style.visibility = "hidden";
       }
+      if (getComputedStyle(el).backgroundAttachment.includes("fixed")) {
+        if (el.__shootBg === undefined) el.__shootBg = [el.style.getPropertyValue("background-image"), el.style.getPropertyPriority("background-image")];
+        el.style.setProperty("background-image", "none", "important");
+      }
       for (const s of sides) if (getComputedStyle(el, "::" + s).position === "fixed") el.setAttribute("data-shoot-fixed-" + s, "");
     } else {
       if (el.__shootVis !== undefined) { el.style.visibility = el.__shootVis; delete el.__shootVis; }
+      if (el.__shootBg !== undefined) { el.style.setProperty("background-image", ...el.__shootBg); delete el.__shootBg; }
       for (const s of sides) el.removeAttribute("data-shoot-fixed-" + s);
     }
   }
