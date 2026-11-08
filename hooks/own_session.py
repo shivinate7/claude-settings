@@ -101,8 +101,8 @@ def own_session_read(transcript, own_id, created=False):
     return newest, tagged_after, parent
 
 
-# How the list_sessions reads of a transcript add up: none was made, the newest did not parse, it has more pages (or
-# a cursor), or one of them is the whole list. Only LIST_FULL proves that no session outside the transcript carries a step.
+# How the list_sessions reads of a transcript add up: none was made, the newest did not parse, it is a page that does not
+# finish a chain, or one of them is the whole list. Only LIST_FULL proves that no session outside the transcript carries a step.
 LIST_NONE, LIST_BAD, LIST_MORE, LIST_FULL = "none", "bad", "more", "full"
 
 
@@ -144,13 +144,17 @@ def session_rows_read(transcript):
     unarchive_session call answered without error makes it live again. `unknown` is the ids whose tags a
     set_session_tags call may have changed after their newest sight (a call with no readable id list may have named
     any of them), because the call's result does not say what the tags are now.
-    `listing` is LIST_FULL when any one list_sessions read was whole: a later partial read does not cancel it, because
-    every session it missed is a sight in `records`. Otherwise it is the state of the newest read: a page with
-    has_more set, or a read with a cursor (after_id or before_id), is LIST_MORE; a body that is not a whole list page
-    is LIST_BAD; no read is LIST_NONE.
+    `listing` is LIST_FULL when the transcript holds a whole list_sessions read: a later partial read does not cancel
+    it, because every session it missed is a sight in `records`. A read is whole when it is a chain: a read with no
+    cursor, then reads whose after_id is the previous page's last row id, the last with has_more false (the tool caps
+    a page, so a long list is never one read). A read with a tags or mine arg lists only a part of the sessions, and a
+    before_id read or an after_id that is not the previous page's last row id breaks the chain; it is partial, and the
+    next whole read must start again with no cursor. Otherwise `listing` is the state of the newest read: a page that
+    does not finish a chain is LIST_MORE; a body that is not a whole list page is LIST_BAD; no read is LIST_NONE.
     Cost: one read of the transcript; no file written, no process."""
     records, listing, whole, unknown = {}, LIST_NONE, False, set()
-    uses = {}  # tool_use id -> (kind, the id acted on, or whether a list read has a cursor) of a call whose result is judged
+    chain = None  # the last row id of the newest page of a chain that no filter or stray cursor has broken, else None
+    uses = {}  # tool_use id -> (kind, the id acted on, or the (after_id, partial) of a list read) of a call whose result is judged
     creates = {}  # tool_use id -> the tags a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -168,8 +172,11 @@ def session_rows_read(transcript):
                     target = given.get("session_id") if isinstance(given, dict) else None
                     target = target if isinstance(target, str) else None
                     if _is_tool(name, "list_sessions"):
-                        cursor = not isinstance(given, dict) or bool(given.get("after_id") or given.get("before_id"))
-                        uses[block.get("id")] = ("list", cursor)
+                        # A filter or a before_id makes the read partial for good; only an after_id can continue a chain.
+                        partial = not isinstance(given, dict) or bool(
+                            given.get("before_id") or given.get("tags") or given.get("mine"))
+                        after = given.get("after_id") if isinstance(given, dict) and not partial else None
+                        uses[block.get("id")] = ("list", (after if isinstance(after, str) and after else None, partial))
                     elif _is_tool(name, "get_session"):
                         uses[block.get("id")] = ("get", None)
                     elif _is_tool(name, "archive_session"):
@@ -207,13 +214,17 @@ def session_rows_read(transcript):
                         try:
                             rows, more = _list_rows(body)
                         except (ValueError, KeyError, TypeError, AttributeError):
-                            listing = LIST_BAD
+                            listing, chain = LIST_BAD, None
                             continue
                         for sid, tags, archived in rows:
                             records[sid] = (tags, archived)
                             unknown.discard(sid)
-                        if more or uses[key][1]:
-                            listing = LIST_MORE
+                        after, partial = uses[key][1]
+                        # A page opens a chain with no cursor, or continues it with the previous page's last row id.
+                        linked = not partial and (after is None or (chain is not None and after == chain))
+                        if linked and not more:
+                            listing, whole, chain = LIST_FULL, True, None
                         else:
-                            listing, whole = LIST_FULL, True
+                            listing = LIST_MORE
+                            chain = rows[-1][0] if linked and rows else None
     return records, LIST_FULL if whole else listing, unknown

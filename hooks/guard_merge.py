@@ -1165,9 +1165,10 @@ STEP_DUP_RECORD_REASON = (
 )
 STEP_DUP_UNKNOWN_REASON = (
     "this session's transcript does not prove that no other live lane carries cs-step:%s in this repo: it holds no "
-    "whole list_sessions result (every page, no cursor), a set_session_tags call followed the newest sight of a "
-    "session, or the subject has no cs-repo tag to match by. Run list_sessions (every page) in its own turn, check "
-    "that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
+    "whole list_sessions read (a read with no cursor, then reads that each pass the last session id of the page "
+    "before as after_id, the last with has_more false, none with tags or mine), a set_session_tags call followed the "
+    "newest sight of a session, or the subject has no cs-repo tag to match by. Run list_sessions in its own turn "
+    "that way, check that the target or the new lane carries a cs-repo tag, then retry." + STEP_DUP_TAIL
 )
 
 
@@ -1182,11 +1183,14 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     brief_hit parses it) or a create_session tagged cs-step:<step>. Steps and tags match without case. It is denied
     when another live session, not the brief's target, carries that step and shares a cs-repo tag with the subject
     (the target's record, or the create's own tags); the reason names that session. A brief to a target that carries
-    the step itself is the remedy, so a second carrier does not deny it. A session is live unless its newest sight in
-    this transcript is archived and not unarchived (hooks/own_session.py session_rows_read). Any one whole
-    list_sessions read earlier in the transcript counts, however old: a later partial read never cancels it.
-    With no carrier found, anything short of a whole read, a subject with no cs-repo tag, or a live session whose
-    tags a set_session_tags call may have changed since its newest sight, is an ask: unknown, never an allow. After a
+    the step itself is the remedy: it starts no new lane, so it passes once the target's own record shows the step,
+    before any list, pull request or step record read (a target with no current record is an ask). A session is live
+    unless its newest sight in this transcript is archived and not unarchived (hooks/own_session.py
+    session_rows_read). A whole list_sessions read is a chain of reads that no filter breaks (session_rows_read
+    says which); one earlier in the transcript counts, however old, and a later partial read never cancels it.
+    A carrier on any page, whole read or not, denies. With no carrier found, anything short of a whole read, a
+    subject with no cs-repo tag, or a live session whose tags a set_session_tags call may have changed since its
+    newest sight, is an ask: unknown, never an allow. After a
     whole read with no carrier, two more reads can still ask: an open pull request of the cs-repo whose head is
     lane_head_refs(step), when the target does not carry the step, and the step record on origin/roadmap (`lane`
     field) naming a session id other than the target. A failed pull request or record read, or an unreadable ref, is
@@ -1223,6 +1227,8 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
                 raise ValueError("no current record of the target")
             subject = records[target][0]
             mine = {v.lower() for v in _tag_values(subject, ARCHIVE_STEP_PREFIX)}
+            if all(step in mine for step in steps):  # no new lane starts, so no other session's tags matter
+                return None
         else:
             subject = tool_input["tags"]
         repos = {r.lower() for r in _tag_values(subject, ARCHIVE_REPO_PREFIX)}
