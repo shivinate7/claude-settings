@@ -17,7 +17,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 RUN_FOLDER = _test_temp.run_folder()
 RUNNER = os.path.join(HERE, "code_check.py")
-STANDARD = os.path.join(HERE, "standard.json")
+STANDARD = os.path.join(HERE, "..", "..", "lint", "code_check_standard.json")
 GOOD_PY = "def add(a: int, b: int) -> int:\n    return a + b\n"
 BAD_PY = "def add(a: int, b: int) -> int:\n    return str(a)\n"
 GOOD_ASTRO = "---\ninterface Props { title: string }\nconst { title } = Astro.props;\nconst n: number = 2;\n---\n<h2>{title} {n}</h2>\n"
