@@ -16,13 +16,14 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
-                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL|WIDE] [--net-value V]
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL|WIDE [--fix-base-record URL]] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. FAIL counts as the next
                           round; WIDE (a diff wider than its finding) counts none and needs a new lane at the first round. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened.
+                          unless the newest earlier record on the PR, read from its issue comments, has no Fix check line and its Head is
+                          HEAD or differs from HEAD by record or notes files only (one head an ancestor of the other). --fix-base-record
+                          names a record comment on another PR of this repo to stand in when this PR has none of its own.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
@@ -890,6 +891,17 @@ class Host:
                 found.setdefault(int(m.group(1)), []).append(body)
         return found
 
+    def review_comment(self, comment_id):
+        """-> {body, issue_number, created_at} of one comment of the repo, by its id: one read. A failed or malformed read is a Stop."""
+        c, out = self.api(f"issues/comments/{comment_id}")
+        try:
+            if c:
+                raise ValueError(out)
+            d = json.loads(out)
+            return {"body": d["body"] or "", "issue_number": int(re.search(r"/issues/(\d+)$", d["issue_url"]).group(1)), "created_at": d["created_at"]}
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            raise Stop(f"reading comment {comment_id} from GitHub failed {READ_CITE}: {e}")
+
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
         which would say no PR is open. A head with two open PRs (a backport, or a fork's branch of the same name) gets base None under
@@ -966,6 +978,21 @@ class Host:
             return json.loads(out)["status"] in ("ahead", "identical")
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+
+    def compare_files(self, base, head):
+        """-> {status, ahead_by, behind_by, files} of GitHub's compare of base...head: ONE read, never paged, so `files` holds at most COMPARE_FILE_CAP
+        entries (each a dict with filename, status and, for a rename, previous_filename). Any failed or malformed read raises Stop."""
+        c, out = self.api(f"compare/{base}...{head}")
+        try:
+            if c:
+                raise ValueError(out)
+            reply = json.loads(out)
+            found = {"status": reply["status"], "ahead_by": int(reply["ahead_by"]), "behind_by": int(reply["behind_by"]), "files": list(reply.get("files") or [])}
+            if not all(isinstance(f, dict) and isinstance(f.get("filename"), str) for f in found["files"]):
+                raise ValueError("a file entry has no filename")
+            return found
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"cannot read the compare of {base[:9]} and {head[:9]} {READ_CITE}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -3528,6 +3555,74 @@ def fix_check_arg(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
     return m.group(1, 2, 3, 4)
 
+COMPARE_FILE_CAP = 300  # GitHub's compare lists at most this many files, so a reply this long may be cut short
+
+def fix_base_problem(host, root, base, last_head):
+    """None when a fix check may start from `base` although the newest earlier record reviewed `last_head`, else the reason it may not.
+    The two heads must be one an ancestor of the other, and every file between them, a rename's old path too, a record or notes file: a Markdown
+    file under a record folder, or the exact notes, todo or records-page file (the layout's places for this repo). A commit of notes after a review
+    then leaves the fix diff the reviewed one. GitHub's three-dot compare lists the files on its second head's side only, so the read that finds the
+    second head an ancestor of the first is read again the other way round. A failed read raises Stop. An unreadable layout, or a list that may be
+    cut at the cap, refuses: the files cannot be told."""
+    try:
+        import layout
+        folders, files = layout.record_places(layout.layout(), root)
+    except Exception as e:  # LayoutError, or a module that will not load: the record places are unknown
+        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code"
+    files = files | {RECORDS_PAGE}
+    found = host.compare_files(last_head, base)
+    if found["ahead_by"] and found["behind_by"]:
+        return f"{base[:9]} and the newest earlier record's Head {last_head[:9]} have diverged: one must hold the other"
+    if found["behind_by"]:  # base is the older head, and this read lists none of the files between them: read it from the older head
+        found = host.compare_files(base, last_head)
+        if found["behind_by"] or not found["ahead_by"]:
+            return f"the two compare reads of {base[:9]} and {last_head[:9]} disagree about which head holds the other"
+    if len(found["files"]) >= COMPARE_FILE_CAP:
+        return f"the compare of {base[:9]} and {last_head[:9]} lists {COMPARE_FILE_CAP} or more files, so its list may be cut short"
+    def is_record_file(path):
+        path = path.strip("/")
+        return path in files or any(path.startswith(d + "/") and path.endswith(".md") for d in folders)
+    named = [name for f in found["files"] for name in (f["filename"], f.get("previous_filename")) if name]
+    code = sorted({name for name in named if not is_record_file(name)})
+    if code:
+        return f"{base[:9]} is not the newest earlier record's Head, and the files between them are not all record or notes files: {', '.join(code[:3])}{' ...' if len(code) > 3 else ''}"
+    return None
+
+FIX_BASE_URL = re.compile(r"https://github\.com/([^/\s]+)/([^/\s#]+)/(?:pull|issues)/(\d+)#issuecomment-(\d+)", re.ASCII)
+
+def fix_base_record_arg(text):
+    """argparse type of --fix-base-record -> (owner/name lowercased, comment id): a link to an issue comment on a pull request or an issue."""
+    m = FIX_BASE_URL.fullmatch(text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"{text!r} is not https://github.com/OWNER/REPO/pull/N#issuecomment-ID")
+    return f"{m.group(1)}/{m.group(2)}".lower(), int(m.group(4))
+
+def source_record_problem(h, root, a, own_records):
+    """-> (source record or None, problem or None) for --fix-base-record: the record that stands in for the newest earlier record of a pull request
+    with none of its own. It must be on this repo, parse, name the pull request its comment is on, be the newest record there, and have no Fix check
+    line. A failed read raises Stop."""
+    repo, cid = a.fix_base_record
+    if own_records:
+        return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete"
+    try:
+        import layout
+        mine = (h.repo or layout.repo_name(root) or "").lower()
+    except Exception:
+        mine = (h.repo or "").lower()
+    if not mine or repo != mine:
+        return None, f"--fix-base-record names {repo}, not this repo ({mine or 'unknown'})"
+    c = h.review_comment(cid)
+    rec = parse_review(c["body"])
+    if rec is None:
+        return None, "--fix-base-record: that comment is not a well-formed review record"
+    if rec["n"] != c["issue_number"]:
+        return None, f"--fix-base-record: that record's PR line names #{rec['n']}, but its comment is on #{c['issue_number']}"
+    if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
+        return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}"
+    if rec["fix"]:
+        return None, "--fix-base-record: that record has a Fix check line, and a fix never follows a fix"
+    return rec, None
+
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
 def role_path():
@@ -3623,12 +3718,13 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from: the Head of the newest earlier record, or a head that differs from it only by record or notes files; VERDICT is PASS, FAIL (counts as the next round) or WIDE (counts none, new lane at round 1)")
+    p.add_argument("--fix-base-record", type=fix_base_record_arg, metavar="URL", help="with --review-record and --fix-check, for a pull request with no review record of its own: the link to an earlier review record on another pull request of this repo (https://github.com/OWNER/REPO/pull/N#issuecomment-ID), which stands in for the newest earlier record: its Head is the fix base, and its last round sets the round floor")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
-        p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
+    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.fix_base_record or a.net_value != "not owed") and not a.review_record:
+        p.error("--head, --kind, --guard, --round, --fix-check, --fix-base-record and --net-value go with --review-record")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
@@ -3661,6 +3757,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--review-record needs --head, --kind and --guard")
         if a.kind == "docs-only" and a.guard == "yes":
             p.error("--kind docs-only means no guard or check, so --guard must be no")
+        if a.fix_base_record and not a.fix_check:
+            p.error("--fix-base-record goes with --fix-check")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)) is None:
@@ -3705,11 +3803,21 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+            if a.fix_check:  # a fix never follows a fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
+                recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                problem = None
+                if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
+                    last, problem = source_record_problem(h, root, a, recs)
+                    if not problem:
+                        problem = round_floor([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
+                else:
+                    last = parse_review(recs[-1]) if recs else None
+                    if not last or last["fix"]:
+                        problem = "the newest earlier review record on this pull request must exist and have no Fix check line"
+                if not problem and last["head"] != a.fix_check[0]:
+                    problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
+                if problem:
+                    print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

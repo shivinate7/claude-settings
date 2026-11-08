@@ -104,6 +104,45 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
+FILE_KINDS = ("debt-notes", "todo")  # record files that are not a listed folder
+
+
+def record_places(data, root=None):
+    """-> (folders, files): where record kinds live, as `/` paths without a trailing slash. `folders` hold Markdown records; `files` are the exact
+    files of the FILE_KINDS. `data` is the layout as read. With no `root`, every layout, legacy and legacy-repos path counts (what check_layout reads).
+    With `root`, the legacy names count only for a repo that is not rolled out, a legacy-repos name only for the repo named by that checkout's
+    origin, and the record or listed kinds of the repo's extras file join. A legacy-repos path of a file kind may be a folder (home keeps its todo at
+    records/), so it counts as both."""
+    legacy_map = data.get("legacy", {})
+    use_legacy = root is None or not rolled_out(root)
+    own = None if root is None else repo_name(root)
+    repos = {repo.lower(): entry for repo, entry in data.get("legacy-repos", {}).items() if root is None or repo.lower() == own}
+    folders, files = set(), set()
+    for name, kind in data["kinds"].items():
+        if not (kind.get("record") or kind.get("listed") or name in FILE_KINDS):
+            continue
+        mine = files if name in FILE_KINDS else folders
+        mine.add(kind["path"].strip("/"))
+        if use_legacy and kind["path"] in legacy_map:
+            mine.add(legacy_map[kind["path"]].strip("/"))
+        for entry in repos.values():
+            if name in entry:
+                mine.add(entry[name].strip("/"))
+                if name in FILE_KINDS:
+                    folders.add(entry[name].strip("/"))
+    if root is not None:
+        for kind in kinds(root).values():
+            if kind.get("set") == "extra" and (kind.get("record") or kind.get("listed")):
+                (files if kind["path"].endswith(".md") else folders).add(kind["path"].strip("/"))
+    return folders, files
+
+
+def record_paths(data, root=None):
+    """Every path of record_places, folders and files together."""
+    folders, files = record_places(data, root)
+    return folders | files
+
+
 # An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
 # /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
 # slashes optional; git_reads.origin_slug reads the owner/name.
