@@ -23,11 +23,13 @@ Run with:  python3 lint/test_windows_split.py -v
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1711,6 +1713,265 @@ class CiCoverage(unittest.TestCase):
     def test_an_unreadable_folder_fails_the_scan(self):
         with self.assertRaises(OSError):
             find_test_files(os.path.join(HERE, "no-such-folder-for-the-scan"))
+
+
+# ---- CI coverage cases on fixture repos. Each case runs the real CiCoverage case on a fixture: the module globals
+# REPO and CHECKS are swapped for the fixture folder and its checks.yml, and the case reads what that run says.
+# So a case tests the real scan, not a copy of it. The scan must read REPO and CHECKS at call time.
+
+RUN_FOLDER = None  # set by setUpModule, so an import makes no folder
+ENV_PATCH = None
+
+
+def setUpModule():
+    global RUN_FOLDER, ENV_PATCH
+    import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+    RUN_FOLDER = _test_temp.run_folder()
+    # A git hook sets these. A fixture git would then write the real index. The patch restores os.environ after the run.
+    ENV_PATCH = mock.patch.dict(os.environ)
+    ENV_PATCH.start()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        os.environ.pop(name, None)
+
+
+def tearDownModule():
+    if ENV_PATCH:
+        ENV_PATCH.stop()
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+        import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
+        tracked_tree.rm_tree(RUN_FOLDER)
+
+
+def write_file(root, rel, text):
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def checks_yml(*jobs):
+    """checks.yml text. Each job is (name, runs-on, run commands)."""
+    text = "jobs:\n"
+    for name, runs_on, runs in jobs:
+        text += "  %s:\n    runs-on: %s\n    steps:\n" % (name, runs_on)
+        text += "".join("      - run: %s\n" % command for command in runs)
+    return text
+
+
+def collector_stub(paths, exit_code):
+    """A stand-in for .github/scripts/mod-tests.sh: `list` prints `paths`, then exits `exit_code`."""
+    lines = "".join("printf '%%s\\n' %s\n" % shlex.quote(path) for path in paths)
+    return '#!/usr/bin/env bash\nif [ "${1:-}" = list ]; then\n%sexit %d\nfi\nexit 0\n' % (lines, exit_code)
+
+
+def make_repo(tracked=(), untracked=(), checks="", collected=(), collector_exit=0, git=True):
+    """A fixture repo in a new folder of this run. `tracked` paths are git-added, `untracked` paths are on disk
+    only, and each file holds one line. `checks` is .github/workflows/checks.yml. With git False the folder is no
+    repo. Returns the folder."""
+    root = tempfile.mkdtemp(prefix="cov-", dir=RUN_FOLDER)
+    for rel in (*tracked, *untracked):
+        write_file(root, rel, "fixture\n")
+    write_file(root, ".github/workflows/checks.yml", checks)
+    write_file(root, ".github/scripts/mod-tests.sh", collector_stub(collected, collector_exit))
+    if git:
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if tracked:
+            subprocess.run(["git", "add", "--"] + list(tracked), cwd=root, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return root
+
+
+def scan(root):
+    """The real CiCoverage case run on fixture `root`: None when it passes, else the error it raised."""
+    checks = os.path.join(root, ".github", "workflows", "checks.yml")
+    with mock.patch.dict(globals(), {"REPO": root, "CHECKS": checks}):
+        try:
+            CiCoverage("test_every_test_file_runs_in_a_ci_step").test_every_test_file_runs_in_a_ci_step()
+        except Exception as error:  # the gap report is an AssertionError; a failed collector raises its own error
+            return error
+    return None
+
+
+def gap_text(root):
+    """The gap report on fixture `root`, "" when the case passes. An error that is not a gap report is raised."""
+    error = scan(root)
+    if error is None:
+        return ""
+    if isinstance(error, AssertionError):
+        return str(error)
+    raise error
+
+
+TEST_FILE_CHECKS = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]))  # names one test file
+COLLECTED = ("mods/a/x.test.mjs", "skills/plain-english-map/tests/y.test.mjs")
+
+
+class CiCoverageScope(unittest.TestCase):
+    def test_tracked_js_and_mjs_test_files_are_reported(self):
+        # Named cause: the scope reads only test_*.py, test_*.sh and *.test.ps1, so a JS test file is missed.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_x.mjs", "lib/y.test.mjs", "lib/z.test.js"],
+                                  checks=TEST_FILE_CHECKS))
+        for path in ("lint/test_x.mjs", "lib/y.test.mjs", "lib/z.test.js"):
+            with self.subTest(path=path):
+                self.assertIn(path, text, "a tracked test file with no run line is not reported")
+        self.assertNotIn("lint/test_ok.py", text, "a test file that a run step names is reported")
+
+    def test_an_untracked_test_file_is_not_reported(self):
+        # Named cause: the scan walks the disk, so a test file that git does not track counts.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py"], untracked=["lint/test_y.py"], checks=TEST_FILE_CHECKS))
+        self.assertNotIn("lint/test_y.py", text, "an untracked test file is reported: the scan read the disk, not git")
+
+    def test_a_js_file_under_untracked_node_modules_is_not_reported(self):
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lib/a.test.js"],
+                                  untracked=["node_modules/pkg/b.test.js"], checks=TEST_FILE_CHECKS))
+        with self.subTest("tracked"):
+            self.assertIn("lib/a.test.js", text, "a tracked *.test.js with no run line is not reported")
+        with self.subTest("untracked"):
+            self.assertNotIn("node_modules/pkg/b.test.js", text,
+                             "a *.test.js under an untracked node_modules is reported")
+
+    def test_a_helper_named_with_an_underscore_is_not_reported(self):
+        # A `_test_` name is a helper (lint/_test_git.py). The test-file row shows the scope is live, so the
+        # helper rows cannot pass on a scan that reads nothing.
+        helpers = ["lint/_test_helper.py", "lint/_test_helper.mjs", "lint/_test_git.mjs"]
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_x.mjs"] + helpers, checks=TEST_FILE_CHECKS))
+        with self.subTest("test file"):
+            self.assertIn("lint/test_x.mjs", text, "a tracked test_*.mjs with no run line is not reported")
+        for helper in helpers:
+            with self.subTest(helper=helper):
+                self.assertNotIn(helper, text, "a helper named _test_* is reported as a test")
+
+    def test_an_empty_git_repo_lists_no_test_files(self):
+        # The empty state. Splitting git's empty output must not give one blank name.
+        self.assertEqual(find_test_files(make_repo(checks=TEST_FILE_CHECKS)), [],
+                         "an empty git repo lists a file it does not track")
+
+    def test_a_name_with_a_space_or_non_ascii_comes_back_exact(self):
+        # Without -z, git quotes such a name and the scan no longer matches the file.
+        names = ["lint/test_my file.py", "lint/test_caf\u00e9.py"]
+        self.assertEqual(find_test_files(make_repo(tracked=names, checks=TEST_FILE_CHECKS)), sorted(names),
+                         "a tracked name with a space or a non-ASCII character came back altered")
+
+    def test_a_non_git_folder_raises(self):
+        # Named cause: the scan lists tracked files through git, so a folder that is no repo must fail the read.
+        root = make_repo(untracked=["lint/test_x.py"], git=False)
+        probe = subprocess.run(["git", "rev-parse"], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertNotEqual(probe.returncode, 0, "the fixture folder is inside a git repo, so the case proves nothing")
+        try:
+            found = find_test_files(root)
+        except (OSError, subprocess.CalledProcessError):
+            return
+        self.fail("find_test_files listed %s for a folder that is not a git repo; it must raise" % found)
+
+    def test_a_file_named_only_in_a_windows_job_is_covered(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]),
+                            ("checks-windows", "windows-latest", ["python lint/test_win.py"]))
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_win.py"], checks=checks))
+        self.assertNotIn("lint/test_win.py", text, "a file that only a windows-latest job names is reported")
+
+    def test_the_gap_report_names_both_remedies(self):
+        # Named failure: the report names the files with no run step, but not the rename that a helper with no
+        # tests takes, to `_test_<name>`.
+        text = gap_text(make_repo(tracked=["lint/test_x.py"], checks=TEST_FILE_CHECKS))
+        with self.subTest("file"):
+            self.assertIn("lint/test_x.py", text, "an unnamed test file is not reported")
+        with self.subTest("add a run step"):
+            self.assertIn("run step", text, "the gap report does not name the add-a-run-step remedy")
+        with self.subTest("rename"):
+            self.assertIn("_test_", text, "the gap report does not name the rename remedy, _test_<name>")
+
+
+class CiCoverageCollector(unittest.TestCase):
+    def test_mod_tests_list_prints_what_both_phases_run(self):
+        # The oracle is the find each phase runs: mods (node_modules pruned) and the skill's test folder.
+        bash = shutil.which("bash")
+        finds = [subprocess.run([bash, "-c", command], cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+                 for command in ("find mods -name node_modules -prune -o \\( -name '*.test.mjs' -o -name '*.test.js' \\) -print",
+                                 "find skills/plain-english-map/tests -maxdepth 1 -name '*.test.mjs' -print")]
+        for found in finds:
+            self.assertEqual(found.returncode, 0, "a find the case relies on exits %d: %s" % (found.returncode, found.stderr))
+        expected = sorted(line for found in finds for line in found.stdout.splitlines())
+        self.assertTrue(expected, "the two finds list no file, so the case proves nothing")
+        # An npm shim that fails and logs. A list run must never reach the skill phase's install.
+        shim = tempfile.mkdtemp(prefix="npm-", dir=RUN_FOLDER)
+        npm_log = os.path.join(shim, "npm.log")
+        write_file(shim, "npm", '#!/bin/sh\necho "$@" >> "%s"\nexit 1\n' % npm_log)
+        os.chmod(os.path.join(shim, "npm"), 0o755)
+        env = dict(os.environ, PATH=shim + os.pathsep + os.environ.get("PATH", ""))
+        listed = subprocess.run([bash, ".github/scripts/mod-tests.sh", "list"], cwd=REPO, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        with self.subTest("exit code"):
+            self.assertEqual(listed.returncode, 0,
+                             "mod-tests.sh list exits %d: %s" % (listed.returncode, listed.stderr.strip()))
+        with self.subTest("files"):
+            self.assertEqual(sorted(listed.stdout.splitlines()), expected,
+                             "mod-tests.sh list prints other files than the two phases' finds")
+        with self.subTest("npm"):
+            self.assertFalse(os.path.exists(npm_log), "mod-tests.sh list ran npm")
+
+    def test_a_file_the_collector_does_not_print_is_reported(self):
+        # The collector counts only the files it runs. Named failure: every mjs test counted as covered once a run
+        # line names the collector.
+        printed, unprinted = "mods/a/x.test.mjs", "mods/a/other.test.mjs"
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        root = make_repo(tracked=["lint/test_ok.py", printed, unprinted], collected=[printed], checks=checks)
+        scoped = find_test_files(root)
+        for path in (printed, unprinted):
+            with self.subTest(path=path):
+                self.assertIn(path, scoped, "%s is not a scoped test file, so its coverage proves nothing" % path)
+        text = gap_text(root)
+        with self.subTest("unprinted"):
+            self.assertIn(unprinted, text, "a test file the collector does not print is covered by the collector")
+        with self.subTest("printed"):
+            self.assertNotIn(printed, text, "a file the collector prints is reported")
+
+    def test_a_collected_file_is_covered_when_a_run_line_names_the_collector(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        root = make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collected=COLLECTED, checks=checks)
+        text = gap_text(root)
+        for path in COLLECTED:
+            with self.subTest(path=path):
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertNotIn(path, text, "a collected file is reported although a run line names the collector")
+
+    def test_a_collected_file_is_reported_when_no_run_line_names_the_collector(self):
+        root = make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collected=COLLECTED, checks=TEST_FILE_CHECKS)
+        text = gap_text(root)
+        for path in COLLECTED:
+            with self.subTest(path=path):
+                self.assertIn(path, text,
+                              "a collected file is not reported when no run line names the collector: %s" % path)
+
+    def test_a_collected_file_is_covered_when_only_a_windows_job_names_the_collector(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]),
+                            ("checks-windows", "windows-latest", [MOD_CMD]))
+        path = COLLECTED[0]
+        root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=checks)
+        self.assertIn(path, find_test_files(root), "%s is not a scoped test file, so its coverage proves nothing" % path)
+        self.assertNotIn(path, gap_text(root),
+                         "a collected file is reported when only a windows-latest job names the collector")
+
+    def test_a_comment_or_name_line_does_not_name_the_collector(self):
+        # Named failure: a commented run line, or a step name that spells the collector, counted as the run.
+        base = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py"]))
+        path = COLLECTED[0]
+        rows = (("comment", "      # run: %s\n" % MOD_CMD), ("name", "      - name: %s\n" % MOD_CMD))
+        for label, extra in rows:
+            with self.subTest(label):
+                root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=base + extra)
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertIn(path, gap_text(root), "a %s line that spells the collector counts as its run" % label)
+
+    def test_a_failing_collector_fails_the_scan(self):
+        checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
+        error = scan(make_repo(tracked=["lint/test_ok.py"] + list(COLLECTED), collector_exit=3, checks=checks))
+        self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
+        self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
+        self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
 
 
 if __name__ == "__main__":
