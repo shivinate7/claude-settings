@@ -2,7 +2,7 @@
 
 **What.** Rule `git-after-cd` reads a cd whose folder word holds a variable (`cd "$WT"; git push`) as unknown, so the git write after it passes. When that variable is empty or names a folder that is gone, the cd fails and the write runs in the folder the shell stayed in. Failing closed would also refuse the usual `cd "$REPO"; git status` shape of normal work, so the rule passes it.
 
-**Where.** `git_after_cd_hit` in `hooks/guard.py`, through `dir_before_segment` in `hooks/guard_core.py`, which gives no folder for a cd to a variable.
+**Where.** `git_after_cd_hit` in `hooks/guard.py`, through `cd_walk` in `hooks/guard_core.py`, which gives no folder for a cd to a variable.
 
 **Decision.** `git-after-cd-joins-with-and`, a git write after a cd joins with `&&`.
 

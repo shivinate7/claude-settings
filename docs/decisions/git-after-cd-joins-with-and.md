@@ -14,7 +14,7 @@ A write is one of these:
 A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_verb`), is no write.
 
 1. When the cd fails, the shell stays in its folder and a `;` runs the next command there. The write then lands in the clone the session meant to leave alone.
-2. The rule reads `dir_before_segment` twice for each write. With `failed_cd_stays=True` a missing folder leaves the shell where it was. With it off, the folder is unknown. A write is refused when the first read gives a folder and the second gives none.
+2. The rule reads `cd_walk(..., failed_cd_stays=True)` once for each write. A missing folder leaves the shell where it was. A write is refused when the walk says `stranded`: a cd that failed ran ahead of it and the shell is still where it stayed.
 3. The refusal tells the session to join the cd to the write with `&&`, or to leave out the cd and use `-C` with a full path. It names no target.
 
 Allowed forms:
@@ -26,7 +26,7 @@ Allowed forms:
 - A cd that lands, or a cd whose word holds a variable: both reads agree.
 - A cd, a git word or a comment opener inside quotes or after `#`.
 
-Risk kind: incident 2026-11-07 ~16:15 CST. A session ran `cd <gone worktree> && <vcs> status; <vcs> fetch; <vcs> checkout -B ...; <vcs> merge ...`. The cd failed, so the `;`-joined writes ran in the main clone.
+Risk kind: incident 2026-11-07 ~16:15 CST. A session ran `cd <gone worktree> && <vcs> status; <vcs> fetch; <vcs> checkout -B ...; <vcs> merge ...`. The cd failed, so the `;`-joined writes ran in the primary checkout.
 
 Reproduction: `cd /tmp/w/b-int && <vcs> status --short; <vcs> fetch origin; <vcs> checkout -B claude/int-batch-banchi-1107b origin/main; <vcs> merge --no-ff claude/lane-a` -> allowed on main 174b005c1; the checkout -B and merge ran in the main clone
 
@@ -37,7 +37,7 @@ Limits:
 - A segment the tokenizer cannot read, because a quote is cut in it, is unknown and passes. An interpreter's heredoc body is read this way.
 - A cd into a folder an earlier `;` segment creates is refused: `mkdir -p X; cd X; git commit` and `git worktree add ../x; cd ../x; git commit`. The folder is not there when the guard looks. The `&&` form passes.
 - A cd to a variable is not judged: `cd "$WT"; git push` passes. Failing closed would also refuse `cd "$REPO"; git status` in normal work. Debt `git-after-cd-variable-cd` holds the gap.
-- PowerShell is out of scope. The lane brief named Bash, and `failed_cd_stays` in `dir_before_segment` reads Bash joins.
+- PowerShell is out of scope. The lane brief named Bash, and `failed_cd_stays` in `cd_walk` reads Bash joins.
 - An `sh -c` body is not walked (`guard-guards-mistakes-only`).
 
 Kind: process

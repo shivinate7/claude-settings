@@ -1510,3 +1510,7 @@
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - git-after-cd-branch-flags-copy: `GIT_BRANCH_WRITE_FLAGS` repeats `BRANCH_DELETE_FLAGS` (hooks/guard_branch_worktree.py) with no stated reason; derive it from that constant (hooks/guard.py `git_write_verb`). Decision: git-after-cd-joins-with-and.
 - git-after-cd-rm-mv-dry-run: `git rm -n` and `git mv -n` after a cd into a missing folder are refused; `-n` reads as a dry run for push only (hooks/guard.py `git_write_verb`). Decision: git-after-cd-joins-with-and.
+- git-after-cd-subshell-cd-token: the tokenizer reads `(cd sub)` as folder `sub)`, so `cd /missing; (cd sub) && git push` passes (hooks/guard_core.py `cd_walk`). Decision: git-after-cd-joins-with-and.
+- git-after-cd-or-exit: `cd X || exit 1; git push` and `if cd X; then git push; fi` are refused when X is missing at check time; the remedy `&&` passes. Decision: git-after-cd-joins-with-and.
+- conflict-markers-echo-quoted-redirect: no case pins a quoted `>` or `$(` in an echo before a commit (hooks/guard_merge.py `_REACHES_TREE`); it errs toward refusing. Decision: git-after-cd-joins-with-and.
+- git-write-missing-verbs: `add`, `worktree add`, `tag`, `config`, `symbolic-ref`, `remote set-url` and branch create pass after a failed cd (hooks/guard.py `session_home_write`). Decision: git-after-cd-joins-with-and.
