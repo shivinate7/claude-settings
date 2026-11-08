@@ -1496,3 +1496,5 @@
 - reviewed-head-push-cases-thin: no case sets `branch.<b>.pushRemote`, `remote.pushDefault` against an origin branch remote, several refspecs or a detached HEAD, so a mutant of the remote order may live (hooks/test_guard.py). Decision: pr-review-record.
 - brief-id-label-before-colon: the lane brief id check needs the label right before the colon, so `Page writer (triage 5): session_x` and `Triage id: session_x` are refused; the strict form is the ruling (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
 - brief-template-guard-sentence: the brief template's line naming the guard reaches each lane as brief text (skills/project-ops/templates/brief.md). Decision: session-tiers.
+- brief-id-quoted-or-linked: the lane brief id check refuses an id in quotes or a markdown link, such as `Triage: "session_01A"`; the refusal shows the form, so one retry fixes it (hooks/guard_merge.py `_BRIEF_ID_FORM`). Decision: session-tiers.
+- brief-id-leading-underscore-run: a run of about 20000 `_` before any label costs about 1.9 s in the lane brief id check (hooks/guard_merge.py `_BRIEF_MD`). Decision: session-tiers.
