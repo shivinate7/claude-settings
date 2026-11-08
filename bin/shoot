@@ -24,8 +24,10 @@
 // Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none. No config key.
 //   Chromium drops the coarse match in a full-page capture however it is asked, and a resize to content height stretches each 100vh block.
 //   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
-//   the same browser. Tiles cover the page's scroll width and height, so the PNG has the size a plain full-page capture gives.
-//   Tiles after the first hide position:fixed elements, so each shows once, at its first-tile place. Sticky elements
+//   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
+//   smaller PNG than a plain full-page capture.
+//   Tiles after the first hide position:fixed elements, so each shows once, at its first-tile place. A fixed pseudo-element or a
+//   fixed background still repeats on each tile. Sticky elements
 //   sit in the flow and the root does not scroll-snap, for the whole stitch. A canvas Chromium cannot read back fails that shot.
 //   A desktop width takes the plain full-page capture.
 // Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). A stitched shot adds one screenshot per viewport tile
