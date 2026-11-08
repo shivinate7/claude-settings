@@ -71,7 +71,8 @@ LIVE_STREAM_REASON = (
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`."
+    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`. "
+    "To follow a log or stream, use the Monitor tool (its own call, not a command inside Bash)."
 )
 
 
