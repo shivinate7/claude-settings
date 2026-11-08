@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, more than 50 agent worktrees exist, a freshness check could not run, the repo's waiting page was last published from a version other than main's, a standing grant file (CLAUDE.md, .claude/CLAUDE.md) differs from origin/main's or neither origin ref can be read, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Fetches origin once per checkout first. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, local main differs from origin/main, more than 50 agent worktrees exist, a freshness check or the fetch could not run, the repo's waiting page was last published from another version than main's, a standing grant file differs from origin/main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -42,10 +42,47 @@ bounded_git() {
   return "$fetch_rc"
 }
 
-# bounded_fetch <dir> <branch>: quiet `git fetch origin <branch>` in <dir>, bounded. Returns the
-# fetch's status: 0 ran, else not. The one home for both freshness checks below.
+# bounded_fetch <dir>: quiet `git fetch --prune origin` in <dir>, bounded. Returns the fetch's status:
+# 0 ran, else not. The one home for every freshness check below. The first call per checkout runs the fetch;
+# a later call for the same checkout (resolved with pwd -P) returns that status again, so a session start
+# fetches each checkout once, however many checks ask. Prune removes remote-tracking refs only. The caller
+# must not run it in $( ), or the memo is lost with the subshell.
+fetch_memo=""
+fetch_reported=""
 bounded_fetch() {
-  bounded_git "$1" /dev/null fetch --quiet origin "$2"
+  bf_key=$(cd "$1" 2>/dev/null && pwd -P)
+  bf_key="${bf_key:-$1}"
+  bf_hit=""
+  while read -r bf_r bf_k; do
+    [ "$bf_k" = "$bf_key" ] && bf_hit="$bf_r"
+  done <<EOF
+$fetch_memo
+EOF
+  [ -n "$bf_hit" ] && return "$bf_hit"
+  bounded_git "$1" /dev/null fetch --quiet --prune origin
+  bf_rc=$?
+  fetch_memo="$fetch_memo
+$bf_rc $bf_key"
+  return "$bf_rc"
+}
+
+# fetch_mark_reported <dir>, fetch_was_reported <dir>: a check that prints its own "the fetch did not run" line
+# marks the checkout, so the session start prints one such line per checkout, not two.
+fetch_mark_reported() {
+  fr_key=$(cd "$1" 2>/dev/null && pwd -P)
+  fetch_reported="$fetch_reported
+${fr_key:-$1}"
+}
+fetch_was_reported() {
+  fr_key=$(cd "$1" 2>/dev/null && pwd -P)
+  case "
+$fetch_reported
+" in
+    *"
+${fr_key:-$1}
+"*) return 0 ;;
+  esac
+  return 1
 }
 
 toplevel=$(cd "$cwd" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
@@ -215,7 +252,7 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   # session start, so a behind count on it is a false alarm. The check skips it.
   cloud_mirror=$(cd "$d" 2>/dev/null && git config --get claude-settings.cloudMirror 2>/dev/null)
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
-    if bounded_fetch "$d" main; then
+    if bounded_fetch "$d"; then
       behind=$(cd "$d" 2>/dev/null && git rev-list --count main..origin/main 2>/dev/null)
       if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
         printf 'claude-settings: %s is %s commits behind origin/main; global rules and hooks are stale\n' \
@@ -224,6 +261,7 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
     else
       printf 'claude-settings: cannot check %s against origin/main, the fetch did not run; freshness unknown\n' \
         "$d"
+      fetch_mark_reported "$d"
     fi
   fi
 fi
@@ -251,15 +289,17 @@ default_branch=$(cd "$toplevel" 2>/dev/null && git symbolic-ref --short refs/rem
 default_branch="${default_branch#origin/}"
 if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
    && { [ -z "$d" ] || [ "$(cd "$toplevel" 2>/dev/null && pwd -P)" != "$(cd "$d" 2>/dev/null && pwd -P)" ]; }; then
-  if bounded_fetch "$toplevel" "$default_branch"; then
+  if bounded_fetch "$toplevel"; then
     behind=$(cd "$toplevel" 2>/dev/null && git rev-list --count "$default_branch..origin/$default_branch" 2>/dev/null)
     if [ -n "$behind" ] && [ "$behind" -gt 0 ] 2>/dev/null; then
       printf 'checkout %s: %s is %s commits behind origin/%s; pull before you read it\n' \
         "$toplevel" "$default_branch" "$behind" "$default_branch"
+      dflt_behind_printed=1
     fi
   else
     printf 'checkout %s: cannot check %s against origin, the fetch did not run; freshness unknown\n' \
       "$toplevel" "$default_branch"
+    fetch_mark_reported "$toplevel"
   fi
 fi
 
@@ -302,15 +342,32 @@ if [ -f "$wp_extras" ] && grep -q '"waiting-page"' "$wp_extras" 2>/dev/null && c
   fi
 fi
 
-# Rule grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
-# because a stale checkout once led a coordinator to cite acts the owner never gave. This compares the HEAD blob of
-# each grant file (CLAUDE.md, .claude/CLAUDE.md) in the session's toplevel with the blob at origin/main, or at
-# origin/HEAD's target ($default_branch above) when origin/main is absent. A file that differs, or sits on one side
-# only, prints one line with the ref tip's short sha and the git show command that reads the ref's copy. When
-# neither ref reads and a grant file exists at HEAD, one unknown line prints. Otherwise silent. Only committed blobs
-# are compared, so an uncommitted edit prints nothing. Cost: once per session start, one git cat-file --batch-check
-# process that reads the local object store (no fetch, no network); no file written, no timer. The refs are as
-# fresh as this checkout's last fetch.
+# Step grants-read-from-main: a session cites the standing grants from origin/main, never from its own checkout,
+# because a stale checkout once led a coordinator to cite acts the owner never gave. A checkout with an origin
+# remote is refreshed first with bounded_fetch (`git fetch --prune origin`, on any branch or a detached HEAD),
+# so the compare reads a current origin/main, not a stale one. A refresh that fails or times out prints one
+# "did not run" line (unless an earlier check already printed its own for this checkout) and marks each grant
+# line as read from an unrefreshed ref. No origin remote: no fetch, no line. The compare is the HEAD blob of each
+# grant file (CLAUDE.md, .claude/CLAUDE.md) in the session's toplevel against the blob at origin/main, or at
+# origin/HEAD's target ($default_branch above) when origin/main is absent. A file that differs, or sits on one
+# side only, prints one line with the ref tip's short sha and the git show command that reads the ref's copy. When
+# neither ref reads and a grant file exists at HEAD, one unknown line prints. Only committed blobs are compared,
+# so an uncommitted edit prints nothing. Local main is counted against origin/main with one rev-list and never
+# moved; the line prints only when they differ, and not when the default-branch check above already said behind.
+# Cost: once per session start, never per prompt (the hook is wired to SessionStart only): one git fetch of this
+# checkout (shared with the earlier freshness checks, so at most one per checkout), whose own writes are refs,
+# objects and FETCH_HEAD; one git remote read, one git cat-file --batch-check and one git rev-list, all local
+# object-store reads. The hook writes no file and starts no timer.
+gm_unref=""
+if (cd "$toplevel" 2>/dev/null && git remote 2>/dev/null | grep -qx origin); then
+  if ! bounded_fetch "$toplevel"; then
+    gm_unref=1
+    if ! fetch_was_reported "$toplevel"; then
+      printf 'checkout %s: the origin fetch did not run, so origin refs may be stale; freshness unknown\n' "$toplevel"
+      fetch_mark_reported "$toplevel"
+    fi
+  fi
+fi
 gm_out=$( {
   printf '%s\n' 'HEAD:CLAUDE.md' 'HEAD:.claude/CLAUDE.md' 'origin/main' 'origin/main:CLAUDE.md' 'origin/main:.claude/CLAUDE.md'
   if [ -n "$default_branch" ] && [ "$default_branch" != "main" ]; then
@@ -339,16 +396,37 @@ if [ -n "$gm_out" ]; then
     fi
   fi
   if [ -n "$gm_ref" ]; then
+    gm_note=""
+    [ -n "$gm_unref" ] && gm_note="; $gm_ref is unrefreshed"
     if [ "$gm_head1" != "$gm_ref1" ]; then
-      printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md\n' \
-        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref"
+      printf 'checkout %s: CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:CLAUDE.md%s\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
     if [ "$gm_head2" != "$gm_ref2" ]; then
-      printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md\n' \
-        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref"
+      printf 'checkout %s: .claude/CLAUDE.md differs from %s at %.12s; read the standing grants with git show %s:.claude/CLAUDE.md%s\n' \
+        "$toplevel" "$gm_ref" "$gm_tip" "$gm_ref" "$gm_note"
     fi
   elif [ -n "$gm_head1" ] || [ -n "$gm_head2" ]; then
     printf 'checkout %s: standing grant check unknown, neither origin/main nor origin/HEAD could be read\n' "$toplevel"
+  fi
+fi
+
+# Local main against origin/main: `main...origin/main` counts local-only commits (ahead) on the left and
+# origin-only commits (behind) on the right. Silent when either ref is absent or the two are equal.
+if [ -z "$dflt_behind_printed" ]; then
+  lm_counts=$(cd "$toplevel" 2>/dev/null && git rev-list --left-right --count refs/heads/main...refs/remotes/origin/main 2>/dev/null)
+  lm_ahead=${lm_counts%%[[:space:]]*}
+  lm_behind=${lm_counts##*[[:space:]]}
+  if [ -n "$lm_counts" ] && { [ "${lm_ahead:-0}" -gt 0 ] || [ "${lm_behind:-0}" -gt 0 ]; } 2>/dev/null; then
+    lm_line="checkout $toplevel: local main is $lm_behind commit"
+    [ "$lm_behind" = 1 ] || lm_line="${lm_line}s"
+    lm_line="$lm_line behind origin/main"
+    if [ "$lm_ahead" -gt 0 ]; then
+      lm_line="$lm_line and $lm_ahead commit"
+      [ "$lm_ahead" = 1 ] || lm_line="${lm_line}s"
+      lm_line="$lm_line ahead"
+    fi
+    printf '%s\n' "$lm_line"
   fi
 fi
 
