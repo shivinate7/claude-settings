@@ -334,6 +334,21 @@ def grant_override(raw, at):
         print("local_time: override: %s" % e, file=sys.stderr)
 
 
+def mail_lines(raw):
+    """Prints the mailbox's open messages after the time line (hooks/mail.py). It starts no process of its own."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return
+    try:
+        import mail
+        lines = mail.turn_start_lines(hook if isinstance(hook, dict) else {}, os.environ)
+    except Exception as e:  # an unread mailbox shows as unknown, never as empty
+        lines = ["mail unknown: %s" % (" ".join(str(e).split())[:120] or type(e).__name__)]
+    for text in lines:
+        print(text)
+
+
 OLD_FLAG_ENDS = "2026-11-09"
 
 
@@ -355,6 +370,7 @@ def main(argv):
             raw = sys.stdin.buffer.read()
             grant_override(raw, now)
             capture(raw, stamp[len("Local time: "):])
+            mail_lines(raw)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0
