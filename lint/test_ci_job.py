@@ -10,6 +10,8 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 PinnedSettings: --step runs each named step in the claude-settings tree the workflow pins (one distinct 40-hex sha on its
 `<owner>/claude-settings/actions/<name>@<ref>` uses: lines); two pins, a ref that is no sha, or an unfetchable sha is unknown.
+A blocked named step stops only itself; under two pins CLAUDE_SETTINGS_DIR is the caller's; one pin builds one tree.
+SettingsPins: settings_pins reads a `#` inside quotes, and a lone quote, as text; a run: block is script, never a pin.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -28,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import run_body, settings_pins, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -563,6 +565,36 @@ class StepMaps(unittest.TestCase):
     def test_a_single_quoted_value_with_a_doubled_quote_keeps_its_hash_and_drops_the_comment(self):
         value = step_env(mapped("env", "          MSG: 'it''s # x' # y\n"))
         self.assertEqual(value.get("MSG"), "'it''s # x'", "the quoted env: value was cut at its inner # or kept the comment")
+
+
+class SettingsPins(unittest.TestCase):
+    """settings_pins, the one pin reader (lint/workflow_steps.py), read as text. A `#` inside quotes is text, so the pin
+    after it is read. A lone quote in text opens no quote. A `#` after a space and outside quotes starts a comment. A
+    run: block's lines are script, never a pin, whatever quotes or comment openers they hold."""
+
+    HEAD = "name: t\non: push\njobs:\n  lane:\n    runs-on: ubuntu-latest\n    steps:\n"  # the step after it is line 7
+    SHA = "a" * 40
+    USES = "o/claude-settings/actions/ste-lint@" + "a" * 40
+
+    def test_a_hash_inside_double_quotes_is_text_and_the_pin_after_it_is_read(self):
+        found = settings_pins(self.HEAD + '      - {name: "Lint #2", uses: %s}\n' % self.USES)
+        self.assertEqual(found, [("ste-lint", self.SHA, 7)], "a # inside double quotes hid the pin after it")
+
+    def test_a_hash_inside_single_quotes_is_text_and_the_pin_after_it_is_read(self):
+        found = settings_pins(self.HEAD + "      - {name: 'a # b', uses: %s}\n" % self.USES)
+        self.assertEqual(found, [("ste-lint", self.SHA, 7)], "a # inside single quotes hid the pin after it")
+
+    def test_a_lone_quote_in_text_opens_no_quote_and_a_comment_after_the_pin_is_dropped(self):  # P2 green control
+        found = settings_pins(self.HEAD + "      - {name: don't, uses: %s}  # it's the lint step\n" % self.USES)
+        self.assertEqual(found, [("ste-lint", self.SHA, 7)], "a lone quote in text hid the pin")
+
+    def test_a_multi_line_run_block_is_script_and_its_quotes_and_comment_openers_hide_nothing(self):  # P2 green control
+        body = ('      - name: notes\n        run: |\n          echo "# uses: o/claude-settings/actions/code-check@%s"\n'
+                "          echo don't \"stop\n"
+                "      - {name: lint, uses: %s}\n") % ("b" * 40, self.USES)
+        found = settings_pins(self.HEAD + body)
+        self.assertEqual(found, [("ste-lint", self.SHA, 11)],
+                         "a run: block's text was read as a pin, or the pin after the block was lost")
 
 
 def run_as_yaml_reads_it(step):
@@ -1207,6 +1239,17 @@ class CodeCheckFromCopiedInstall(Job):
         self.assertNotRegex(log, r"(?m)^code-check: ", out + log)  # the good copy's code_check never ran
 
 
+def pipx_stub_env():
+    """PATH with a stub pipx first, which exits 0. A zizmor step reads a missing pipx as unknown, so the stub keeps the
+    run.sh under test the only reason in play."""
+    bin_dir = tempfile.mkdtemp(prefix="pipx-", dir=RUN_FOLDER)
+    stub = os.path.join(bin_dir, "pipx")
+    with open(stub, "w", encoding="utf-8", newline="\n") as f:
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(stub, 0o755)
+    return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+
+
 class ZizmorBranches(Job):
     """bin/ci-job's zizmor branch. A local $/actions/zizmor uses runs the repo under test's own run.sh, and with none
     there it FAILs, never PASS or unknown. A remote uses with no claude-settings pin finds no run.sh beside a copied install
@@ -1219,14 +1262,8 @@ class ZizmorBranches(Job):
     LINT = ("--lint",)
 
     def pipx_env(self):
-        """PATH with a stub pipx first. The zizmor branch reads a missing tool as unknown, so the stub keeps the
-        missing run.sh the only reason in play."""
-        bin_dir = tempfile.mkdtemp(prefix="pipx-", dir=RUN_FOLDER)
-        stub = os.path.join(bin_dir, "pipx")
-        with open(stub, "w", encoding="utf-8", newline="\n") as f:
-            f.write("#!/bin/sh\nexit 0\n")
-        os.chmod(stub, 0o755)
-        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}
+        """PATH with a stub pipx first (pipx_stub_env), so the missing run.sh is the only reason in play."""
+        return pipx_stub_env()
 
     def test_a_local_zizmor_uses_with_no_run_sh_fails(self):
         # The fixture repo has no actions/zizmor: the local form names the repo's own run.sh, which is missing.
@@ -1379,11 +1416,20 @@ class WindowsShell(unittest.TestCase):
 
 
 PIN_USES = "shivinate7/claude-settings/actions/code-check@%s"  # a pin: any owner's claude-settings action, at a ref
+ZIZMOR_USES = "shivinate7/claude-settings/actions/zizmor@%s"  # a pin of the zizmor action, at a ref
+RUN_SH_A = "#!/bin/sh\necho A > zizmor-A.txt\n"  # pin A's zizmor run.sh: writes a file named for its own commit
+RUN_SH_B = "#!/bin/sh\necho B > zizmor-B.txt\n"  # pin B's zizmor run.sh
+CODE_CHECK_A = "import pathlib\npathlib.Path('code-check-A.txt').write_text('A\\n')\n"  # pin A's code_check.py
+CODE_CHECK_B = "import pathlib\npathlib.Path('code-check-B.txt').write_text('B\\n')\n"  # pin B's code_check.py
+CODE_CHECK_FAIL_A = "import pathlib, sys\npathlib.Path('code-check-A.txt').write_text('A\\n')\nsys.exit(1)\n"  # pin A's, failing
+RUN_SH_SEEN_B = '#!/bin/sh\necho B > zizmor-B.txt\nprintf "%s" "$CLAUDE_SETTINGS_DIR" > seen-B.txt\n'  # pin B's run.sh: reports its settings dir
 READ_PINNED = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = pinned'
 READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
 CODE_CHECK_STUB = "import pathlib\npathlib.Path('pinned-code-check.txt').write_text('pinned\\n')\n"
 STE_CHANGED_STUB = "#!/bin/sh\necho pinned > ste-pinned.txt\n"
+STE_CHANGED_A = "#!/bin/sh\necho A > ste-A.txt\n"  # pin A's bin/ste-changed: writes a file named for its own commit
+STE_CHANGED_B = "#!/bin/sh\necho B > ste-B.txt\n"  # pin B's bin/ste-changed, over the copy B inherits from A
 # The step before a pin: a `run: |` block, then the blank line that ends it. The pin is the first line of the next step.
 BUILD_LITERAL = "      - name: build\n        run: |\n          make\n\n"
 BUILD_ONE_LINE = "      - name: build\n        run: make\n\n"
@@ -1455,9 +1501,10 @@ class PinnedSettings(Job):
         with open(os.path.join(self.decoy, "marker"), "w", encoding="utf-8", newline="\n") as f:
             f.write("local\n")
 
-    def settings(self, *, fetch_only=False, extra=None, executable=()):
+    def settings(self, *, fetch_only=False, extra=None, executable=(), local_extra=None):
         """Build the fixture clone. Without fetch_only the clone is cloned from origin and holds A; with it the clone has
-        its own history, so A is absent until ci-job fetches it. Scope first (P7): each marker reads what the case needs."""
+        its own history, so A is absent until ci-job fetches it. `extra` adds files to A, `local_extra` to the clone's
+        own commit B. Scope first (P7): each marker reads what the case needs."""
         origin = os.path.join(self.fixture, "origin")
         self.clone = os.path.join(self.fixture, "clone")
         os.makedirs(origin)
@@ -1469,21 +1516,21 @@ class PinnedSettings(Job):
             fixture_git(self.clone, "remote", "add", "origin", origin)
         else:
             fixture_git(self.fixture, "clone", "-q", origin, self.clone)
-        self.sha_b = fixture_commit(self.clone, {"marker": "local\n"}, "local")
+        self.sha_b = fixture_commit(self.clone, {"marker": "local\n", **(local_extra or {})}, "local", executable)
         self.assertEqual(fixture_git(origin, "show", self.sha_a + ":marker"), "pinned")
         self.assertEqual(fixture_git(self.clone, "show", "HEAD:marker"), "local")
         absent = fixture_rc(self.clone, "cat-file", "-e", self.sha_a + "^{commit}") != 0
         self.assertEqual(absent, fetch_only, "the clone holds pin A" if fetch_only else "the clone lacks pin A")
         return self.clone
 
-    def pinned_env(self, clone=None):
+    def pinned_env(self, clone=None, extra=None):
         """The env of one ci-job run: the decoy and the clone seam are the only settings values, and the run's temp
-        folder is under this run's folder, so a pinned tree a run leaves is swept with the fixture."""
+        folder is under this run's folder, so a pinned tree a run leaves is swept with the fixture. `extra` is added last."""
         tmp = os.path.join(self.fixture, "tmp")
         os.makedirs(tmp, exist_ok=True)
         env = {k: v for k, v in ENV.items() if k not in ("CLAUDE_SETTINGS_DIR", "CI_JOB_SETTINGS_CLONE", "TMPDIR")}
         env.update(CLAUDE_SETTINGS_DIR=self.decoy, CI_JOB_SETTINGS_CLONE=self.clone if clone is None else clone,
-                   TMPDIR=tmp, VERDICT_LOG=self.log)
+                   TMPDIR=tmp, VERDICT_LOG=self.log, **(extra or {}))
         return env
 
     def wf_argv(self, text, job, args=()):
@@ -1495,13 +1542,13 @@ class PinnedSettings(Job):
 
     def run_text(self, text, job, args=(), clone=None, env=None):
         done = subprocess.run(self.wf_argv(text, job, args), cwd=self.root, capture_output=True, text=True,
-                              env={**self.pinned_env(clone), **(env or {})}, timeout=120)
+                              env=self.pinned_env(clone, env), timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
 
-    def run_pinned(self, *steps, args=(), clone=None):
+    def run_pinned(self, *steps, args=(), clone=None, env=None):
         """One ci-job run of the job: the fixture clone is the pin's source, and the decoy is the caller's own value."""
-        return self.run_text(workflow(*steps), "lane", args, clone)
+        return self.run_text(workflow(*steps), "lane", args, clone, env)
 
     def start_pinned(self, *steps, args=()):
         """Start one ci-job run in a process group of its own, output to a file. Cleanup kills the group, so a step a
@@ -1534,6 +1581,12 @@ class PinnedSettings(Job):
         """How many worktrees the fixture clone lists, its own folder included."""
         listed = fixture_git(self.clone, "worktree", "list", "--porcelain")
         return sum(1 for ln in listed.splitlines() if ln.startswith("worktree "))
+
+    @staticmethod
+    def pinned_listed(path):
+        """The ci-job pin trees a `git worktree list --porcelain` output file names; the clone's own folder is left out."""
+        with open(path, encoding="utf-8") as f:
+            return [ln for ln in f.read().splitlines() if ln.startswith("worktree ") and "ci-job-pin-" in ln]
 
     @unittest.skipUnless(os.name == "posix", "the signal cases are posix only")
     def test_a_sigterm_mid_step_leaves_no_pinned_tree_and_no_worktree(self):
@@ -1906,6 +1959,196 @@ class PinnedSettings(Job):
         self.assertIn(os.path.join("actions", "zizmor", "run.sh"), line,
                       "the unknown line must name the run.sh it looked for: " + line)
         self.assertIn(self.fixture, line, "the unknown line must name the pinned tree, not the local checkout: " + line)
+    def test_a_remote_zizmor_under_a_pin_runs_the_pinned_run_sh(self):  # coverage: green on the old code
+        self.settings(extra={"actions/zizmor/run.sh": RUN_SH_A})
+        self.assertIn("zizmor-A.txt", fixture_git(self.clone, "show", self.sha_a + ":actions/zizmor/run.sh"),
+                      "precondition: pin A's run.sh is not the stub that writes zizmor-A.txt")
+        rc, lines, out = self.run_pinned(step("zizmor", uses=ZIZMOR_USES % self.sha_a), args=("--step", "zizmor"),
+                                         env=pipx_stub_env())
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "zizmor-A.txt")),
+                        "the pinned run.sh did not run: ci-job ran another run.sh for the pinned zizmor\n" + out)
+        self.assertEqual(by_step(lines).get("zizmor"), "PASS",
+                         "the pinned run.sh ran, but the zizmor step did not PASS:\n" + out)
+
+    def two_pin_settings(self, run_sh_b=RUN_SH_B):
+        """The fixture of two pins: pin A is the origin's commit and pin B is the clone's HEAD. Each carries its own
+        code_check.py and run.sh, which write a file named for their commit. Scope first (P7): both pins are in the clone,
+        and each commit holds its own stubs, before any verdict is read."""
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A, "actions/zizmor/run.sh": RUN_SH_A},
+                      local_extra={"actions/code-check/code_check.py": CODE_CHECK_B, "actions/zizmor/run.sh": run_sh_b})
+        self.assertNotEqual(self.sha_a, self.sha_b, "precondition: the two pins are one commit")
+        self.assertIn("code-check-A.txt", fixture_git(self.clone, "show", self.sha_a + ":actions/code-check/code_check.py"),
+                      "precondition: pin A's code_check.py is not its own stub")
+        self.assertIn("code-check-B.txt", fixture_git(self.clone, "show", self.sha_b + ":actions/code-check/code_check.py"),
+                      "precondition: pin B's code_check.py is not its own stub")
+        self.assertIn("zizmor-B.txt", fixture_git(self.clone, "show", self.sha_b + ":actions/zizmor/run.sh"),
+                      "precondition: pin B's run.sh is not its own stub")
+
+    def two_pin_steps(self, *more):
+        """A job with two pins, each action at its own sha as CI pins it: the code check at A, zizmor at B. `more` follow."""
+        return [step("code check", uses=PIN_USES % self.sha_a), step("zizmor", uses=ZIZMOR_USES % self.sha_b), *more]
+
+    def test_each_pinned_step_runs_in_its_own_pins_tree(self):
+        self.two_pin_settings()
+        args = ("--base", "origin/main", "--step", "code check", "--step", "zizmor")
+        rc, lines, out = self.run_pinned(*self.two_pin_steps(), args=args, env=pipx_stub_env())
+        check, zizmor = line_of(lines, "code check") or "", line_of(lines, "zizmor") or ""
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "the code check did not run pin A's code_check.py: " + check + "\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "code-check-B.txt")),
+                         "the code check ran pin B's code_check.py, not its own pin A's: " + check)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "zizmor-B.txt")),
+                        "the zizmor step did not run pin B's run.sh: " + zizmor + "\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "zizmor-A.txt")),
+                         "the zizmor step ran pin A's run.sh, not its own pin B's: " + zizmor)
+        self.assertEqual(by_step(lines).get("code check"), "PASS",
+                         "the code check under its own pin A did not PASS: " + check + "\n" + out)
+        self.assertEqual(by_step(lines).get("zizmor"), "PASS",
+                         "the zizmor step under its own pin B did not PASS: " + zizmor + "\n" + out)
+        self.assertEqual(rc, 0, "both named steps passed, so the run must exit 0:\n" + out)
+        self.assertEqual(self.worktrees(), 1, "a pinned tree was left in the clone after the run:\n" + out)
+
+    def test_a_plain_step_in_a_job_with_two_pins_is_unknown_and_names_both_pins(self):  # coverage: green on the old code
+        self.two_pin_settings()
+        plain = step("plain", 'test -d "$CLAUDE_SETTINGS_DIR" && echo ran > plain.txt')  # passes if it runs, so only the pins stop it
+        rc, lines, out = self.run_pinned(*self.two_pin_steps(plain), args=("--step", "plain"), env=pipx_stub_env())
+        line = line_of(lines, "plain") or ""
+        self.assertFalse(os.path.exists(os.path.join(self.root, "plain.txt")), "the plain step ran under two pins:\n" + out)
+        self.assertEqual((rc, by_step(lines).get("plain")), (2, "unknown"),
+                         "a plain step in a job with two pins must be unknown, exit 2:\n" + out)
+        self.assertTrue(self.sha_a[:9] in line and self.sha_b[:9] in line,
+                        "the unknown line must name both pins, the ambiguity: " + line)
+
+    def test_a_blocked_named_step_does_not_stop_a_good_one_which_still_passes(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),
+            step("blocked pin", uses=ZIZMOR_USES % "main"),
+            args=("--base", "origin/main", "--step", "good pin", "--step", "blocked pin"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the good step's pinned code_check.py did not run:\n" + out)
+        self.assertEqual(by_step(lines).get("good pin"), "PASS",
+                         "a blocked named step stopped the good one, which runs in its own pinned tree:\n" + out)
+        self.assertEqual(by_step(lines).get("blocked pin"), "unknown",
+                         "a named step pinned at @main must read unknown, not run:\n" + out)
+        self.assertEqual(rc, 2, "one named step is unknown and none failed, so the run must exit 2:\n" + out)
+
+    def test_a_failing_good_named_step_beside_a_blocked_one_exits_one(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_FAIL_A})
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),
+            step("blocked pin", uses=PIN_USES % ABSENT_SHA),
+            args=("--base", "origin/main", "--step", "good pin", "--step", "blocked pin"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the failing pinned code_check.py did not run:\n" + out)
+        self.assertEqual(by_step(lines).get("good pin"), "FAIL",
+                         "a blocked named step hid the FAIL of the good one, whose pinned code_check.py exited 1:\n" + out)
+        self.assertEqual(by_step(lines).get("blocked pin"), "unknown",
+                         "a pin that cannot be fetched must read unknown, not run:\n" + out)
+        self.assertEqual(rc, 1, "a FAIL beats unknown, so the run must exit 1:\n" + out)
+
+    def test_under_two_pins_a_pinned_step_sees_the_callers_settings_dir_not_a_tree(self):
+        self.two_pin_settings(run_sh_b=RUN_SH_SEEN_B)
+        rc, lines, out = self.run_pinned(*self.two_pin_steps(),
+                                         args=("--base", "origin/main", "--step", "code check", "--step", "zizmor"),
+                                         env=pipx_stub_env())
+        seen_file = os.path.join(self.root, "seen-B.txt")
+        self.assertTrue(os.path.isfile(seen_file), "precondition: pin B's run.sh did not run:\n" + out)
+        with open(seen_file, encoding="utf-8") as f:
+            seen = f.read()
+        self.assertEqual(seen, self.decoy, "under two pins ci-job changed CLAUDE_SETTINGS_DIR: the pinned step saw %r, "
+                         "not the caller's value:\n%s" % (seen, out))
+
+    def test_two_steps_at_one_pin_share_one_pinned_tree(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A, "actions/zizmor/run.sh": RUN_SH_A})
+
+        def listing(name):
+            return 'git -C "%s" worktree list --porcelain > %s' % (self.clone, name)
+
+        rc, lines, out = self.run_pinned(
+            step("code check", uses=PIN_USES % self.sha_a),
+            step("zizmor", uses=ZIZMOR_USES % self.sha_a),
+            step("list one", listing("one.txt")),
+            step("list two", listing("two.txt")),
+            args=("--base", "origin/main", "--step", "code check", "--step", "zizmor",
+                  "--step", "list one", "--step", "list two"),
+            env=pipx_stub_env())
+        for name in ("one.txt", "two.txt"):
+            path = os.path.join(self.root, name)
+            self.assertTrue(os.path.isfile(path), "precondition: the step did not write its worktree list:\n" + out)
+            pinned = self.pinned_listed(path)
+            self.assertEqual(len(pinned), 1, "one pin made %d pinned trees while %s ran, not one:\n%s"
+                             % (len(pinned), name, out))
+
+    def test_lint_runs_a_remote_ste_lint_and_code_check_each_from_its_own_pins_tree(self):
+        self.settings(extra={"bin/ste-changed": STE_CHANGED_A}, executable=("bin/ste-changed",),
+                      local_extra={"bin/ste-changed": STE_CHANGED_B, "actions/code-check/code_check.py": CODE_CHECK_B})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", self.sha_a + ":actions/code-check/code_check.py"), 0,
+                            "precondition: pin A holds a code_check.py, so the code check could run from A")
+        self.assertIn("ste-B.txt", fixture_git(self.clone, "show", self.sha_b + ":bin/ste-changed"),
+                      "precondition: pin B's bin/ste-changed is not its own stub")
+        rc, lines, out = self.run_pinned(
+            step("ste lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % self.sha_a),
+            step("code check", uses=PIN_USES % self.sha_b),
+            args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "ste-A.txt")),
+                        "the ste lint did not run pin A's bin/ste-changed:\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ste-B.txt")),
+                         "the ste lint ran pin B's bin/ste-changed, not its own pin A's:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-B.txt")),
+                        "the code check did not run pin B's code_check.py:\n" + out)
+        self.assertEqual((rc, by_step(lines)), (0, {"ste lint": "PASS", "code check": "PASS"}),
+                         "both lint steps pass under their own pins, so --lint must exit 0:\n" + out)
+
+    def test_lint_with_a_blocked_pin_beside_a_good_pin_runs_the_good_step_and_exits_two(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: the clone holds the blocked sha, so its pin is not blocked")
+        self.assertNotEqual(fixture_rc(os.path.join(self.fixture, "origin"), "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: origin holds the blocked sha, so its pin is not blocked")
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),
+            step("blocked pin", uses=PIN_USES % ABSENT_SHA),
+            args=("--lint", "--base", "origin/main"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "the good pin's code_check.py did not run:\n" + out)
+        self.assertEqual(by_step(lines), {"good pin": "PASS", "blocked pin": "unknown"},
+                         "a blocked pin must read unknown and must not stop the good pin's lint step:\n" + out)
+        self.assertIn(ABSENT_SHA[:9], line_of(lines, "blocked pin") or "",
+                      "the unknown line must name the blocked sha: " + str(line_of(lines, "blocked pin")))
+        self.assertEqual(rc, 2, "one lint step is unknown and none failed, so --lint must exit 2:\n" + out)
+
+    def test_lint_does_not_run_an_install_before_a_lint_step_whose_pin_is_blocked(self):
+        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
+        self.assertNotEqual(fixture_rc(self.clone, "cat-file", "-e", ABSENT_SHA + "^{commit}"), 0,
+                            "precondition: the clone holds the blocked sha, so its pin is not blocked")
+        env = InstallSteps.stub_path(self, npm=InstallSteps.NPM_OK)  # the npm stub: InstallSteps's one home
+        rc, lines, out = self.run_pinned(
+            step("good pin", uses=PIN_USES % self.sha_a),  # keeps the all-blocked gate from ending the run before the install
+            step("install", "npm ci"),
+            step("blocked pin", uses=PIN_USES % ABSENT_SHA),
+            args=("--lint", "--base", "origin/main"), env=env)
+        self.assertEqual(InstallSteps.npm_calls(self), "(no npm call)",
+                         "the install ran before a lint step whose pin is blocked:\n" + out)
+        self.assertEqual((rc, by_step(lines)), (2, {"good pin": "PASS", "install": "not run", "blocked pin": "unknown"}),
+                         "the install has no lint step after it that will run, so it is not run:\n" + out)
+
+    def test_lint_under_two_pins_a_plain_lint_step_reading_the_settings_dir_is_unknown_beside_pinned_actions(self):
+        self.two_pin_settings()
+        rc, lines, out = self.run_pinned(
+            *self.two_pin_steps(self.lint_step("read settings", "read_marker", MARKER_SCRIPT, "local")),
+            args=("--lint", "--base", "origin/main"), env=pipx_stub_env())
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
+                        "precondition: the code check under pin A did not run:\n" + out)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "zizmor-B.txt")),
+                        "precondition: the zizmor step under pin B did not run:\n" + out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "seen.txt")),
+                         "the plain lint step ran under two pins and read the caller's settings dir:\n" + out)
+        line = line_of(lines, "read settings") or ""
+        self.assertEqual((rc, by_step(lines).get("read settings")), (2, "unknown"),
+                         "a plain lint step under two pins must be unknown, exit 2:\n" + out)
+        self.assertTrue(self.sha_a[:9] in line and self.sha_b[:9] in line,
+                        "the unknown line must name both pins, the ambiguity: " + line)
 
 
 if __name__ == "__main__":

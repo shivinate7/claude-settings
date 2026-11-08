@@ -11,9 +11,10 @@
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
-                          Each step runs in the claude-settings commit the repo's workflow pins (one sha), as CI does; two pins, a
-                          ref that is no sha or a pin that cannot be fetched is an unknown, which stops the step too.
-                          Cost per draft-step ready: one ci-job run and one worktree, plus ci-job's pinned worktree (a git fetch
+                          Each step runs in the claude-settings commit its workflow job pins, as CI does: a pinned action step at its
+                          own sha. A plain step in a job with two pins, a ref that is no sha or a pin that cannot be
+                          fetched is an unknown, which stops the step too.
+                          Cost per draft-step ready: one ci-job run and one worktree, plus ci-job's pinned worktrees, one per pinned sha (a git fetch
                           only when the sha is absent, an npm ci only when that tree has a lockfile); the run time is unmeasured
                           for a step subset (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
@@ -33,9 +34,9 @@
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree, plus ci-job's pinned worktree when the workflow pins one
-                          and a lint step is not skipped (a git fetch only when the sha is absent, an npm ci only when that tree has a
-                          package-lock.json).
+                          measured once on one PR head), one worktree, plus ci-job's pinned worktrees, one per pinned sha a lint step needs,
+                          paid only when a lint step is not skipped (a step left unknown still pays it; a git fetch only when the sha is
+                          absent, an npm ci only when that tree has a package-lock.json).
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
