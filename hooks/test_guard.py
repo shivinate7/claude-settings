@@ -29095,7 +29095,7 @@ def register_simulator_drive_cases():
              'bin/sim-test --hold -- hinge -d "iPhone Duo A" open', "deny", nolease, carries=HOLD_CARRIES)
     drive_sh("drive: a hinge open of the shut-down Duo 2 by its UDID inside sim-test --hold is refused",
              "bin/sim-test --hold -- hinge -d %s open" % D2, "deny", nolease, carries=HOLD_CARRIES)
-    # Ruling 12 (coordinator, 2026-11-07 16:13 CST): a drive needs this session's own live lease for the phone. A lease
+    # Ruling 12: a drive needs this session's own live lease for the phone. A lease
     # for Duo 1 covers this drive, so it is allowed. The no-lease case above is its control; a lease on Duo 2 is the
     # control below, with Duo 1 booted, so only the lease's UDID can change the verdict.
     drive_sh("drive: a hinge open of Duo 1 by its UDID in sim-test --hold is allowed under this session's own lease",
