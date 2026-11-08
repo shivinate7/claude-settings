@@ -482,6 +482,33 @@ def _writes_a_file(words) -> bool:
     return False
 
 
+def _script_is_text(words, at, written) -> bool:
+    """True when the script FILE of the interpreter segment WORDS has a visible source that runs no shell
+    (`guard_core.script_source_is_text`), so its quoted arguments are data. The source is visible when a
+    heredoc of this command writes it (WRITTEN, from `guard_core.heredoc_sources`), or it is a plain readable
+    file under AT, the folder the segment runs in (None when that cannot be told), no larger than
+    `SCRIPT_READ_CAP`. A source that is not visible, or cannot be read, is not text: the segment keeps main's
+    verdict. One read of one small file, no process."""
+    unquoted = [_unquoted(word) for word in words]
+    name = unquoted[guard_core.interpreter_script(unquoted)]
+    plain = name[2:] if name.startswith("./") else name
+    if plain in written:
+        source = written[plain]
+        return source is not None and guard_core.script_source_is_text(unquoted[0], source)
+    if not at or re.search(r"[$`~*?\[{]", name):
+        return False
+    path = name if os.path.isabs(name) else os.path.join(at, name)
+    try:
+        if not os.path.isfile(path):
+            return False
+        with open(path, "rb") as handle:
+            raw = handle.read(guard_core.SCRIPT_READ_CAP + 1)
+        return len(raw) <= guard_core.SCRIPT_READ_CAP and guard_core.script_source_is_text(
+            unquoted[0], raw.decode("utf-8"))
+    except (OSError, ValueError):   # unreadable, or no utf-8
+        return False
+
+
 def _data_words(kind: str, words):
     """The indexes of the words that are data in a printer, reader, interpreter or message segment. A reader's
     quoted words are its patterns. An interpreter's are the arguments after its script file."""
@@ -703,6 +730,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(*closing))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
+    written = None   # the files this command's heredocs write, read once for the first interpreter that needs it
+    for number, kind in enumerate(kinds):
+        if kind != "interpreter" or not _data_words(kind, parsed[number]):
+            continue
+        if written is None:
+            _, bodies, unclosed = _walk_heredocs(cmd) if "<<" in cmd else (0, [], False)
+            written = {} if unclosed else guard_core.heredoc_sources(bodies)
+        at = (dir_before_segment(segments, number, cwd, ends) if follow_cd else cwd)
+        if not _script_is_text(parsed[number], at, written):
+            kinds[number] = ""   # the script's source is not visible text: its quoted arguments are shell words
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)

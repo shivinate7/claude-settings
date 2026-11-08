@@ -667,7 +667,8 @@ def _without_message_values(cmd: str) -> str:
 def _interpreter_header(words: str):
     # The word stands alone or ends a path or a name (`/usr/bin/bash`, `ts-node`, `node.cmd`);
     # the lookahead alone keeps `node-notes.md` and `bash-tips.md` text.
-    return re.compile(r"(?<!\w)(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
+    # `(?<![\w.])`: the word is no file extension either, so `cat > notes.sh <<EOF` holds no `sh`.
+    return re.compile(r"(?<![\w.])(?:" + words + r")(?:\.exe|\.cmd)?(?![\w.-])[^\n]*<<").search
 
 
 _SHELLS = "bash|sh|zsh|dash|ksh|pwsh|powershell"
@@ -823,8 +824,8 @@ _RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|
 # (`-W ignore`). Only the flags before the script file are the interpreter's own: what follows it is that
 # script's data.
 _SCRIPT_INTERPRETERS = (
-    (re.compile(r"python[\d.]*(?:\.exe)?").fullmatch, re.compile(r"-[A-Za-z]*c"),
-     re.compile(r"-[A-Za-z]*[WXm]$|--check-hash-based-pycs$")),
+    (re.compile(r"python[\d.]*(?:\.exe)?").fullmatch, re.compile(r"-[A-Za-z]*[cm]"),   # `-m MODULE` runs no script file
+     re.compile(r"-[A-Za-z]*[WX]$|--check-hash-based-pycs$")),
     (re.compile(r"(?:node|nodejs)(?:\.exe)?").fullmatch, re.compile(r"-[A-Za-z]*[ep]|--eval|--print"),
      re.compile(r"-[A-Za-z]*[rC]$|--(?:require|import|loader|input-type|conditions|env-file)$")),
     (re.compile(r"perl(?:\.exe)?").fullmatch, re.compile(r"-[A-Za-z]*[eE]"),
@@ -865,18 +866,55 @@ def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _written_file_use(text: str, headers) -> str:
+# What a node, perl or ruby script names when it can hand text to a shell: a call that runs a command, an
+# eval, a backtick, `%x`, `qx`, a pipe-open, or the `child_process` module. A source that holds none is text.
+_SCRIPT_SHELL = re.compile(r"\b(?:system|exec|spawn|eval|popen|qx)|child_process|`|%x", re.IGNORECASE).search
+SCRIPT_READ_CAP = 65536   # a script source larger than this is not read: it counts as not visible
+
+
+def script_source_is_text(interpreter: str, source: str) -> bool:
+    """True when SOURCE, the text of a script that INTERPRETER (a word of `_SCRIPT_INTERPRETERS`) runs as its
+    file, runs no shell, so a quoted argument it gets is data. Python is read by `python_body_is_text`; node,
+    perl and ruby by `_SCRIPT_SHELL`."""
+    name = interpreter.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    if _SCRIPT_INTERPRETERS[0][0](name):
+        from guard_frozen import python_body_is_text   # imported late: guard_frozen imports this file
+        return python_body_is_text(source)
+    return not _SCRIPT_SHELL(source)
+
+
+def heredoc_sources(bodies) -> dict:
+    """{file a heredoc writes: its body} for BODIES, as `_walk_heredocs` gives them: only a file the header
+    writes from scratch whose body reaches the file as written (a quoted delimiter, or no `$`, backtick or
+    backslash in it), on a header with one heredoc. The last heredoc to write a file wins. The names are read as
+    `_written_file_use` reads them (`./f` is `f`). Any other file a header writes holds the key with None."""
+    sources = {}
+    for quote, body, header in bodies:
+        names = _plain_words(_WRITE_TARGET.findall(header))
+        # An append (`>> f`, `tee -a f`) adds to a file this command did not write; `<<<` is a here-string.
+        fresh = (len(re.findall(r"<<(?!<)", header)) == 1 and not re.search(r">>|tee[ \t]+-\w*a", header)
+                 and (quote or not re.search(r"[$`\\]", body)))
+        for name in names:
+            sources[name] = body if fresh else None
+    return sources
+
+
+def _written_file_use(text: str, headers, bodies=()) -> str:
     """How a file a heredoc writes is used later, in TEXT (the command with its bodies dropped): 'run' when
     its pipeline holds a shell, a runner or an interpreter that reads its program elsewhere (`sh < f`,
-    `cat f | sh`, `timeout 5 sh f`, `python3 -c x f`), or it is the command itself (`./f`); 'script' when only a
-    python, node, perl or ruby runs it as its script file (`python3 f`; in `python3 j.py f` the file is data
-    for j.py); else ''. A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
-    matches only itself."""
+    `cat f | sh`, `timeout 5 sh f`, `python3 -c x f`, `python3 -m m f`), or it is the command itself (`./f`); 'script' when only a
+    python, node, perl or ruby runs it as its script file (`python3 f`); else ''. In `python3 j.py f` the file
+    is data for j.py only when j.py is a file BODIES write and it runs no shell (`script_source_is_text`); a j.py
+    that is not visible there, or runs a shell, may run f. A runner whose file argument is no name a heredoc
+    wrote (`bash "$PWD/xa"`) may run any of them, so each is 'run'. A read such as `wc -c f` runs nothing. The
+    word is compared as written, so `$HOME/f` matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
+    sources = heredoc_sources(bodies)
+    known = set(sources)
     use = ""
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs, scripts = False, set()   # scripts: the files a python, node, perl or ruby stage runs as its script
+        runs, loose, scripts = False, False, set()   # scripts: the files a python, node, perl or ruby stage runs as its script
         for words in stages:
             for at, word in enumerate(words):
                 if not _RUNNER(word.rsplit("/", 1)[-1]):
@@ -884,20 +922,27 @@ def _written_file_use(text: str, headers) -> str:
                 script = interpreter_script(words[at:])
                 if script is None or script == PROGRAM_NOT_A_FILE:
                     runs = True   # a shell, a wrapper, or an interpreter that reads its program elsewhere
-                else:
-                    scripts.add(words[at + script])   # a later argument of that interpreter is data
+                    if any(re.search(r"[/$~*?\[{\\]", arg) and arg not in known for arg in words[at + 1:]
+                           if not arg.startswith("-")):
+                        return "run"   # a file argument no heredoc wrote under that name: every body stays
+                    continue
+                name = words[at + script]
+                body = sources.get(name)
+                scripts.add(name)
+                if body is None or not script_source_is_text(word, body):
+                    loose = True   # its source is not visible, or it runs a shell: a later argument may run
         for words in stages:
             for at, word in enumerate(words):
-                if word in written and (runs or at == 0):
+                if word in written and (runs or at == 0 or (loose and word not in scripts)):
                     return "run"
                 if word in written and word in scripts:
                     use = "script"
     return use
 
 
-def _runs_written_file(text: str, headers) -> bool:
+def _runs_written_file(text: str, headers, bodies=()) -> bool:
     """True when a file a heredoc writes is run later, by anything (`_written_file_use`)."""
-    return bool(_written_file_use(text, headers))
+    return bool(_written_file_use(text, headers, bodies))
 
 
 def drop_script_bodies(cmd: str) -> str:
@@ -910,7 +955,7 @@ def drop_script_bodies(cmd: str) -> str:
     if unclosed or not bodies:
         return cmd
     text = _without_message_values(_drop_heredoc_bodies(cmd))
-    return _drop_heredoc_bodies(cmd, lambda header: _written_file_use(text, [header]) != "script")
+    return _drop_heredoc_bodies(cmd, lambda header: _written_file_use(text, [header], bodies) != "script")
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
@@ -937,9 +982,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     text = _without_message_values(dropped)
     if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text):
         return cmd  # the body may be executed, so keep it under inspection
-    if _runs_written_file(text, [header for _, _, header in bodies]):
+    if _runs_written_file(text, [header for _, _, header in bodies], bodies):
         # Only a body whose file is run stays in view: a file that a later command reads as data is text.
-        return "\n".join([_drop_heredoc_bodies(cmd, lambda header: _runs_written_file(text, [header]))] + runs)
+        return "\n".join([_drop_heredoc_bodies(cmd, lambda header: _runs_written_file(text, [header], bodies))] + runs)
     return "\n".join([dropped] + runs)
 
 
