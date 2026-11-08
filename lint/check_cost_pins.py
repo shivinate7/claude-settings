@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fails when a decision record's Cost sentence names a file that no test pins, or states a count with no reader.
+"""Fails when a decision record's Cost sentence names a file that no test pins, or states a count with no reader,
+or when a debt note states a count with no reader.
 
     python3 lint/check_cost_pins.py [--root DIR]
 
@@ -36,9 +37,21 @@ whole name, the code span nearest the count word. A test-name span is never the 
 code span passes on any existing test-name candidate. A sentence with a claim that passes none of these is one finding,
 on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
 
+A debt note is one list item of the debt notes file (kind `debt-notes` in lint/layout.json), with its continuation
+lines. A note is read sentence by sentence, with the same sentence split and code-span blanking as a Cost paragraph.
+A note's count claim is `among` and a count word (one to six, or digits), or digits, `of`, and a number of two or more
+digits (`406 of 8000`). The first number of an `N of M` claim is not read after the word `Round` or `Try`, or as the tail
+of a decimal (`20.2 of 28`). Words match in any case. A claim passes on the Cost rule's passes (a bound, an exempt word,
+a test-name candidate that holds the nearest code span), or when its sentence holds a date (YYYY-MM-DD) or `run` and
+digits: a count in a note is a dated past observation, not a standing fact. A sentence with a claim that passes none of
+these is one finding, on the line of its claim: `<notes path>:<line>: count in a debt note with no reader`. A note's
+cost-noun counts are not read, and a Cost sentence in a decision record keeps the Cost rule alone.
+
 The report is one line per token and line: `<record>:<line>: <token> named in a Cost sentence with no pin`.
-Exit 1 when there is a finding, 0 when there is none. Only the decision records (kind `decisions` in lint/layout.json)
-are read: a debt's Cost line is not. Each test file is read once per run.
+Exit 1 when there is a finding, 0 when there is none. The decision records (kind `decisions` in lint/layout.json) and
+the debt notes file are read. A debt record's Cost line is not read. Each test file is read once per run.
+Cost: at most one more file read per run than before, the notes file, read once. The count rule scans the decision
+records, so an unbounded count there is a finding.
 """
 import argparse
 import collections
@@ -68,6 +81,7 @@ TEST_NAME = re.compile(r"^(?:test_.*|.*_test\..*|.*\.test\..*|.*Tests\.swift|.*\
 CLOSERS = ")*\"'"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 NO_READER = "count in a Cost sentence with no reader"
+NOTE_NO_READER = "count in a debt note with no reader"
 WORD = re.compile(r"\w+(?:['\u2019-]\w+)*")
 COUNT_WORD = re.compile(r"(?:one|two|three|four|five|six|once|twice|thrice|\d+)", re.IGNORECASE)
 TIMES_WORD = re.compile(r"(?:once|twice|thrice)", re.IGNORECASE)
@@ -77,6 +91,11 @@ BOUND = re.compile(r"\b(?:at\s+most|up\s+to|no\s+more\s+than|fewer|at\s+least)\b
 # A number beside a cost noun that counts nothing: a date, a time, an id.
 NOT_COUNTS = [re.compile(r"\b\d{4}-\d{2}-\d{2}\b"), re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
+# A debt note's count claim: `among` and a count word, or `N of M` with M of two or more digits. The lookbehinds drop
+# a decimal tail (`20.2 of 28`) and a number after Round or Try.
+NOTE_CLAIM = re.compile(r"\bamong\s+(?:\d+|one|two|three|four|five|six)\b"
+                        r"|(?<![\d.])(?<!\bround )(?<!\btry )\b\d+\s+of\s+\d{2,}(?!\d)", re.IGNORECASE)
+NOTE_DATED = re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\brun\s+\d+\b", re.IGNORECASE)
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
 Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
 
@@ -282,6 +301,53 @@ def has_reader(sentence, start, end, candidates, root, texts):
     return pinned(sentence.spans[min(near)[1]][0], candidates, root, texts)
 
 
+def note_paragraphs(lines):
+    """Each debt note of `lines` as a list of (line number, text): a list item and its continuation lines. A blank
+    line, a heading or a code fence ends a note; fenced code is not read."""
+    found, current, fenced = [], None, False
+    for number, text in enumerate(lines, 1):
+        if FENCE.match(text):
+            fenced, current = not fenced, None
+        elif fenced or HEADING.match(text) or not text.strip():
+            current = None
+        elif LIST_ITEM.match(text):
+            current = [(number, text)]
+            found.append(current)
+        elif current is not None:
+            current.append((number, text))
+    return found
+
+
+def note_claim(sentence, candidates, root, texts):
+    """The offset in the sentence text of its first note count claim that has no reader, else None. A bound, an
+    exempt word, a date or run id in the sentence, or a test that holds the nearest span, passes it."""
+    if EXEMPT.search(sentence.text) or NOTE_DATED.search(sentence.blanked):
+        return None
+    for m in NOTE_CLAIM.finditer(sentence.blanked):
+        if not has_reader(sentence, m.start(), m.end(), candidates, root, texts):
+            return m.start()
+    return None
+
+
+def check_notes(root, texts):
+    """The findings of the debt notes file under `root`, as `check` makes them. A file that is absent has none."""
+    homes = layout.candidates(root, "debt-notes")
+    home = next((h for h in homes if os.path.isfile(os.path.join(root, *h.split("/")))), None)
+    text = read(os.path.join(root, *home.split("/"))) if home else None
+    findings = []
+    for paragraph in note_paragraphs((text or "").splitlines()):
+        sentences, balanced = read_paragraph(paragraph)
+        if not balanced:
+            findings.append((home, paragraph[0][0], None, UNBALANCED.replace("a Cost paragraph", "a debt note")))
+            continue
+        for sentence in sentences:
+            candidates = [t for t, _ in sentence.spans if is_test_name(t) and EXTENSION.search(basename(bare(t)))]
+            start = note_claim(sentence, candidates, root, texts)
+            if start is not None:
+                findings.append((home, sentence.line + sentence.text.count("\n", 0, start), None, NOTE_NO_READER))
+    return findings
+
+
 def check(root):
     """The findings of the records under `root` as (record, line, token, message), in file order.
     `token` is None for a finding that names no token."""
@@ -312,7 +378,7 @@ def check(root):
                         line = sentence.line + sentence.text.count("\n", 0, start)
                         findings.append((record, line, None, NO_READER))
                         break
-    return findings
+    return findings + check_notes(root, texts)
 
 
 def main(argv=None):
