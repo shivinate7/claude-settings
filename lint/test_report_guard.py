@@ -703,6 +703,43 @@ class ReportGuardTests(unittest.TestCase):
                 else:
                     self.assertEqual(run.stdout.strip(), "")
 
+    def test_74_peer_wake_that_only_spawns_and_messages_is_not_a_landing(self):
+        # Catches: a landing is read from the owner's last message, so a push earlier in that span
+        # (already reported) reads as the landing of a later turn. This turn is woken by a peer, and
+        # its only calls are an Agent spawn and a send_message, so it owes no report.
+        records = [
+            human("land it"),
+            tool_use_msg("Bash", {"command": "git push origin HEAD:lane"}),
+            tool_result_msg(),
+            assistant_text(GOOD_REPORT),
+            peer_msg("Lane 2 is done."),
+            tool_use_msg("Agent", {"subagent_type": "Explore", "prompt": "find the next file"}),
+            tool_result_msg(),
+            tool_use_msg("mcp__claude-code-remote__send_message",
+                         {"session_id": "session_other9", "message": "the next brief"}),
+            tool_result_msg(),
+            assistant_text("Sent the next brief to the lane."),
+        ]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+        self.assertEqual(run.returncode, 0)
+        self.assertNotIn("Report-shape guard", run.stdout,
+                         "a turn with no commit, push or merge was judged as a landing")
+
+    def test_75_push_then_no_report_still_blocks(self):
+        # Control: a turn with a git push and no report is a landing, so the report is still owed.
+        records = [
+            human("push it"),
+            tool_use_msg("Bash", {"command": "git push origin HEAD:lane"}),
+            tool_result_msg(),
+            assistant_text("Pushed the branch."),
+        ]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(json.loads(run.stdout).get("decision"), "block")
+        self.assertIn("Report-shape guard", json.loads(run.stdout)["reason"])
+
 
 class DoneFormatAndCiteTests(unittest.TestCase):
     """reports-done-format and speak-cite-id-plus-gloss, both in report_guard.py's Stop hook."""
@@ -848,13 +885,15 @@ class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
+    def verdict(self, reply, spawns, denied=(), running=()):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for spawn in running:  # a spawn with no result yet: the agent is still running
+            records += [tool_use_msg("Agent", spawn)]
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
@@ -929,6 +968,24 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+    def test_dm_false_alarm_running_builder_named_only_in_next_passes(self):
+        # A builder still running has built nothing yet, so Done need not name it. Next names it
+        # as running. Done names the finished test-author with its model.
+        out = self.verdict(
+            "> **Done**\n> - BUILT: red cases at abc1234 (test-author haiku)\n"
+            "> - OTHER: kept the lint clean (test-author haiku)\n"
+            "> **Next**\n> - builder (sonnet) is running.\n> - Unstarted: none",
+            [{"subagent_type": "test-author", "model": "haiku", "prompt": "write the red cases"}],
+            running=[self.BUILDER])
+        self.assertIsNone(out, "the Model-name guard blocked a builder that is still running")
+
+    def test_dm_control_builder_named_without_model_blocks(self):
+        # Control: a builder that finished and built the change, named with no model, still blocks.
+        out = self.verdict("> **Done** BUILT: x at abc1234, by builder.\n> **Next** Unstarted: none",
+                           [self.BUILDER])
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
