@@ -1590,7 +1590,7 @@ def _may_assign(earlier: str, name: str) -> bool:
         or re.search(r"(?:^|[\s;&|(])(?:eval|source|\.)\s", earlier))
 
 
-def pr_edit_body(segment: str, raw: str, where: str, before: int, earlier: str = ""):
+def pr_edit_body(segment: str, raw: str, where: str, before: int, segments=(), number: int = 0):
     """Return (selector, repo, body) for a `gh pr edit` segment that sets a body this guard can read,
     else None. The last body text wins, as gh reads it. A body with a `$` or a backtick is judged only
     when the shell sends it as it stands: a message file (gh reads it as it is), a quoted heredoc, or a
@@ -1598,7 +1598,7 @@ def pr_edit_body(segment: str, raw: str, where: str, before: int, earlier: str =
     is not the text the call will send. A body that is one bare variable is read from this process's
     environment, or as empty when unset, because shell state does not carry over between Bash calls. Only
     a placeholder value is a hit; a real value passes with no live read. A value the command may set in
-    `earlier` (the segments ahead of this one) stays unknown. A prefix
+    the segments ahead of this one (`segments[:number]`, joined only for a bare variable) stays unknown. A prefix
     `BODY=x gh pr edit ... "$BODY"` sets nothing the word sees, since bash expands the word first. An
     unread message file is cite-by-id's to refuse, and a body piped in with no heredoc is unseen: each
     is no hit."""
@@ -1609,7 +1609,7 @@ def pr_edit_body(segment: str, raw: str, where: str, before: int, earlier: str =
     body = read[1][-1]
     if "$" in body or "`" in body:
         name = _bare_variable(segment, body) if not read[1][:-1] and "<<" not in segment else ""
-        if name and not _may_assign(earlier, name):
+        if name and not _may_assign("\n".join(segments[:number]), name):
             value = os.environ.get(name, "")
             # Only the placeholder test reads this value: a real one is passed unjudged, with no live read.
             return (call[0], call[1], value) if pr_body_is_placeholder(value) else None
@@ -3555,7 +3555,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
-        edited = pr_edit_body(segment, raw, cite_where, before, "\n".join(segments[:number]))
+        edited = pr_edit_body(segment, raw, cite_where, before, segments, number)
         if edited:
             judge_pr_body(tool, edited[2], edited[0], edited[1], cite_where, True)
 
