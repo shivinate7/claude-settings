@@ -100,9 +100,10 @@ def narrating_stage(segment: str) -> str:
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
-    NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
-    both match. `interpreter_only` keeps the word to python, python3 or py: the check rule needs it, so
-    `grep -n x merge/merge.py` is no run of the script."""
+    NARRATING_SCRIPT_TAILS. By default a word carrying a script path counts, so `python3.11` and
+    `uv run python` both match. `interpreter_only` (the check rule) keeps the word to python, python3
+    or py, so `grep -n x merge/merge.py` is no run of the script, and `python3.11` and `uv run`
+    do not match. The follow-up branch check-tail-wrapper-forms adds both."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
