@@ -31,11 +31,14 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. After the checks lint it runs each CI step of
                           another Linux job (runs-on ubuntu*) whose suite the lint picked, as `bin/ci-job <job> --step NAME`, one run
-                          per job; a job on another OS stays one `not run` line. Such a run that passes OTHER_JOB_SECONDS reads
-                          unknown and names the suite. The fetch of a branch retries a ref-lock collision (FETCH_COLLISION_TRIES).
+                          per job, under that job's own timeout-minutes (x 60 s), else OTHER_JOB_SECONDS; a job on another OS stays
+                          one `not run` line. Such a run that passes its bound reads unknown and names the suite. A job whose picked
+                          suite needs an install that only CI makes (checks-guard's test_guard: NODE_PATH from Playwright) is one
+                          `not run` line too, and its suite does not run here (debt lane-lint-guard-suite-not-run). The fetch of a
+                          branch retries a ref-lock collision (FETCH_COLLISION_TRIES).
                           Cost per call: one ci-job run (about 550 s, measured once on one PR head), one worktree, plus per other
-                          Linux job with a picked suite up to 1800 s (OTHER_JOB_SECONDS) and one ci-job run, so two such jobs
-                          (checks-merge-install, checks-guard) bound it at 3600 s; none with no pick, and at
+                          Linux job with a picked suite one ci-job run, up to that job's timeout-minutes x 60 s (checks-merge-install
+                          1800 s, checks-guard 1620 s); none with no pick, and at
                           most 3 extra `git fetch` and 6 s of wait per fetch, only on a collision.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
@@ -1547,10 +1550,10 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 UNSHALLOW_SECONDS = 600  # the bound on the lane lint's `git fetch --unshallow origin`: a full fetch of this repo over a slow link, about half of LINT_SECONDS, since the lint it gates runs 550 s to 660 s. Unmeasured; raise it on a timeout from a link that was only slow.
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
-OTHER_JOB_SECONDS = 1800  # the bound on each run of a picked suite in another Linux job in the lane lint, on top of LINT_SECONDS for the checks lint. One run per job, so a lane that picks suites in two jobs waits up to 2 x this after the checks lint. 1800 s is the larger CI cap of the two jobs that hold suites (checks-merge-install 30 min, checks-guard 27 min); their slowest CI runs are 21.0 and 18.9 min. Unmeasured locally. LINT_SECONDS is not raised. Raise this on a timeout from a slow machine.
+OTHER_JOB_SECONDS = 1800  # the bound on a picked suite's run in another Linux job in the lane lint, for a job whose workflow has no readable timeout-minutes; a job with one runs under it (minutes x 60). On top of LINT_SECONDS for the checks lint. One run per job, so a lane that picks suites in two jobs waits up to the sum of both after the checks lint. 1800 s equals checks-merge-install's CI cap (30 min); the slowest CI runs of the jobs that hold suites are 21.0 and 18.9 min. Unmeasured locally. LINT_SECONDS is not raised. Raise this on a timeout from a slow machine.
 FETCH_COLLISION_TRIES, FETCH_COLLISION_PAUSE = 4, 2  # a lane lint's fetch of a branch retries on a ref-lock collision with another lint's fetch: 4 tries, 2 s between them, so at most 3 extra `git fetch` and 6 s of wait per fetch. Any other fetch error stops after one try
 COLLISION = re.compile(r"cannot lock ref .*but expected")  # git's text when another fetch moved the ref
-SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
+PLAIN_SUITE_COMMAND = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
 def needles(path):
     """The names a suite that reads `path` would hold: the path, its file name, its stem (4 or more characters), and each
@@ -1786,7 +1789,7 @@ def hit_suites(root, paths, skip):
             else:  # node and bash suites: any needle in the source is a hit, which fails safe
                 hit = any(w.search(text) for w in words)
             if hit:
-                if not SUITE_LINE.fullmatch(line):
+                if not PLAIN_SUITE_COMMAND.fullmatch(line):
                     raise Stop(f"the suite line `{line}` reads main's paths and cannot be run as written {BASE_CITE}")
                 hits.append((m.group(1), line))
     return hits
@@ -2455,7 +2458,7 @@ def lane_head_and_base(root, target, base):
     if c:
         raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
     if not re.fullmatch(r"[0-9a-fA-F]{7,64}", target):  # a bare branch name means the pushed branch, never a local one that may differ
-        git(root, "fetch", "-q", "origin", f"+refs/heads/{target}:refs/remotes/origin/{target}")  # a name that is no branch on origin fails here, and is judged below
+        fetch_branch(root, target)  # a name that is no branch on origin fails here, and is judged below
         c, pushed = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{target}^{{commit}}")
         local = git(root, "rev-parse", "--verify", "-q", f"refs/heads/{target}^{{commit}}")
         if not local[0] and c:
@@ -2468,7 +2471,7 @@ def lane_head_and_base(root, target, base):
     want = f"{target}^{{commit}}"
     c, head = git(root, "rev-parse", "--verify", "-q", want)
     if c:
-        git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+        fetch_branch(root, "*")  # every branch: fetch_branch's refspec with `*` for the name; a failure shows in the rev-parse below
         c, head = git(root, "rev-parse", "--verify", "-q", want)
     if c:
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
@@ -2504,7 +2507,7 @@ def ci_job_run(wt, *args, seconds=None):
 def other_job_runs(wt, others, base):
     """The lane lint's run of each picked suite CI step in another job (decision lanes-run-no-full-ci-job). `others` is ci_job_run's list
     of (job, suites) the checks lint picked but did not run. A Linux job (runs-on ubuntu*) runs through `ci-job <job> --step NAME ...`, the
-    one runner, one run per job bounded by OTHER_JOB_SECONDS; a job on another OS prints one `not run` line and runs nowhere. A job or step
+    one runner, one run per job bounded by the job's own timeout-minutes (x 60), else OTHER_JOB_SECONDS; a job on another OS prints one `not run` line and runs nowhere. A job or step
     this cannot read from the workflow at the head reads unknown, never a pass;
     so does a runs-on that is not one literal label (an expression, a map, empty). A run whose only unknowns are a NODE_PATH install that CI makes
     and this box lacks (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result. Cost: one ci-job run (its own processes) per Linux job
@@ -2537,7 +2540,9 @@ def other_job_runs(wt, others, base):
         if not names or not all(names):
             out.append((job, suites, CiRun("unknown", [f"unknown         job {job}: no named step runs the picked {', '.join(suites)}"], [], False, [], False)))
             continue
-        run = ci_job_run(wt, job, *[a for name in names for a in ("--step", name)], "--base", f"origin/{base}", seconds=OTHER_JOB_SECONDS)
+        minutes = workflow_steps.job_timeout_minutes(block)
+        seconds = minutes * 60 if minutes else OTHER_JOB_SECONDS  # the job's own CI cap bounds its picked suite, as CI would cut it
+        run = ci_job_run(wt, job, *[a for name in names for a in ("--step", name)], "--base", f"origin/{base}", seconds=seconds)
         gaps = [workflow_steps.MISSING_INSTALL_LINE.search(l) for l in run.lines]
         if run.state == "unknown" and not run.timed_out and gaps and all(gaps):
             # Every unknown is an install that a uses: step makes in CI and never runs here (checks-guard's Playwright). Main passes such a lane,
@@ -2546,7 +2551,7 @@ def other_job_runs(wt, others, base):
                 "not run", job, ", ".join(suites), ", ".join(dict.fromkeys(g.group(1) for g in gaps))))
             continue
         if run.timed_out:
-            run = run._replace(lines=[f"unknown         job {job}: the picked suite {', '.join(suites)} timed out: ci-job did not finish in {OTHER_JOB_SECONDS} s"])
+            run = run._replace(lines=[f"unknown         job {job}: the picked suite {', '.join(suites)} timed out: ci-job did not finish in {seconds} s"])
         out.append((job, suites, run))
     return out
 
@@ -2582,7 +2587,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     A shallow clone is unshallowed first (unshallow_for_lint).
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Then each picked suite CI step of another Linux job runs through ci-job (other_job_runs, bounded by OTHER_JOB_SECONDS per job), unless the checks lint FAILed.
+    Then each picked suite CI step of another Linux job runs through ci-job (other_job_runs, bounded per job by its timeout-minutes, else OTHER_JOB_SECONDS), unless the checks lint FAILed.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
     unshallow_for_lint(root)
     if target.isdigit():

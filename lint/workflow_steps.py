@@ -44,6 +44,17 @@ def job_runs_on(block):
     return value
 
 
+def job_timeout_minutes(block):
+    """A job's own `timeout-minutes:` as a whole number, quotes stripped, or None. None means no number this reader can
+    name: an absent key, an expression (`${{ ... }}`), a fraction. A step's cap sits deeper and never counts. The caller keeps its
+    own bound for None, never a guess."""
+    m = re.search(r"^    timeout-minutes:[ \t]*(.*?)[ \t]*$", block or "", re.M)
+    if not m:
+        return None
+    value = drop_comment(m.group(1)).strip().strip("'\"")
+    return int(value) if value.isdigit() and int(value) > 0 else None
+
+
 def step_blocks(block):
     """Each `      - ` step of a job block, as raw text. Block scalars stay whole."""
     return [p for p in re.split(r"^(?=      - )", block or "", flags=re.M) if p.startswith("      - ")]
