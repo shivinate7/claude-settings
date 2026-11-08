@@ -15,7 +15,10 @@ step sha-hex-followups). Process-only.
   closure (coordinator, 2026-11-07 22:12 CST). Its own tests cover it.
 
 Check: `lint/test_ci_scope.py` walks the imports from `merge/merge.py` to closure and fails when a file in
-it lacks the merge flag. Code: `.github/scripts/ci-scope.sh`.
+it lacks the merge flag. It fails loudly, naming the file and the load, on a load it cannot resolve: a
+package-qualified import, or a by-path load built at run time. A path built from a parameter is no load,
+since its callers name the file. A by-path load through a constant named in `ALLOWED_CONSTANT_LOADS` takes
+that constant's value as its path. Code: `.github/scripts/ci-scope.sh`.
 
 ## Cost
 
