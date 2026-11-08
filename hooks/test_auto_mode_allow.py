@@ -25,8 +25,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page). Its Covers text names settings or permissions, and its Never
-  covers names neither: one entry cannot cover and refuse the same act.
+  relayed-grant-read-from-page). Its Covers text states, as a positive sentence, that the act may
+  be a change to settings or permissions, and does not name overrides. Its Never covers names
+  neither settings nor permissions: one entry cannot cover and refuse the same act.
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
   one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
@@ -97,9 +98,12 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("overrides", "overrides"),
                    ("no counted line", "no `counted` line in this session"))
-# The scope the Relayed Grant entry's Covers text must name, and the words its Never covers must not name.
-RELAYED_SETTINGS_SCOPE = (("settings or permissions", "settings or permissions"),)
-SETTINGS_SCOPE_WORDS = (("settings", r"\bsettings\b"), ("permissions", r"\bpermissions\b"))
+# The Relayed Grant entry's Covers text states the scope as a positive sentence, so a negated form
+# ("may not be a change to ...") fails. Its Never covers names the words by stem, singular or plural.
+RELAYED_SETTINGS_SCOPE = (
+    ("settings or permissions", r"(?:^|\. )The act may be a change to settings or permissions\b"),)
+RELAYED_COVERS_REFUSED = (("overrides", "override"),)
+SETTINGS_SCOPE_WORDS = (("settings", "setting"), ("permissions", "permission"))
 # Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
@@ -191,6 +195,11 @@ def unnamed_terms(clause, terms):
     return [name for name, pattern in terms if not re.search(pattern, clause, re.I)]
 
 
+def named_terms(clause, terms):
+    """The names in terms whose pattern the clause matches, ignoring case."""
+    return [name for name, pattern in terms if re.search(pattern, clause, re.I)]
+
+
 class AutoModeKeepsTheBuiltInRules(unittest.TestCase):
     def test_allow_list_keeps_defaults(self):
         self.assertIn("$defaults", auto_mode().get("allow", []))
@@ -238,12 +247,19 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         entry = allow_entry(RELAYED)
         self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED)
         missing = unnamed_terms(bounds_text(entry), RELAYED_SETTINGS_SCOPE)
-        self.assertFalse(missing, "Covers text does not name settings or permissions: %r" % missing)
+        self.assertFalse(missing, "Covers text does not state that the act may be a change to settings or "
+                         "permissions: %r" % missing)
+
+    def test_covers_does_not_name_overrides(self):
+        entry = allow_entry(RELAYED)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED)
+        named = named_terms(bounds_text(entry), RELAYED_COVERS_REFUSED)
+        self.assertFalse(named, "Covers text names overrides, which the entry may not cover: %r" % named)
 
     def test_never_covers_names_neither_settings_nor_permissions(self):
         clause = never_covers(allow_entry(RELAYED))
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
-        named = [word for word, pattern in SETTINGS_SCOPE_WORDS if re.search(pattern, clause, re.I)]
+        named = named_terms(clause, SETTINGS_SCOPE_WORDS)
         self.assertFalse(named, "Never covers still names %r: the entry may not both cover and refuse them"
                          % named)
 
@@ -514,6 +530,38 @@ class NeverCoversSentence(unittest.TestCase):
 
     def test_none_without_a_clause(self):
         self.assertIsNone(never_covers("Allowed, with no bound."))
+
+
+class RelayedGrantScopeOnWrongText(unittest.TestCase):
+    """The Relayed Grant scope checks, fed wrong text in memory. Each good text is a green control."""
+
+    def test_covers_accepts_the_positive_sentence(self):
+        covers = "The act may be a change to settings or permissions, under the same condition."
+        self.assertEqual(unnamed_terms(covers, RELAYED_SETTINGS_SCOPE), [])
+
+    def test_covers_rejects_a_negated_sentence(self):
+        covers = "The act may not be a change to settings or permissions, under the same condition."
+        self.assertEqual(unnamed_terms(covers, RELAYED_SETTINGS_SCOPE), ["settings or permissions"])
+
+    def test_covers_rejects_a_sentence_that_only_mentions_the_scope(self):
+        covers = "A session does not say the act may be a change to settings or permissions."
+        self.assertEqual(unnamed_terms(covers, RELAYED_SETTINGS_SCOPE), ["settings or permissions"])
+
+    def test_covers_names_no_override_when_it_names_only_the_scope(self):
+        covers = "The act may be a change to settings or permissions."
+        self.assertEqual(named_terms(covers, RELAYED_COVERS_REFUSED), [])
+
+    def test_covers_rejects_overrides(self):
+        covers = "The act may be a change to settings or permissions or overrides."
+        self.assertEqual(named_terms(covers, RELAYED_COVERS_REFUSED), ["overrides"])
+
+    def test_never_covers_names_singular_setting_and_permission(self):
+        clause = never_covers("Ok. Never covers a permission, setting or overrides.")
+        self.assertEqual(named_terms(clause, SETTINGS_SCOPE_WORDS), ["settings", "permissions"])
+
+    def test_never_covers_a_change_to_overrides_names_no_scope_word(self):
+        clause = never_covers("Ok. Never covers a change to overrides.")
+        self.assertEqual(named_terms(clause, SETTINGS_SCOPE_WORDS), [])
 
 
 if __name__ == "__main__":
