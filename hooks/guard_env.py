@@ -5,11 +5,12 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import warnings
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
-    is_powershell, norm, split_segments,
+    is_powershell, norm, segment_tokens, split_segments,
 )
 
 
@@ -101,19 +102,27 @@ ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
 ENV_SCRIPT_VALUE_SHORT = "Fv"
 # Per-command flag letters, for the letters that differ between the search tools. `-f` takes a file
 # of patterns in grep and rg, and is a plain switch in ag and ack. `-t` and `-T` take a file type in
-# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. The word
-# after rg `-t` or `-T` is a type name and no path, so it is skipped.
+# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path.
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
-# `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns. Each
-# value is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
+# `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns, which
+# is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
 ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
-ENV_TYPE_SHORT_BY_COMMAND = {"rg": "tT"}
+# The value of these letters is no path, so it is skipped: after rg `-t` or `-T` a file type name,
+# after ag `-G` a file regex, judged by `_ag_hidden_regex_refusal` instead.
+ENV_NO_PATH_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
+# A hidden flag makes a search read dotfiles: `--hidden`, `--unrestricted`, `-u`, and rg `-.`. rg
+# `-u` alone skips no hidden file, but it counts here: main refuses that form too.
+ENV_HIDDEN_LONG = ("--hidden", "--unrestricted")
+ENV_HIDDEN_SHORT = "u."
+# rg `-T` excludes a file type, so with a hidden flag the search still reaches the env file, and a
+# pattern that names one stays judged. `-t` searches only the named type, so its pattern is skipped.
+ENV_RG_TYPE_NOT_SHORT = "T"
 # With a hidden flag, ag searches dotfiles, so it reads each env file whose name its file regex
-# (`-G`, `--file-search-regex`) matches. `-u` and `--unrestricted` search hidden files too. The
-# regex is tried on a sample of env file names, bare and with the `./` that ag prefixes.
-ENV_AG_HIDDEN_LONG = ("--hidden", "--unrestricted")
+# (`-G`, `--file-search-regex`) matches. The regex is tried on a sample of env file names, bare and
+# with the `./` that ag prefixes. Without a hidden flag ag skips dotfiles, so the regex is not judged.
 ENV_AG_REGEX_LONG = "--file-search-regex"
-ENV_SAMPLE_NAMES = tuple(ENV_PREFIX + suffix for suffix in ("", "rc", ".local"))
+ENV_SAMPLE_NAMES = tuple(ENV_PREFIX + suffix for suffix in (
+    "", "rc", ".local", ".production", ".development", ".test", ".staging"))
 # `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
 # Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
 # `-f` / `--from-file` names a file of the program.
@@ -457,6 +466,7 @@ def _pattern_words(words, position: int, command: str):
     which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
+    hidden, type_not = False, False
     program = command in ENV_PROGRAM_COMMANDS
     value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
                    else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
@@ -477,18 +487,20 @@ def _pattern_words(words, position: int, command: str):
             continue
         if word.startswith("--"):
             name, attached, _ = word.partition("=")
+            hidden = hidden or name in ENV_HIDDEN_LONG
             if name in ENV_PATTERN_LONG:
                 given = True
                 skip.update({i} if attached else {i + 1})
             elif name in ENV_FILE_LONG:
                 given = True
-            elif name in ENV_EXCLUDE_LONG:
+            elif name in ENV_EXCLUDE_LONG or (command == "ag" and name == ENV_AG_REGEX_LONG):
                 skip.update({i} if attached else {i + 1})
             i += 1 if attached or name not in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG else 2
             continue
         step = 1
         for k, letter in enumerate(word[1:], 1):
             rest = word[k + 1:]
+            hidden = hidden or letter in ENV_HIDDEN_SHORT
             if letter == "e" and not program:
                 given = True
                 skip.update({i} if rest else {i + 1})
@@ -503,8 +515,9 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
             if letter in value_short:
-                if not rest and letter in ENV_TYPE_SHORT_BY_COMMAND.get(command, ""):
-                    skip.add(i + 1)  # a file type name, never a path
+                if not rest and letter in ENV_NO_PATH_SHORT_BY_COMMAND.get(command, ""):
+                    skip.add(i + 1)  # a file type name or an ag file regex, never a path
+                type_not = type_not or (command == "rg" and letter in ENV_RG_TYPE_NOT_SHORT)
                 step = 1 if rest else 2
                 break
         i += step
@@ -514,7 +527,7 @@ def _pattern_words(words, position: int, command: str):
         lead = 1 if command == "yq" and words[plain[0]] in ENV_YQ_SUBCOMMANDS else 0
         if len(plain) > lead + 1:
             skip.update(plain[:lead + 1])
-    elif not given and plain:
+    elif not given and plain and not (hidden and type_not):
         skip.add(plain[0])
     return skip, glued
 
@@ -534,7 +547,7 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
             break
         if word.startswith("--"):
             name, attached, value = word.partition("=")
-            hidden = hidden or name in ENV_AG_HIDDEN_LONG
+            hidden = hidden or name in ENV_HIDDEN_LONG
             if name == ENV_AG_REGEX_LONG:
                 if attached:
                     regexes.append(value)
@@ -561,9 +574,13 @@ def _ag_hidden_regex_refusal(words, position: int) -> str:
     if not hidden:
         return ""
     for regex in regexes:
-        regex = regex.strip("\"'")
+        tokens = segment_tokens(regex)   # the value ag gets, after the shell's quote removal
+        regex = "".join(tokens) if tokens else regex.strip("\"'")
         try:
-            compiled = re.compile(regex)
+            with warnings.catch_warnings():
+                # A POSIX class such as `[[:alpha:]]` warns of a nested set on stderr. The verdict stands.
+                warnings.simplefilter("ignore", FutureWarning)
+                compiled = re.compile(regex)
         except re.error:
             return "a file regex the guard cannot compile"
         for name in ENV_SAMPLE_NAMES:
