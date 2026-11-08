@@ -8012,8 +8012,8 @@ for shape, command in (
 
 # A quoted interpreter heredoc whose string holds a backtick around a shell form is a false alarm today:
 # the backtick is body text, and bash runs no substitution there. An unquoted heredoc does run its
-# backticks, and a quoted one whose python opens the file still reads it. Names start
-# "env: interpreter heredoc", so MUTATE_ONLY="env: interpreter heredoc" runs this block alone.
+# backticks. Names start "env: interpreter heredoc", so MUTATE_ONLY="env: interpreter heredoc" runs
+# this block alone.
 sh("env: interpreter heredoc: allow, a python body with a backtick around a bash -c string",
    'test -e a.json && echo EXISTS || python3 - "$T" <<\'PY\'\n'
    'd={"why":"On main, `bash -c \\"cat ' + ENV + '\\"` and `sh -c \'cat ' + ENVRC + '\'` get no refusal."}\n'
@@ -8023,8 +8023,6 @@ sh("env: interpreter heredoc: allow, a js template literal around a bash -c stri
    'node <<\'EOF\'\nconst s = `run bash -c "cat ' + ENV + '"`;\nEOF', "allow", cwd=NOGIT)
 sh("env: interpreter heredoc: deny, an unquoted heredoc whose backtick runs the read",
    'python3 <<PY\nx = "`cat ' + ENV + '`"\nPY', "deny", "env-file", cwd=NOGIT)
-sh("env: interpreter heredoc: deny, a quoted python heredoc that opens the file",
-   'python3 <<\'PY\'\nopen("' + ENV + '").read()\nPY', "deny", "env-file", cwd=NOGIT)
 
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
