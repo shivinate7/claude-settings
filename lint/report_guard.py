@@ -85,7 +85,7 @@ the current Recovered line (split on ";" outside parentheses) names a source, ma
 page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
 a colon or spaces, then at most one backtick, may sit between), `PR #<n>`, `PRs #<n>`, `PR (#<n>)`, `PR#<n>`,
 `pull request #<n>`, `pull #<n>`, `issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source,
-and a PR with no `#` (`PR 3`) is no source even beside git, page or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+and a PR with no `#` (`PR 3`) is no source even beside git, page or digest. A `pull <n>` is no PR when `git` and one space lead it or a word follows the number (`git pull 2`, `pull 3 files`). An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
 already loaded (the rewrite reads the transcript once, as before); no file, log or process.
