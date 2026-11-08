@@ -22583,6 +22583,40 @@ for _shown, _body in _KEPT_READ_ONLY_BODIES:
                 "then a heredoc run.sh whose body is %s, then bash run.sh, is allowed" % _shown,
                 "allow", _kept_unresolved_run(_body), "home")
 
+# A script body that python or node runs is not shell text, so the shell check does not read its calls. Each run below
+# reaches a written helper that writes out of the tree through a call that names no file a heredoc wrote, so the
+# helper's body is dropped and nothing stops the run. Main keeps every body a written file runs, and refuses each.
+_KEPT_SCRIPT_RUNS = (
+    ("subprocess.run(['bash', f]) over glob('*.sh')", "helper.sh", "echo hi > ../other/f", "run.py",
+     "import glob, subprocess\nfor f in glob.glob('*.sh'):\n    subprocess.run(['bash', f])", "python3 run.py"),
+    ("os.system('bash ' + f) over os.listdir('.')", "helper.sh", "echo hi > ../other/f", "run.py",
+     "import os\nfor f in os.listdir('.'):\n    os.system('bash ' + f)", "python3 run.py"),
+    ("exec(open(f).read()) over glob('*.py')", "helper.py", "import os\nos.system('echo hi > ../other/f')", "run.py",
+     "import glob\nfor f in glob.glob('*.py'):\n    exec(open(f).read())", "python3 run.py"),
+    ("execSync('bash ' + f) over readdirSync('.')", "helper.sh", "echo hi > ../other/f", "run.js",
+     "const fs = require('fs');\nconst { execSync } = require('child_process');\n"
+     "for (const f of fs.readdirSync('.')) execSync('bash ' + f);", "node run.js"),
+)
+for _shown, _helper, _helper_body, _run, _run_body, _cmd in _KEPT_SCRIPT_RUNS:
+    _relesc_add("other-checkout: heredoc replay kept body unresolved: a heredoc %s that writes ../other/f, then a heredoc "
+                "%s whose body runs %s, then %s, is refused" % (_helper, _run, _shown, _cmd),
+                "deny", _kept_heredocs([(_helper, _helper_body), (_run, _run_body)], _cmd), "home", rule="other-checkout")
+
+# A test command in a kept body, beside a data body that writes out of the tree and runs nothing, is read, and the data
+# body is dropped. A kept body that runs a helper which only echoes is read too, and nothing it runs writes out.
+_KEPT_TEST_BODIES = (
+    "[ -f x ] && echo ok",
+    "if [ -f x ]; then echo ok; fi",
+)
+for _body in _KEPT_TEST_BODIES:
+    _relesc_add("other-checkout: heredoc replay kept body test command: a heredoc run.sh whose body is %s, beside a heredoc "
+                "data.txt that writes ../other/f, then bash run.sh, is allowed" % _body,
+                "allow", _kept_heredocs([("run.sh", _body), ("data.txt", "echo hi > ../other/f")], "bash run.sh"), "home")
+_relesc_add("other-checkout: heredoc replay kept body helper that only echoes: a heredoc helper2.sh that echoes, a heredoc "
+            "run.sh that runs bash helper2.sh, beside a heredoc data.txt that writes ../other/f, then bash run.sh, is allowed",
+            "allow", _kept_heredocs([("helper2.sh", "echo ok"), ("run.sh", "bash helper2.sh"),
+                                     ("data.txt", "echo hi > ../other/f")], "bash run.sh"), "home")
+
 
 # ---- Script rows. The fixture writes every on-disk script these rows run into RELESC_TREE_AGENT's home
 # (`_relesc_tree_files`). No command here writes one. The root's judge.py only prints, and sub/judge.py runs its
