@@ -10464,11 +10464,13 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no read. The conflict-markers push check
-    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
+    push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
-    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    and an upstream reads two. A push with no tracking ref and no upstream reads three, and the third, the
+    default base, costs one `git symbolic-ref` for
     origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
     runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
@@ -10501,7 +10503,7 @@ def record_push_cost_case():
             kinds[word] = kinds.get(word, 0) + 1
         return kinds, lines
 
-    for label, tail, want in (
+    for label, tail, want, *cwd in (
         ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
@@ -10510,8 +10512,12 @@ def record_push_cost_case():
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
          {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+        # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
+        # the conflict check rejects that base and reads the upstream: two diff reads.
+        ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
-        kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
+        kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
         if label == "a bare push" and not any("push.default" in line for line in lines):
@@ -10528,7 +10534,8 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, symbolic-ref for HEAD and bare, push.default for bare only; " \
+    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+                 "push.default for bare only; " \
                  "the transcript is read only at the record branch"
 
 
@@ -22902,8 +22909,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, symbolic-ref for a refspec, HEAD and bare, push.default "
-     "for bare only, one config read of the remote for a literal main destination, no read for HEAD:<branch>, "
+    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+     "no read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
@@ -29986,6 +29994,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
