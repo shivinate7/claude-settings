@@ -13,6 +13,8 @@ An open decision or task on a repo's waiting page names the repo it is about, an
   - A `str_replace`, a closed item and an `update` with no `repo` pass.
   - Both fields are in the `itemFields` block of `skills/waiting-page/page.html`, the one list the page and the guard read.
   - The session id shape is `own_session._CREATED_ID` and the repo shape is `stale_pages.REPO_NAME`. This code holds no copy.
+  - A checkout with no extras file, such as a worktree on the record branch, reads the page from the default branch: `origin/HEAD`'s branch, else `origin/main` (`lint/layout.py`, `waiting_page`). It reads the ref only: no checkout moves, no fetch runs. The text goes through the local file's parse, the checkout's own file always wins, and no origin, no ref, a git error, a timeout or a file that does not parse reads as "unknown", never an error. Only the page lookup reads it; other extras keys still read the local file.
+  - Cost of that read: at most two `git show` processes per call (the second only when `origin/HEAD` does not resolve), only when the checkout has no extras file, 10 seconds each, no file written.
   - The reason names the field. For a missing `repo` it names the page's own repo as the value to write, so one retry fixes it.
 
 ## The mistake and the harm
@@ -21,7 +23,9 @@ The mistake: triage filed another repo's design questions on this repo's page. T
 
 Incident: mailaudit item `ma144-tab-bar` (mailaudit #144, the Duo tab bar place), filed on this page by a batch runner session. The owner's ruling on the Card in Hand design already covered it.
 
-Cost: no process, no file written. One read of git's config file per waiting-page write (`lint/layout.py`, `repo_name`).
+Second incident: item 397, 2026-11-07 22:58 CST. Triage writes the page from a worktree on the record branch, which holds no extras file, so the page read as unknown, no page check ran, and every rule above was skipped.
+
+Cost of the field check: no process, no file written, except the default-branch read above. One read of git's config file per waiting-page write (`lint/layout.py`, `repo_name`).
 
 Known limit: the guard sees that `checked_with` is session-shaped, not that the session checked. A made-up id passes. Review and the owner catch it.
 

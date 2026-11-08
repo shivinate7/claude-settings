@@ -29,6 +29,7 @@ import ntpath
 import os
 import posixpath
 import re
+import subprocess
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -45,8 +46,16 @@ class BranchNameError(LayoutError):
 def _read(path):
     try:
         with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError) as err:
+            return _parse(handle.read(), path)
+    except OSError as err:
+        raise LayoutError("cannot read %s: %s" % (path, err)) from err
+
+
+def _parse(text, path):
+    """The extras or layout text as a dict. `path` names the source in an error."""
+    try:
+        data = json.loads(text)
+    except ValueError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
     if not isinstance(data, dict) or not isinstance(data.get("kinds"), dict):
         raise LayoutError("%s: no \"kinds\" object" % path)
@@ -248,10 +257,13 @@ def artifacts(root):
     `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
-    found = _repo_keys(root).get(ARTIFACTS)
+    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
+
+
+def _registry(root, found, where):
+    """artifacts(root) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
     if found is None:
         return []
-    where = _extras(root)
     if not isinstance(found, list):
         raise LayoutError("%s: %s is not a list" % (where, ARTIFACTS))
     seen, out = set(), []
@@ -302,19 +314,53 @@ def artifacts(root):
     return out
 
 
-def waiting_page(root):
-    """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
-    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not.
-    "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
-    if not has_extras(root):
-        return "unknown"
-    for entry in artifacts(root):
+GIT_SHOW_TIMEOUT = 10  # seconds one `git show` may run
+
+
+def _default_branch_extras(root):
+    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. For a
+    checkout that holds no extras file of its own, such as a worktree on the record branch. It reads origin/HEAD's
+    branch, else origin/main, from the ref alone: no checkout moves and no fetch runs. None for no extras path, no
+    such ref, a git error or a timeout, and for a file that does not parse.
+    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve), and
+    only when the checkout holds no extras file. No file is written."""
+    where = layout().get("extras")
+    if not where:
+        return None
+    for ref in ("origin/HEAD", "origin/main"):
+        try:
+            done = subprocess.run(["git", "-C", root, "show", "%s:%s" % (ref, where)], capture_output=True,
+                                  stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
+            if done.returncode == 0:
+                return _parse(done.stdout.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
+        except (OSError, ValueError, subprocess.SubprocessError, LayoutError):
+            continue
+    return None
+
+
+def _page_in(root, keys, where):
+    """The waiting page URL held by the extras dict `keys` (read from `where`), else "unknown"."""
+    for entry in _registry(root, keys.get(ARTIFACTS), where):
         if entry["role"] == WAITING_ROLE:
             return entry["url"]
-    found = _read(_extras(root)).get(WAITING_PAGE)
-    if found is None:
+    found = keys.get(WAITING_PAGE)
+    return "unknown" if found is None else _artifact_link(found, where)
+
+
+def waiting_page(root):
+    """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
+    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. A checkout with no extras
+    file reads it from the default branch's (_default_branch_extras); its own file always wins.
+    "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
+    if has_extras(root):
+        return _page_in(root, _read(_extras(root)), _extras(root))
+    held = _default_branch_extras(root)
+    if held is None:
         return "unknown"
-    return _artifact_link(found, _extras(root))
+    try:
+        return _page_in(root, *held)
+    except LayoutError:
+        return "unknown"  # a ref's file that does not hold a page is no page, never an error
 
 
 def set_waiting_page(root, url):
