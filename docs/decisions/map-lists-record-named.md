@@ -29,3 +29,4 @@ No new process: the skill reads the records and `lint/layout.json` in the check 
 Debt: `js-layout-reader` (the skill reads the layout in JS, and skips `legacy-repos`).
 
 Kind: process
+Home: skills/plain-english-map/SKILL.md
