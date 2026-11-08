@@ -89,11 +89,11 @@ quiet git clone -q --single-branch -b topic-revert "$remote" "$work/single"
 quiet git -C "$work/unpersisted" remote set-url origin "$work/unreachable.git"
 head_rev="$(git -C "$work/revert" rev-parse HEAD)"
 fails=0
-expect() { # label want-exit work-dir base-ref want-text [head-sha]: runs check.sh as action.yml does
-  label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)}
+expect() { # label want-exit work-dir base-ref want-text [head-sha] [pr-body]: runs check.sh as action.yml does
+  label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)} body=${7-}
   if [ ! -f "$check" ]; then echo "FAIL $label: check.sh is not built at $check"; fails=$((fails + 1)); return; fi
   # env -u CI: GitHub sets CI, which makes the lint red on UNKNOWN even without --strict. The cases must test --strict itself.
-  out="$(cd "$dir" && env -u CI BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
+  out="$(cd "$dir" && env -u CI PR_BODY="$body" BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
   if [ "$got" -ne "$want" ]; then
     echo "FAIL $label: exit $got, wanted $want"; printf '%s\n' "$out" | sed 's/^/     /'; fails=$((fails + 1))
   elif [ -n "$text" ] && ! printf '%s' "$out" | grep -q -F -- "$text"; then
@@ -112,6 +112,10 @@ expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
 expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
+# The pull request body, as action.yml passes it in env PR_BODY, excuses its path the way a commit trailer does.
+expect body-excuse-green 0 "$work/revert" main "ALLOWED rules.md" "" $'Summary.\n\nDrops-lines: rules.md -- the rules are rolled back on purpose for this test'
+expect body-without-reason-red 1 "$work/revert" main "FAIL: rules.md" "" $'Summary.\n\nDrops-lines: rules.md'
+expect body-other-path-red 1 "$work/revert" main "FAIL: rules.md" "" $'Summary.\n\nDrops-lines: other.md -- a reason for a file that did not change'
 # action.yml gives check.sh the pull request body as env PR_BODY. The step's env is read by the shared step parser
 # (lint/workflow_steps.py). action.yml indents its steps two columns less than a job does, so the steps move to a job's columns first.
 pin_py='
