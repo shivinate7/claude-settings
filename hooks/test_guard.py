@@ -5537,9 +5537,9 @@ sh("waiter: a loop inside a heredoc body is allowed",
    "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
-# A brace is a script block only where the command runs it. `echo {sleep}` prints the word and waits for nothing,
-# and a block that does run still counts its sleep.
-sh("waiter: a brace around sleep in an echo is text, allowed", "echo {sleep}", "allow", cwd=NOGIT)
+# A printing command's `{ ... }` block is read as code, as on main: it can run later or through a pipe,
+# and no narrow rule keeps every running form refused. So `echo {sleep}` is refused.
+sh("waiter: a brace around sleep in an echo is refused, as on main", "echo {sleep}", "deny", "waiter", cwd=NOGIT)
 sh("waiter: a brace around sleep in an echo does not hide a long sleep after it, refused",
    "echo {sleep}; sleep 30", "deny", "waiter", cwd=NOGIT)
 sh("waiter: a call operator on a script block with a long Start-Sleep is refused",
@@ -5559,8 +5559,7 @@ sh("waiter: a PowerShell range piped to % with Start-Sleep is refused",
    "1..10 | % { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 sh("waiter: a PowerShell range piped to ForEach-Object with Start-Sleep is refused",
    "1..10 | ForEach-Object { Start-Sleep 2 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
-# A printing command prints what it is given, but a block that runs still counts its sleep. The control
-# `echo {sleep}`, above, stays allowed: it runs no block.
+# A printing command's `{ ... }` block is read as code, so the sleep inside it counts, run or printed.
 sh("waiter: echo of a block that is then invoked, with a long Start-Sleep, is refused",
    "echo {Start-Sleep 120}.Invoke()", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 # A block that a pipe or a variable hands to a runner is run, whichever command printed it: `iex`,
@@ -5576,9 +5575,12 @@ sh("waiter: Write-Output of a block piped to ForEach-Object that dot-sources it,
    tool="PowerShell", cwd=NOGIT)
 sh("waiter: echo of a block held in a variable, then called, with a long Start-Sleep, is refused",
    "$b = echo {Start-Sleep 120}; & $b", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
-# Control: a block that is stored and never called runs nothing, so the store alone stays allowed.
-sh("waiter: echo of a block held in a variable and never called is text, allowed",
-   "$b = echo {Start-Sleep 120}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("waiter: echo of a block held in a variable and never called is refused, as on main",
+   "$b = echo {Start-Sleep 120}", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: echo of a block piped to iex, with a long Start-Sleep, is refused",
+   "echo {Start-Sleep 30; } | iex", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
+sh("waiter: echo of a brace block with a sleep, piped to bash, is refused",
+   "echo { sleep 30; } | bash", "deny", "waiter", cwd=NOGIT)
 # Two more forms are refused by detached-launch, on main and on this branch, so the waiter never names them.
 # They pin the refusal with no rule named: a waiter name would fail on main, and this branch did not cause it.
 sh("waiter: Write-Host of a call that wraps a long Start-Sleep is refused",
@@ -8872,28 +8874,27 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a glued block that does not set, allowed, %s" % _cmd[:36].replace(
         "\n", " "), _cmd, "allow", tool="PowerShell", cwd=NOGIT)
-# Two safe forms. A null set removes the name, so it points no git at another tree, and Write-Host prints
-# a script block without running it. A value set inside a block that does run stays refused, as does a call
-# operator on a block that sets.
+# A null set removes the name, so it points no git at another tree, and stays allowed. A printed block is read
+# as code, as on main: it can run later or through a pipe, so Write-Host of a block is refused too.
 sh("git env set: PowerShell, a null set inside try, allowed",
    "try{$env:GIT_DIR=$null}catch{}", "allow", tool="PowerShell", cwd=NOGIT)
-sh("git env set: PowerShell, a script block given to Write-Host is printed, not run, allowed",
-   "Write-Host {$env:GIT_DIR=1}", "allow", tool="PowerShell", cwd=NOGIT)
-# A trailing argument after the printed block does not make Write-Host run it.
-sh("git env set: PowerShell, a script block given to Write-Host with a trailing argument is printed, allowed",
-   "Write-Host {$env:GIT_DIR=1} ./x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Host of a script block is refused, as on main",
+   "Write-Host {$env:GIT_DIR=1}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, Write-Host of a block with a trailing argument is refused, as on main",
+   "Write-Host {$env:GIT_DIR=1} ./x", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # The nearest risky forms with the trailing argument: the output still carries the block, and the pipe runs it.
 sh("git env set: PowerShell, Write-Output of a block with a trailing argument, piped to a call operator, denies",
    "Write-Output {$env:GIT_DIR=1} ./x | % { & $_ }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, echo of a block with a trailing argument, piped to iex, denies",
    "echo {$env:GIT_DIR=1} ./x | iex", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: a pwsh -Command echo of a block piped to iex, denies",
+   "pwsh -NoProfile -Command 'echo {$env:GIT_DIR=1} | iex'", "deny", GIT_ENV_RULE, cwd=NOGIT)
 sh("git env set: PowerShell, a value set inside try, denies",
    "try{$env:GIT_DIR='x'}catch{}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, a call operator on a block that sets, denies",
    "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
-# A printing command prints the block it is given and runs none of it. A block that the same call then runs,
-# through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression, still sets the name. The control above,
-# `Write-Host {$env:GIT_DIR=1}`, stays allowed.
+# Each form below runs the block it prints, through `.Invoke()`, a `%` pipe into `& $_`, or Invoke-Expression,
+# so the set inside counts. Printing the block alone is refused too (above).
 sh("git env set: PowerShell, echo of a block that is then invoked, denies",
    "echo {$env:GIT_DIR=1}.Invoke()", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 sh("git env set: PowerShell, Write-Output of a block piped to a call operator, denies",
