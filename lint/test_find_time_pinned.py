@@ -614,6 +614,42 @@ class PythonCalendarTest(FinderCase):
         calendar_judge(self, "tests/test_fixed_dates.py", text,
                        clean=["t_fixed = pendulum.datetime(2024, 1, 1)"])
 
+    def test_python_date_library_no_argument_reads_are_listed(self):
+        text = src(
+            "import arrow",
+            "import pandas as pd",
+            "import pendulum",
+            "from django.utils import timezone",
+            "",
+            "def test_no_argument(stamp):",
+            "    t_pd_utc = pd.Timestamp.utcnow()",
+            "    t_today = pendulum.today()",
+            "    t_arrow = arrow.get()",
+            "    t_local = timezone.localtime()",
+            "    t_local_date = timezone.localdate()",
+        )
+        self.put("tests/test_no_argument.py", text)
+        calendar_judge(self, "tests/test_no_argument.py", text, listed=[
+            "t_pd_utc = pd.Timestamp.utcnow()", "t_today = pendulum.today()", "t_arrow = arrow.get()",
+            "t_local = timezone.localtime()", "t_local_date = timezone.localdate()",
+        ])
+
+    def test_python_date_library_with_an_argument_is_not_listed(self):
+        text = src(
+            "import arrow",
+            "from django.utils import timezone",
+            "",
+            "def test_given(fixed_dt):",
+            "    t_arrow_fixed = arrow.get(0)",
+            "    t_local_fixed = timezone.localtime(fixed_dt)",
+            "    t_date_fixed = timezone.localdate(fixed_dt)",
+        )
+        self.put("tests/test_given_argument.py", text)
+        calendar_judge(self, "tests/test_given_argument.py", text, clean=[
+            "t_arrow_fixed = arrow.get(0)", "t_local_fixed = timezone.localtime(fixed_dt)",
+            "t_date_fixed = timezone.localdate(fixed_dt)",
+        ])
+
     def test_freeze_time_decorator_suppresses_calendar_not_elapsed_assert(self):
         text = src(
             "import datetime",
@@ -648,6 +684,39 @@ class PythonCalendarTest(FinderCase):
         self.put("tests/test_frozen_block.py", text)
         out = calendar_judge(self, "tests/test_frozen_block.py", text, clean=["t_now = datetime.datetime.now()"])
         self.assertEqual(self.rows(out), set(), "a plain read under a fake clock is listed in some category")
+
+    def test_fake_clock_scope_block_ends_before_the_read(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "def test_after_block(stamp):",
+            "    with freeze_time('2024-01-01'):",
+            "        t_inside = datetime.datetime.now()",
+            "    t_after = datetime.datetime.now()",
+        )
+        self.put("tests/test_block_scope.py", text)
+        calendar_judge(self, "tests/test_block_scope.py", text,
+                       listed=["t_after = datetime.datetime.now()"],
+                       clean=["t_inside = datetime.datetime.now()"])
+
+    def test_fake_clock_scope_stops_at_an_undecorated_sibling_def(self):
+        text = src(
+            "import datetime",
+            "from freezegun import freeze_time",
+            "",
+            "@freeze_time('2024-01-01')",
+            "def test_frozen(stamp):",
+            "    t_frozen = datetime.datetime.now()",
+            "",
+            "",
+            "def test_plain(stamp):",
+            "    t_plain = datetime.datetime.now()",
+        )
+        self.put("tests/test_sibling_scope.py", text)
+        calendar_judge(self, "tests/test_sibling_scope.py", text,
+                       listed=["t_plain = datetime.datetime.now()"],
+                       clean=["t_frozen = datetime.datetime.now()"])
 
     def test_freeze_time_in_a_comment_or_a_string_does_not_suppress_calendar(self):
         text = src(
@@ -782,6 +851,38 @@ class JsCategoriesTest(FinderCase):
         text = src(*JS_DATE_READ)
         self.put("tests/real_clock.test.js", text)
         calendar_judge(self, "tests/real_clock.test.js", text, listed=["const f_now = new Date();"])
+
+    def test_jest_fake_clock_still_lists_temporal_now(self):
+        """Jest fakes Date, not Temporal, so a Temporal.Now read under it is still a real-date read."""
+        text = src(
+            "jest.useFakeTimers();",
+            "it('reads the clocks', () => {",
+            "  const t_date = new Date();",
+            "  const t_instant = Temporal.Now.instant();",
+            "  const t_plain = Temporal.Now.plainDateISO();",
+            "});",
+        )
+        self.put("tests/jest_temporal.test.js", text)
+        calendar_judge(self, "tests/jest_temporal.test.js", text,
+                       listed=["const t_instant = Temporal.Now.instant();",
+                               "const t_plain = Temporal.Now.plainDateISO();"],
+                       clean=["const t_date = new Date();"])
+
+    def test_vi_fake_clock_still_lists_temporal_now(self):
+        """Vitest fakes Date, not Temporal, so a Temporal.Now read under it is still a real-date read."""
+        text = src(
+            "vi.useFakeTimers();",
+            "it('reads the clocks', () => {",
+            "  const t_date = new Date();",
+            "  const t_instant = Temporal.Now.instant();",
+            "  const t_plain = Temporal.Now.plainDateISO();",
+            "});",
+        )
+        self.put("tests/vi_temporal.test.js", text)
+        calendar_judge(self, "tests/vi_temporal.test.js", text,
+                       listed=["const t_instant = Temporal.Now.instant();",
+                               "const t_plain = Temporal.Now.plainDateISO();"],
+                       clean=["const t_date = new Date();"])
 
     def test_elapsed_assert_on_expect_or_assert_calls(self):
         text = src(
@@ -1124,6 +1225,30 @@ class JsCalendarTest(FinderCase):
         self.put("tests/library_fixed.test.js", text)
         calendar_judge(self, "tests/library_fixed.test.js", text,
                        clean=["const c_day_fixed = dayjs(0);", "const c_moment_fixed = moment(EPOCH);"])
+
+    def test_utc_library_no_argument_reads_are_listed(self):
+        text = src(
+            "it('reads the utc library clocks', () => {",
+            "  const u_day = dayjs.utc();",
+            "  let u_moment = moment.utc();",
+            "  const u_new = new dayjs();",
+            "});",
+        )
+        self.put("tests/utc_library.test.js", text)
+        calendar_judge(self, "tests/utc_library.test.js", text, listed=[
+            "const u_day = dayjs.utc();", "let u_moment = moment.utc();", "const u_new = new dayjs();",
+        ])
+
+    def test_utc_library_with_an_argument_is_not_listed(self):
+        text = src(
+            "const EPOCH = 0;",
+            "const u_day_fixed = dayjs.utc(0);",
+            "const u_moment_fixed = moment.utc(EPOCH);",
+        )
+        self.put("tests/utc_fixed.test.js", text)
+        calendar_judge(self, "tests/utc_fixed.test.js", text, clean=[
+            "const u_day_fixed = dayjs.utc(0);", "const u_moment_fixed = moment.utc(EPOCH);",
+        ])
 
     def test_new_date_in_a_template_interpolation_is_listed(self):
         text = src(
