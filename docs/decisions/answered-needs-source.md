@@ -16,7 +16,7 @@ Risk kind: likely risk. The incident F188 (claude-settings draft PR #1008, `docs
 
 Cost: a regex over the reply. No file, no process. `AnsweredNeedsSourceTests` in `lint/test_report_guard.py` proves it by watching every file the check opens.
 
-Known limit: a negator anywhere earlier in the clause exempts the word, so "Q2 was not skipped and Q1 was answered" passes. A line that cites a time or number for another reason passes. Code reads tokens, not what they cite.
+Known limit: a negator anywhere earlier in the clause exempts the word, so "Q2 was not skipped and Q1 was answered" passes. A line that cites a time or number for another reason passes. Code reads tokens, not what they cite. The word inside an inline code span passes even when the line claims an answer. The refusal names that route for a mention, so a rewrite can reach it.
 
 Kind: process
 Home: lint/report_guard.py

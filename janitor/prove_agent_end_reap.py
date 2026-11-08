@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 sys.path.insert(0, HERE)
 import sweep  # noqa: E402
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_git  # noqa: E402,F401  fixture commits skip signing (lint/_test_git.py)
 
@@ -33,16 +34,12 @@ VCS = "g" + "it"
 IDENT = ["-c", "user.email=reap-proof@example.invalid", "-c", "user.name=reap-proof"]
 
 
-def git_bash():
-    """Git's own bash.exe by full path on Windows. See
-    decisions/bare-bash-on-windows-can-resolve-to-the-wsl-stub.md."""
-    if os.name != "nt":
-        return shutil.which("bash") or "bash"
-    for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
-        candidate = os.path.join(os.environ.get(var) or "", "Git", "bin", "bash.exe")
-        if os.path.isfile(candidate):
-            return candidate
-    sys.exit("proof setup failed: Git bash.exe not found")
+def bash_path():
+    """Bash by full path, from the one home. The proof ends when there is none."""
+    found = find_git_bash()
+    if not found:
+        sys.exit("proof setup failed: Git Bash not found")
+    return found
 
 
 def vcs(where, *args):
@@ -63,7 +60,7 @@ def start_leaking_server(cwd, port):
     python = sys.executable.replace("\\", "/")
     script = ('"%s" -m http.server %d --bind 127.0.0.1 >/dev/null 2>&1 </dev/null &\n'
               "echo started" % (python, port))
-    _nowindow.run([git_bash(), "-c", script], cwd=cwd, capture_output=True, timeout=20)
+    _nowindow.run([bash_path(), "-c", script], cwd=cwd, capture_output=True, timeout=20)
     deadline = time.time() + 15
     while time.time() < deadline:  # bounded readiness read for a fixture this file started
         for entry in sweep.list_listeners() or []:
