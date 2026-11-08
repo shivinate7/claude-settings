@@ -25,7 +25,7 @@ from guard_core import (
     _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_wrappers, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
-from guard_env import _substitutions
+from guard_env import substitution_commands
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -973,15 +973,9 @@ def git_env_command_hit(raw: str, stripped: str) -> str:
     in_raw = _holds_git_env_name(raw)
     if not in_raw and not _SUBSTITUTION_OPEN.search(raw):
         return ""   # every hit below needs a watched name as text, once quotes and escapes fall away
-    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
-    texts = [text for text, _in_message in found]
-    if too_deep:   # the env-file rule refuses a nesting this deep; judge the text as it stands
-        texts = [stripped]
-    # An UNQUOTED heredoc body runs its substitutions; the body text around them is data. A quoted
-    # delimiter (`<<'EOF'`) runs nothing. A quote mark in the body is text (`don't`, `'$(...)'`).
-    # A body nested too deep is refused by env_heredoc_refusal.
-    texts = [text for quote, body, _ in _split_heredocs(raw)[1] if not quote
-             for text, _in_message in _substitutions(body, heredoc=True)[0][:-1]] + texts   # command stays last
+    # An UNQUOTED heredoc body runs its substitutions; the body text around them is data (see
+    # substitution_commands). A body nested too deep is refused by env_heredoc_refusal.
+    texts = substitution_commands(raw, stripped, outer=True)   # the command stays last
     for text in texts:
         last = text == texts[-1]
         if not (in_raw and last) and not _holds_git_env_name(text):
