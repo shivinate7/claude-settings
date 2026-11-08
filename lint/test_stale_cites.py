@@ -2034,8 +2034,9 @@ class RouteClaimTests(StaleCase):
     def test_route_claim_read_or_test_backing_naming_a_file_absent_at_head_is_a_dead_backing(self):
         """Class (d), a test re-pointed by a ruling. Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code
         name missing there is red". Lane pick, 04:16 CST: a dead cite has one home, STALE010. Their home is decision
-        `record-cites-live-code` (claims about code cite live code names). The node id is that dead cite, so the exit
-        is 1. The read backing names no code name, so it keeps only its STALE005 report."""
+        `record-cites-live-code` (claims about code cite live code names). Owner, 2026-11-01 16:30 CST, "make it a
+        standing thing that stale prose never makes it anymore", in decision `stale-cites-at-merge`. The node id is
+        that dead cite, so the exit is 1. The read backing names no code name, so it keeps only its STALE005 report."""
         rows = [
             ("- The cloud cannot push to main (read hooks/guard.py:12).", False),  # the file exists at head: backed
             ("- The cloud cannot push to main (read hooks/gone.py:12).", True),  # no such file: a dead backing
@@ -3026,8 +3027,10 @@ class CodeClaimTests(StaleCase):
         """Class (d), a test re-pointed by a ruling: a dead cite moves from a STALE009 report to the STALE010 finding.
         Coordinator ruling, 2026-11-08 04:03 CST (item 386): "a cite to a code name missing there is red". Lane pick,
         04:16 CST: a dead cite has one home, STALE010, and STALE009 keeps only "a code claim with no cite".
-        Their home is decision `record-cites-live-code` (claims about code cite live code names)."""
-        cited = [(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
+        Their home is decision `record-cites-live-code` (claims about code cite live code names). Owner, 2026-11-01
+        16:30 CST, "make it a standing thing that stale prose never makes it anymore", in decision
+        `stale-cites-at-merge`."""
+        cited =[(DEAD_PAREN, "no_such_name"), (DEAD_TICK, "no_such_name"), (GONE_FILE, "lane_lint")]
         rng, _ = self.rows_range([("- " + text, False) for text, _ in cited] + [("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         self.assertIsNone(binding_kind(LANE_LINT, "no_such_name"))  # scope: the head file never binds the name
@@ -3090,7 +3093,8 @@ class CodeClaimTests(StaleCase):
         """Class (d), a test re-pointed by a ruling. Lane pick, 04:16 CST: STALE009 keeps only "a code claim with no
         cite", so both lines here stay report lines. A dead cite is STALE010, never a report line (coordinator ruling,
         2026-11-08 04:03 CST, item 386). Their home is decision `record-cites-live-code` (claims about code cite live
-        code names)."""
+        code names). Owner, 2026-11-01 16:30 CST, "make it a standing thing that stale prose never makes it
+        anymore", in decision `stale-cites-at-merge`."""
         rng, flagged = self.rows_range([("- " + INCIDENT, True), ("- " + UNCITED, True)])
         self.assertIn(DECISION, touched(rng))
         rc, out = self.run_check(rng)
@@ -3179,7 +3183,8 @@ class NameCiteTests(StaleCase):
     """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form, or a node id, is
     flagged when its file is absent at head or the name is not bound there at head (names_in). A cite of a JavaScript
     or shell file keeps the unknown form, and a cite of a .py file that does not parse at head is one unknown line with
-    no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring)."""
+    no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring). STALE010 judges only the
+    lines the PR adds, so the check stays never red on work the PR did not do."""
 
     def test_the_incident_line_is_flagged_while_its_name_is_unbound_and_silent_once_it_is_bound(self):
         rng, _ = self.route_range([(INCIDENT_LINE, True)], extra={STALE_FIXTURE: LACKS_CODE_CLAIM})
