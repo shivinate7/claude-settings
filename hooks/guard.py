@@ -33,7 +33,9 @@ set_override_veto and session_home_keep):
                        `agent_id` passes. An override lifts it. A failed import allows.
                        (precompact-handoff, item 9)
 
-Shell tools (Bash, PowerShell), in judge_shell order:
+Shell tools (Bash, PowerShell, and Monitor's `command`), in judge_shell order. A Monitor call gets every
+rule below except the stream family: live-stream, waiter, narrated-tail and background-end never refuse
+it (agents-wait-with-monitor):
   builder-diff         deny. A builder commit or push whose diff holds a test path, judged
                        against the commits the builder made and its working tree. The reason gives
                        the undo route and names no path. No override lifts it. SubagentStop
@@ -160,7 +162,7 @@ Other tools, in `judge` order:
                        `agent_id` and a valid session id. Unreadable git passes. The shell form
                        reads the targets frozen-path reads, after a leading `cd`. An override
                        lifts it.
-                       A Bash or PowerShell `cd`, `pushd` or `Set-Location` into another
+                       A Bash, PowerShell or Monitor `cd`, `pushd` or `Set-Location` into another
                        checkout is refused too, bare or chained; the cd target in the caller's
                        recorded home, a session's recorded home, or the caller's own
                        `agent-<id>-<suffix>` red-run folder passes that act. A write strictly
@@ -371,6 +373,7 @@ while True:
         import guard_core
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, SHELL_TOOLS,
+            MONITOR_TOOL, SHELL_COMMAND_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
@@ -3303,7 +3306,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
-RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
+RUNNING_AGENT_TOOLS = SHELL_COMMAND_TOOLS + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
                          "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
@@ -3733,25 +3736,28 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 3. A live stream that never ends, or a waiter loop (Rule 9). A waiter loop whose own
     # condition polls a pattern gets the more specific reason: the pattern can match the loop's
     # own command line and never go false.
+    # A Monitor call is a stream by design (decision agents-wait-with-monitor), so the stream family
+    # (live-stream, waiter, narrated tail, background-end) never refuses it. Every other rule still judges it.
+    stream_family = tool != MONITOR_TOOL
     poller = ""
     for segment in split_segments(stripped):
         matched = live_stream_hit(segment)
-        if matched:
+        if matched and stream_family:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
         poller = loop_condition_polls_a_pattern(segment) or poller
     matched = waiter_verdict(split_segments(stripped), background)
-    if matched:
+    if matched and stream_family:
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
     matched = narrated_tail_hit(stripped)
-    if matched:
+    if matched and stream_family:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
     matched = verdict_pipe_hit(stripped)
     if matched:
         refuse(tool, "deny", "verdict-pipe", VERDICT_PIPE_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
-    if matched:
+    if matched and stream_family:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
 
     # 3c. A command that sets the Playwright browser cache location (incident 2026-10-10).
@@ -4588,7 +4594,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     home_status, home, home_primary = agent_worktree_home(payload, home_cwd)
     if home_status != "home":
         return ""
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         # The one allowed call is a lone `cd` back into the home (a recovery step).
         if (path_is_inside(home_cwd, home) is False
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
@@ -4856,7 +4862,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
         writes = bool(targets)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         raw = str(tool_input.get("command", "") or "")
         command = strip_heredoc_bodies(raw)
@@ -5068,7 +5074,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         return ""
     if tool in WRITE_TOOLS:
         targets = write_targets(tool_input)
-    elif tool in SHELL_TOOLS:
+    elif tool in SHELL_COMMAND_TOOLS:
         targets = None
         command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command)))
@@ -5123,7 +5129,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_COMMAND_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
@@ -5328,14 +5334,14 @@ def judge(payload) -> None:
             refuse(tool, "deny", "page-stale", behind[0], behind[1])
         return
 
-    if tool in SHELL_TOOLS:
+    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:
         command = tool_input.get("command", "") or ""
         if isinstance(command, str) and command.strip():
             transcript = payload.get("transcript_path") if isinstance(payload, dict) else ""
             judge_shell(tool, command, cwd, session_id_of(payload), agent_role(payload),
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
-                        tool_input.get("run_in_background") is True,
+                        tool_input.get("run_in_background") is True or tool == MONITOR_TOOL,
                         tool_input.get("description") or "")
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")

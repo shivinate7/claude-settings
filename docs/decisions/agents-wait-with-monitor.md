@@ -16,7 +16,11 @@ It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a b
 Why: the guard once refused Monitor and all short pauses, so an agent that followed the Bash tool's text lost a turn. Almost none of the refusals were real loops. That count is unmeasured: it has no source or re-run command.
 Whether Monitor still errors is unmeasured too (notes entry `waiter-monitor-failures-unmeasured`).
 
+A Monitor call's `command` gets every shell rule except the stream family: live-stream, waiter, narrated tail and background-end never refuse it. The waiter bullets above are the Bash and PowerShell rule. So a raw `xcrun simctl boot`, `git reset --hard` or a `cd` into another checkout is refused inside a Monitor as in Bash (`sim-test-is-the-one-boot-path`). One list names the tools whose command is a shell command (`SHELL_COMMAND_TOOLS`, `hooks/guard_core.py`), and each rule that treats Monitor as Bash tests it. `settings.json` lists Monitor in the first guard matcher.
+Basis: owner, coordinator pick (b), 2026-11-08 11:23 CST, which applies item 386: an on-topic finding rides in its lane.
+Cost: one guard run per Monitor call, no new process. A refusal adds one guard.log line.
+
 Monitor waits for a condition, such as a port or a file. A long command still runs in the background, and the agent waits for its completion notice.
 
 Kind: process
-Home: hooks/guard_stream.py
+Home: hooks/guard_stream.py (waiter rule), hooks/guard.py `judge_shell` (the Monitor exemption)

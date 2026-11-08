@@ -418,6 +418,17 @@ def chained_ask(name, command, **kw):
     sh(name, command, "deny", CHAIN_ASK, carries=carries, **kw)
 
 
+# The Monitor tool runs a shell command as a stream. Its `command` is judged by the same shell rules as a
+# Bash call, except the stream family (live-stream, waiter, narrated-tail live-stream, background-end), which
+# never refuses a Monitor call (decision agents-wait-with-monitor). One home for its payload: the fields the
+# tool sends, so a case never builds the payload by hand.
+def monitor(name, command, expected, rule=None, **kw):
+    """One case: `command` in a Monitor call, with the input fields the tool sends."""
+    kw.setdefault("cwd", NOGIT)
+    add(name, expected, rule=rule, tool="Monitor", command=command,
+        description="wait on the stream", timeout_ms=300000, **kw)
+
+
 # --------------------------------------------------------------------------- the fixtures
 #
 # Every path a case names lives under one temporary root, so no case can reach the real
@@ -467,6 +478,14 @@ AGENTWT = os.path.join(GITMAIN, ".claude", "worktrees", "agent-x")
 FARWT = os.path.join(ROOT, "worktrees", "stray")
 SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
 DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
+# The records the Monitor cases of worktree-home and session-home read (see the Monitor block below). A
+# call reads a record, and the first call of an agent or a session is what writes it, so _build_gitmain
+# seeds both: MON_HOME is the recorded home of MON_AGENT, a folder GITMAIN is not inside, and MON_LOST is
+# the worktree MON_SESSION recorded, which is gone.
+MON_AGENT = "monhome1"
+MON_HOME = os.path.join(GITMAIN, ".claude", "worktrees", "agent-" + MON_AGENT)
+MON_SESSION = "monlost-session-1"
+MON_LOST = os.path.join(GITMAIN, ".claude", "worktrees", "lost-monitor")
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
@@ -1520,6 +1539,8 @@ def _build_gitmain():
     # path's PREFIX, not just test for the substring.
     run_vcs(GITMAIN, "worktree", "add", "-q", AGENTWT, "-b", "agent-x-branch")
     run_vcs(GITMAIN, "worktree", "add", "-q", FARWT, "-b", "stray-branch")
+    write(os.path.join(GITMAIN, ".git", "agent-homes", MON_AGENT), MON_HOME + "\n")
+    write(os.path.join(GITMAIN, ".git", "session-homes", MON_SESSION), MON_LOST + "\n")
     for _tree in (GITMAIN, GITWT, AGENTWT, FARWT):
         write(os.path.join(_tree, "docs", "DEBTS.md"), "uncommitted\n")
         write(os.path.join(_tree, "f.txt"), "uncommitted\n")
@@ -2376,6 +2397,9 @@ sh("stash: branch consumes the entry it builds from", VCS + " stash branch lane"
 sh("reset: throws the tree away", VCS + " reset --hard origin/main", "deny", "shared-tree",
    cwd=NOGIT)
 sh("reset: --hard with no argument", VCS + " reset --hard", "deny", "shared-tree", cwd=NOGIT)
+# The Monitor tool's command gets the Bash verdict (see monitor()).
+monitor("Monitor: reset throws the tree away, as in Bash", VCS + " reset --hard origin/main",
+        "deny", "shared-tree")
 # A bare reset, `--soft` and `--mixed` leave the working tree alone, and `--hard` rewrites it.
 # `--merge` rewrites it too: it reverts a staged edit and deletes a staged new file. `--keep` and
 # `--merge` both move the branch at another commit, so they take `--hard`'s verdict.
@@ -6315,6 +6339,56 @@ add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev,
 add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
+
+# --- the Monitor tool: the stream family never refuses it (decision agents-wait-with-monitor). Each
+# "Bash twin" pins that the same text is refused in a Bash call, so the Monitor allow beside it is a real
+# exemption. The Bash twins of the narrated merge and of the server are the cases "narrate: merge --confirm
+# piped to tail hides its heartbeat" and "background-end: a python http.server under run_in_background with
+# no note is refused", above.
+MON_STREAM = "tail -f /tmp/x.log | grep --line-buffered ERROR"
+MON_LOOP = "while true; do gh pr checks 1; sleep 30; done"
+monitor("Monitor: a followed log piped to grep is allowed", MON_STREAM, "allow", silent=True)
+sh("Bash twin of the Monitor case: the followed log is refused", MON_STREAM, "deny", "live-stream",
+   cwd=NOGIT)
+monitor("Monitor: a polling loop with a pause is allowed", MON_LOOP, "allow", silent=True)
+sh("Bash twin of the Monitor case: the polling loop is refused", MON_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+monitor("Monitor: a narrated merge piped to tail is allowed", "merge 12 --confirm 2>&1 | tail -18",
+        "allow", silent=True)
+monitor("Monitor: a server with no end note is allowed", "python3 -m http.server 3202", "allow",
+        silent=True)
+# A stream exempts only its own rules. A hard reset after it is still refused, so the exemption cannot
+# return early from the whole judge: rule shared-tree (judge_shell, before rule 3) still denies.
+monitor("Monitor: a followed log, then a hard reset, is refused as the reset",
+        MON_STREAM + "; " + VCS + " reset --hard origin/main", "deny", "shared-tree")
+
+# --- the Monitor tool through the rules that key on the shell tool list. A rule that tests `tool in SHELL_TOOLS`
+# skips a Monitor call, so each case below pins one such rule. Each Monitor case has a Bash twin: the same
+# text in a Bash call, which takes the verdict the Monitor case wants.
+# A shell that sets a git location variable is refused with no override lift (never_lifted, decision owner-override).
+NEVER_LIFTED = ("No override lifts this refusal.",)
+MON_GIT_ENV = "GIT_DIR=/x ls"
+monitor("Monitor: a command that sets GIT_DIR is refused, and no override lifts it", MON_GIT_ENV, "deny",
+        "git-env-set", carries=NEVER_LIFTED)
+sh("Bash twin of the Monitor case: a command that sets GIT_DIR is refused, and no override lifts it",
+   MON_GIT_ENV, "deny", "git-env-set", cwd=NOGIT, carries=NEVER_LIFTED)
+# A `cd` into another checkout of the clone (rule 0, other-checkout). AGENTWT is a linked worktree of GITMAIN,
+# so `../../..` climbs into GITMAIN, and the write after the cd lands in that primary checkout.
+MON_CD_OUT = "cd ../../.. ; echo x > zz-probe.txt"
+monitor("Monitor: a cd from a worktree into the primary checkout, then a write, is refused as other-checkout",
+        MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
+sh("Bash twin of the Monitor case: a cd from a worktree into the primary checkout, then a write, is refused",
+   MON_CD_OUT, "deny", "other-checkout", cwd=AGENTWT)
+# worktree_home_hit and session_home_hit each gate a shell call on SHELL_COMMAND_TOOLS. Each case reads the
+# record _build_gitmain seeded, so one call is the whole case.
+monitor("Monitor: an agent's command from outside its recorded home is refused as worktree-home",
+        "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
+sh("Bash twin of the Monitor case: an agent's command from outside its recorded home is refused as worktree-home",
+   "echo hi", "deny", "worktree-home", cwd=GITMAIN, agent_id=MON_AGENT)
+monitor("Monitor: a lost session's write into the primary checkout is refused as session-home",
+        "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
+sh("Bash twin of the Monitor case: a lost session's write into the primary checkout is refused as session-home",
+   "echo x > f.txt", "deny", "session-home", cwd=GITMAIN, session=MON_SESSION)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list
@@ -27345,6 +27419,18 @@ for _tool, _given in LB_WRITES:
 lb_add("an agent's Bash, memory 97.2%: full, refused, names the reading",
        lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))
+# The Monitor tool's command is a shell command, so an agent's Monitor write at full is braked as its Bash twin is.
+# Both take the same reading and the same command, so only the tool differs.
+LB_RUN_WRITE = "echo x > zz-probe.txt"
+lb_add("Monitor: an agent's Monitor write, 3.1 GB free of 926 GB: full, refused, names the reading, says stop",
+       lb_decision_check("Monitor", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE),
+                         tool_input={"command": LB_RUN_WRITE, "description": "wait on the stream",
+                                     "timeout_ms": 300000}, agent=LB_AGENT))
+lb_add("Bash twin of the Monitor case: an agent's Bash write, 3.1 GB free of 926 GB: full, refused",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE),
+                         tool_input={"command": LB_RUN_WRITE}, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 91.7% and 9.4 GB free of 926 GB: busy, allowed, one read",
        lb_decision_check("Bash", lb_reading(memory_pct=91.7, disk_free_gb=9.4, disk_total_gb=926.0), "allow",
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))
@@ -29323,6 +29409,17 @@ def register_simulator_bypass_cases():
     )
     for name, command in allowed:
         sh("control: " + name, command, "allow", cwd=NOGIT)
+    # The same texts through the Monitor tool, with the verdicts above. The sim-test hold is the route guard.
+    for name, command in denied:
+        monitor("Monitor: " + name, command, "deny", "simulator-boot-bypass", carries="sim-test")
+    for name, command in allowed:
+        monitor("Monitor: " + name, command, "allow", silent=True)
+    monitor("Monitor: sim-test hold keeps its device, allowed silently", "sim-test --hold --for 900",
+            "allow", silent=True)
+    # A stream does not hide a raw boot after it: the stream rules are exempt, the boot rule still refuses.
+    monitor("Monitor: a followed log, then a raw boot, is refused as the boot",
+            MON_STREAM + "; xcrun simctl boot 1A2B3C4D-0000-4000-8000-00000000000C",
+            "deny", "simulator-boot-bypass", carries="sim-test")
 
 
 def sim_bypass_override_check(timed):
