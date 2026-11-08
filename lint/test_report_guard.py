@@ -999,13 +999,13 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no reviewer spawn", out["reason"])
 
-    def test_dm_red_spawn_before_an_owner_message_does_not_back_a_name_blocks(self):
-        # Catches: a spawn from an earlier task must not back a name in this turn's report. An owner message
-        # (not a notice) ends the window, so the opus spawn before it is out of the count.
+    def test_dm_red_spawn_before_an_owner_message_backs_only_its_own_model_blocks(self):
+        # Catches: under the session-wide rule (coordinator, 22:10 CST), the opus spawn before the owner message
+        # backs an opus name, but a haiku name that no reviewer spawn in the session ran is still refused.
         out = self.verdict(
-            "> **Done** BUILT the guard, PR #5 (reviewer opus)\n> **Next** Unstarted: none",
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku)\n> **Next** Unstarted: none",
             [self.REVIEWER_OPUS, self.REVIEWER_R2], between=[human("also check the docs")])
-        self.assertIsNotNone(out, "the report passed: an opus spawn from before the owner message backed the name")
+        self.assertIsNotNone(out, "the report passed: a haiku name that no reviewer spawn in the session ran was not blocked")
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no reviewer spawn", out["reason"])
 
@@ -1227,6 +1227,17 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: an opus name that no reviewer spawn in the session ran was not blocked")
         self.assertEqual(out["decision"], "block")
         self.assertIn("matches no reviewer spawn", out["reason"])
+
+    def test_dm_red_built_item_marked_no_agent_still_blocks_a_running_builder_in_next(self):
+        # Catches: "(no agent)" skips only non-BUILT items. A BUILT item that carries the mark still gates Next, so
+        # a builder that ran cannot be excused by a Next line naming its pair while the BUILT item names none.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #5 (no agent).\n>\n"
+            "> **Next:**\n> - Builder running (builder sonnet).\n> - Unstarted: none.",
+            [self.BUILDER])
+        self.assertIsNotNone(out, "the report passed: a BUILT item marked (no agent) let Next excuse a running builder")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
