@@ -8377,6 +8377,24 @@ sh("env: interpreter code follow-ups: allow, python3 -c, a listing of names that
    "python3 -c \"import os; print([f for f in os.listdir('.') if f.startswith('" + ENV + "')])\"",
    "allow", cwd=NOGIT)
 
+# Decision env-file-stays-unread, "Interpreter code", follow-ups, fifth set: a node -e loop over readdirSync that
+# hands the file's name to a shell (a concat or a template literal) or to spawnSync is a deny, since cat reads the
+# file. The allow lists the names and skips the file's name in an equal test whose body holds a line comment with
+# a brace in it, so the brace in the comment must not count. Names share "a readdirSync loop, the file's name", so
+# MUTATE_ONLY can pick this set out.
+sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the file's name in an execSync concat",
+   "node -e \"const {execSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
+   "if (f.startsWith('" + ENV + "')) execSync('cat ' + f)\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the file's name in an execSync template literal",
+   "node -e \"const {execSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
+   "if (f.startsWith('" + ENV + "')) execSync(`cat ${f}`)\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: deny, node -e, a readdirSync loop, the file's name in spawnSync argv",
+   "node -e \"const {spawnSync}=require('child_process'); for (const f of require('fs').readdirSync('.')) "
+   "if (f.startsWith('" + ENV + "')) spawnSync('cat', [f])\"", "deny", "env-file", cwd=NOGIT)
+sh("env: interpreter code follow-ups: allow, node -e, a readdirSync loop, the file's name in an equal test with a line comment",
+   "node -e \"for (const f of require('fs').readdirSync('.')) { if (f === '" + ENV + "') { // done }\n"
+   "} console.log(f) }\"", "allow", cwd=NOGIT)
+
 sh("env: the two measured false positives, the accessor search",
    'grep -n "dotenv|VERIFY_DATABASE_URL|process\\' + ENV + '" harness/browser/verify.mjs',
    "allow", cwd=NOGIT)
