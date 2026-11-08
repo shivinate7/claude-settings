@@ -2278,6 +2278,31 @@ RUN_COMMANDS = (
     "~/.claude/bin/verdict python3 hooks/guard.py",
     "hooks/guard.py",
 )
+# Each runs the file through a wrapper, a `bash -c` string, a pytest `-c` option or a backslash continuation, so each
+# clears the claim.
+WRAPPED_RUN_COMMANDS = (
+    "timeout 60 python3 hooks/guard.py",
+    "env X=1 python3 hooks/guard.py",
+    "time python3 hooks/guard.py",
+    "uv run python3 hooks/guard.py",
+    "python3.12 hooks/guard.py",
+    'bash -c "python3 hooks/guard.py"',
+    '~/.claude/bin/verdict bash -c "python3 hooks/guard.py"',
+    "python3 -m pytest -c pytest.ini hooks/guard.py",
+    "python3 hooks/guard.py \\\n--flag x",
+)
+BARE_RUN_CONTROL = ("python3 hooks/guard.py",)
+# Each is a check, not a run: it runs nothing from the file, so the claim stays refused.
+CHECK_ONLY_COMMANDS = (
+    "bash -n hooks/guard.py",
+    "python3 -B -m py_compile hooks/guard.py",
+    "python3 -B -m json.tool hooks/guard.py",
+)
+# A `-c` string runs no file, so the claim stays refused.
+NO_RUN_CONTROLS = (
+    'bash -c "cat hooks/guard.py"',
+    "python3 -c \"open('hooks/guard.py')\"",
+)
 
 
 def case_read_of_the_claimed_file_in_this_turn_does_not_clear_the_claim():
@@ -2303,26 +2328,27 @@ def case_forecast_on_the_claimed_file_with_no_bash_call_is_refused():
 
 
 def case_read_of_the_claimed_file_does_not_back_a_forecast():
-    # Each read is the turn's only Bash call. A read names the file and runs nothing, so the claim stays refused.
-    for index, command in enumerate(READ_COMMANDS):
+    # Each read, check-only command and `-c` control is the turn's only Bash call. None runs the file, so the claim
+    # stays refused.
+    for index, command in enumerate(READ_COMMANDS + CHECK_ONLY_COMMANDS + NO_RUN_CONTROLS):
         transcript = write_transcript("claim-read-%d" % index, commands=[command])
-        check("read scope (%s): the turn's only Bash call is this read" % command,
+        check("no-run scope (%r): the turn's only Bash call is this command" % command,
               turn_commands(transcript) == [command], turn_commands(transcript))
         for tool in SEND_TOOLS:
             r = run_hook(send_input(tool, GUARD_CLAIM, transcript=transcript), answer=ALLOW)
-            check("read of the claimed file (%s), via %s: the send is refused" % (command, tool),
+            check("no-run of the claimed file (%r), via %s: the send is refused" % (command, tool),
                   (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
 
 
 def case_run_of_the_claimed_file_backs_a_forecast():
     # Each run is the turn's only Bash call. Every form executes hooks/guard.py, so the claim is not refused.
-    for index, command in enumerate(RUN_COMMANDS):
+    for index, command in enumerate(RUN_COMMANDS + WRAPPED_RUN_COMMANDS + BARE_RUN_CONTROL):
         transcript = write_transcript("claim-run-%d" % index, commands=[command])
-        check("run scope (%s): the turn's only Bash call names the claimed file" % command,
+        check("run scope (%r): the turn's only Bash call names the claimed file" % command,
               turn_commands(transcript) == [command] and GUARD_FILE in command, turn_commands(transcript))
         for tool in SEND_TOOLS:
             r = run_hook(send_input(tool, GUARD_CLAIM, transcript=transcript), answer=ALLOW)
-            check("run of the claimed file (%s), via %s: the send is not refused" % (command, tool),
+            check("run of the claimed file (%r), via %s: the send is not refused" % (command, tool),
                   r.code == 0 and r.deny() is None, detail(r))
 
 
