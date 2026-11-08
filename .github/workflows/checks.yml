@@ -249,6 +249,9 @@ jobs:
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
 
+      - name: Stop-hook owner-safe reason suite
+        run: python3 lint/test_report_guard_remedy.py
+
       - name: Stop-hook review-record fixture suite
         run: python3 lint/test_report_guard_review.py
 
@@ -279,6 +282,9 @@ jobs:
 
       - name: Wait-pid helper fixture suite
         run: python3 lint/test_wait_pid.py
+
+      - name: Wait-until helper fixture suite
+        run: python3 lint/test_wait_until.py
 
       - name: sim-lease fixture suite
         run: python3 lint/test_sim_lease.py
@@ -979,6 +985,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_landing.py
 
+      - name: Stop-hook owner-safe reason suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_remedy.py
+
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_ruling_home.py
@@ -994,6 +1004,10 @@ jobs:
       - name: Wait-pid helper fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_wait_pid.py
+
+      - name: Wait-until helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_until.py
 
       - name: Unknown-read contract (guard + session_start)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -1219,6 +1233,15 @@ jobs:
       - name: Guard mutation test
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/mutate_guard.py
+
+      # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not checks-guard, which sits at 84%
+      # of its cap (decision ci-job-caps); this job is projected at 64% of 25 min, and this step adds 101 s locally (16 tests, about 1.7 min,
+      # so about 71%, past the 70% warn line of the merge tool).
+      # Same `guard` scope flag as the guard mutation test above. Own 5 min cap (3x the local time), so a hang reads red here.
+      - name: Guard progress beat suite
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
+        run: python3 hooks/test_guard_beat.py
 
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
@@ -1646,6 +1669,10 @@ jobs:
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_remedy.py
 
       - name: Ruling home fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
