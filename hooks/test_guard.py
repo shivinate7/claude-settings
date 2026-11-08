@@ -5857,12 +5857,15 @@ for _label, _trigger, _rule, _lacks in (
 ):
     add("wait-pid: the remedy of %s names the helper" % _label, "deny", _rule, cwd=NOGIT,
         carries=(WAIT_PID,), lacks=_lacks, command=_trigger)
-# A bare `wait-pid` is not on PATH in an agent worktree, so each remedy names the helper by its bin path.
-for _label, _trigger, _rule in (
+# The three triggers, each reaching one waiter-family remedy by its own rule. The bin-path cases of wait-pid
+# and of wait-until both loop over them.
+REMEDY_TRIGGERS = (
         ("a followed stream", "tail -f app.log", "live-stream"),
         ("a pause", "sleep 30", "waiter"),
         ("a loop whose condition polls a pattern", "while ! pgrep -f server; do sleep 1; done", "waiter"),
-):
+)
+# A bare `wait-pid` is not on PATH in an agent worktree, so each remedy names the helper by its bin path.
+for _label, _trigger, _rule in REMEDY_TRIGGERS:
     sh("wait-pid: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
        cwd=NOGIT, carries=("bin/wait-pid",))
 # The path forms a remedy may name are allowed, in the foreground and under run_in_background.
@@ -6059,9 +6062,11 @@ add("wait-until: a clock loop on a read with +%FT%TZ is allowed under run_in_bac
 add("wait-until: a clock loop on a read with +%FT%T and no -u is allowed under run_in_background", "allow", cwd=NOGIT,
     command=r'until [ "$(date +%FT%T)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; cmd', run_in_background=True)
 
-# The remedy of a pause names the time form in backticks; the remedy check below reads those forms.
-sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
-   carries=("`wait-until",))
+# Each waiter-family remedy names the helper by its bin path in backticks, since a bare `wait-until` is not on
+# PATH in a session. The remedy check below reads those forms.
+for _label, _trigger, _rule in REMEDY_TRIGGERS:
+    sh("wait-until: the remedy of %s names the helper by its bin path" % _label, _trigger, "deny", _rule,
+       cwd=NOGIT, carries=("`bin/wait-until",))
 
 # The helper is never refused, in the foreground or under run_in_background. Nothing judges it yet, so these
 # pin that a waiter rule never refuses the one allowed form. A command after the helper is allowed too.
