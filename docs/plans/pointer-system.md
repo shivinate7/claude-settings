@@ -31,8 +31,8 @@ to L4. The slugs replace the numbers.
 
 ### stale-names-bound (built on main)
 
-- Fires when the pull request removes a module-level name that a line cites as "`file.py` `name`" or <!-- ste-disable-line STALE010 -->
-  "(file.py name)". <!-- ste-disable-line STALE010 -->
+- Fires when the pull request removes a module-level name that a line cites as "`file.py` `name`" or
+  "(file.py name)".
 - Bound names: def, class, import, and assignment to a plain name (py-facts `defined_names`). Also
   tuple, list, starred, for, with-as and walrus targets (`target_bindings`). A def directly in a
   module-level class counts. A def nested in a function does not.
