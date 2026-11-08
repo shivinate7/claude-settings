@@ -27666,7 +27666,7 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 
 # ---- I: the reviewer's guard marker. A reviewer on Sonnet may run a guard or check diff when its brief carries the line
 # the review record writes, `Guard or check: yes` (rule agent-role-model). The marker must start a line and match case.
-# It lifts Sonnet on every review pass. It lifts no other role and no Opus spawn, and a `no` value, a mid-line marker,
+# It lifts Sonnet on any round. It lifts no other role and no Opus spawn, and a `no` value, a mid-line marker,
 # a lowercase form or a line inside a fenced block lifts nothing. Its one home is REVIEW_GUARD_MARKER in shared_names,
 # read here through the file's own loader.
 def review_record_guard_line():
@@ -27734,7 +27734,7 @@ role_model_allow("role-model: reviewer on sonnet whose guard marker follows a cl
                  "sonnet", "Check the guard diff.\n" + MD_FENCE + "\nsome code\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER.lower())
-# The marker is `yes` with the end of the line, a space or a full stop after it. A `|`, a `-` or a letter after yes (the
+# The marker is `yes` with the end of the line, a space, a tab, a CR or a full stop after it. A `|`, a `-` or a letter after yes (the
 # template line `Guard or check: yes|no`, `yesterday`, `yes-ish`) is not that value, so those lift nothing.
 role_model_refuse("role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes|no")
@@ -27750,6 +27750,11 @@ role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + " (`hooks/`)")
 role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a full stop is allowed",
                  "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + ".")
+role_model_allow("role-model: reviewer on sonnet with Guard or check: yes then a tab and text is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\n" + REVIEW_GUARD_MARKER + "\tThe diff edits the guard.")
+# A CRLF brief ends every line `\r\n`, so its marker line ends `yes\r`. The CR after yes is a line end, not text after it.
+role_model_allow("role-model: reviewer on sonnet with a CRLF brief whose Guard or check: yes line ends CR is allowed",
+                 "reviewer", "sonnet", "Check the guard diff.\r\n" + REVIEW_GUARD_MARKER + "\r\nThe lane is c204.\r\n")
 # The refusal names the marker beside the Round N of 3 remedy, as a reviewer's second way past its row.
 role_model_refuse("role-model: reviewer on sonnet with no marker is denied, and names the guard marker beside the "
                   "Round N of 3 remedy", "reviewer", "sonnet", "Check the guard diff.",
