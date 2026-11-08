@@ -2151,8 +2151,8 @@ def refuse_dropped_lane(wt, base_ref, sha, unknown_ok="", tips_out=None):
                       "Instead, rebuild the integration branch from main without the lane, then run again. " + DROP_CITE)
 
 def owed_round(num, bodies, sha):
-    """-> (kind, clause) when pull request `num` owes its third round for lane tip `sha`, else None. `clause` finishes the sentence "#N (head ...)". `kind` picks the remedy: "held" (net value negative: the
-    owner decides, no more rounds), "fix" (the fix check failed: the fix needs a new lane), "net" (the third round is done and its net-value test is owed), "round" (the third round is owed, or the record is bad). `bodies`: its record bodies,
+    """-> (kind, clause, named) when pull request `num` owes its third round for lane tip `sha`, else None. `clause` finishes the sentence "#N (head ...)". `named`: the pull request a record posted elsewhere names (kind "wrongpr"), else None. `kind` picks the remedy: "held" (net value negative: the
+    owner decides, no more rounds), "fix" (the fix check failed: the fix needs a new lane), "net" (the third round is done and its net-value test is owed), "wrongpr" (the newest record names another pull request, so it is on the wrong one and owes no round), "round" (the third round is owed, or the record does not parse). `bodies`: its record bodies,
     oldest first. The newest one whose Head line is `sha` decides (decision pr-review-record, Q1: no record, or Guard or check no, passes). A record that names `sha`
     and fails to parse, or whose PR line is not `num`, is bad and refuses: its Guard or check value is unknown, never read as no."""
     mine = [b for b in bodies if re.search(rf"^Head: {sha}$", b.split("\n---\n")[0], re.M)]
@@ -2167,16 +2167,16 @@ def owed_round(num, bodies, sha):
         return None
     if not rec:  # its Guard or check value is unknown, so the clause does not say the change touches a guard or check
         if parsed:
-            return "round", f"has a record for another PR (the newest record says PR #{parsed['n']}, and it was posted on #{num})"
-        return "round", "has a newest record that does not parse"
+            return "wrongpr", f"has a record for another PR (the newest record says PR #{parsed['n']}, and it was posted on #{num})", parsed["n"]
+        return "round", "has a newest record that does not parse", None
     if state == "held":
-        return "held", f"changes a guard or check and is held for the owner ({why})"
+        return "held", f"changes a guard or check and is held for the owner ({why})", None
     fix = rec["fix"] if rec else None
     if fix and fix[3] != "PASS":  # review_state reads a failed fix check open at any round, and the third round again would not cover the fix (decision hold-unsafe-after-round-3)
-        return "fix", f"changes a guard or check and its fix check failed ({why})"
+        return "fix", f"changes a guard or check and its fix check failed ({why})", None
     if rec and state == "open" and max((i for i, *_ in rec["rounds"]), default=0) >= REVIEW_LAST_ROUND:
-        return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})"
-    return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})"
+        return "net", f"changes a guard or check and has round {REVIEW_LAST_ROUND} done, and the net-value test is owed ({why})", None
+    return "round", f"changes a guard or check and round {REVIEW_LAST_ROUND} is owed ({why})", None
 
 def head_in_history(root, head, tip):
     """True when commit `head` is `tip` or an ancestor of it, False when it is a commit of the clone that is not, and False when the clone does not hold `head`
@@ -2237,6 +2237,7 @@ ROUND_REMEDY = {"held": "Run no more rounds on a lane held for the owner: bring 
                 "fix": "A failed fix check means the fix needs a new lane at round 1: start it, post its record, then run again.",
                 "newhead": "The new head needs a fix check or a new review: post it, then run again.",
                 "net": "Run the net-value test on each such lane, post its record with the Net value, then run again.",
+                "wrongpr": "A record posted on the wrong pull request is not read: post it on the pull request it names ({named}), then run again.",
                 "round": "Get round 3 done on each such lane, post its record, then run again."}  # 3 is REVIEW_LAST_ROUND, defined further down
 
 def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread=False):
@@ -2275,8 +2276,14 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
                        f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
     heads = list(dict.fromkeys([*tips, info["head"]]))
     lanes = [(info["head"], n)] + [(t, num) for t in tips for num in sorted(records)]
-    found = [(kind, f"#{num} ({'head' if sha == info['head'] and num == n else 'tip'} {sha[:9]}) {why}.") for sha, num in dict.fromkeys(lanes)
-             for kind, why in [owed_round(num, records.get(num, []), sha) or (None, None)] if kind]
+    named = []  # the pull requests that records posted on the wrong pull request name
+    found = []
+    for sha, num in dict.fromkeys(lanes):
+        kind, why, pr = owed_round(num, records.get(num, []), sha) or (None, None, None)
+        if kind:
+            found.append((kind, f"#{num} ({'head' if sha == info['head'] and num == n else 'tip'} {sha[:9]}) {why}."))
+            if pr is not None and pr not in named:
+                named.append(pr)
     def new_to_batch(h):  # the own head's history first: once it holds `h`, the clone holds `h`, so an exit 128 on the base read is a bad base and refuses
         return head_in_history(root, h, info["head"]) and not head_in_history(root, h, base_ref)
     try:
@@ -2290,7 +2297,7 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
         lifted = unknown_ok.strip()
     if found:  # a lane found owing still refuses when the stale-record read was lifted
         kinds = [k for k in ROUND_REMEDY if any(k == f[0] for f in found)]
-        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k] for k in kinds) + f" {ROUND3_CITE}")
+        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k].format(named=", ".join(f"#{p}" for p in named)) for k in kinds) + f" {ROUND3_CITE}")
     return lifted
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
