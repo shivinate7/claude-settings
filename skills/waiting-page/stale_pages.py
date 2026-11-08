@@ -518,13 +518,14 @@ def wait_lines(items, complete=True):
     return lines
 
 
-def kept_answer_lines(items, answers, complete=True):
+def kept_answer_lines(items, answers, complete=True, answers_complete=True):
     """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
     (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. Never an open item, an item with `waits` (no delete
     happens during a wait), an arbiter ruling (its overturn answer is meant to stay), a park answer or an answer with no item.
-    With `complete` False (the items folder may be cut short), one unknown line."""
-    if not complete:
-        return ["kept-answer: unknown (the items folder has no .complete marker, so its list may be cut short)"]
+    With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
+    if not (complete and answers_complete):
+        return ["kept-answer: unknown (the %s folder has no .complete marker, so its list may be cut short)"
+                % ("items" if not complete else "answers")]
     kept = {}
     for doc_id, data in answers:
         if not isinstance(data, dict):
@@ -568,7 +569,7 @@ def single_page(argv):
                 if items is None:
                     raise ValueError("the items cannot be read")
                 answers, answers_complete = load_docs(args.answers, "answers", keyed=True)
-                lines += kept_answer_lines(items, answers, complete and answers_complete)
+                lines += kept_answer_lines(items, answers, complete, answers_complete)
             except ValueError as err:
                 lines.append("kept-answer: unknown (%s)" % err)
         for line in lines:
