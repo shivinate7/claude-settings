@@ -13692,6 +13692,17 @@ sh("builder-test: shell, r5 control, sort -o src/out.txt src/x, is allowed",
    "sort -o src/out.txt src/x", "allow", **BR)
 sh("builder-test: shell, r5 control, git diff --output=/tmp/d.patch, is allowed",
    "git diff --output=/tmp/d.patch", "allow", **BR)
+# Output-flag twins of the frozen controls: a printer or a reader with an output-flag spelling reads the test path
+# as its operand or its text, and writes nothing, so each allows. A check that reads every command's flag as sort's
+# takes the test path as the file written, and goes red there.
+sh("builder-test: shell, output-flag control, grep -o x reads tests/test_a.py, is allowed",
+   "grep -o x tests/test_a.py", "allow", **BR)
+sh("builder-test: shell, output-flag control, grep -o takes tests/test_a.py as its pattern, is allowed",
+   "grep -o tests/test_a.py x", "allow", **BR)
+sh("builder-test: shell, output-flag control, echo --output=tests/test_a.py is text, is allowed",
+   "echo --output=tests/test_a.py", "allow", **BR)
+sh("builder-test: shell, output-flag control, jq -o x reads tests/test_a.py, is allowed",
+   "jq -o x tests/test_a.py", "allow", **BR)
 # Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
 sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
    "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
