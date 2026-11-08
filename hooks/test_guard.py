@@ -105,7 +105,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
-    "lane-step-dup": "one live lane per step: a brief or a create_session naming a step that another live session carries is refused and names that session; an archived carrier, the brief's own target, a near-miss step or a read that found none passes; a brief or a step-tagged create with no read of a carrier is asked",
+    "lane-step-dup": "one live lane per step: a brief or a create_session naming a step that another live session in its cs-repo carries is refused and names that session; an archived carrier, the brief's own target, a near-miss step, a carrier in another repo or a full read that found none passes; no read, a subject with no cs-repo, or a read with more pages that finds no carrier is asked",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10300,6 +10300,8 @@ DUP_CARRIER_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a",
 DUP_TWO_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-b", "cs-step:dup-step-a", "cs-repo:o/r"]
 DUP_NEAR_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-ab", "cs-repo:o/r"]
 DUP_NEW_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"]
+DUP_OTHER_REPO_TAGS = ["cs-build:lane", "cs-topic:dup-topic", "cs-step:dup-step-a", "cs-repo:other/repo"]  # the carrier's step, in another repo
+DUP_NO_REPO_TAGS = ["cs-build:lane", "cs-topic:dup-topic"]  # a subject with no cs-repo tag: it cannot be matched
 DUP_FILLER = 40  # the live lanes a full page holds before the carrier
 
 
@@ -10314,10 +10316,10 @@ def dup_filler(count):
             for n in range(count)]
 
 
-def dup_list(tool_id, rows, cut=False):
-    """One list_sessions call and its result: `rows` in one wrapped record, every page in one read. `cut` drops the end
-    of the result, so the JSON is not whole and its rows are text, not a read."""
-    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": False}}))
+def dup_list(tool_id, rows, cut=False, more=False):
+    """One list_sessions call and its result: `rows` in one wrapped record. `more` sets has_more, a read that did not
+    return every page. `cut` drops the end of the result, so the JSON is not whole and its rows are text, not a read."""
+    body = role_wrapped(json.dumps({"ccr": {"data": list(rows), "has_more": more}}))
     return [role_use(tool_id, LIST_SESSIONS, {}), role_result(tool_id, body[:-40] if cut else body)]
 
 
@@ -10479,6 +10481,14 @@ ROLE_LINES = {
                                                                                             session=DUP_CARRIER),
     "dup-no-read": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + [role_use("b1", "Bash", {"command": "git status"}),
                                                                       role_result("b1", "ok")],
+    # cs-repo scope and has_more. A carrier in another repo, a subject with no cs-repo, and a read that has more pages.
+    "dup-list-other-repo": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                           + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_OTHER_REPO_TAGS)]),
+    "dup-list-no-repo-target": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NO_REPO_TAGS)
+                               + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)]),
+    "dup-list-more-empty": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS) + dup_list("l1", [], more=True),
+    "dup-list-more-carrier": dup_get("t0", DUP_NEW, DUP_LIVE, DUP_NEW_TAGS)
+                             + dup_list("l1", [dup_row(DUP_CARRIER, DUP_LIVE, DUP_CARRIER_TAGS)], more=True),
 }
 
 
@@ -11152,8 +11162,10 @@ FAMILY = "lane-step-dup"
 # Rule lane-step-dup. A step has one live lane. A send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.`
 # (the marker parse of brief_hit), or a create_session whose tags hold `cs-step:<step>`, is refused when another live session,
 # not the brief's own target, carries `cs-step:<step>`. The reason names that session's id and says to send the work there.
-# A session is live unless its session_status holds ARCHIVED or a later archive_session call names it. A brief or a
-# step-tagged create with no read of a carrier is asked, never allowed. A read that ran and found none allows.
+# A session is live unless its session_status holds ARCHIVED or a later archive_session call names it. A carrier counts
+# only when it shares a cs-repo tag with the subject, the brief's target record or the create's tags; a subject with no
+# cs-repo tag is asked. A brief or a step-tagged create with no read of a carrier is asked, never allowed, and so is a
+# list read with has_more set that finds no carrier. A read that ran in full and found none allows.
 # A message without the marker, and a create_session with no cs-step tag, read no transcript and pass.
 BRIEF_DUP = "Lane brief: dup-step-a. Topic: dup-topic.\n\nDo the step."
 DUP_STEER = (DUP_CARRIER, "send")  # the reason names the live carrier's id, and says to send the work there
@@ -11225,6 +11237,26 @@ dup_send("a message without the marker passes an unreadable transcript: it reads
          "allow", role_path("unreadable"), "Status: dup-step-a is still open.")
 dup_create("a create_session with no cs-step tag passes an unreadable transcript: it reads none",
            "allow", role_path("unreadable"), ["cs-build:lane", "cs-topic:dup-topic", "cs-repo:o/r"])
+
+
+# cs-repo scope. A carrier counts only when it shares a cs-repo tag with the subject: the brief's target record, or the
+# create_session's own tags. A carrier in another repo is another lane, so it passes. A subject with no cs-repo tag
+# cannot be matched, so it is asked. A read whose has_more is set did not return every page: no carrier in it is asked.
+dup_send("a carrier in another repo does not count: a brief to a new lane for the same step is allowed",
+         "allow", role_path("dup-list-other-repo"), BRIEF_DUP)
+dup_create("a create_session tagged cs-step:dup-step-a passes when the live carrier is in another repo",
+           "allow", role_path("dup-list-other-repo"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"])
+dup_send("a brief whose target record has no cs-repo tag is asked, though a live carrier holds the step",
+         "ask", role_path("dup-list-no-repo-target"), BRIEF_DUP)
+# No cs-build:lane tag here: lane-repo-tag refuses a lane create that names no cs-repo before lane-step-dup is judged.
+dup_create("a create_session with no cs-repo tag is asked, though a live carrier holds its step",
+           "ask", role_path("dup-list-carrier"), ["cs-step:dup-step-a", "cs-topic:dup-topic"])
+dup_send("a brief to a new lane, where the list read has more pages and holds no carrier, is asked",
+         "ask", role_path("dup-list-more-empty"), BRIEF_DUP)
+dup_create("a create_session tagged cs-step:dup-step-a, where the list read has more pages and no carrier, is asked",
+           "ask", role_path("dup-list-more-empty"), ["cs-build:lane", "cs-step:dup-step-a", "cs-repo:o/r"])
+dup_send("a brief to a new lane is refused when the list read has more pages and a live carrier is in its page",
+         "deny", role_path("dup-list-more-carrier"), BRIEF_DUP, carries=DUP_STEER)
 
 
 # =========================================================================== 5d. cite by id
