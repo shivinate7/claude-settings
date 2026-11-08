@@ -8,7 +8,7 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
-in this process, except the hung-lint case. That case reads the slot's lock in this process once lane_lint returns: a lock that a
+in this process, except the in-process hung-lint case. That case reads the slot's lock in this process once lane_lint returns: a lock that a
 subprocess leaks is freed when the subprocess exits, so only a probe here sees the leak. The other slot cases (lint slots: a lane lint
 waits for one of merge.lint_slots() slots) set the slot count and the bound (merge.LINT_SECONDS) in that subprocess, and read the order
 of the stub's starts and ends, never the clock.
@@ -644,6 +644,28 @@ class LaneLint(CiJobStub, tm.CloudSession):
         slot = os.path.join(self.cfg, "state", "lane-lint-slots", "slot-0.lock")
         self.assertTrue(os.path.exists(slot), "the lint took no slot: " + out)
         self.assertTrue(slot_is_free(slot), "the slot's lock was still held once lane_lint returned: the slot's fd was not closed")
+
+    @unittest.skipIf(os.name == "nt", "a signal to the holder ends it on Windows, so its liveness cannot be read there")
+    def test_a_hung_lint_ends_at_the_bound_and_frees_its_slot_for_the_next_lint(self):
+        """A hung ci-job ends unknown at the bound and frees its slot. The next lint's ci-job starts only then: its start record
+        reads that the hung run is no longer alive (holder_alive). The next lint then passes."""
+        hung = self.write_stub(PASSING, 0, sleep=60)  # it runs past the bound, so the bound ends it
+        head = self.head("feat")
+        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1, bound=8)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1, bound=8)
+        rc1, out1, err1 = self.finish(first)
+        rc2, out2, err2 = self.finish(second)
+        starts = [e for e in self.lint_events() if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
+        self.assertIs(starts[1]["holder_alive"], False,
+                      "the next lint's ci-job started while the hung one still ran: no slot was held")
+        self.assertEqual(rc1, 1, out1 + err1)
+        self.assertIn("did not finish", out1 + err1)
+        self.assertEqual(pass_lines(out1), [], out1)
+        self.assertEqual(rc2, 0, out2 + err2)
+        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
 
     @unittest.skipIf(os.name == "nt", "a signal to the holder ends it on Windows, so its liveness cannot be read there")
     def test_with_two_slots_a_lint_starts_beside_a_hung_one_and_reads_it_alive(self):
