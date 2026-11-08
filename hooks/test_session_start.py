@@ -32,6 +32,7 @@ UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook'
 KEEP = object()  # run_hook's tmpdir default: the runner's own TMPDIR is kept
 TMP_SEAM = "CLAUDE_SETTINGS_TMP_CANDIDATE"  # the hook's /tmp candidate, read only so these tests can name it
 WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
+ON_WINDOWS = os.name == "nt"  # a Windows runner: the hook writes no TMPDIR line there (ruling 2026-11-08 00:38 CST)
 # Git's sh.exe builds PATH with /usr/bin, which holds the real uname, ahead of the Windows PATH, so a fake uname
 # set in the environment is shadowed there. The shell prepends the fake folder itself. Derived from the PATH_FIRST
 # of hooks/test_wrappers.py, which replaces PATH whole; a whole replace would drop the /usr/bin tools the hook needs.
@@ -813,13 +814,17 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(answer.returncode, 0, "the env file does not source cleanly: %r" % answer.stderr)
         return answer.stdout
 
-    def assert_writable_tmpdir_exported(self, tmpdir, label):
+    def assert_tmpdir_export(self, tmpdir, label):
+        """Off Windows, the env file exports a writable TMPDIR. On Windows it gets no TMPDIR line."""
         for fixture in FIXTURES:
             with self.subTest(fixture=fixture):
                 path = self.env_run("%s-%s.sh" % (label, fixture), fixture, tmpdir)
                 text = self.read(path)
                 self.assertTrue(text.startswith(FIXTURES[fixture]),
                                 "the hook changed a line the env file already held: %r" % text)
+                if ON_WINDOWS:
+                    self.assert_no_tmpdir_line(text)
+                    continue
                 self.assertRegex(text, TMPDIR_LINE, "the env file has no export TMPDIR= line: %r" % text)
                 value = self.sourced_tmpdir(path)
                 self.assertTrue(value, "the env file exports an empty TMPDIR")
@@ -830,10 +835,10 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
                 self.assertTrue(os.access(value, os.W_OK), "TMPDIR names a dir that is not writable: %r" % value)
 
     def test_an_unset_tmpdir_gets_a_writable_dir_in_the_env_file(self):
-        self.assert_writable_tmpdir_exported(None, "unset")
+        self.assert_tmpdir_export(None, "unset")
 
     def test_an_empty_tmpdir_gets_a_writable_dir_in_the_env_file(self):
-        self.assert_writable_tmpdir_exported("", "empty")
+        self.assert_tmpdir_export("", "empty")
 
     def test_a_set_tmpdir_adds_no_tmpdir_line(self):
         tmp = os.path.join(self.root, "set-tmp")
@@ -874,6 +879,11 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         for fixture in FIXTURES:
             with self.subTest(fixture=fixture):
                 path = self.env_run("preset-%s.sh" % fixture, fixture, None)
+                if ON_WINDOWS:
+                    # Nothing is written to overwrite the preset. The value is not compared: Git Bash reports a preset
+                    # TMPDIR in POSIX form, so the comparison below would fail on a correct hook.
+                    self.assert_no_tmpdir_line(self.read(path))
+                    continue
                 # Control: the env file holds the line, so a source that changes nothing is not a pass by default.
                 self.assertRegex(self.read(path), TMPDIR_LINE, "the env file has no export TMPDIR= line, so the case tests nothing")
                 value = self.sourced_tmpdir(path, preset=preset)
