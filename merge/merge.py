@@ -131,6 +131,7 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
+REPO_ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # the checkout whose hooks/guard.py guard_hits reads; read at each call, so a case can point it elsewhere
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
@@ -3505,11 +3506,54 @@ def write_merge_role(tier):
             tmp.unlink()
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
+def _imported_names(tree):
+    """-> the module names a parsed file imports: an Import, an absolute ImportFrom, and importlib.import_module with a literal name.
+    A dotted name keeps its last part, since a module is found by its basename."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name.rpartition(".")[2] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.rpartition(".")[2])
+        elif (isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+              and (node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")) == "import_module"):
+            names.add(node.args[0].value.rpartition(".")[2])
+    return names
+
+def guard_import_closure(root, is_test_rel):
+    """-> the repo-relative posix paths of the non-test .py files that hooks/guard.py reaches through its imports, hooks/guard.py among them.
+    A name resolves to every .py under `root` with that basename (a dot folder and node_modules are skipped), so an ambiguous name keeps
+    each match. It reads the AST and never sys.modules, because guard.py loads some modules lazily inside functions. A file that cannot be
+    read or parsed stops the review record: the guard import list is then unknown, never empty."""
+    by_name = {}
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
+        for f in files:
+            if f.endswith(".py"):
+                rel = os.path.relpath(os.path.join(folder, f), root).replace(os.sep, "/")
+                by_name.setdefault(f[:-3], []).append(rel)
+    seen, todo = set(), ["hooks/guard.py"]
+    while todo:
+        rel = todo.pop()
+        if rel in seen or (rel != "hooks/guard.py" and is_test_rel(rel)):
+            continue
+        seen.add(rel)
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8") as fh:
+                names = _imported_names(ast.parse(fh.read(), filename=rel))
+        except (OSError, SyntaxError, ValueError) as e:  # ValueError: a null byte in the source
+            raise Stop(f"the guard import list is unknown: cannot read {rel} under {root} ({type(e).__name__}: {e}). Fix the file, then record the review again.")
+        for name in names:
+            todo.extend(by_name.get(name, ()))
+    return seen
+
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
-    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    """-> the sorted paths that start with a GUARD_PATHS entry, equal a GUARD_FILES entry, or are in hooks/guard.py's import closure, less each
+    test path: a test file alone is no guard change (decision hold-unsafe-after-round-3). This is the one home of the guard path list.
+    hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
-    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+    closure = guard_import_closure(REPO_ROOT, hook_guard.is_test_rel)
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES or p in closure) and not hook_guard.is_test_rel(p))
 
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path not ending .md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
