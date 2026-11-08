@@ -13801,6 +13801,13 @@ add("builder-test: Edit of an empty package.json that adds a jest key is refused
 add("builder-test: Edit of an empty package.json that adds dependencies is allowed", "allow", tool="Edit",
     file_path="package.json", old_string="",
     new_string='{\n  "dependencies": {\n    "a": "1"\n  }\n}\n', **EMPTY)
+# A disabling flag in a partly-owned manifest's own part (the `ci` script is no test script) is refused by the
+# write tool's read of the content. The owned-part check does not judge this script, so only the content read refuses it.
+_disable = diff_repo("b-disable-manifest", lambda w: None, files={
+    **BASE_FILES, "package.json": '{\n  "name": "x",\n  "scripts": {\n    "ci": "npm run build",\n    "test": "jest"\n  }\n}\n'})
+add("builder-test: Edit of a package.json script that adds a disabling flag is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='"ci": "npm run build"',
+    new_string='"ci": "npm run build && jest --testPathIgnorePatterns=e2e"', **dict(B, cwd=_disable))
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))
@@ -14660,26 +14667,27 @@ def _plan_repo(name, text):
 
 
 def xctestplan_logs_case():
-    """A builder's added codeCoverage line logs nothing. A test-author's plan edit logs no
-    author-diff line. A builder's added skippedTests line is refused, not logged: see the
-    builder-refuse section, which builds the same plan repo (`xctestplan-skip`) once."""
+    """A builder's added codeCoverage line is refused at commit (builder-diff): a .xctestplan is whole-file
+    test config. A test-author's plan edit logs no author-diff line. A builder's added skippedTests line is
+    refused too: see the builder-refuse section, which builds the same plan repo (`xctestplan-skip`) once."""
     problems = []
     skip = os.path.join(DIFFROOT, "xctestplan-skip")
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"),
                               _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE), "builder",
                               "bld1")
-    if out or rows:
-        problems.append("coverage: expected no log, got %r %r" % (out[:60], rows))
+    refused = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == "builder-diff"]
+    if not refused:
+        problems.append("coverage: expected a builder-diff refusal, got %r %r" % (out[:60], rows))
     out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-author"), skip,
                               "test-author", "auth1")
     rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
     if out or rows:
         problems.append("author: a plan edit was judged: %r %r" % (out[:60], rows))
     return (not problems), ("; ".join(problems) or
-                            "codeCoverage logs nothing; a test-author's plan edit logs no author-diff line")
+                            "codeCoverage is refused builder-diff; a test-author's plan edit logs no author-diff line")
 
 
-LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line logs nothing, and a "
+LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line is refused builder-diff, and a "
                          "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
 
 
