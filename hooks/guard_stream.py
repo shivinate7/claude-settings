@@ -152,22 +152,16 @@ NARRATED_TAIL_REASON = (
 # twice. `ci-job` is refused in the background only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
-VERDICT_WRAPPER = "verdict"
 
 
 def check_stage(segment: str, background: bool) -> str:
-    """The command word when one segment runs a named check outside `verdict`, else ''. `ci-job` counts
+    """The command word when one segment runs a named check, else ''. `ci-job` counts
     only in the background."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
     index = resolve_command(tokens)
     if index is None:
-        return ""
-    # resolve_command skips `verdict` like any wrapper, and the wrapper walk skips the `verdict` after
-    # `python3` without recording it, so read the words ahead of the command word: a check run through
-    # it, alone or as `python3 .../verdict`, keeps its full log.
-    if any(basename(token) == VERDICT_WRAPPER for token in tokens[:index]):
         return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
@@ -216,8 +210,8 @@ CHECK_TAIL_REASON = (
     "this check's output goes into a filter that keeps one end, so the filter holds everything "
     "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
-    "Remedy: run the check through verdict, as `verdict <cmd>`. It keeps the full log and "
-    "prints the verdict itself."
+    "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
+    "full log and prints the verdict itself."
 )
 
 
