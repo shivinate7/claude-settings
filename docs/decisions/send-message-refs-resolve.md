@@ -25,7 +25,7 @@ The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any se
 "This repo" is the `owner/repo` of the `cwd` checkout's `origin`. Text that names another repo is skipped:
 
 - A URL to another repo.
-- A sha or PR number on a line that names another repo. A line names another repo when it holds an `owner/repo` that is not this repo, followed by `#`, `@` or `:` (such as `acme/widgets#5` or `acme/widgets: PR #5`). An `owner/repo` with no such mark is a branch or a path (`lane/env-file-scope`, `origin/main`, `hooks/guard_merge`) and does not count. `origin/` and `upstream/` never count.
+- A sha or PR number on a line that names another repo. A line names another repo when it holds an `owner/repo` that is not this repo, followed by `#`, `@` or `:` (such as `acme/widgets#5` or `acme/widgets: PR #5`). An `owner/repo` with no such mark is a branch or a path (`lane/env-file-scope`, `origin/main`, `hooks/guard_merge`) and does not count. `origin/` and `upstream/` never count. An `owner/repo` whose name ends in a file extension (`hooks/guard.py`) is a path and never counts.
 
 With no origin, only shas are judged.
 
@@ -41,7 +41,7 @@ With no origin, only shas are judged.
 
 Per send, at most:
 
-- one `git config --get remote.origin.url`, when the text names a PR, a comment or a commit URL
+- one `git config --get remote.origin.url`, when the text names a PR, a comment or a commit URL, or holds an `owner/repo` mark
 - one `git cat-file --batch-check` for all shas (10 s timeout), and one `rev-parse --is-shallow-repository` on a miss
 - one `git ls-remote origin` for all PR numbers (5 s), a network read of about 0.6 s, measured once from a cloud container
 - one `gh api repos/<owner>/<repo>/issues/comments/<id>` per comment link, up to 5 (5 s each), a network read
@@ -53,3 +53,8 @@ The worst case is about 45 s. A message with no ref starts no process. A guard.l
 - An issue number, a branch name and a record path are not judged.
 - A fork's `origin` lacks the upstream's `refs/pull`, so a PR of the upstream reads as missing. Fix: none — the owner's repos are not worked from forks. Until: 2026-11-21.
 - A ref that exists but is the wrong one passes.
+- A repo whose name ends like a file extension (`vercel/next.js: PR #5`) reads as a path, so its PR is judged against this repo and can refuse.
+- A path or branch followed by `:` reads as another repo, so its line is skipped (`lane/x: head <sha>`, `hooks/guard_merge: PR #5`).
+- A PR list split across a line break is judged on its first line only.
+- Another repo's PR named with no `owner/repo` on its line is judged against this repo and can refuse.
+- The URL-word pattern takes time that grows with the square of a long unbroken token: 1.7 s at 32,000 characters. A timeout fails open (note report-sha-url-word-slow).
