@@ -480,7 +480,7 @@ PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", 
 # backslashes of `C:\tools\Get-Thing` and `~\Get-Item`. Each component ends in a separator, so the run reads in one pass.
 ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/]+[\\/])*"
                              r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+(?=\s|$)")
-SHELL_CMDLET = re.compile(r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+")
+SHELL_CMDLET = re.compile(r"(?:[A-Z][a-z]+|" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+")
 # What may come before a cmdlet path in a segment: `&`, then any `VAR=value`, `sudo` or `env` words.
 CMDLET_PREFIX = re.compile(r"\s*(?:&\s+)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|sudo|env)\s+)*")
 # What the refusal prints for a Verb-Noun at an absolute path: a folder written with a trailing `/` is text.
