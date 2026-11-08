@@ -279,7 +279,7 @@ RED = [
     ("adHocKey with a value of letters and digits", "adHocKey: " + GLUED_VALUE, GLUED_VALUE),
     ("returnKey with a value of letters and digits", "returnKey: " + GLUED_VALUE, GLUED_VALUE),
     # A letters-only secret after a plain word and prose is one. The prose after the plain word must not hide it.
-    ("letters-only secret after a plain word and a semicolon",
+    ("letters-only secret after a plain word, a semicolon and `is`",
      "password: required to log in; default is swordfish", "swordfish"),
     ("letters-only secret after a plain word and `and`", "password: none and swordfish", "swordfish"),
     # Each separator word or mark before a non-function word starts a second value, so the password value is refused.
@@ -289,6 +289,8 @@ RED = [
     ("letters-only secret after a plain word and `are`", "password: none are swordfish", "swordfish"),
     ("letters-only secret right after a plain word and a semicolon", "password: none; swordfish", "swordfish"),
     ("letters-only secret after prose and a comma", "password: none for the guest, swordfish", "swordfish"),
+    # A semicolon after prose starts a second value as a comma does. Only the `;` in the separator check refuses this.
+    ("letters-only secret after prose and a semicolon", "password: none for the guest; swordfish", "swordfish"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
