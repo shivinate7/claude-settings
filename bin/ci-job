@@ -39,6 +39,7 @@
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.event.pull_request.body }} and ${{ github.token }} are empty.
+# So an excuse that lives only in the PR body (Drops-lines, Retire-run) reads FAIL here, as it does on main, which passes no body.
 # Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
