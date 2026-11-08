@@ -10105,6 +10105,66 @@ for _body, _file, _what in ((REVIEW_FOOTED, "footed.md", "a record with its foot
         bash_post("review-record: %s is allowed, %s" % (_what, _label), _command, "allow")
 
 
+# THE ISSUE WORD AND THE ANSI-C QUOTING. `gh issue comment` posts to the same pull request, and merge --reviewed reads issue
+# comments, so it is judged as `gh pr comment` is. Bash reads `$'...'` with its escapes decoded, so a body in that form holds
+# the marker, but the guard reads the quoted word without decoding it.
+ISSUE_CMD = "gh issue comment %d" % REVIEW_PR
+
+
+def issue_forms(body, path):
+    """The Bash forms that post `body` through `gh issue comment`, one command each: the text forms carry `body`, the file forms
+    read `path`. inline_forms and file_forms cannot take this word: they also hold the gh api forms, which have no issue word."""
+    quoted = "'%s'" % body
+    return [("gh issue comment --body", "%s --body %s" % (ISSUE_CMD, quoted)),
+            ("gh issue comment -b", "%s -b %s" % (ISSUE_CMD, quoted)),
+            ("gh issue comment --body-file", "%s --body-file %s" % (ISSUE_CMD, path)),
+            ("gh issue comment -F", "%s -F %s" % (ISSUE_CMD, path))]
+
+
+def ansi_c(text):
+    """The `$'...'` form of `text`, as bash reads it: a backslash, a single quote and a newline are written as escapes."""
+    return "$'%s'" % text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+
+
+# RED on the head this branch starts from: `gh issue comment` is not judged, so a record with prose after its CI line is allowed
+# on every form. Each refusal names the shape, as the gh pr comment refusal does.
+for _label, _command in issue_forms(REVIEW_TRAILING, TRAILING_PATH):
+    bash_post("review-record: prose after the CI line is refused, %s" % _label, _command, "deny", rule=REVIEW_RULE,
+              carries=SHAPE_TEXT)
+# The head check, mirroring the gh pr comment stale-head case: a record for a head before the push is refused,
+# with the render line.
+bash_post("review-record: a stale record is refused, gh issue comment --body-file",
+          "%s --body-file %s" % (ISSUE_CMD, os.path.join(GHRECORDDIR, "stale.md")), "deny", rule=REVIEW_RULE,
+          carries=(REVIEW_RENDER,))
+# ALLOW CONTROLS for gh issue comment: a bare record at the live head is allowed on every form, as on gh pr comment.
+for _label, _command in issue_forms(review_record(), os.path.join(GHRECORDDIR, "ok.md")):
+    bash_post("review-record: a record at the live head is allowed, %s" % _label, _command, "allow")
+
+# RED on the head this branch starts from: the marker is in a body the guard reads as one undecoded word, so it is not on line 1
+# and the record is never judged. The same text in plain quotes is refused, so the decoded text must be refused too.
+bash_post("review-record: prose after the CI line is refused, gh pr comment --body with ANSI-C quoting",
+          "%s --body %s" % (PR_CMD, ansi_c(REVIEW_TRAILING)), "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+bash_post("review-record: prose after the CI line is refused, gh api -X PATCH -f with ANSI-C quoting",
+          "%s -f %s" % (API_EDIT_CMD, ansi_c("body=" + REVIEW_TRAILING)), "deny", rule=REVIEW_RULE, carries=SHAPE_TEXT)
+# ALLOW CONTROLS for the ANSI-C forms: a bare record at the live head is allowed on the post and both gh api routes, the marker in
+# prose below line 1 is allowed, and a plain ANSI-C text body is allowed.
+bash_post("review-record: a record at the live head is allowed, gh pr comment --body with ANSI-C quoting",
+          "%s --body %s" % (PR_CMD, ansi_c(review_record())), "allow")
+bash_post("review-record: a record at the live head is allowed, gh api -f with ANSI-C quoting",
+          "%s -f %s" % (API_CMD, ansi_c("body=" + review_record())), "allow")
+bash_post("review-record: a record at the live head is allowed, gh api -X PATCH -f with ANSI-C quoting",
+          "%s -f %s" % (API_EDIT_CMD, ansi_c("body=" + review_record())), "allow")
+bash_post("review-record: the marker in prose below the first line is allowed, gh pr comment --body with ANSI-C quoting",
+          "%s --body %s" % (PR_CMD, ansi_c(REVIEW_PROSE)), "allow")
+bash_post("review-record: a plain ANSI-C text body is allowed, gh pr comment --body $'plain text'",
+          "%s --body $'plain text'" % PR_CMD, "allow")
+
+# PIN, green on the head this branch starts from. The guard does not resolve a shell variable, so a body held in one
+# is not judged: a named limit, allowed on purpose, not a case the judge should pass.
+bash_post("review-record: a body in a shell variable is allowed, a named limit, gh pr comment --body \"$BODY\"",
+          "%s --body \"$BODY\"" % PR_CMD, "allow")
+
+
 def review_counted_fake():
     """The counted pull request tool, with its log emptied. Each call it answers is logged."""
     make_fake_gh(GHRECORDCOUNT, "main", need=["12"], head_sha=REVIEW_LIVE,
