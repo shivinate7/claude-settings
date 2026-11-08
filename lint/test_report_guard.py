@@ -117,6 +117,28 @@ def tool_result_msg(tool_use_id="tu_1"):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
+def async_launch_msg(tool_use_id, agent_id):
+    """The tool result Claude Code writes when a background agent launches. Its toolUseResult carries the
+    fields a real transcript stores (hooks/stall_watch.py scan_jobs reads them): isAsync true, status
+    async_launched and the agentId. The agent has not stopped yet."""
+    rec = tool_result_msg(tool_use_id)
+    rec["toolUseResult"] = {"isAsync": True, "status": "async_launched", "agentId": agent_id,
+                            "outputFile": "/tmp/%s.output" % agent_id, "canReadOutputFile": True,
+                            "canContinueAgent": True, "description": "build it", "prompt": "build it"}
+    return rec
+
+
+def completion_notice_msg(agent_id, tool_use_id):
+    """The notice a background agent queues once it stops: an attachment whose prompt is a
+    task-notification with a terminal status, as a real transcript stores it."""
+    prompt = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+              "<output-file>/tmp/%s.output</output-file>\n<status>completed</status>\n"
+              "<summary>Agent \"build it\" finished</summary>\n</task-notification>"
+              % (agent_id, tool_use_id, agent_id))
+    return {"type": "attachment", "isSidechain": False,
+            "attachment": {"type": "queued_command", "prompt": prompt}}
+
+
 def assistant_text(text):
     return {"type": "assistant", "isSidechain": False,
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
@@ -933,7 +955,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=(), running=(), ids=False):
+    def verdict(self, reply, spawns, denied=(), running=(), ids=False, background=(), notified=False):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
@@ -945,6 +967,12 @@ class DoneNamesModelsTests(unittest.TestCase):
             result = tool_result_msg("tu_denied")
             result["message"]["content"][0]["is_error"] = True
             records += [use, result]
+        for spawn in background:  # a background agent: its launch result is a real tool result, and its notice follows once it stops
+            use = tool_use_msg("Agent", spawn)
+            use["message"]["content"][0]["id"] = "tu_bg"
+            records += [use, async_launch_msg("tu_bg", "agent_bg")]
+            if notified:
+                records += [completion_notice_msg("agent_bg", "tu_bg")]
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
@@ -1035,6 +1063,22 @@ class DoneNamesModelsTests(unittest.TestCase):
             [{"subagent_type": "test-author", "model": "haiku", "prompt": "write the red cases"}],
             running=[self.BUILDER], ids=True)
         self.assertIsNone(out, "the Model-name guard blocked a builder that is still running")
+
+    def test_dm_false_alarm_async_launched_builder_named_only_in_next_passes(self):
+        # A background builder whose launch result says async_launched has not stopped, so Done owes it no
+        # model. Its launch result is a real tool result, so the guard must read what the result says.
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next**\n> - builder is running.\n"
+                           "> - Unstarted: none", [], background=[self.BUILDER])
+        self.assertIsNone(out, "the Model-name guard blocked a background builder that has not stopped: %s"
+                          % (out or {}).get("reason"))
+
+    def test_dm_control_async_builder_after_its_notice_named_without_model_blocks(self):
+        # Control: the same background builder, once its completion notice is in, has finished, so Done owes it a model.
+        out = self.verdict("> **Done** BUILT the guard, PR #5, by builder.\n> **Next** Unstarted: none",
+                           [], background=[self.BUILDER], notified=True)
+        self.assertIsNotNone(out, "a finished background builder named with no model passed the Model-name guard")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_control_builder_named_without_model_blocks(self):
         # Control: a builder that finished and built the change, named with no model, still blocks.
