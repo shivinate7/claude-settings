@@ -12033,8 +12033,12 @@ sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config se
 sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
    "[pwsh-c-text-mode green]",
    "echo \"a \\\" b\"", "allow", cwd=NOGIT)
-# NESTED-SCRIPT PIN. `_shell_write_hit` judges the PowerShell text that `iex` runs by PowerShell's rules,
-# through `_powershell_script_of`. This DENIES on that step alone.
+# NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
+# rules, through `_powershell_script_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
+# in Bash backgrounds the first command, and detached-launch denies that before the write is read.
+sh("frozen shell: pwsh-c-text-mode pin, cmd /c runs a smart-quoted config settings write after a `&` inside "
+   "double quotes and denies [pwsh-c-text-mode pin]",
+   "cmd /c \"echo don’t & copy NUL " + SMART_CFG_SETTINGS + "\"", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: pwsh-c-text-mode pin, iex runs a smart-quoted config settings write whose comment holds a "
    "double quote, and denies [pwsh-c-text-mode pin]",
    "iex 'Set-Content -Path " + SMART_CFG_SETTINGS + " -Value 1 # don\"t'", "deny", "frozen-path", cwd=NOGIT)
