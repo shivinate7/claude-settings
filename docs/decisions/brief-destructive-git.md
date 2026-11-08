@@ -21,7 +21,7 @@ Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workf
 - By design, not a limit: an order with no backticks passes here and meets the shell guard at run time.
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 
-Protected by the `brief-destructive-git:` cases in `hooks/test_guard.py` (60 cases and 2 override checks), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.
+Protected by the `brief-destructive-git:` cases in `hooks/test_guard.py` (64 cases and 2 override checks), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.
 
 Kind: process
 Home: hooks/guard.py
