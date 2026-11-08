@@ -27,6 +27,7 @@ PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 PR_BODY = "Drops-lines: docs/old.md -- the lines are dead\nRetire-run: 12345\n"  # the lane's PR body, as the fake host reports it
+INHERITED_BODY = "An inherited body, never the lane's\n"  # what a caller's CI_JOB_PR_BODY_FILE names in the inherited-env cases
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
@@ -49,7 +50,7 @@ if "--plan" in sys.argv:
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
-lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+lines = [name if state == "raw" else "%-15s %s: stub step" % (state, name) for state, name in STEPS]  # a ("raw", line) pair prints its line as it is
 print("\\n".join(lines))
 if RC == 1:
     with open(STEP_LOG, "w", encoding="utf-8") as f:
@@ -343,6 +344,36 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.lint_calls(), [], "ci-job linted after the pull request read failed, so with a blank body")
         self.assertNotIn("PASS:", out)
+
+    def test_a_ref_target_hands_ci_job_no_pr_body(self):
+        self.use_ci_job(PASSING, 0)
+        sha = self.head("feat")
+        rc, out = self.lint_run("--lane-lint", sha, head=sha)
+        self.assertEqual(rc, 0, out)
+        self.assertIsNone(self.lint_calls()[0]["pr_body"], "a ref target has no pull request, yet ci-job got a PR body")
+
+    def test_an_inherited_pr_body_file_never_reaches_ci_job_from_a_ref_target(self):
+        self.use_ci_job(PASSING, 0)
+        sha = self.head("feat")
+        inherited = os.path.join(self.t, "inherited-body.md")
+        with open(inherited, "w", encoding="utf-8", newline="") as f:
+            f.write(INHERITED_BODY)
+        with unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY_FILE": inherited}):
+            rc, out = self.lint_run("--lane-lint", sha, head=sha)
+        self.assertEqual(rc, 0, out)
+        self.assertIsNone(self.lint_calls()[0]["pr_body"], "an inherited CI_JOB_PR_BODY_FILE reached ci-job from a ref target")
+
+    def test_an_unknown_exit_that_names_no_step_is_not_lifted_by_lint_unknown_ok(self):
+        self.use_ci_job([("raw", "unknown         CI_JOB_PR_BODY_FILE cannot be read: [Errno 2] No such file")], 2)
+        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
+        self.assertNotIn("--lint-unknown-ok, reason:", out, "--lint-unknown-ok lifted an exit that names no step")
+        self.assertEqual(rc, 1, out)
+
+    def test_an_exit_two_with_no_unknown_line_is_not_lifted_by_lint_unknown_ok(self):
+        self.use_ci_job([("PASS", "record slugs")], 2)
+        rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "a reason")
+        self.assertNotIn("--lint-unknown-ok, reason:", out, "--lint-unknown-ok lifted an exit two that names no unknown step")
+        self.assertEqual(rc, 1, out)
 
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
@@ -642,6 +673,18 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+    def test_an_inherited_pr_body_file_never_reaches_the_ready_checks(self):
+        self.use_ci_job([("PASS", "check invariants")], 0)
+        inherited = os.path.join(self.t, "inherited-body.md")
+        with open(inherited, "w", encoding="utf-8", newline="") as f:
+            f.write(INHERITED_BODY)
+        with unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY_FILE": inherited}):
+            merge.run_ready_checks(self.co, 7, "main", ["check invariants"])
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the ready checks did not run ci-job once")
+        self.assertIsNone(runs[0]["pr_body"], "an inherited CI_JOB_PR_BODY_FILE reached the ready checks")
 
 
 class RunFolderSweep(unittest.TestCase):
