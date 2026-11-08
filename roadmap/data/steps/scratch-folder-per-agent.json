@@ -1,0 +1,11 @@
+{
+  "title": "Each agent writes only under its own scratch folder",
+  "why": "Coordinator 15:24 CST Nov 8; Merge after: #2023 (step scratchpad-file-ownership). Sightings: (1) about 15:00 CST a reviewer on #2269 extracted `git archive` copies into shared scratchpad folders `base` and `head`, maybe over round 1's hooks copies (lane guard-checkout-path-restore, 15:23 CST). (2) Lane revive-1042 (15:09 CST): scratch folders for mutant copies need unique names per agent, or two agents collide. Hand-made worktrees are refused, so agents fall back to common scratch names. Fix shape: a guard or scratchpad helper that gives each agent a folder named after it.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 825,
+  "updatedAt": "2026-11-08T15:26:00-06:00"
+}

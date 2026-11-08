@@ -1,0 +1,11 @@
+{
+  "title": "The env-file rule does not refuse a heredoc whose prose names a sample env file while editing the env guard",
+  "why": "Lane notes-fix-large-1 (session_013NEJL4DPEKRiC91yHkQV7m), 15:25 CST Nov 8, possible false alarm: the env-file rule refused a builder's Bash heredoc that edited hooks/guard_env.py. The heredoc read no file; a docstring and a comment named a sample env file name (an env stem with a .py suffix) as an example. Cost: a builder on the env guard cannot write prose about the names it matches. Step env-heredoc-false-alarm (done) covered heredoc text that only writes a file, so either this form escapes it or it regressed: reproduce first. Fix shape: ignore env names inside a heredoc body written to a file under hooks/, or list the case under the decision's Known false alarms.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 826,
+  "updatedAt": "2026-11-08T15:26:00-06:00"
+}
