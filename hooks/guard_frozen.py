@@ -274,7 +274,7 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), runs=None) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -283,7 +283,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     Reading the TARGET of the redirect is what separates
     `echo x > .claude/settings.json` from `cat .claude/settings.json 2>/dev/null`. The second
     redirects to the null device. It is also what stops a redirect elsewhere on the line from
-    counting as a write to a path named in a comment.
+    counting as a write to a path named in a comment. A caller that gives `runs` (the command name that
+    runs in the segment, `_commands_run`) has `sed -i` and `perl -i` count only when that command runs, so
+    `grep sed -i P` and `echo perl -i P` name an in-place edit and make none.
     """
     target = re.escape(path)
     if re.search(r"\d?>>?\s*&?\s*['\"]?" + target, cmd):   # `>` and `>&` redirect onto the path, with or without a space; `>&1` names no file
@@ -295,7 +297,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(_SED_IN_PLACE + target, cmd) or re.search(_PERL_IN_PLACE + target, cmd):
+    if (runs is None or runs.intersection(_SED_NAMES)) and re.search(_SED_IN_PLACE + target, cmd):
+        return True
+    if (runs is None or "perl" in runs) and re.search(_PERL_IN_PLACE + target, cmd):
         return True
     return False
 
@@ -1477,6 +1481,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                                         predicate_command)
                 if hit:
                     return _from_cwd(hit, at, cwd) if follow_cd else hit
+        runs = _commands_run(raw)
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
@@ -1485,7 +1490,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 continue
             if follow_cd and word == '""':
                 continue   # the data placeholder is no path, though `cd tests` makes it one in that folder
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ()), runs=runs):
                 return _from_cwd(word, at, cwd) if follow_cd else word
     return ""
 
@@ -1638,6 +1643,15 @@ def _sed_script_targets(script):
         else:
             at += 1
     return targets, commands
+
+
+def _commands_run(raw):
+    """The command name that runs in one segment's `raw` words, after any `sudo`, `env` or `xargs`
+    (`_segment_command`), as a set. None when a quoted word holds a space: it may be a script the shell runs
+    (`sh -c 'sed -i s/a/b/ P'`, or JSON piped to an interpreter), so no command name is read from the segment."""
+    if any(word[:1] in ("'", '"') and re.search(r"\s", _unquoted(word)) for word in raw):
+        return None
+    return {_segment_command([_unquoted(word) for word in raw])[0]}
 
 
 def _perl_script_words(raw):
