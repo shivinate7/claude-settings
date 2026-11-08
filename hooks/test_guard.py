@@ -9975,7 +9975,7 @@ def pfr_handback(agent_id, report):
     """A report as the harness hands it back: a user message whose string content opens with the frame, then the
     agent-message tag that names the agent, then the report indented by the harness (hooks/shared_names.py)."""
     indented = "\n".join("    " + line for line in report.split("\n"))
-    return [role_said("%s\n<agent-message from=\"%s\">\n[Subagent hand-back]\n%s\n</agent-message>"
+    return [role_said("%s\n<agent-message from=\"%s\">\n[Agent hand-back]\n%s\n</agent-message>"
                       % (PFR_HAND_FRAME, agent_id, indented))]
 
 
