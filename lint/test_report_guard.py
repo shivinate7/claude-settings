@@ -3744,18 +3744,38 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        import time
-        lines = []
-        for i in range(600):
-            lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
-            lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
-        lines.append("const y = <p>In order to go.</p>;")
-        text = "\n".join(lines) + "\n"
-        self.assertGreaterEqual(len(lines), 4800)
-        started = time.monotonic()
-        codes = self.check("a.tsx", text)
-        self.assertLess(time.monotonic() - started, 2.0)
-        self.assertEqual(codes, ["STE011"])
+        # Work steps, not time: the copy events the scanner emits (a tag start, a text node, a tag end),
+        # counted at 50 blocks and at 200 blocks. Each block holds one generic and one <p>, so the scan
+        # emits 3 events per block, plus 3 for the last <p>: linear, bounded by 4x the small count plus 8.
+        # A scan that re-reads the text for each generic re-emits the events of every later block, so its
+        # count grows with the square of the size and breaks the bound.
+
+        def text_with(blocks):
+            lines = []
+            for i in range(blocks):
+                lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.append("const p%d = <p>Go now.</p>;" % i)
+                lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
+            lines.append("const y = <p>In order to go.</p>;")
+            return "\n".join(lines) + "\n"
+
+        def events(text):
+            with contextlib.ExitStack() as stack:
+                counters = [stack.enter_context(mock.patch.object(
+                                ste_lint._UICopy, name, autospec=True,
+                                side_effect=getattr(ste_lint._UICopy, name)))
+                            for name in ("start", "text", "end")]
+                codes = self.check("a.tsx", text)
+            return codes, sum(counter.call_count for counter in counters)
+
+        small_codes, small = events(text_with(50))
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertGreater(small, 0)
+        big_codes, big = events(text_with(200))
+        self.assertEqual(big_codes, ["STE011"])
+        self.assertLessEqual(big, 4 * small + 8,
+                             "200 blocks emit %d copy events, over 4x the %d of 50 blocks plus 8"
+                             % (big, small))
 
 
 class TurnReaderTests(unittest.TestCase):

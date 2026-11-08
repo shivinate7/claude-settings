@@ -28,10 +28,12 @@ P4. Make each failure message name one cause.
 - claude-settings hooks/mutate_guard.py — a red on the wrong case reads WRONG CAUSE, not a kill.
 Applies to: every test; guards and checks.
 
-P5. Never use a fixed sleep or a wall-clock wait bound; wait on a marker file or a condition. Never put a real clock or machine load in an assert; use an injected clock or a same-process ratio.
+P5. Never use a fixed sleep or a wall-clock wait bound; wait on a marker file or a condition. Never put a real clock or machine load in an assert; use an injected clock or a same-process ratio. A calendar date, a time-zone offset or a DST switch is a real clock too. A fixture stamped from the real clock, then judged by code that reads the clock again, must use one injected clock for both. Otherwise, a test that crosses a day or hour boundary goes red with no defect.
 - claude-settings plan c95-step2-escapes (roadmap branch) — 24 of 34 red runs on main were timing or load asserts.
 - q_max b14be7a95 — a fixed wait went false-green under load.
 - mailaudit 99bc9df — cases that waited real seconds moved to a virtual clock, asserts unchanged.
+- joyous PR 68 — main went red on 2026-11-03 because a test read the real clock; the fix pins the tour test's clock.
+- degen branch `l4-row-wait` — a test counted rows before they rendered; wait on the rendered condition, then count.
 Applies to: every test.
 
 P6. Treat a flake as a defect report: find its cause and make it deterministic before you widen a bound.
