@@ -73,7 +73,6 @@ REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it nam
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
 FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
-READ_FAILED_WORDS = ("git", "read", "rev-parse", "timed out")  # words a reason names a failed read with
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -927,21 +926,40 @@ class BudgetTests(unittest.TestCase):
                          "the push was not read as one unknown branch: %s" % states)
         return report_guard.push_ci_problem(REPORT, states)
 
-    def assert_names_failed_read(self, reason):
+    def failed_read_text(self, failure, ref):
+        """The message the head read of `ref` raises under `failure`: the read's own text, which a reason must carry."""
+        with failure:
+            with self.assertRaises(ci_wake.Unknown) as raised:
+                ci_wake.commit_read(ref, self.folder)
+        return str(raised.exception)
+
+    def assert_names_failed_read(self, reason, text):
         self.assertNotIn(UNNAMED_HEAD_TEXT, reason, "the failed head read is reported as the ref names no head, which "
                          "hides that the read failed: " + reason)
         self.assertIn("CI unknown on " + BRANCH, reason, "the push is not named unknown on %s: %s" % (BRANCH, reason))
-        self.assertTrue(any(word in reason for word in READ_FAILED_WORDS),
-                        "the reason does not name a failed read (one of %s): %s" % (READ_FAILED_WORDS, reason))
+        self.assertNotIn("budget", reason, "a failed head read is reported as the read budget, which was never spent: "
+                         + reason)
+        self.assertIn(text, reason, "the reason does not carry the head read's own message (%s): %s" % (text, reason))
 
     def test_missing_git_on_the_head_read_names_the_failed_read(self):
-        reason = self.failed_head_read_reason(mock.patch.object(ci_wake.shutil, "which", return_value=None))
-        self.assert_names_failed_read(reason)
+        ref = "refs/remotes/origin/%s" % BRANCH
+
+        def failure():
+            return mock.patch.object(ci_wake.shutil, "which", return_value=None)
+
+        text = self.failed_read_text(failure(), ref)
+        reason = self.failed_head_read_reason(failure())
+        self.assert_names_failed_read(reason, text)
 
     def test_timed_out_head_read_names_the_failed_read(self):
-        timeout = subprocess.TimeoutExpired(["git", "rev-parse"], 8)
-        reason = self.failed_head_read_reason(mock.patch.object(subprocess, "run", side_effect=timeout))
-        self.assert_names_failed_read(reason)
+        ref = "refs/remotes/origin/%s" % BRANCH
+
+        def failure():
+            return mock.patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(["git", "rev-parse"], 8))
+
+        text = self.failed_read_text(failure(), ref)
+        reason = self.failed_head_read_reason(failure())
+        self.assert_names_failed_read(reason, text)
 
 
 if __name__ == "__main__":
