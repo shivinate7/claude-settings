@@ -42,7 +42,7 @@
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403 (route graphql-gh-api-cloud).
-`gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
+A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond `api -X GET -f` is needed.
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
@@ -169,6 +169,7 @@ RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
+PAGE_CEILING = 500  # pages of 100 one list read may take (50,000 items) before Host.pages stops instead of looping
 RATE_LADDER = (60, 300, 900)  # seconds, one wait per retry (standing-merge-grant). GitHub's own reset time, when `gh api -i` gives one, is the wait instead. The last rung is the cap on any wait.
 # A rate-limit text (gh prints these on a 403 or 429): the wrapped HTTPError line, the GraphQL line, and `gh api`'s last line. Same anchors as the 5xx forms.
 _RATE_WRAPPED = r"(?:^|: )HTTP 403: (?:API rate limit|You have exceeded a secondary rate limit)[^\n]*\(https?://\S+\)\s*$"
@@ -213,6 +214,10 @@ def split_headers(out):
         return {}, out
     pairs = (line.partition(":") for line in m.group(0).splitlines()[1:])
     return {k.strip().lower(): v.strip() for k, sep, v in pairs if sep}, out[m.end():]
+
+def has_next_link(link):
+    """True when a `Link` header value has an entry whose rel is next. Only the relation counts: the entry's URL is never read."""
+    return any(re.search(r'\brel="?(?:[^";,]*\s)?next\b', entry) for entry in re.findall(r"<[^<>]*>([^<]*)", link or ""))
 
 def _seconds(value):
     """A header value as whole seconds, or None when it is not a number."""
@@ -727,11 +732,17 @@ class Host:
     def gh(self, args, cwd=None):
         """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
         `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
-        of the last call. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
-        c, out, self.net_retries = retry_net(lambda: sh(["gh", *args], cwd=cwd), self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
+        raw = []
+
+        def call():
+            c, out = sh(["gh", *args], cwd=cwd)
+            raw[:] = [out]
+            return c, out
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
-        return c, out
+        return c, raw[0] if "-i" in args else out
 
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
@@ -759,14 +770,29 @@ class Host:
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
-        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests."""
-        c, out = self.api(rel, "--paginate", "--slurp", fields={**(fields or {}), "per_page": 100})
-        try:
-            if c:
-                raise ValueError(out)
-            return [x for page in json.loads(out) for x in (page[key] if key else page)]
-        except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"reading {rel} from GitHub failed: {e}")
+        Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
+        so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
+        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
+        items = []
+        for n in range(1, PAGE_CEILING + 1):
+            c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
+            headers, out = split_headers(out)
+            try:
+                if c:
+                    raise ValueError(out)
+                page = json.loads(out)
+                page = page[key] if key else page
+                if not isinstance(page, list):
+                    raise TypeError(f"expected a list, got {type(page).__name__}")
+            except (ValueError, KeyError, TypeError) as e:
+                why = f" on page {n}: {e}"
+                break
+            items += page
+            if not has_next_link(headers.get("link")):
+                return items
+        else:
+            why = f": more than {PAGE_CEILING} pages of 100"
+        raise Stop(f"reading {rel} from GitHub failed{why}")
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
@@ -3057,10 +3083,10 @@ REVIEW_MODEL = r"(?!(?i:unknown)(?![A-Za-z0-9._-]))[A-Za-z0-9][A-Za-z0-9._-]*"  
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_SHA = r"[0-9a-f]{40}"
 REVIEW_FIX_VERDICTS = (*REVIEW_VERDICTS[:2], "WIDE")  # a fix check is PASS, FAIL or WIDE, never PARTIAL (decision hold-unsafe-after-round-3)
-ROUND3_PARTIAL_HOLDS = True  # owner page item 362 b, 2026-11-07 14:41 CST: a round-3 PARTIAL line holds, like a FAIL. False: it reads by the done rules
-FIX_PASS_CLEARS_ROUND3_HOLD = True  # owner page item 363 b, 2026-11-07 14:41 CST: a fix check PASS after a round-3 FAIL follows the round-3 done rules. False: the hold stays
-ROUND3_DESIGN_FAIL_HOLDS = True  # coordinator pick a (page item 356 q5), 2026-11-07 14:15 CST: a design-reviewer FAIL in round 3 holds. False: only a reviewer FAIL holds
-FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the lane's reading, agreed by the coordinator 2026-11-07 14:15 CST: a fix FAIL after round 3 holds. False: it reads open with the fix-failed why
+ROUND3_PARTIAL_HOLDS = True  # owner page item 362 b: a final-round PARTIAL line holds, like a FAIL. False: it reads by the done rules
+FIX_PASS_CLEARS_ROUND3_HOLD = True  # owner page item 363 b: a fix check PASS after a final-round FAIL follows the final-round done rules. False: the hold stays
+ROUND3_DESIGN_FAIL_HOLDS = True  # coordinator pick a on page item 356: a design-reviewer FAIL in the final round holds. False: only a reviewer FAIL holds
+FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the coordinator's pick (decision pr-review-record): a fix FAIL after the final round holds. False: it reads open with the fix-failed why
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
@@ -3119,9 +3145,10 @@ def review_state(rec, head):
     passing, and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
     final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
-    A round-3 line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
-    when ROUND3_PARTIAL_HOLDS; a design-reviewer line holds only when ROUND3_DESIGN_FAIL_HOLDS; a fix check PASS lifts the round-3 line hold when
-    FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules decide; a fix check FAIL after round 3 holds when FIX_FAIL_AFTER_ROUND3_HOLDS, else it reads open.
+    A final-round line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
+    when the PARTIAL switch is on; a design-reviewer line holds only when the design switch is on; a fix check PASS lifts a reviewer's final-round hold when
+    the fix-PASS switch is on, so the final-round done rules decide, but never a design reviewer's: that hold stays, and its why names the design reviewer;
+    a fix check FAIL after the final round holds when the fix-FAIL switch is on, else it reads open.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL is open, whatever the rounds say, and counts
     as the next round (after the last recorded one). A WIDE is open, counts no round and
@@ -3138,13 +3165,18 @@ def review_state(rec, head):
     top = max((i for i, *_ in rounds), default=0)
     fix = rec.get("fix")
     # a failed final round, or a failed fix check after it, holds the change; the finding becomes a new lane
-    # a final-round line holds when it is a FAIL, or a PARTIAL under ROUND3_PARTIAL_HOLDS; a design-reviewer line only under ROUND3_DESIGN_FAIL_HOLDS.
-    # A fix check PASS clears the hold under FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules below decide
+    # a final-round line holds when it is a FAIL, or a PARTIAL under the PARTIAL switch; a design-reviewer line only under the design switch.
+    # A fix check PASS clears a reviewer's hold under the fix-PASS switch, so the final-round done rules below decide. The fix check
+    # reviews the code reviewer's finding, so it never clears a design reviewer's hold
     holding = {"FAIL", "PARTIAL"} if ROUND3_PARTIAL_HOLDS else {"FAIL"}
     cleared = FIX_PASS_CLEARS_ROUND3_HOLD and fix and fix[3] == "PASS"
     if (not cleared and any(i == REVIEW_LAST_ROUND and v in holding and (role == REVIEW_ROLES[0] or ROUND3_DESIGN_FAIL_HOLDS) for i, role, _, v in rounds)) \
             or (FIX_FAIL_AFTER_ROUND3_HOLDS and fix and fix[3] == "FAIL" and top >= REVIEW_LAST_ROUND):
         return "held", f"round {REVIEW_LAST_ROUND} failed, so the finding becomes a new lane at round 1"
+    held_design = next((v for i, role, _, v in rounds if i == REVIEW_LAST_ROUND and role == REVIEW_ROLES[1] and v in holding), None)
+    if ROUND3_DESIGN_FAIL_HOLDS and held_design:  # reached only when a fix check PASS cleared the reviewer lines
+        return "held", (f"the {REVIEW_ROLES[1].replace('-', ' ')} in round {REVIEW_LAST_ROUND} is {held_design}, "
+                        "and a fix check PASS does not clear it, so the finding becomes a new lane at round 1")
     design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
@@ -3183,7 +3215,10 @@ def round_floor(earlier, rec):
     record that did not parse already dropped); else None. Counts never go down on one PR (decision pr-review-record): the floor is the highest, over
     `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. A newest
     record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
-    fix check floors at the record's own last round and counts no slot. The floor comes from the bodies the listing already holds."""
+    fix check floors at the record's own last round and counts no slot. A failed round stays failed: an earlier record's last round N is uncleared when
+    it has a FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it, clears it by reaching a round above N or by
+    carrying a fix check PASS; at the final round only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. An uncleared round reads
+    open, and the why names the earliest record at the highest such round. The floor comes from the bodies the listing already holds."""
     last = max((i for i, *_ in rec["rounds"]), default=0)
     best = None  # (floor, failed, record): the earliest record at the highest floor, a failed fix check first
     for e in earlier:
@@ -3201,13 +3236,31 @@ def round_floor(earlier, rec):
         n = max((i for i, *_ in e["rounds"]), default=0)
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none"
+    stuck = None  # (round, design, record): the earliest record at the highest uncleared round
+    later = [*earlier, rec]
+    for k, e in enumerate(earlier):
+        n = max((i for i, *_ in e["rounds"]), default=0)
+        failing = {role for i, role, _, v in e["rounds"] if i == n and v in REVIEW_VERDICTS[1:]}
+        if not failing and not (e["fix"] and e["fix"][3] in REVIEW_FIX_VERDICTS[1:]):
+            continue
+        design = REVIEW_ROLES[1] in failing  # a fix check reviews the code reviewer's finding, so its PASS never clears a design reviewer's line
+        if any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design) for r in later[k:]):
+            continue
+        if stuck is None or n > stuck[0]:
+            stuck = (n, design, e)
+    if stuck:
+        n, design, e = stuck
+        ways = ([f"reaches round {n + 1}"] if n < REVIEW_LAST_ROUND else []) + ([] if design else ["carries a fix check PASS"])
+        why = f"round {n} on head {e['head'][:9]} is not passed" + (", and no later record " + " or ".join(ways) if ways else "")
+        return why + (("; " if ways else ", and ") + f"a fix check PASS does not clear the {REVIEW_ROLES[1].replace('-', ' ')}" if design else "")
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The newest record is read against every earlier record of its pull request that parses (round_floor): it reads open when its last round is below the
-    round count any of them reached, or when a failed fix check's counted round holds no FAIL line. Same bodies, no extra call."""
+    round count any of them reached, when a failed fix check's counted round holds no FAIL line, or when an earlier record's failed round is not yet
+    cleared by a later round or a fix check PASS. Same bodies, no extra call."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."]
