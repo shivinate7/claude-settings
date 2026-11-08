@@ -1,0 +1,11 @@
+{
+  "title": "The builder-test-edit guard does not read a test run's label words as a test-file edit",
+  "why": "builder-test-edit refused `MUTATE_ONLY=\"a copy whose source is in another checkout\" python3 hooks/test_guard.py`, a test run only, by reading the words inside the quoted label (lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8); coordinator, 04:13 CST Nov 8).",
+  "note": "Fix: the guard reads an env-assignment value as data, not as command words, before it looks for a test-file write. Red case first: that command is refused today; control: a real write to a test file by a builder still refuses. Related done step refusal-stricter-fixes. Owner: lane other-checkout-cp-own, a fix in that lane (coordinator, 04:13 CST Nov 8). Queue fix. Filed 04:20 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 592,
+  "owner": "triage",
+  "lane": "session_013NEJL3R2CBFavz7grtbJY8",
+  "updatedAt": "2026-11-08T04:14:00-06:00"
+}

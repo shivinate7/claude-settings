@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T10:20:00Z",
+  "context": "Goal: a lane never stalls on an agent that cannot come back.\nProblem (rule): rule roles-resume-by-name says \"Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.\" A resumed builder or test-author whose worktree was cleaned up has the same problem: it stops at the worktree-home guard (lane other-checkout-cp-own, Nov 8). The rule is your text, so widening it needs your word.\nBased on (read): main's CLAUDE.md, rule roles-resume-by-name, read 04:19 CST Nov 8.\nBased on (read): step resume-finished-reviewer-no-tree (in progress) builds the refusal for the reviewer case.\nDeparts from: the rule names only a finished reviewer \u2014 it would name any finished agent whose worktree is gone, with the same remedy: a fresh agent given the prior report.\nMeanwhile: lanes keep working; a stalled builder is restarted by hand.",
+  "home": "resume-finished-reviewer-no-tree",
+  "id": "resume-any-finished-agent",
+  "kind": "decision",
+  "n": 409,
+  "options": [
+    {
+      "gain": "Builders and test-authors stop stalling on a cleaned-up worktree; one rule covers every role.",
+      "how": "The rule reads: \"Resume a dead agent by name, never fresh. When a finished agent's worktree is gone, send a fresh agent of the same role the prior report instead.\" Step resume-finished-reviewer-no-tree widens its refusal to match.",
+      "key": "a",
+      "label": "Cover any finished agent whose worktree is gone",
+      "lose": "A fresh builder starts without the dead one's working memory, only its report."
+    },
+    {
+      "gain": "No rule change.",
+      "how": "The rule stays as written. A resumed builder or test-author with no worktree keeps stopping at worktree-home, and the lane restarts it by hand.",
+      "key": "b",
+      "label": "Keep the rule for reviewers only",
+      "lose": "Lanes keep stalling on reaped builder and test-author worktrees."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "CLAUDE.md rule roles-resume-by-name; step resume-finished-reviewer-no-tree",
+  "short": "Resume rule: cover builders and test-authors",
+  "status": "open",
+  "title": "When any finished agent's worktree is gone, should the rule say to send a fresh agent the prior report, not only for reviewers?"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "The frozen-path guard judges a command the same with or without the `verdict` wrapper",
+  "why": "The frozen-path guard refused `MUTATE_ONLY=\"worktree-home: a copy\" verdict python3 hooks/test_guard.py`, while the same command without `verdict` passed (lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8); coordinator, 04:13 CST Nov 8).",
+  "note": "Fix: the frozen-path guard unwraps `verdict` (and reads a leading env assignment as data) before it matches, as it does for the bare command. Red case first: the `verdict` form is refused today; control: a `verdict`-wrapped write to a frozen path still refuses. Owner: lane other-checkout-cp-own, a fix in that lane (coordinator, 04:13 CST Nov 8). Queue fix. Filed 04:20 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 593,
+  "owner": "triage",
+  "lane": "session_013NEJL3R2CBFavz7grtbJY8",
+  "updatedAt": "2026-11-08T04:14:00-06:00"
+}
