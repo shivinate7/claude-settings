@@ -22,8 +22,22 @@ except ImportError:  # install-hooks-whole: the guard set lands whole, the helpe
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
+class _Raw(str):
+    """The marker type of RAW, so a test that counts `_git` calls by their string arguments reads it."""
+
+
+RAW = _Raw("<raw bytes>")
+
+
 def _git(where: str, *args):
+    """The finished git call, its output decoded as text. A first argument RAW keeps the output as bytes: the
+    same call, and the same `(where, *args)` shape for a reader that wraps it, with no keyword."""
+    raw = bool(args) and args[0] is RAW
+    if raw:
+        args = args[1:]
     try:
+        if raw:
+            return _nowindow.run(["git", "-C", where, *args], capture_output=True, timeout=10)
         return _nowindow.run(
             ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
         )

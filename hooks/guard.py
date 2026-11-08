@@ -2065,18 +2065,39 @@ def merge_tree(root: str, ours: str, theirs: str):
     return answer.stdout.split("\0", 1)[0].strip() or None
 
 
-CONFLICT_LABEL = re.compile(r"^([<=>|])\1{6}(?: [^\r\n]*)?(?=\r?$)", re.M)
+# A conflicted file's marker lines, as bytes so each line's ending stays. (guard_merge._MARKER_KINDS names the kind
+# of one line `git diff --check` flagged; this reads every marker line of a file, so it is a different rule.)
+CONFLICT_LABEL = re.compile(rb"^([<=>|])\1{6}(?: [^\r\n]*)?(?=\r?$)", re.M)
+
+
+def bytes_at(root: str, rev, rel: str):
+    """The file's bytes at `rev` (a commit or tree), in the working tree when `rev` is None, and None when it
+    does not exist there or `rev` is '' (no commit). An empty file is b'', not None."""
+    if rev is None:
+        try:
+            with open(os.path.join(root, rel), "rb") as handle:
+                return handle.read()
+        except Exception:
+            return None
+    if not rev:
+        return None
+    answer = guard_core._git(root, guard_core.RAW, "show", "--no-textconv", rev + ":" + norm(rel))
+    return answer.stdout if answer is not None and answer.returncode == 0 else None
 
 
 def merge_resolved(root: str, old: str, new, paths):
     """The paths among `paths` that differ from git's merge tree `old` in more than conflict-marker
     labels. `git merge-tree` labels its markers by commit (`>>>>>>> main`), `git merge` by branch, so a
-    conflicted file left as git wrote it differs in those labels alone. Compare each marker line by its
-    kind only (7 of `<`, `=`, `>` or `|`, then an optional label); every other byte must match.
-    Cost: two file reads (a git call for each commit side) per differing path, in a merge only."""
-    def bare(text):
-        return CONFLICT_LABEL.sub(lambda m: m.group(1) * 7, text)
-    return [rel for rel in paths if bare(text_at(root, old, rel)) != bare(text_at(root, new, rel))]
+    conflicted file left as git wrote it differs in those labels alone. Compare bytes, so a line ending or
+    an invalid byte is a change; compare presence, so an empty file added or deleted is one too. Each marker
+    line is compared by its kind only (7 of `<`, `=`, `>` or `|`, then an optional label); every other byte
+    must match.
+    Cost: in a merge only, one `git show` per differing path for the `old` side, and a second for a committed
+    merge's `new` side (an open merge reads the working-tree file instead). `own_changes` re-reads each
+    merge commit the agent made that HEAD still holds, so it repeats on each commit, push and stop."""
+    def bare(data):
+        return None if data is None else CONFLICT_LABEL.sub(lambda m: m.group(1) * 7, data)
+    return [rel for rel in paths if bare(bytes_at(root, old, rel)) != bare(bytes_at(root, new, rel))]
 
 
 def upstream_kept(root: str, orig: str, onto: str):
