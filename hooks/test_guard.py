@@ -11661,6 +11661,28 @@ sh("frozen: a node --eval writeFileSync onto bin/verdict is denied",
    cwd=NOGIT)
 sh("frozen: touch -r of bin/verdict reads its time and writes only /tmp/y, and is allowed",
    "touch -r " + CFG_VERDICT + " /tmp/y", "allow", cwd=NOGIT)
+# A BARE FROZEN FOLDER IS A WRITE TARGET TOO. A write that names the folder itself, with no file under it,
+# removes, copies into or moves onto the folder. The allow rows read the folder only: a listing, a cd and
+# a listing, a search, and a find by name.
+CFG_HOOK_DIR = slash(os.path.join(CFG, "hooks"))
+sh("frozen: rm -rf of the bare frozen hooks folder is denied", "rm -rf " + CFG_HOOK_DIR, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: rm -r of the bare frozen hooks folder with a trailing slash is denied",
+   "rm -r " + CFG_HOOK_DIR + "/", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp into the bare frozen hooks folder is denied", "cp x " + CFG_HOOK_DIR + "/", "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: mv onto the bare frozen hooks folder is denied", "mv x " + CFG_HOOK_DIR, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: cp -r of a source into the bare frozen hooks folder is denied",
+   "cp -r src/. " + CFG_HOOK_DIR, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: ls of the bare frozen hooks folder is a read, and is allowed", "ls " + CFG_HOOK_DIR,
+   "allow", cwd=NOGIT)
+sh("frozen: cd into the bare frozen hooks folder, then ls, is a read, and is allowed",
+   "cd " + CFG_HOOK_DIR + " && ls", "allow", cwd=NOGIT)
+sh("frozen: grep -rn of the bare frozen hooks folder is a read, and is allowed",
+   "grep -rn x " + CFG_HOOK_DIR, "allow", cwd=NOGIT)
+sh("frozen: find of the bare frozen hooks folder by name is a read, and is allowed",
+   "find " + CFG_HOOK_DIR + " -name '*.py'", "allow", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
