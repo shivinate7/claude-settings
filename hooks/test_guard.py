@@ -14756,10 +14756,10 @@ def _f1b_push_reset(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
-def _f2_conflict_merge(w):
+def _f2_conflict_open(w):
     """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
-    line at the same place in that file. The builder merges main, the test file conflicts, and the builder
-    takes its own side and commits the merge by hand (reflog `commit (merge)`)."""
+    line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
+    left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
     main = w + "-main"
     _test_author_lane(w)
     _must(w, "reset", "-q", "--hard", "lane")
@@ -14769,6 +14769,12 @@ def _f2_conflict_merge(w):
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+
+
+def _f2_conflict_merge(w):
+    """The open merge of _f2_conflict_open. The builder takes its own side of the test file and commits the
+    merge by hand (reflog `commit (merge)`)."""
+    _f2_conflict_open(w)
     write(os.path.join(w, TEST_A), LANE_TEXT)
     _must(w, "add", "-A")
     _must(w, *IDENT, "commit", "-q", "--no-edit")
@@ -14823,15 +14829,17 @@ def _push_main(w):
     _must(w + "-main", "push", "-q", "origin", "main")
 
 
-def _c1_mid_merge(w):
+def _c1_mid_merge(w, extra_tests=()):
     """Cut at main. The builder commits product work. Main then changes a test file and the product file the
-    builder changed. The builder merges main: the product file conflicts and the test file merges clean. The
-    builder resolves the product file and stops before the commit."""
+    builder changed, and adds each of `extra_tests`. The builder merges main: the product file conflicts and the
+    test files merge clean. The builder resolves the product file and stops before the commit."""
     main = w + "-main"
     _origin(w)
     _push_main(w)
     _product_commit(w)
     write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    for rel in extra_tests:
+        write(os.path.join(main, rel), "def test_clean():\n    assert 2\n")
     write(os.path.join(main, "src/app.py"), "x = 10\n")
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main changes a test file and the product file")
@@ -14846,6 +14854,32 @@ def _c1_mid_merge(w):
 def _c1_committed(w):
     _c1_mid_merge(w)
     _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+# Twenty test files that main adds and the builder never touches: each merges clean into the builder's tree.
+MANY_CLEAN_TESTS = ["tests/test_clean_%02d.py" % n for n in range(1, 21)]
+
+
+def _c1_many_clean(w):
+    """The _c1_mid_merge shape, with twenty more test files that main adds and that merge clean beside TEST_A."""
+    _c1_mid_merge(w, MANY_CLEAN_TESTS)
+
+
+def _open_test_conflict_left(w):
+    """The open merge of _f2_conflict_open, with the builder's product edit staged. The conflicted test file stays
+    as git's merge wrote it, with its conflict markers: the test-author resolves it next, so the builder may
+    commit now."""
+    _f2_conflict_open(w)
+    _require_conflict(w, TEST_A)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "src/app.py")
+
+
+def _open_test_conflict_edited(w):
+    """The open merge of _f2_conflict_open, where the builder rewrites the conflicted test file to its own side.
+    The bytes are no text git's merge wrote, so this is the builder's own change."""
+    _open_test_conflict_left(w)
+    write(os.path.join(w, TEST_A), LANE_TEXT)
 
 
 def _g_lane_and_product(w):
@@ -15242,6 +15276,21 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase -i that squashes a fixup of t
 diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
+
+# A merge in progress is git's until the builder edits it. The builder's commit of its product edit is allowed when
+# the test file stays as git's merge wrote it, with its conflict markers: the test-author resolves that file next.
+# The same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
+_bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
+sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
+   "wrote it, is allowed at commit", COMMIT, "allow", cwd=_bd_m_left, agent_id="bld1", agent_type="builder")
+_bd_m_edited = diff_repo("bd-m-test-edited", _open_test_conflict_edited)
+sh("builder-refuse: a builder's merge in progress that rewrites a conflicted test file to its own side is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_edited, agent_id="bld1", agent_type="builder")
+
+# A merge in progress where the merged branch added twenty test files that merged clean is git's, and allowed.
+_bd_m_many = diff_repo("bd-m-many-clean", _c1_many_clean)
+sh("builder-refuse: a builder's merge in progress, with twenty test files that merged clean and a product file "
+   "resolved, is allowed at commit", COMMIT, "allow", cwd=_bd_m_many, agent_id="bld1", agent_type="builder")
 
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
