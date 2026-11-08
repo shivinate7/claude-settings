@@ -13575,11 +13575,12 @@ def setUpModule():
 
 
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None, later=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None, renames=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
         target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
-        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
+        a prose file are selected through the diff base, and a cited line through the backing file it cites. `renames` ({old: new})
+        is one more feat commit after the base too: a git mv of each old path to its new one."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -13596,10 +13597,12 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
-        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+        if later or renames:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
             sh(o, "git", "fetch", "-q", "origin")
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-            for path, text in later.items():
+            for old, new in (renames or {}).items():
+                sh(o, "git", "mv", old, new)  # the new path keeps the old text, so git reads a pure rename
+            for path, text in (later or {}).items():
                 put(os.path.join(o, path), text)
             sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
@@ -13872,6 +13875,18 @@ class ProseJudge(Env):
             with self.assertRaises(ModelStarted):
                 decision_watch._nowindow.run(["claude", "-p"])
         self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_a_renamed_prose_file_has_its_lines_judged_as_added(self):
+        # --no-renames in prose_judge_lines: the moved file's lines read as added, so each is judged. Under rename detection a pure
+        # rename adds no line, and its lines go unjudged. Scope first: the range is one pure rename of the prose file.
+        moved = "docs/notes/moved.md"
+        self.setup_range({PROSE: "# Cloud notes\n\nThe cloud runner is idle on weekends.\n"}, {}, renames={PROSE: moved})
+        base = sh(self.other, "git", "merge-base", "origin/main", "origin/feat")
+        scope = sh(self.other, "git", "diff", "--name-status", "-M", base, "origin/feat")
+        self.assertIn("R100\t%s\t%s" % (PROSE, moved), scope, "the range is not a pure rename of %s, so the case proves nothing:\n%s" % (PROSE, scope))
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the moved %s adds its line, so the line is judged\n%s" % (len(stub.prompts), moved, out))
+        self.assertIn("idle on weekends", stub.prompts[0], "the call does not carry the moved file's line")
 
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
