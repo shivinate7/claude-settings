@@ -534,12 +534,12 @@ def _wrapper_name(word: str) -> str:
     return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
 
 
-def _quoted_words(segment: str, keep_newline: bool = False):
+def _quoted_words(segment: str, keep_newlines=False):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
-    The redirects are spaced into words of their own outside the quotes only. A quote with no
-    closing mate is a plain character, so a lone quote in text still leaves the words after it.
-    With `keep_newline` a line break inside quotes stays a line break (the env reader splits a
-    shell string there); by default it is a space, as guard_frozen reads it."""
+    A newline inside a quote reads as a space, or stays a newline with `keep_newlines`, for a caller that
+    reads the quoted text as a script (a `bash -c` string with two lines runs two commands). The redirects
+    are spaced into words of their own outside the quotes only. A quote with no
+    closing mate is a plain character, so a lone quote in text still leaves the words after it."""
     chunks, plain, i, n = [], [], 0, len(segment)
 
     def flush():
@@ -559,8 +559,8 @@ def _quoted_words(segment: str, keep_newline: bool = False):
                 j += 2 if char == '"' and segment[j] == "\\" else 1
             if j < n:
                 flush()
-                blank = r"[^\S\n]" if keep_newline else r"\s"
-                chunks.append(re.sub(blank, "\0", segment[i:j + 1]).replace("\n", "\1"))
+                chunks.append(re.sub(r"\s", lambda m: "\1" if keep_newlines and m.group() == "\n" else "\0",
+                                     segment[i:j + 1]))
                 i = j + 1
                 continue
         plain.append(char)
@@ -571,7 +571,7 @@ def _quoted_words(segment: str, keep_newline: bool = False):
 
 def _env_words(segment: str):
     """Return (words, command word) of one segment, redirects spaced into words of their own."""
-    words = _quoted_words(_blank_messages(segment), True)
+    words = _quoted_words(_blank_messages(segment), keep_newlines=True)
     # The command is the first word that is not a `VAR=value` assignment.
     # A `(` glued to the first assignment is a subshell paren, not part of the name.
     if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
