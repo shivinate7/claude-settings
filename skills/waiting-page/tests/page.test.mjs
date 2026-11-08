@@ -153,6 +153,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   if (clock) await page.clock.setFixedTime(new Date(clock));
   // timers: the page's timers run on a synthetic clock from the start. Time flows as usual until a case moves it with runTimers.
   if (timers) await page.clock.install();
+  if (clock || timers) clocked.add(page);
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -160,12 +161,12 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
 }
+// Pages whose synthetic clock is set: open's clock or timers option, or openStatus's install. A second install would drop a fixed time.
+const clocked = new WeakSet();
 const card = (page, it) => page.locator(`#item-${it.id}`);
 // Runs the page's timers ms ahead on the synthetic clock (open({ timers: true }), or openStatus). Each timer due by then fires inside the call, with no real wait.
 // The clock keeps running in real time after the call, so the page stays usable. Resolves to the message of an error a timer threw, or null: the clock rethrows it here.
 const runTimers = (page, ms) => page.clock.runFor(ms).then(() => null, (e) => String(e && e.message || e).split("\n")[0]);
-// Ends once the page's queued promise work has run: a macrotask after the microtasks. No timer and no wait.
-const flush = (page) => page.evaluate(() => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); }));
 const answers = (page) => page.evaluate(() => window.__answers());
 // A tap on an option's picture opens the viewer (d9 ruling), so a pick taps the option's label text.
 const choose = (page, it, key) => page.locator(`label[for="o-${it.id}-${key}"] .lab`).click();
@@ -1787,12 +1788,12 @@ test("Undo deletes before the canSend wait", async (t) => {
 });
 
 test("Undo refuses a delete once 8 seconds from the send have passed", async (t) => {
-  const page = await open(t); if (!page) return;
+  const page = await open(t, { timers: true }); if (!page) return;
   await takePick(page, DECISION); await send(page);
   await page.locator("#undoBtn").waitFor();
   await page.evaluate(() => { const real = Date.now, b = document.getElementById("undoBtn"); Date.now = () => real() + 9000; b.click(); });
-  // The refused Undo's work is promise work, so a flush ends it. A mutant that moves the entry check after an await still deletes nothing, since the loop's clock check refuses each delete.
-  await flush(page);
+  // The refused Undo's work may wait on a page timer, so the synthetic clock runs 400 ms on and fires it. A mutant that moves the entry check after an await still deletes nothing, since the loop's clock check refuses each delete.
+  assert.equal(await runTimers(page, 400), null, "a page timer threw during the refused Undo");
   assert.equal((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete").length, 0, "a delete ran after the window");
   assert.ok((await answers(page))[DECISION.id]);
 });
@@ -5135,14 +5136,15 @@ test("a receipt wholly below the screen drops its height without moving the page
   await noAnchor(page);
   await choose(page, items[0], "a");
   await page.evaluate(() => window.scrollTo(0, 60));
-  // The sent card is in the flow, so a page scroll moves its top at any width. The rail is sticky above 960 px, so a scroll there leaves it in place.
-  const cardTop = () => page.evaluate(() => Math.round(document.getElementById("item-q0").getBoundingClientRect().top));
+  // The rail is in the flow at this width (static under 960 px), so a page scroll moves it. A send moves the card, so the baseline is the rail's
+  // top before Send: a page move during the receipt's build counts too.
+  const railTop = () => page.evaluate(() => Math.round(document.querySelector(".ov-prog").getBoundingClientRect().top));
+  const at = await railTop();
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  const at = await cardTop();
   // The synthetic clock runs 600 ms on, so a page move that a receipt timer starts fires here.
   assert.equal(await runTimers(page, 600), null, "a page timer threw while the receipt shrank");
-  assert.ok(Math.abs((await cardTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
+  assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
 // A phone mockup shows whole, so the design caps its height at 480px (docs/design/c193-sizes.md item 3); it scales to its card and stays centred.
@@ -5608,7 +5610,6 @@ const LEAK = {
 // The waiting part reads items, answers, groups, receipts and meta/page. A read of anything else is the status part's.
 const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
 const statusTab = (page) => page.getByRole("tab", { name: "Status", exact: true });
-const clocked = new WeakSet(); // pages whose synthetic clock openStatus has installed
 async function openStatus(page) {
   const tab = statusTab(page);
   assert.equal(await tab.count(), 1, "the page has no Status tab (role=tab, name Status)");
