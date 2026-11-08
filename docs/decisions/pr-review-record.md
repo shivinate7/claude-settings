@@ -63,7 +63,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
-Round 3 for a guard or check change is prose only: the merge tool still reads a `Guard or check: yes` record as done after a round-1 or round-2 PASS, by the first rule above.
+Round 3 for a guard or check change is prose only. The merge tool still reads a `Guard or check: yes` record as done after a round-1 or round-2 PASS, by the first rule above.
 
 ## The cost
 
