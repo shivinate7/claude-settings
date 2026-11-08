@@ -118,7 +118,7 @@ CHECKIN_DELETE = "mcp__claude-code-remote__delete_trigger"
 CHECKIN_MAKERS = (("create_trigger", "`create_trigger`"), ("send_later", "`send_later`"))
 # (name, case-insensitive pattern) for each check-in act the Own Check-in Delete "Never covers" must name.
 CHECKIN_REFUSED = (("list_triggers", "`list_triggers`"), ("update_trigger", "`update_trigger`"),
-                   ("fire_trigger", "`fire_trigger`"),
+                   ("fire_trigger", "`fire_trigger`"), ("any other remote tool", "any other remote tool"),
                    ("trigger this session did not visibly create",
                     "trigger this session did not visibly create"),
                    ("create_new_session_on_fire", "`create_new_session_on_fire`"),
