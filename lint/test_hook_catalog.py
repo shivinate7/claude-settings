@@ -1554,6 +1554,12 @@ class Helpers(unittest.TestCase):
     def test_u1_escaped_pipe_in_a_code_span_stays_in_its_cell(self):
         self.assertEqual(split_cells("| `Bash\\|PowerShell` | x |"), ["`Bash|PowerShell`", "x"])
 
+    def test_one_home_mask_tag_after_a_double_span_with_an_inner_backtick_is_wrapped(self):
+        from hook_catalog import cell  # noqa: E402  one table cell, the What it does column (lint/hook_catalog.py)
+        self.assertEqual(cell("`a` <tag>"), "`a` `<tag>`", "control: a tag after a plain span is wrapped")
+        self.assertEqual(cell("`` a ` `` <tag>"), "`` a ` `` `<tag>`",
+                         "a lone backtick before a double span leaves the tag after the span bare")
+
     def test_u5_records_rows_reads_each_section_and_unescapes_a_pipe(self):
         text = ("# Records\n\n## Debts\n\n| Slug | Gist | Link |\n|---|---|---|\n"
                 "| `a-b` | One \\| two. | [a-b](../debts/a-b.md) |\n\n"
@@ -1693,6 +1699,15 @@ class CellCap(Tree):
     def test_e12_a_short_span_that_straddles_the_cap_is_cut_before_it(self):
         cap = cell_cap()
         text = prose(cap - 40) + " `" + "c" * 10 + " | " + "d" * 60 + "` " + PROSE * 20  # starts before the cap, ends after, with spaces inside before it
+        self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
+
+    def test_one_home_mask_a_cut_never_lands_inside_a_double_span(self):
+        # A single-backtick reading puts the cut on the span's inner backtick. The span opens before the cut,
+        # so the cell must end before the span, never inside it.
+        cap = cell_cap()
+        control = prose(cap - 30) + " ` a " + "c" * 40 + " ` " + PROSE * 20  # a plain span over the same spot
+        self.assert_span_cut(self.render_skill(control), "skills/alpha", control)
+        text = prose(cap - 30) + " `` a ` " + "c" * 40 + " `` " + PROSE * 20
         self.assert_span_cut(self.render_skill(text), "skills/alpha", text)
 
     def test_e9_comment_openers_inside_a_code_span_at_the_cut_are_text_not_comments(self):

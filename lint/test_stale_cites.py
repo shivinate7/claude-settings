@@ -2358,6 +2358,18 @@ class ValueCiteTests(StaleCase):
         head[NOTES] = "# Notes\n\n" + "".join("- row %d: `%s`\n" % (k + 1, row["cite"]) for k, row in enumerate(rows))
         return self.value_range(base, head)
 
+    def test_one_home_mask_json_cite_with_a_backtick_in_its_literal_is_read_whole(self):
+        # Control: a plain JSON literal in a single-backtick span is read, and its added line passes.
+        plain = '"ab"'
+        self.assertEqual(module_value(value_file("NAME", plain), "NAME"), "ab")  # scope: the literal binds "ab"
+        self.assert_passes(self.value_range({CONFIG: value_file("NAME", plain)},
+                                            {NOTES: "# Notes\n\n- retry name `%s: NAME = %s`\n" % (CONFIG, plain)}))
+        # The string holds a backtick, so the cite needs a double-backtick span to carry the whole literal.
+        quoted = '"a ` b"'
+        self.assertEqual(module_value(value_file("NAME", quoted), "NAME"), "a ` b")  # scope: the literal holds a backtick
+        self.assert_passes(self.value_range({CONFIG: value_file("NAME", quoted)},
+                                            {NOTES: "# Notes\n\n- retry name ``%s: NAME = %s``\n" % (CONFIG, quoted)}))
+
     # Fires: the range changed or removed the value a line quotes, or added a line that does not match head.
 
     def test_a_changed_value_still_quoted_by_an_untouched_line_is_flagged(self):

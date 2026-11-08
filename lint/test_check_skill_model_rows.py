@@ -365,6 +365,19 @@ class OpenFences(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(out, "")
 
+    def test_one_home_mask_comment_opener_after_an_unclosed_double_run_is_not_a_comment(self):
+        # Control, green today: a real opener after a plain span is an open comment, named as one.
+        files = skills("alpha")
+        text = record([row("alpha")], extra="intro `x` <!-- y\n")
+        files[RECORD] = text
+        code, out = run(files)
+        self.assertEqual(code, 1, out)
+        self.assertNamed(out, "comment", text.splitlines().index("intro `x` <!-- y") + 1)
+        # The `` run closes no span, so the single span after it holds the opener: it is code, and no comment opens.
+        files[RECORD] = record([row("alpha")], extra="intro `` x ` <!-- y `\n")
+        code, out = run(files)
+        self.assertEqual(code, 0, out)
+
 
 class Folders(unittest.TestCase):
     """Exact SKILL.md, dot folders, unreadable folders."""

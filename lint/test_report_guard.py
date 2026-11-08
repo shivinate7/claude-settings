@@ -2709,8 +2709,20 @@ class DoubleBacktickMaskTests(unittest.TestCase):
                          "text inside a double-backtick span is linted as prose")
 
     def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
-        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
+        # The span holds 25 words, so a mask that reads them as prose goes over the 30-word budget.
+        words = " ".join(["word"] * 25)
+        self.assertIn("STE001", self.codes("Set the flag " + words + " and then stop the pump now.\n"),
+                      "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Set the flag ``" + words + "`` and then stop the pump now.\n"),
                          "a double-backtick span with no backtick inside adds a finding")
+
+    def test_one_home_mask_span_does_not_cross_a_line_break(self):
+        # Control: a one-line code span matches. The pin: the same span with a line break inside does not.
+        words = " ".join(["word"] * 31)
+        self.assertIsNotNone(ste_lint.INLINE_CODE_RE.search("`status " + words + "` now."),
+                             "control: a one-line code span does not match")
+        self.assertIsNone(ste_lint.INLINE_CODE_RE.search("`status\n" + words + "` now."),
+                          "INLINE_CODE_RE matches a code span across a line break")
 
     def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
         # The `` run has no closing run of two, so it is literal text and opens no span.
@@ -2755,6 +2767,33 @@ class DoubleBacktickMaskTests(unittest.TestCase):
                 "before the branch is pushed to the shared remote today for the crew now")
         self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
         self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
+
+
+class ReportGuardMaskTests(unittest.TestCase):
+    """The report guard's own code-span masks read a double-backtick span as one span, as INLINE_CODE_RE does
+    (lint/ste_lint.py, the one masker). Each case puts an inner backtick, or an unclosed run, where a
+    single-backtick mask pairs the wrong backticks, and asserts the answer the code span gives."""
+
+    def test_one_home_mask_bare_cite_after_an_inner_backtick_span_is_read_as_prose(self):
+        import report_guard  # noqa: E402  bare_cite, the Done-line cite check (lint/report_guard.py)
+        self.assertEqual(report_guard.bare_cite("Done: `a b` D12 bare and `x`."), "D12",
+                         "control: a plain span hides nothing, so the bare cite is found")
+        self.assertEqual(report_guard.bare_cite("Done: `` a ` b `` D12 bare and `x`."), "D12",
+                         "a double span with an inner backtick hides the bare cite after it")
+
+    def test_one_home_mask_question_after_an_inner_backtick_span_is_asked(self):
+        import report_guard  # noqa: E402  asks_a_question, the Input Needed check (lint/report_guard.py)
+        self.assertTrue(report_guard.asks_a_question("> **Input Needed** Keep `a b` and is it done? `x` (my pick): ship it.\n"),
+                        "control: a question after a plain span is asked")
+        self.assertTrue(report_guard.asks_a_question("> **Input Needed** Keep ``a ` b`` and is it done? `x` (my pick): ship it.\n"),
+                        "a question after a double span with an inner backtick is hidden, so it is not asked")
+
+    def test_one_home_mask_unclosed_run_mid_line_opens_no_span_for_a_question(self):
+        import report_guard  # noqa: E402  prose_questions, the reply's own question lines (lint/report_guard.py)
+        self.assertEqual(report_guard.prose_questions("Say `x` what? y.\n"), ["Say `x` what? y."],
+                         "control: a question after a plain span is found")
+        self.assertEqual(report_guard.prose_questions("Say `` x ` what? y `\n"), [],
+                         "the question sits in a span that an unclosed `` run does not close, so it is code")
 
 
 class DecisionGlossCollapseTests(unittest.TestCase):

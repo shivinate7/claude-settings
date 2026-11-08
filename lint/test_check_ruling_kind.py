@@ -215,6 +215,16 @@ class RulingKindTests(unittest.TestCase):
         self.put(REC, record(ruling))
         self.assert_passes(REC)
 
+    def test_one_home_mask_comment_opener_after_an_inner_backtick_span_passes(self):
+        # Control: a single-backtick span holds the opener, so the Kind line after it counts.
+        plain = "Owner ruling, 2026-10-12. Prose names `<!-- x` here.\n\nKind: build\nPlan: %s (mac)" % L1
+        self.put(REC, record(plain))
+        self.assert_passes(REC)
+        # The opener's `` run closes at the final ``, so the <!-- is code and no comment opens.
+        ruling = "Owner ruling, 2026-10-12. Prose names ``<!-- `x`` here.\n\nKind: build\nPlan: %s (mac)" % L1
+        self.put(REC, record(ruling))
+        self.assert_passes(REC)
+
     def test_apostrophe_heading_slugs_as_github_does(self):
         self.put(REC, record("Kind: build\nPlan: plans/build-plan.md#dont-stop-the-sweep (mac)"))
         self.assert_passes(REC)
