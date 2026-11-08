@@ -2416,6 +2416,7 @@ class RevivedNote(unittest.TestCase):
     DOUBLED = "- doubled-note: a finding a union merge doubles (lint/check_doubled.py)"
     LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
     REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
+    SECOND = "- second-note: a finding the branch deletes with retired-note (lint/check_second.py)"
     IN_PLACE = "an edit in place does not keep a note"  # the refusal's words, compared lowercased
 
     def text(self, *lines):
@@ -2495,6 +2496,17 @@ class RevivedNote(unittest.TestCase):
         lines = self.body(head)
         lines.remove(self.DOUBLED)
         return self.commit_notes("delete one copy of the doubled note", lines)
+
+    def start_two(self):
+        """Two notes the branch deletes in one commit, with main appending after them: the union merge of main brings both back."""
+        return self.start(union=True, base=(self.UNTOUCHED, self.RETIRED, self.SECOND), branch=(self.UNTOUCHED,),
+                          main=(self.UNTOUCHED, self.RETIRED, self.SECOND, self.MAIN))
+
+    def trailer_commit(self, reason):
+        """An empty commit on the branch whose last paragraph is the notes path's `Drops-lines` trailer with `reason`. It touches
+        no file, so it moves no count. -> the sha."""
+        self.r.sh("commit", "-q", "--allow-empty", "-m", "Keep the notes change on purpose\n\n%s: %s -- %s" % (C.TRAILER, self.NOTES, reason))
+        return self.r.sh("rev-parse", "HEAD")
 
     def assert_refused(self, got, slug="retired-note", deleted=None):
         """One problem line names the note and the commit that deleted it: retired-note and self.retire, unless the case names
@@ -2632,6 +2644,54 @@ class RevivedNote(unittest.TestCase):
         self.commit_notes("re-add the note on purpose", self.body(head))
         self.assertIn(self.RETIRED, self.notes_at("HEAD"), "premise: the re-add put retired-note back in the head")
         self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
+
+    def test_a_trailer_naming_one_revived_note_refuses_the_other(self):
+        self.start_two()
+        self.merge_main()
+        self.assert_refused(self.r.verdict(), slug="retired-note")
+        self.assert_refused(self.r.verdict(), slug="second-note")
+        self.trailer_commit("the owner retired both - retired-note")
+        got = self.r.verdict()
+        self.assert_refused(got, slug="second-note")
+        self.assertEqual([p for p in got if "note `retired-note`" in p], [],
+                         "retired-note is named in the trailer and was refused anyway: %r" % got)
+
+    def test_a_trailer_naming_both_revived_notes_passes(self):
+        self.start_two()
+        self.merge_main()
+        got = self.r.verdict()
+        self.assert_refused(got, slug="retired-note")
+        self.assert_refused(got, slug="second-note")
+        self.trailer_commit("the owner retired both - retired-note - second-note")
+        self.assertEqual(self.r.verdict(), [], "a trailer that names both revived notes was refused")
+
+    def test_a_trailer_that_names_no_slug_is_refused_and_says_how_to_name_one(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it")
+        got = self.r.verdict()
+        self.assert_refused(got)
+        named = [p for p in got if C.TRAILER in p and "- retired-note" in p]
+        self.assertTrue(named, "the refusal for retired-note does not say how to name the slug in %s: %r" % (C.TRAILER, got))
+
+    def test_a_lost_line_on_the_notes_path_passes_under_a_path_only_trailer(self):
+        self.start(union=True, retire=False)
+        self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN))
+        self.assertIn(self.MAIN, self.merged, "premise: the union merge kept main-note")
+        got = self.r.verdict()
+        self.assertTrue([p for p in got if "drops" in p and self.NOTES in p],
+                        "premise: the merge drops main-note, a lost-lines finding on the notes path: %r" % got)
+        self.assertEqual([p for p in got if "note `" in p], [], "premise: no slug was lowered, so nothing is a revival: %r" % got)
+        self.trailer_commit("the owner dropped main's line on purpose")
+        self.assertEqual(self.r.verdict(), [], "a lost line on the notes path was refused under a path-only trailer")
+
+    def test_a_trailer_naming_a_slug_never_revived_passes(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it - retired-note - untouched-note - no-such-note")
+        self.assertEqual(self.r.verdict(), [], "a trailer that also names slugs never revived was refused")
 
 
 if __name__ == "__main__":
