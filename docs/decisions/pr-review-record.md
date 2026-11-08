@@ -47,11 +47,12 @@ CI: read live by merge --reviewed
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
 - A Round line may end in the head its reviewer read: `--round N:ROLE:MODEL:VERDICT:SHA`, 9 to 40 lowercase hex. It prints as `Round N: role, model, verdict, SHA`. A record names a head on every line or on none. The old four-field form still parses.
 - Why: PR 2235 posted rounds 1 to 3 at once, read on another PR's heads, and passed round 3 at the head where round 2 failed. The coordinator withdrew the earlier own-rounds rule at 15:56 CST on 2026-11-08, because a named head proves more.
-- The write step refuses, with exit 2 and no record, a named head that is not one of the PR's own commits. That means the live head, or an ancestor of it that the base branch lacks.
+- The write step refuses, with exit 2 and no record, a named head that is not one of the PR's own commits. An own commit is the live head, or an ancestor of it that the base branch lacks.
 - Two compare reads prove it for each distinct sha, the ancestor read and the base read. The live head needs only the base read. This is the same proof the open FAIL record on an ancestor head uses.
-- The write step also refuses a record whose top round is all PASS on a head where an earlier record's top round FAILed or PARTIALed, with exit 2. A passed fix check on that earlier record lifts it.
-- An earlier body that does not parse refuses too, when a FAIL or PARTIAL Round line names that head. A record that names no head compares Heads and counts only FAIL, as before.
+- The write step also refuses a record whose top round is all PASS on a head where an earlier record's top round FAILed or PARTIALed, with exit 2. It does the same for a lower round of its own record. A passed fix check on that earlier record lifts it. The listing reads the same fault as open.
+- An earlier body that does not parse refuses only when it holds a FAIL or PARTIAL Round line naming that head: by its sha, or by its `Head:` line when the line names none. A record that names no head compares Heads, and FAIL and PARTIAL both count.
 - `merge --reviewed` reads a record that names heads as done only when every top-round line names the live head, or a fix check PASS follows. Otherwise it reads stale, and the why names the head.
+- A records-only commit after a passing round needs a fix check record, because the gate reads the top round's head (lane pick, 16:25 CST Nov 8).
 - The Fix check line is unchanged. Its read head is the record's Head, because a fix check always reads up to that head, so the line needs no sha of its own.
 - The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 

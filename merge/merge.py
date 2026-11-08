@@ -28,11 +28,11 @@
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
                           --round's optional SHA (9 to 40 lowercase hex) is the head that round's reviewer read; it prints as `Round N: role,
                           model, verdict, SHA`. Name one on every line or on none. Each SHA must be one of the PR's own commits: the live head,
-                          or an ancestor of it that the base branch lacks (two compare reads per distinct SHA), or it refuses (exit 2). A fix
+                          or an ancestor of it that the base branch lacks (two compare reads per distinct SHA, one for the live head), or it refuses (exit 2). A fix
                           check's read head is the record's Head. A record that names heads reads done only when every top-round line names
                           the live head, or a fix check PASS follows; else stale. It refuses (exit 2) a top round that is all PASS on a head
-                          where an earlier record's top round FAILed or PARTIALed, unless that record has a fix check PASS; a record that
-                          names no head compares Heads, and only FAIL counts. A plain record makes one paged comment-list read of the
+                          where an earlier record's top round, or a lower round of its own record, FAILed or PARTIALed, unless that record has a fix check PASS; a record that
+                          names no head compares Heads, and FAIL and PARTIAL count. A plain record makes one paged comment-list read of the
                           repo's comments since the PR opened; a fix check makes none.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
@@ -3356,8 +3356,12 @@ def fix_chain_problem(earlier, rec):
         return f"the chain holds {count} fix checks, past the cap of {FIX_CHAIN_CAP}; the next change starts a fresh chain from round 1, with records up to the last round reached"
 
 def round_floor(earlier, rec):
-    """-> the why of floor_problem, else the why of fix_chain_problem, else the why of uncleared_round, else None."""
-    return (floor_problem(earlier, rec) or (None,))[0] or fix_chain_problem(earlier, rec) or uncleared_round(earlier, rec)
+    """-> the why of floor_problem, else the why of fix_chain_problem, else the why of uncleared_round, else the why of same_head_problem (a top round
+    that passes on a head a lower round of its record, or an earlier record, failed; read only for a record that names heads, since an old-form record
+    compares Heads and its listing has always read by the round rules alone), else None. Same bodies the listing already holds, no extra read."""
+    named = bool(rec["rounds"]) and len(rec["rounds"][0]) > 4
+    return ((floor_problem(earlier, rec) or (None,))[0] or fix_chain_problem(earlier, rec) or uncleared_round(earlier, rec)
+            or (named and same_head_problem(earlier, rec) or (None,))[0])
 
 def dropped_round_lines(last, rec):
     """-> (why, remedy), when the parsed record `rec` lacks a Round line of the parsed record `last` it follows, or holds those lines in another order; else
@@ -3369,7 +3373,7 @@ def dropped_round_lines(last, rec):
         if line in new[pos:]:
             pos += new[pos:].index(line) + 1
         else:
-            lost.append("Round {}: {}, {}, {}".format(*line))
+            lost.append("Round {}: {}, {}, {}".format(*line[:4]) + "".join(f", {sha}" for sha in line[4:]))
     if lost:
         return f"this record drops or reorders {'; '.join(lost)} of the record on head {last['head'][:9]}", FIX_DROPPED_REMEDY
 
@@ -3385,34 +3389,39 @@ def same_head_problem(earlier, rec, bodies=()):
     """-> (why, remedy), when the top round of the parsed record `rec` is all PASS on a head where an earlier record's top round failed, so no fix
     commit came between the two; else None. `earlier` is the parsed records of this pull request, oldest first, or the one source record a
     --fix-base-record names (a record that did not parse is already dropped). The head a round read is its line's named sha, or the record's Head
-    when the record names none. An earlier record whose lines name heads fails its top round with a FAIL or PARTIAL line; one that names none, with a
-    FAIL line. A record with a Fix check PASS is skipped: its FAIL belongs to its fix base. `bodies` are the raw bodies of this pull request's records,
-    and an earlier body that does not parse is read by line. A FAIL or PARTIAL Round line that names a head of this top round refuses. So does a
-    `Head:` line equal to the Head of `rec` when `rec` names no head, since that body's rounds are unknown. Cost: none beyond the comment list the
+    when the record names none. An earlier record fails its top round with a FAIL or PARTIAL line. A lower FAIL or PARTIAL round of `rec` itself,
+    when `rec` names heads, fails on the head it names. A record with a Fix check PASS is skipped: its FAIL belongs to its fix base. `bodies` are the
+    raw bodies of this pull request's records, and an earlier body that does not parse is read by line: only a FAIL or PARTIAL Round line refuses,
+    when the head it names, or its body's stripped `Head:` line for a line that names none, is a head of this top round. Cost: none beyond the comment list the
     caller already read. The --fix-check path adds no read. The plain path adds one paged comment-list read of the repo's comments since the PR
     opened (`review_comments`), on every call."""
     top = max((i for i, *_ in rec["rounds"]), default=0)
     if not rec["rounds"] or any(r[3] != "PASS" for r in rec["rounds"] if r[0] == top):
         return None
     mine = top_line_heads(rec, top, REVIEW_VERDICTS)
+    for i, _, _, verdict, *named in rec["rounds"]:  # a lower round of this same record, which names its heads, failed on a head the top round passes
+        if named and i < top and verdict in REVIEW_VERDICTS[1:] and any(same_head(named[0], m) for m in mine):
+            return f"round {top} passes on head {named[0][:9]}, where round {i} of this same record failed, and no fix commit came between them", FIX_SAME_HEAD_REMEDY
     for e in earlier:
         if e["fix"] and e["fix"][3] == "PASS":
             continue
         e_top = max((i for i, *_ in e["rounds"]), default=0)
-        failing = REVIEW_VERDICTS[1:] if e["rounds"] and len(e["rounds"][0]) > 4 else REVIEW_VERDICTS[1:2]
-        for sha in top_line_heads(e, e_top, failing):
+        for sha in top_line_heads(e, e_top, REVIEW_VERDICTS[1:]):
             if any(same_head(sha, m) for m in mine):
                 return f"round {top} passes on head {sha[:9]}, where an earlier record's round {e_top} failed, and no fix commit came between them", FIX_SAME_HEAD_REMEDY
     for body in bodies:
         if parse_review(body) is not None:
             continue
-        lines = body.split("\n---\n")[0].splitlines()
-        if len(rec["rounds"][0]) == 4 and f"Head: {rec['head']}" in lines:
-            return f"an earlier review record at head {rec['head'][:9]} does not parse, so round {top} cannot be told from a pass after its failure", FIX_UNPARSED_HEAD_REMEDY
+        lines = [line.strip() for line in body.split("\n---\n")[0].splitlines()]
+        read = next((m.group(1) for m in (re.fullmatch(rf"Head: ({REVIEW_SHA})", line, re.ASCII) for line in lines) if m), None)  # the head a line with no sha read
         for line in lines:
-            m = re.fullmatch(rf"Round \d+: [^,]+, [^,]+, (?:FAIL|PARTIAL), ({REVIEW_ROUND_SHA})", line, re.ASCII)
-            if m and any(same_head(m.group(1), h) for h in mine):
+            m = re.fullmatch(rf"Round \d+: [^,]+, [^,]+, (?:FAIL|PARTIAL)(?:, ({REVIEW_ROUND_SHA}))?", line, re.ASCII)
+            named = m and (m.group(1) or read)  # a line that names no sha read its body's Head, and a body with no Head line read none
+            if not named or not any(same_head(named, h) for h in mine):
+                continue
+            if m.group(1):
                 return f"an earlier review record that does not parse holds a failed round on head {m.group(1)[:9]}, so round {top} cannot be told from a pass after its failure", FIX_UNPARSED_HEAD_REMEDY
+            return f"an earlier review record at head {read[:9]} does not parse, so round {top} cannot be told from a pass after its failure", FIX_UNPARSED_HEAD_REMEDY
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
@@ -3617,10 +3626,11 @@ def own_commit_state(h, sha, live, base, seen):
             seen[sha] = "own" if h.compare_files(base, sha)["ahead_by"] > 0 else "base"
     return seen[sha]
 
-def round_head_problem(h, live, a, base, seen):
+def round_head_problem(h, live, a, base, seen, carried=()):
     """-> why, when a --round names a head that is not one of the pull request's own commits (own_commit_state); else None. Reads the distinct shas in
-    the order of the rounds and stops at the first refusal."""
-    for sha in dict.fromkeys(r[4] for r in a.round if len(r) > 4):
+    the order of the rounds and stops at the first refusal. A sha that `carried` names (the shas of a --fix-base-record source record's lines, which
+    stands in for this pull request's own record) is accepted unread, so a copy of that record's lines is not refused as foreign."""
+    for sha in dict.fromkeys(r[4] for r in a.round if len(r) > 4 and not any(same_head(r[4], c) for c in carried)):
         state = own_commit_state(h, sha, live, base, seen)
         if state != "own":
             return (f"--round: the head {sha[:9]} is not one of the pull request's own commits: " +
@@ -3751,7 +3761,7 @@ def main(argv, host=None, lock=None):
             seen = {}  # sha -> own_commit_state: one compare pair per distinct sha in this run
             if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a, info["base"], seen):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            problem = round_head_problem(h, info["head"], a, info["base"], seen)  # a named round head is one of this pull request's own commits, whatever the path below
+            problem = None if a.fix_base_record and a.fix_check else round_head_problem(h, info["head"], a, info["base"], seen)  # a named round head is one of this pull request's own commits, whatever the path below; a --fix-base-record run checks it once its source record is read
             if problem:
                 print(f"merge: {problem}. {FIX_ROUND_HEAD_REMEDY} " + REVIEW_CITE, file=sys.stderr)
                 return 2
@@ -3762,6 +3772,11 @@ def main(argv, host=None, lock=None):
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
                     last, problem, remedy = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
+                    if last:  # the source record's own heads, carried unchanged into the copy, are not this pull request's commits
+                        heads = round_head_problem(h, info["head"], a, info["base"], seen, carried=[r[4] for r in last["rounds"] if len(r) > 4])
+                        if heads:
+                            print(f"merge: {heads}. {FIX_ROUND_HEAD_REMEDY} " + REVIEW_CITE, file=sys.stderr)
+                            return 2
                     if not problem:
                         problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 else:
