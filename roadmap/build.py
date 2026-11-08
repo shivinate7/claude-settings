@@ -127,6 +127,9 @@ def shown(path):
     return path.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
 
 
+NOT_JSON = object()
+
+
 class Staged:
     """What the staged commit changes under STEPS_PATH, and the bases it is committed onto.
 
@@ -137,7 +140,7 @@ class Staged:
 
     def __init__(self, repo):
         self.repo = repo
-        self.cache = {}  # blob -> parsed dict, or None when it is not JSON or not an object
+        self.cache = {}  # blob -> parsed JSON value, or NOT_JSON
         self.bases = ["HEAD"] if self.git("rev-parse", "-q", "--verify", "HEAD^{commit}").returncode == 0 else []
         merge_head = pathlib.Path(repo, self.git("rev-parse", "--git-path", "MERGE_HEAD").stdout.strip())
         if merge_head.is_file():
@@ -178,14 +181,13 @@ class Staged:
             head = data[pos:end].split()
             pos = end + 1
             if head[1] == b"missing":
-                self.cache[blob] = None
+                self.cache[blob] = NOT_JSON
                 continue
             size = int(head[2])
-            try:
-                d = json.loads(data[pos:pos + size])
+            try:  # surrogateescape, as git() decodes: a non-UTF-8 note still parses and is counted
+                self.cache[blob] = json.loads(data[pos:pos + size].decode("utf-8", "surrogateescape"))
             except ValueError:
-                d = None
-            self.cache[blob] = d if isinstance(d, dict) else None
+                self.cache[blob] = NOT_JSON
             pos += size + 1
 
     def step_at(self, rev, path):
@@ -205,7 +207,8 @@ class Staged:
         """(steps, refusal lines, invalid paths) for the staged step files.
 
         steps is (path, parsed step). A staged symlink is refused, since load() would follow it. A file
-        that is not JSON, or not an object, has no fields to check; the next build fails loudly on it.
+        that is not JSON is reported in `invalid`; one that is JSON but not an object has no fields to check.
+        The next build fails loudly on either.
         """
         files = [e for e in self.entries if self.is_step_file(e[2])]
         self.blobs(b for m, b, _ in files if m != "120000")
@@ -213,9 +216,9 @@ class Staged:
         for mode, blob, path in files:
             if mode == "120000":
                 refused.append(f"{shown(path)} is a symlink; build.py would follow it. Commit the file itself.")
-            elif self.cache[blob] is None:
+            elif self.cache[blob] is NOT_JSON:
                 invalid.append(path)
-            else:
+            elif isinstance(self.cache[blob], dict):
                 steps.append((path, self.cache[blob]))
         return steps, refused, invalid
 
@@ -223,7 +226,7 @@ class Staged:
         """(path, parsed step) of each step file in the index."""
         files = [e for e in self.listing() if self.is_step_file(e[2]) and e[0] != "120000"]
         self.blobs(b for _, b, _ in files)
-        return [(path, self.cache[blob]) for _, blob, path in files if self.cache[blob] is not None]
+        return [(path, self.cache[blob]) for _, blob, path in files if isinstance(self.cache[blob], dict)]
 
 
 def staged_notes_over_cap(staged):
