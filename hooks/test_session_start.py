@@ -779,6 +779,9 @@ class SessionStartWaitingPageTests(SessionStartAgentWorktreeNoticeTests):
 
 
 TMPDIR_LINE = re.compile(r"^\s*export\s+TMPDIR=", re.MULTILINE)
+# A line that sets TMPDIR, with or without `export`. The Windows cases refuse a line-start `export TMPDIR=`
+# or a plain `TMPDIR=`, so a hook that writes either one fails them.
+TMPDIR_ASSIGN_LINE = re.compile(r"^\s*(?:export\s+)?TMPDIR=", re.MULTILINE)
 # The env file a case starts from: empty, and one that already holds another hook's export.
 FIXTURES = {"empty": "", "one_export": "export FOO=bar\n"}
 
@@ -972,11 +975,11 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
         return answer.stdout
 
     def assert_no_tmpdir_line(self, text):
-        self.assertNotRegex(text, TMPDIR_LINE,
-                            "the env file got an export TMPDIR= line on a Windows host, though Git Bash has /tmp: %r" % text)
+        self.assertNotRegex(text, TMPDIR_ASSIGN_LINE,
+                            "the env file got a TMPDIR assignment line on a Windows host, though Git Bash has /tmp: %r" % text)
 
     def test_a_windows_uname_gets_no_tmpdir_line(self):
-        """Git Bash always has /tmp, so the hook writes no export TMPDIR= line on a Windows host."""
+        """Git Bash always has /tmp, so the hook writes no TMPDIR assignment line on a Windows host."""
         for uname in WINDOWS_UNAMES:
             with self.subTest(uname=uname):
                 # Scope first: if the shell did not run the fake, these cases would read the real host.
@@ -990,6 +993,8 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
     def test_a_linux_uname_still_gets_the_tmpdir_line(self):
         """Control for the Windows case: the same fake answering Linux still gets the export line."""
         self.assertEqual(self.uname_probe("Linux"), "Linux", "the shell did not run the fake uname")
+        self.assertEqual(self.shell_tmpdir("Linux", None), "",
+                         "the shell fills an unset TMPDIR, so no case here proves the line")
         for tmpdir in (None, ""):
             # Scope first: the value the hook's shell starts with decides which expectation holds.
             shell_value = self.shell_tmpdir("Linux", tmpdir)
