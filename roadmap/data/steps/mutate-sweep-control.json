@@ -1,11 +1,11 @@
 {
   "title": "janitor/mutate_sweep.py gets the clean-layout control through mutate_shared.control_verdict",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 60,
   "owner": "coordinator",
   "lane": "session_013NEJKyoqH7Pdyv1k1rK8bE",
   "why": "mutate_sweep runs without the clean-layout control that the guard mutation job reads from mutate_shared.control_verdict.",
-  "note": "No overlap with step mutate-guard-split, which splits the CI job into shards (checked 18:33 CST). Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step.",
-  "updatedAt": "2026-11-07T18:32:00-06:00"
+  "note": "No overlap with step mutate-guard-split, which splits the CI job into shards (checked 18:33 CST). Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Built as #1715, with runner 8, merging after #1597 (19:43 CST). After it merges, a session on the owner's computer deletes claude/mutate-sweep-control (235c00c94, the pre-rebase copy); the coordinator holds that on its list.",
+  "updatedAt": "2026-11-07T19:43:00-06:00"
 }
