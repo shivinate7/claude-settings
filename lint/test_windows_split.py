@@ -1290,7 +1290,7 @@ class ScriptRun:
 
 def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
     """Run the script file in a scratch repo, with `arg` (None for no argument). files maps a path to True
-    (passes) or False (fails). dirs are empty folders to make. find_exit, when set, puts a `find` first on
+    (passes), False (fails), or the source text to write as is. dirs are empty folders to make. find_exit, when set, puts a `find` first on
     PATH that runs the real find and then exits with that code, as a find does that meets an error after it
     listed files. An `npm` shim records its arguments, so no run reaches the network. cwd is a repo-relative
     folder to start in."""
@@ -1312,8 +1312,9 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
         for rel, ok in files.items():
             full = os.path.join(work, rel)
             os.makedirs(os.path.dirname(full), exist_ok=True)
+            text = ok if isinstance(ok, str) else ("// fixture\n" if ok else 'throw new Error("planted failure");\n')
             with open(full, "w", encoding="utf-8") as f:
-                f.write("// fixture\n" if ok else 'throw new Error("planted failure");\n')
+                f.write(text)
         target = os.path.join(work, ".github", "scripts", MOD_SCRIPT_NAME)
         shutil.copyfile(script or MOD_SCRIPT, target)
         r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", target.replace("\\", "/")] + ([arg] if arg is not None else []),
@@ -1325,6 +1326,8 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
 
 SKILL_OK = {"skills/plain-english-map/tests/ok.test.mjs": True}
 NPM_CI = "ci --ignore-scripts --no-audit --no-fund"
+# A mod test that reads its input, as a test that reads stdin does: it takes every line the loop has left.
+STDIN_READER = 'import { readFileSync } from "node:fs";\nreadFileSync(0, "utf8");\n'
 
 
 class ModTestStep(unittest.TestCase):
@@ -1379,6 +1382,21 @@ class ModTestScript(unittest.TestCase):
             with self.subTest(case=label):
                 r = run_mod_script("mods", files)
                 self.assertEqual(r.rc == 0, ok, f"{label}: exit {r.rc}\n{r.out}")
+
+    def test_a_mod_test_that_reads_stdin_does_not_hide_the_files_after_it(self):
+        # Named cause: phase_mods feeds the file list on the loop's stdin, so a file that reads stdin takes the lines
+        # after it, and the loop ends before the failing file runs. find does not sort, so the script's own list order
+        # sets the roles: the reader first, the failing file second, a passing file third.
+        names = ["mods/a/a.test.mjs", "mods/b/b.test.mjs", "mods/c/c.test.mjs"]
+        probe = run_mod_script("list", {**SKILL_OK, **{name: True for name in names}})
+        self.assertEqual(probe.rc, 0, probe.out)
+        listed = [line for line in probe.out.splitlines() if line in names]
+        self.assertEqual(len(listed), 3, "list does not name the three fixture files:\n" + probe.out)
+        for label, first in (("file reads stdin", STDIN_READER), ("control: first file reads no stdin", True)):
+            with self.subTest(case=label):
+                r = run_mod_script("mods", {listed[0]: first, listed[1]: False, listed[2]: True})
+                self.assertIn("planted failure", r.out, f"{label}: the failing second file did not run\n{r.out}")
+                self.assertNotEqual(r.rc, 0, f"{label}: the phase exited 0 although the second file fails\n{r.out}")
 
     def test_the_script_fails_when_it_finds_no_test_or_find_errors(self):
         """`done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
