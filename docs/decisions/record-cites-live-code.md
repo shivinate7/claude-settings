@@ -29,11 +29,11 @@ Claude writes both in normal work: it states what code does from memory, and it 
 - The cite uses the forms the stale-prose check already reads: "`file.py` `name`", "(file.py name)" and a test node id. A dotted name reads its first part.
 - STALE009 reports, never fails: a sentence on a line a range adds in a decision record that states what code does, with no code cite (lint/stale_cites.py `CodeClaimReader`).
 - STALE010 fails the PR: a line a range adds in governed Markdown cites a Python name, and the file is absent at head or the name is not bound there (lint/stale_cites.py `dead_name_cites`).
-- STALE011 fails the PR when a line a range adds in governed Markdown cites `file.py:N` or `file.py:N-M` and its sentence names a symbol no cite there holds (lint/stale_cites.py `anchor_name_cites`). `--tree` judges every line.
-  - A name counts when it holds an underscore or an inner capital, or is a call. A dotted name counts by its last part. A file name offers none.
+- STALE011 fails the PR on a line a range adds in governed Markdown (lint/stale_cites.py `anchor_name_cites`). The line cites `file.py:N` or `file.py:N-M`, and its sentence names a symbol the cite's file binds that no cite there holds. `--tree` judges every line.
+  - A name counts only when it holds an underscore or an inner capital, or is a call. A dotted name counts by its last part. A file name offers none.
   - The file binds a name by a def or class at any depth, or by a module-level assignment, spanning its whole statement. A local binds nothing.
   - A name holds at a cite when its def or class span, or a line naming it, falls within three lines of that cite.
-  - A cite fails only when none of its file's names holds there and one of them holds at no cite of the sentence.
+  - A cite fails only when none of the sentence's names its file binds holds there and one of those names holds at no cite of the sentence.
 - Whether the claim is true stays with the reviewer: `agents/reviewer.md` reads each cited name against its claim.
 - The module docstring of `lint/stale_cites.py` and `skills/fresh-prose/SKILL.md` state the cost. Both run inside the existing ste-lint step.
 
