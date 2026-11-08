@@ -223,11 +223,24 @@ MUTATING_COMMAND = (
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
 
+# An interpreter run with its script on the command line (`python3 -c`, `node -e`, `perl -e`): the
+# script's own calls (`shutil.copy`) write files the shell never names, so the segment is scanned
+# whole, as it was before a mutating word was read only in command position.
+_INLINE_INTERPRETER = re.compile(r"python[\d.]*|node(?:js)?|bun|deno|perl|ruby|lua|php", re.IGNORECASE)
+_INLINE_FLAG = re.compile(r"-[A-Za-z]*[ceprE]|--eval|--print")
+
+
 def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
-    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
+    arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen.
+    `touch` and `dd of=` write by the verb itself, and an interpreter with a script on its command
+    line writes by its own code."""
     if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+        return True
+    if command == "touch" or (command == "dd" and any(word.startswith("of=") for word in words)):
+        return True
+    if _INLINE_INTERPRETER.fullmatch(command) and any(_INLINE_FLAG.fullmatch(word) for word in words):
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
@@ -253,6 +266,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+    if command == "touch":
+        return bool(re.search(r"\btouch\b[^\n;|&]*" + target, cmd))
+    if command == "dd":
+        return bool(re.search(r"\bof=\s*['\"]?" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
@@ -451,10 +468,18 @@ def _words_of(word: str):
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
     inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
+    blocks = [[inner], [_unquoted(w) for w in _quoted_words(inner)]]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
-        out.extend(REDIRECT.sub(r" \1 ", piece).split())
-    return list(dict.fromkeys(out))   # a whole-word quote reads as itself twice, and a copy would stand after a write word in its own name
+        blocks.append(REDIRECT.sub(r" \1 ", piece).split())
+    out, seen = [], []
+    for block in blocks:
+        # A whole-word quote reads as itself in each block, and a copy would stand after a write word
+        # in its own name. Only a block that repeats an earlier block whole is dropped: a word that
+        # repeats inside a script (`rm a; rm b`) stays.
+        if block not in seen:
+            seen.append(block)
+            out.extend(block)
+    return out
 
 
 def _runs_stored_text(segment: str, words, plain: str) -> bool:
@@ -631,15 +656,37 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 shown.extend(pieces)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        verb = _segment_command(words)[0] if predicate_command else ""
+        commands = [_segment_command(start) for start in _command_starts(words)]
+        verb = commands[0][0] if predicate_command and commands else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position or predicate_command else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and any(
+                    writes_to(word, text, *(position if command_position or predicate_command else ()))
+                    for position in commands):
                 return word
     return ""
+
+
+# A command that starts inside a segment: after `$(` or a backtick, and behind a leading `(` (a subshell).
+_SUBSTITUTION_OPEN = re.compile(r"\$\(|`")
+_LEADING_GROUP = re.compile(r"\$?\(+|`+")
+
+
+def _command_starts(words):
+    """The word lists a segment's commands start: its own, with a leading `(`, `$(` or backtick cut
+    off the first word, then one after each `$(` or backtick in a word (`echo $(cp a b)`, `D=$(cp a b)`).
+    `_name` reads `(cp` as no command, so each list begins at the command word itself."""
+    words = [word for word in words if word]
+    if not words:
+        return []
+    first = _LEADING_GROUP.match(words[0])
+    starts = [[words[0][first.end():], *words[1:]] if first else words]
+    for index, word in enumerate(words):
+        starts.extend([word[opener.end():], *words[index + 1:]] for opener in _SUBSTITUTION_OPEN.finditer(word))
+    return [[word for word in start if word] for start in starts]
 
 
 def _segment_command(words):

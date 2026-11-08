@@ -355,7 +355,8 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # command word, not the wrapper. `xargs pkill foo` runs pkill, so `xargs` unwraps the same as
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
-                    "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&"}
+                    "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&",
+                    "busybox", "stdbuf", "watch"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
 # Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
 # needs no entry.
@@ -363,6 +364,7 @@ WRAPPER_VALUE_FLAGS = {
     "nice": {"-n", "--adjustment"},
     "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string", "-P"},
     "time": {"-f", "--format", "-o", "--output"}, "exec": {"-a"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
     "doas": {"-u", "-C"},
     "xargs": {"-n", "--max-args", "-P", "--max-procs", "-I", "-L", "--max-lines", "-s",
               "--max-chars", "-d", "--delimiter", "-E", "-a", "--arg-file"},
@@ -370,8 +372,8 @@ WRAPPER_VALUE_FLAGS = {
              "--close-from", "-D", "--chdir", "-R", "--chroot", "-T", "--command-timeout",
              "-r", "--role", "-t", "--type", "-U", "--other-user"},
 }
-# Runners that start another command but are no `COMMAND_WRAPPERS` entry: `wrapped_commands` reads
-# them. Their value flags sit here so `_wrapper_flags` skips the same way.
+# Runners that `wrapped_commands` reads, and the value flags of `stdbuf` (also a wrapper above) and of
+# the runners that are no `COMMAND_WRAPPERS` entry. They sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
