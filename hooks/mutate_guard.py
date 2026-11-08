@@ -2041,6 +2041,20 @@ MUTATIONS = [
      'GIT_AFTER_CD_EXTRA_VERBS = ("add", "tag", "config", "worktree")',
      'GIT_AFTER_CD_EXTRA_VERBS = ("add", "tag", "config")',
      "guard", "git-after-cd: a cd into a missing folder, then ; git worktree add ../w is refused"),
+    # The three readings of _exits_on_failure: an exit that ends only a subshell, an exit in a pipe, and a
+    # piped braced group. Each mutant reads that exit as the shell's own, so its existing red case goes green.
+    ("git-after-cd: an exit inside ( ) after a failed cd's || counts as the shell's exit",
+     '        if index is not None and tokens[index] == "exit" and not in_pipe and not opens:',
+     '        if index is not None and tokens[index] == "exit" and not in_pipe:',
+     "guard", "git-after-cd: a cd into a missing folder, then || ( exit 1 ) with spaces, then ; a git push is refused"),
+    ("git-after-cd: an exit before a pipe after a failed cd's || counts as the shell's exit",
+     '        if index is not None and tokens[index] == "exit" and not in_pipe and not opens:',
+     '        if index is not None and tokens[index] == "exit" and not opens:',
+     "guard", "git-after-cd: a cd into a missing folder, then || exit 1 | cat, then ; a git push is refused"),
+    ("git-after-cd: a piped braced group after a failed cd's || counts as the shell's exit",
+     '            return found and end_of(number) != "|"',
+     '            return found',
+     "guard", "git-after-cd: a cd into a missing folder, then || a braced exit 1 in a pipe, then ; a git push is refused"),
     # ---- conflict-markers after a segment the cd walk cannot read (an echo with an ANSI-C quote).
     ("conflict-markers: a segment the walk cannot read hides the cd before it",
      '        where = walk.where or command_root(stripped, cwd)',

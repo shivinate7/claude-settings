@@ -4985,6 +4985,10 @@ sh("git-after-cd: a cd into a missing folder, then || (exit 1), then ; a git pus
    "cd /tmp/w || (exit 1); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd into a missing folder, then || (exit 1), then a newline and a git push is refused",
    "cd /tmp/w || (exit 1)\n%s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: with spaces, the exit is the second word of its ( ) group, so only the subshell reading stops it
+# from counting as the shell's exit. The unspaced form tokenizes as `(exit`, which is no exit at all.
+sh("git-after-cd: a cd into a missing folder, then || ( exit 1 ) with spaces, then ; a git push is refused",
+   "cd /tmp/w || ( exit 1 ); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd into a missing folder, then || exit 1 | cat, then ; a git push is refused",
    "cd /tmp/w || exit 1 | cat; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd into a missing folder, then || a braced exit 1 in a pipe, then ; a git push is refused",
@@ -5016,6 +5020,30 @@ sh("git-after-cd: a cd into a missing folder, then ; git config user.name x is r
    "cd /tmp/w; %s config user.name x" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd into a missing folder, then ; git worktree add ../w is refused",
    "cd /tmp/w; %s worktree add ../w" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A failed cd under && skips the group, loop or if body it heads: bash runs no git write in them, with the
+# folder missing and git stubbed. A `;` after the group ends reopens the stranded folder, so the push refuses.
+sh("git-after-cd: a failed cd, then && a brace group of git writes, passes",
+   "cd /tmp/w && { %s add -A; %s commit -m m; }" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a brace group of git writes across newlines, passes",
+   "cd /tmp/w && {\n%s add -A\n%s commit -m m\n}" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && an if whose then branch pushes, passes",
+   "cd /tmp/w && if true; then %s push; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a for loop that pushes, passes",
+   "cd /tmp/w && for b in a; do %s push; done" % VCS, "allow", cwd=NOGIT)
+# `while false` never runs its body, so no push runs in any folder, and `; true` ends the call.
+sh("git-after-cd: a failed cd, then && a while loop whose body never runs, then ; true, passes",
+   "cd /tmp/w && while false; do %s push; done; true" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a brace group of git writes, then ; a git push is refused",
+   "cd /tmp/w && { %s add -A; %s commit -m m; }; %s push" % (VCS, VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# `if !` turns the failed cd into a passing test, so exit 1 runs and the shell stops before the push.
+sh("git-after-cd: an if test that is a negated failed cd, then exit 1, then a git push, passes",
+   "if ! cd /tmp/w; then exit 1; fi; %s push" % VCS, "allow", cwd=NOGIT)
+# set -e stops the shell at the failed cd, so the push after ; never runs.
+sh("git-after-cd: set -e, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; cd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e on its own line, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
