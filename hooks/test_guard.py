@@ -8921,7 +8921,7 @@ sh("env-child: allow, bun x runs vitest, an app's own test command",
    "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
 # Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
 # flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
-# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+# ENV_CHILD_BOOL_FLAGS drops reads the next word as the flag's value, so the allow turns to a deny.
 sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
    "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
@@ -8949,6 +8949,88 @@ sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a co
 sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
    "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
 
+# The false alarms that decision env-file-stays-unread names. Each allow runs its program with env only
+# as an argument, and the flag before the program takes no value. The guard reads that flag's next word
+# as its value, so the program's word starts a child and env is read as the child. Each deny beside it
+# puts env in the child's place with the same flag, so a fix that stops reading these flags fails it.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter -k env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
+   "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
+   "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter -t env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --silent takes no value, so env is the child, the control for --silent",
+   "npx --env-file=" + ENV + " --silent env", "deny", "env-file", cwd=NOGIT)
+# pnpm reads its own flags before `exec`. After `exec` a word is the command's, so the pins put --stream
+# before it, where it takes no value and the word after it is the program.
+sh("env-child: allow, pnpm --stream before exec takes no value, so vitest runs with the filter env",
+   "pnpm --env-file=" + ENV + " --stream exec vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm --stream before exec takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " --stream exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream before exec takes no value, so jest -c env is jest's option",
+   "pnpm --env-file=" + ENV + " --stream exec jest -c env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " exec --stream env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --stream then -c env, so pnpm's own -c is a shell string, the control",
+   "pnpm --env-file=" + ENV + " exec --stream -c env", "deny", "env-file", cwd=NOGIT)
+# npm's --color is a bool that owns only the literal words always, true and false, which nopt reads as
+# its value. Any other word after it is the child. The deny puts env straight after --color. The allows
+# put jest after always, and after true with -- before it.
+sh("env-child: deny, npm exec --color is a bool, so env straight after it is the child",
+   "npm --env-file=" + ENV + " exec --color env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm exec --color owns always, so env after always is the child",
+   "npm --env-file=" + ENV + " exec --color always env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color owns always, so jest after always is the child, the control",
+   "npm --env-file=" + ENV + " exec --color always jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --color owns true, so -- ends the options and env is the child",
+   "npm --env-file=" + ENV + " exec --color true -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color owns true, so -- ends the options and jest is the child",
+   "npm --env-file=" + ENV + " exec --color true -- jest", "allow", cwd=NOGIT)
+# nopt reads a literal true or false after a bool flag as that flag's value. So the word after the flag
+# is not the child: the deny puts env there, and the allow puts the program there.
+sh("env-child: deny, pnpm --stream takes a literal true, so exec then env runs env",
+   "pnpm --env-file=" + ENV + " --stream true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream takes a literal true, so exec then vitest is the child",
+   "pnpm --env-file=" + ENV + " --stream true exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm --json takes a literal true, so exec then env runs env",
+   "npm --env-file=" + ENV + " --json true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm --json takes a literal true, so exec then jest is the child",
+   "npm --env-file=" + ENV + " --json true exec jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --json takes a literal true, so env is the child of npx",
+   "npx --env-file=" + ENV + " --json true env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --json takes a literal true, so vitest is the child of npx",
+   "npx --env-file=" + ENV + " --json true vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --dry-run takes a literal false, so env is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --dry-run takes a literal false, so jest is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false jest", "allow", cwd=NOGIT)
+# npm exec documents --no, which takes no value. The allow runs jest with the filter -t env; the deny
+# puts env in the child's place.
+sh("env-child: allow, npm exec --no takes no value, so jest runs with the filter -t env",
+   "npm --env-file=" + ENV + " exec --no jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --no takes no value, so env is the child, the control for --no",
+   "npm --env-file=" + ENV + " exec --no env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, bun x --bun takes no value, so vitest runs with the filter -t env",
+   "bun --env-file=" + ENV + " x --bun vitest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, bun x --bun takes no value, so env is the child, the control for --bun",
+   "bun --env-file=" + ENV + " x --bun env", "deny", "env-file", cwd=NOGIT)
+# `container` is the management word docker and podman give to run, so `container run` starts the same
+# child as `run`. The allows beside it run the image's own command, with env only as an argument.
+sh("env-child: deny, docker container run is docker run, so env runs in img",
+   "docker container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker container run --rm takes no value, so printenv runs in alpine",
+   "docker container run --env-file " + ENV + " --rm alpine printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, podman container run is podman run, so env runs in img",
+   "podman container run --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker container run with serve as the child, the control for the gap",
+   "docker container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, podman container run with serve as the child, the control for the gap",
+   "podman container run --env-file " + ENV + " img serve", "allow", cwd=NOGIT)
+
 # A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
 # A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
 # deny forms below each print a variable through echo or printf, so they stay denied.
@@ -8965,6 +9047,75 @@ sh("env-child: deny, printf prints a $ variable in a shell string, docker runs s
    cwd=NOGIT)
 sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
    "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A child that prints the environment without a word the shell scan reads: a substitution in a child's
+# shell string, perl, ruby or awk over the environment, the printing builtins set and export -p, a /proc
+# environ file, and a grouped or negated env. Each deny is one such child. The allows are the same forms
+# that print nothing: a substitution that is not a variable, an arithmetic expansion, and compose up.
+sh("env-child: deny, sh -c cd $(env) runs env in a substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cd $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls $(printenv) runs printenv in a substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls $(printenv)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat <(env) runs env in a process substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat <(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls `env` runs env in backticks, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls `env`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm exec -c ls $(env) runs env in a substitution, npm --env-file",
+   "npm --env-file=" + ENV + " exec -c 'ls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e print %ENV prints the environment, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print %ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby -e p ENV prints the environment, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, awk over ENVIRON prints every variable, uv run",
+   "uv run --env-file " + ENV + " awk 'BEGIN{for(k in ENVIRON) print k\"=\"ENVIRON[k]}'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c set prints the shell variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c export -p prints the exported variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'export -p'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, cat /proc/self/environ prints the process environment, uv run",
+   "uv run --env-file " + ENV + " cat /proc/self/environ", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat /proc/$$/environ prints the shell's environment, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat /proc/$$/environ'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a brace group { env; } runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '{ env; }'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a subshell ( env ) runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '( env )'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c a negated ! env runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c '! env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c if true; then env; fi runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'if true; then env; fi'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker compose --env-file config prints the resolved values",
+   "docker compose --env-file " + ENV + " config", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo $(date) runs date, a substitution that is not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(date)'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c echo $((1+2)) is arithmetic, not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $((1+2))'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c ls $(pwd) runs pwd, a substitution that is not a variable, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls $(pwd)'", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -e print 1 prints a literal, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print 1'", "allow", cwd=NOGIT)
+sh("env-child: allow, awk print $1 reads a field of a file, uv run",
+   "uv run --env-file " + ENV + " awk '{print $1}' file", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file up runs the stack, the control for config",
+   "docker compose --env-file " + ENV + " up", "allow", cwd=NOGIT)
+
+# The substitution reader must find a $( ) past a quote, a # inside quotes and a line break. A # outside
+# quotes starts a shell comment, so the $( ) after it never runs. The echo deny is the twin of echo $(date).
+sh("env-child: deny, a # inside double quotes does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls \"#\" $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a # inside a quoted word does not hide a later $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo \"a # b\"; ls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, double quotes do not hide a $( ) that runs env in cd, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cd \"$(env)\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a lone quote in text does not hide a $( ) that runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c \"echo don't; ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break in a shell string starts a segment whose $( ) runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'npm ci\nls $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, echo prints the output of a $( ) that runs env, the twin of echo $(date), uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a # outside quotes starts a shell comment, so the $( ) after it never runs, uv run",
+   "uv run --env-file " + ENV + " sh -c 'ls # $(env)'", "allow", cwd=NOGIT)
 
 # A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
 # is a child the scan must read. Each deny is one such child that prints the environment.
@@ -8986,6 +9137,125 @@ sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for t
    "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
 sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
    "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
+
+# A nested substitution, a /proc environ glob, an escaped $ that the child shell expands, and a redirect
+# that writes the environment to a file each print or save a file value, so each is denied.
+sh("env-child: deny, sh -c echo $(echo $X) prints a variable through a nested substitution, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo $(echo $X)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c cat /proc/*/environ reads every process environment, uv run",
+   "uv run --env-file " + ENV + " sh -c 'cat /proc/*/environ'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c ls $(env) with an escaped dollar runs env in the child shell, uv run",
+   "uv run --env-file " + ENV + " sh -c \"ls \\$(env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c env > out.txt writes the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'env > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c set > out.txt writes the shell variables to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set > out.txt'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c printenv >> log appends the environment to a file, uv run",
+   "uv run --env-file " + ENV + " sh -c 'printenv >> log'", "deny", "env-file", cwd=NOGIT)
+
+# A double-quoted substitution is expanded by the parent shell before uv runs, and the parent holds no
+# file value, so it prints HOME and nothing from the file. docker compose config prints service names
+# or nothing. perl -pe rewrites text in a file it reads and prints no variable.
+sh("env-child: allow, bash -c with a double-quoted $(printenv HOME) is expanded by the parent, uv run",
+   "uv run --env-file " + ENV + " bash -c \"echo $(printenv HOME)\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config --services prints service names, not values",
+   "docker compose --env-file " + ENV + " config --services", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose --env-file config -q prints nothing",
+   "docker compose --env-file " + ENV + " config -q", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -pe rewrites text in config.yml and prints no variable, uv run",
+   "uv run --env-file " + ENV + " perl -pe 's/ENV/prod/' config.yml", "allow", cwd=NOGIT)
+
+# A pin beside the deny pins above (perl print %ENV and docker compose config): one variable read by perl.
+sh("env-child: deny, perl -e print $ENV{KEY} prints one variable from the environment, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print $ENV{KEY}'", "deny", "env-file", cwd=NOGIT)
+
+# A child that prints the environment by a route no earlier case named: a quote joined from parts in a shell
+# string, and the exec and system calls of ruby, perl and awk. Each deny has a control beside it that runs
+# date in the same place, so the deny turns on the program that prints, not on the shape of the command.
+sh("env-child: deny, sh -c echo it's; env runs env after a quote joined from parts, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\"'\"'s; env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, sh -c echo it's; date runs date, the control for the quote-joined env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\"'\"'s; date'", "allow", cwd=NOGIT)
+sh("env-child: deny, ruby -e system env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " ruby -e \"system(\\\"env\\\")\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, ruby -e system date runs date, the control for ruby system env, uv run",
+   "uv run --env-file " + ENV + " ruby -e \"system(\\\"date\\\")\"", "allow", cwd=NOGIT)
+sh("env-child: deny, perl -e exec env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " perl -e \"exec(\\\"env\\\")\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, perl -e exec date runs date, the control for perl exec env, uv run",
+   "uv run --env-file " + ENV + " perl -e \"exec(\\\"date\\\")\"", "allow", cwd=NOGIT)
+sh("env-child: deny, awk BEGIN system env runs env in a double-quoted program, uv run",
+   "uv run --env-file " + ENV + " awk \"BEGIN{system(\\\"env\\\")}\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, awk BEGIN system date runs date, the control for awk system env, uv run",
+   "uv run --env-file " + ENV + " awk \"BEGIN{system(\\\"date\\\")}\"", "allow", cwd=NOGIT)
+
+# Words that name the environment and print no value: a ruby string or script argument that holds ENV, a
+# file named with ENV, the printers compgen and declare with a name or -f, a compose config that lists
+# hashes, and a /proc file that is not environ. Each is allowed, since none prints a value.
+sh("env-child: allow, ruby -e puts a string that says ENV prints no variable, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"the ENV var\"'", "allow", cwd=NOGIT)
+sh("env-child: allow, ruby script.rb ENV passes the word ENV to a script, uv run",
+   "uv run --env-file " + ENV + " ruby script.rb ENV", "allow", cwd=NOGIT)
+sh("env-child: allow, awk prints a file named ENV.txt, not a variable, uv run",
+   "uv run --env-file " + ENV + " awk '{print}' ENV.txt", "allow", cwd=NOGIT)
+sh("env-child: allow, perl -ne prints README.ENV.md, a file read, uv run",
+   "uv run --env-file " + ENV + " perl -ne print README.ENV.md", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c compgen -v lists variable names, not values, uv run",
+   "uv run --env-file " + ENV + " sh -c 'compgen -v'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c compgen -e lists exported names, not values, uv run",
+   "uv run --env-file " + ENV + " sh -c 'compgen -e'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -pf prints function bodies, not variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -pf'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -fp foo prints one function, not variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -fp foo'", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose config --hash lists service hashes, not values",
+   "docker compose --env-file " + ENV + " config --hash=\"*\"", "allow", cwd=NOGIT)
+sh("env-child: allow, cat /proc/self/environ_x reads a file that is not environ, uv run",
+   "uv run --env-file " + ENV + " cat /proc/self/environ_x", "allow", cwd=NOGIT)
+
+# Shell and perl or ruby strings that print the environment: declare -p, -x and typeset print variables,
+# perl and ruby run env through a shell string, and a quote escaped as '\'' is one quote in the child.
+# The allows are the same printers with no variable to print, and compose's --volumes and --images list names.
+sh("env-child: deny, sh -c declare -p prints the variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -p'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c declare -x prints the exported variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -x'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c typeset prints the variables, uv run",
+   "uv run --env-file " + ENV + " sh -c 'typeset'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e system env runs env from a perl string, uv run",
+   "uv run --env-file " + ENV + " perl -e 'system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl -e print qx env prints env output, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print qx(env)'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby -e puts backtick env prints env output, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts `env`'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sh -c echo it's; env after an escaped quote runs env, uv run",
+   "uv run --env-file " + ENV + " sh -c 'echo it'\\''s; env'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker compose config --volumes lists volume names, not values",
+   "docker compose --env-file " + ENV + " config --volumes", "allow", cwd=NOGIT)
+sh("env-child: allow, docker compose config --images lists image names, not values",
+   "docker compose --env-file " + ENV + " config --images", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c export FOO=bar sets a variable and runs pytest, uv run",
+   "uv run --env-file " + ENV + " sh -c 'export FOO=bar && pytest'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c declare -f prints function bodies only, uv run",
+   "uv run --env-file " + ENV + " sh -c 'declare -f'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c typeset -i x=1 sets an integer, uv run",
+   "uv run --env-file " + ENV + " sh -c 'typeset -i x=1'", "allow", cwd=NOGIT)
+sh("env-child: allow, sh -c set -euo pipefail sets options and runs pytest, uv run",
+   "uv run --env-file " + ENV + " sh -c 'set -euo pipefail; pytest'", "allow", cwd=NOGIT)
+
+# The perl and ruby code reader must not end a string early. A // , a /* or a # inside quotes is text, so the
+# call after it still runs. A lone quote in text is an apostrophe, not a string opener, so the call after it
+# is read too.
+sh("env-child: deny, perl prints // inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print \"//\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, perl prints /* inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " perl -e 'print \"/*\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, ruby puts # inside a string, then system env runs env, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"#\"; system(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a ruby code string whose second line is system env runs env, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts 1\nsystem(\"env\")'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, ruby puts a double-quoted don't, a lone quote in text, uv run",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"don'\\''t\"'", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
