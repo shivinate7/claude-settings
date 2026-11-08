@@ -55,7 +55,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   or scope word (merge, push, delete, deploy, release, publish, always, standing, "from now on", and
   all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of four
   homes: a `ruling` item whose home passes, an open `page` item with its send, a `note` item `-> not-a-grant`, or an
-  open `note` item `-> once:<act>` for a one-shot approval. A once: home is barred when the message holds a standing
+  open `note` item `-> once:<act>` for a one-shot grant. A once: home is barred when the message holds a standing
   word (the guard's STANDING list, such as "whenever", "going forward", "each time", "until withdrawn", "any open").
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named

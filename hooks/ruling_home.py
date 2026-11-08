@@ -125,8 +125,9 @@ def _ensure_transcript_helpers():
 class _GitFailure(Exception):
     """`git` itself could not be trusted to answer, or the repository itself could not be
     read: the binary is missing, the call timed out, or `for-each-ref` -- a repository-wide
-    listing, never a per-value lookup -- exited non-zero (item 9). The caller stands the whole
-    check down. A plain non-zero exit from `cat-file --batch-check`, a per-VALUE lookup, is
+    listing, never a per-value lookup -- exited non-zero (item 9). The caller stands that repo's
+    check down: feedback_guard skips the repo and a readable one still decides, and stands the whole check
+    down only when no repo reads. A plain non-zero exit from `cat-file --batch-check`, a per-VALUE lookup, is
     never this -- see value_resolves and the module docstring's FAIL OPEN section."""
 
 
