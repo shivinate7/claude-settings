@@ -23876,11 +23876,13 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The two new asks of rulings 206 a and 207 a are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
+    ("push-agent", "a non-forced push of an agent-worktree branch name",
+     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
 )
 
 
