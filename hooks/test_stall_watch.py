@@ -1256,6 +1256,84 @@ def pipe_at_line_end_runs_the_cd_in_a_subshell():
     ])
 
 
+def log_folders_after(shell, script):
+    """Run script under shell in a fresh start folder that holds a folder x. Return the folders, of
+    start and x, that hold a file named log once the script ends. The exit code is not read."""
+    start = new_dir()
+    x = os.path.join(start, "x")
+    os.mkdir(x)
+    subprocess.run([shell, "-c", script], cwd=start, stdin=subprocess.DEVNULL,
+                   capture_output=True, timeout=20)
+    return {name for name, d in (("start", start), ("x", x)) if os.path.exists(os.path.join(d, "log"))}
+
+
+@posix_case
+def quoted_empty_cd_word_reads_the_start_folder():
+    """27m. cd "" is a quoted empty word, not a tag: bash stays in the start folder, so the log is read bare"""
+    problems = read_rows_problems([
+        ('cd /x && make > log', ["/x/log"], []),  # control: a cd to a directory
+        ('cd "" && make > log', ["log"], []),
+    ])
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise, in a temp dir: the empty cd leaves the log in the start folder
+        got = log_folders_after(shell, 'cd "" && echo ok > log')
+        if got != {"start"}:
+            problems.append(f"{shell}: cd \"\" && echo ok > log left the log in {sorted(got)}, want ['start']")
+    return problems
+
+
+@posix_case
+def quoted_semicolon_after_cd_leaks_no_nul_tag():
+    """27n. cd ";" is a quoted word, not an operator: its NUL tag never reaches a path, and cd fails, so the && list stops"""
+    sw = load_module()
+    problems = read_rows_problems([("cd /x && cd y && make > log", ["/x/y/log"], [])])  # control: a plain word
+    paths, unresolved = read_with(sw, 'cd /x && cd ";" && make > log')
+    names = paths + unresolved
+    if not names:  # scope: the read is empty, so no NUL check runs on it
+        problems.append('cd /x && cd ";" && make > log reads no path at all, so the NUL check has nothing to test')
+    for name in names:
+        if "\0" in name:
+            problems.append(f'cd /x && cd ";" && make > log reads {name!r}: the quoted ";" tag reached the cd target')
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: cd ";" fails, the list stops, and no log is written
+        got = log_folders_after(shell, 'cd x && cd ";" && echo ran > log')
+        if got:
+            problems.append(f"{shell}: cd x && cd \";\" && echo ran > log left a log in {sorted(got)}, want none")
+    return problems
+
+
+@posix_case
+def nul_tag_stays_out_of_the_rewritten_command():
+    """27o. the rewrite of cd "" && make > log passes its log as --also, and the rewritten command holds no NUL byte"""
+    cmd, _hso = rewrite('cd "" && make > log')
+    if " --also " not in cmd:  # scope: the hook passed a log, so the NUL check has a command to read
+        return ['the rewrite passes no --also for cd "" && make > log, so there is no log to check']
+    if "\0" in cmd:
+        return ['the rewritten command holds a NUL byte: the quoted empty cd word tag reached --also']
+    return []
+
+
+@posix_case
+def same_line_pipe_forms_read_the_start_folder():
+    """27p. a cd joined to the next command by | or |& runs in a pipeline subshell: the log after it is read bare"""
+    problems = read_rows_problems([
+        ("cd /x && make > log", ["/x/log"], []),  # control: a cd joined by &&
+        ("cd /x | make > log", ["log"], []),
+        ("cd /x | tee log", ["log"], []),
+        ("cd /x |& make > log", ["log"], []),  # |& is bash only: dash reports a syntax error on it
+    ])
+    for script, folders in (
+        ("cd x | echo hi > log", {"start"}),
+        ("cd x | tee log", {"start"}),
+    ):
+        for shell in ("/bin/sh", "/bin/bash"):  # the premise: the pipe's cd is in a subshell
+            got = log_folders_after(shell, script)
+            if got != folders:
+                problems.append(f"{shell}: {script!r} left the log in {sorted(got)}, want {sorted(folders)}")
+    got = log_folders_after("/bin/bash", "cd x |& echo hi > log")
+    if got != {"start"}:
+        problems.append(f"/bin/bash: 'cd x |& echo hi > log' left the log in {sorted(got)}, want ['start']")
+    return problems
+
+
 VERDICT_QUIET = "3"  # the quiet time of the watch in the verdict cases
 VERDICT_SLEEP = 6  # the verdict child runs this many seconds, above the quiet time
 
