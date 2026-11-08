@@ -1,9 +1,9 @@
 {
- "title": "Repo pages with a blank Status tab although the repo has plans",
- "phase": "page",
- "status": "todo",
- "order": 533,
- "why": "Owner ask ask-mw1exqmkne (Nov 3 19:03 CST): some repos' pages show a blank roadmap but the repos have plans.",
- "note": "Known causes, from skill waiting-page 'Update the roadmap block': the Status tab shows only steps baked from the repo's roadmap record branch; plans in docs/plans count only in the Records view. So a repo with plans but no roadmap branch or no steps shows blank, and a page republished from plain page.html loses its roadmap block. Lane work: per repo page (live_pages in lint/layout.py), read which cause holds, then fix it (build and splice the block, or make steps from the plans). Ready.",
- "updatedAt": "2026-11-04T01:05:00Z"
+  "title": "Repo pages with a blank Status tab although the repo has plans",
+  "phase": "page",
+  "status": "todo",
+  "order": 533,
+  "why": "Owner ask ask-mw1exqmkne (Nov 3 19:03 CST): some repos' pages show a blank roadmap but the repos have plans.",
+  "note": "Known causes, from skill waiting-page 'Update the roadmap block': the Status tab shows only steps baked from the repo's roadmap record branch; plans in docs/plans count only in the Records view. So a repo with plans but no roadmap branch or no steps shows blank, and a page republished from plain page.html loses its roadmap block. Lane work: per repo page (live_pages in lint/layout.py), read which cause holds, then fix it (build and splice the block, or make steps from the plans). Ready. Waits under the owner's item 384 hold (21:42 CST Nov 7): it is not a lane that makes a queue fix land.",
+  "updatedAt": "2026-11-07T21:43:00-06:00"
 }

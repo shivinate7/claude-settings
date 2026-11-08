@@ -4,6 +4,11 @@
   "home": "pr-backlog-clear",
   "id": "lane-inflow-hold",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-08T03:42:00Z",
+    "choice": "chat",
+    "note": "ill allow holding off on spawning new lanes but u shd still be able to spawn the lanes that will result in these fixes landing"
+  },
   "n": 384,
   "options": [
     {
@@ -30,8 +35,10 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "steps pr-backlog-clear and pr-state-is-on-the-pr; rule parallelism-keep-going",
+  "replied": "2026-11-08T03:44:00Z",
+  "reply": "Your chat answer to the coordinator, 21:42 CST: new lanes wait, and the lanes that make the idle-PR, archive and drain fixes land still start. Home: the note on step pr-backlog-clear (roadmap commit after 70d405fe2). Triage, 21:44 CST.",
   "short": "Hold new lanes while the merge queue is long",
-  "status": "open",
+  "status": "closed",
   "title": "Should new lanes wait while too many reviewed PRs wait to merge?",
   "why": "The coordinator recommends a: the queue is past 200, and a limit of 50 lets batches catch up without stopping all work."
 }
