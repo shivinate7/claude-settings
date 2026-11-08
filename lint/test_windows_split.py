@@ -1955,9 +1955,12 @@ class CiCoverageGating(unittest.TestCase):
             self.assertNotIn(GATING_FILE, text, cause)
 
     def test_a_gating_step_is_reported(self):
-        # Rows: a step with continue-on-error: true or an always-false if:, with the key below or on the dash line.
+        # Rows: a step with continue-on-error: true, or a `${{ true }}` form (the spacing varies), or an always-false if:,
+        # with the key below or on the dash line.
         rows = [
             ("continue-on-error: true", ["run: python3 lint/test_x.py", "continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["run: python3 lint/test_x.py", "continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["run: python3 lint/test_x.py", "continue-on-error: ${{true}}"]),
             ("if: false", ["run: python3 lint/test_x.py", "if: false"]),
             ("if: ${{ false }}", ["run: python3 lint/test_x.py", "if: ${{ false }}"]),
             ("if: false on the dash line", ["if: false", "run: python3 lint/test_x.py"]),
@@ -1969,8 +1972,13 @@ class CiCoverageGating(unittest.TestCase):
                                 "request, yet the file counts as covered" % label)
 
     def test_a_gating_job_is_reported(self):
-        # Rows: the job holding the only step that names the file has continue-on-error: true, or if: false.
-        rows = [("continue-on-error: true", ["continue-on-error: true"]), ("if: false", ["if: false"])]
+        # Rows: the job holding the only step that names the file has continue-on-error: true (or a `${{ true }}` form), or if: false.
+        rows = [
+            ("continue-on-error: true", ["continue-on-error: true"]),
+            ("continue-on-error: ${{ true }}", ["continue-on-error: ${{ true }}"]),
+            ("continue-on-error: ${{true}}", ["continue-on-error: ${{true}}"]),
+            ("if: false", ["if: false"]),
+        ]
         for label, job_keys in rows:
             with self.subTest(label):
                 checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_x.py"], job_keys))
@@ -1985,13 +1993,15 @@ class CiCoverageGating(unittest.TestCase):
                         "which cannot fail a pull request, yet the file counts as covered")
 
     def test_a_step_that_can_fail_a_pull_request_is_not_reported(self):
-        # Rows: a normal step; a key that is false, or an if: that can be true, on the step or the job; a file named by
+        # Rows: a normal step; a key that is false, or a value that can be false (a matrix expression, an if: that can be
+        # true), on the step or the job; a file named by
         # a gating and a normal step; gating text that is not a key (a comment, a run block, a quoted run).
         block = '|\n          echo "continue-on-error: true"\n          python3 lint/test_x.py'
         scope = "needs.scope.outputs.code == 'true'"
         rows = [
             ("a normal step", ["python3 lint/test_x.py"], []),
             ("continue-on-error: false", [["run: python3 lint/test_x.py", "continue-on-error: false"]], []),
+            ("continue-on-error: a matrix expression", [["run: python3 lint/test_x.py", "continue-on-error: ${{ matrix.experimental }}"]], []),
             ("an if: that can be true, on the step", [["run: python3 lint/test_x.py", "if: %s" % scope]], []),
             ("an if: that can be true, on the job", ["python3 lint/test_x.py"], ["needs: scope", "if: %s" % scope]),
             ("the file in a normal step and a gating step",
