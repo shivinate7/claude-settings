@@ -3246,8 +3246,23 @@ def _loads_module(source: str, stem: str) -> bool:
     `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
     `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
     directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
-    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is followed
+    to the calls of that function in the same file: a call by a bare name, with the argument by position or by keyword
+    for that parameter, counts as a binding of the parameter, read only inside the def that owns the parameter. Two functions
+    with different names that share a parameter name keep their calls apart.
+    Only the forms above are followed. Any other form reads False, and this list is not complete. Examples: a loader
+    imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
+    `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
+    it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
+    (`helper = load`), a loader that takes the path as `*args` or `**kwargs`, a call that spreads the path in (a starred
+    argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name bound only as a `for` or
+    comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking, augmented assignment,
+    `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that takes the path
+    (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
+    literal (`"widget" + ".py"`).
+    Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
+    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
+    the argument its calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
@@ -3266,15 +3281,45 @@ def _loads_module(source: str, stem: str) -> bool:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
 
-    def names_base(expr, seen) -> bool:
+    parent = {}  # a node -> its parent, built with `fed` on the first file loader, so a file with none pays nothing
+    fed = {}  # (a def, a parameter name) -> the argument expressions its calls pass for it
+
+    def read_params() -> None:
+        defs = {}  # a function name -> its defs, in any scope
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parent[child] = node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(node.name, []).append(node)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in defs:
+                for function in defs[node.func.id]:
+                    params = [arg.arg for arg in function.args.posonlyargs + function.args.args]
+                    for index, value in enumerate(node.args):
+                        if isinstance(value, ast.Starred):
+                            break
+                        if index < len(params):
+                            fed.setdefault((function, params[index]), []).append(value)
+                    for keyword in node.keywords:
+                        if keyword.arg:
+                            fed.setdefault((function, keyword.arg), []).append(keyword.value)
+
+    def names_base(expr, seen, scope=()) -> bool:
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
                 if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
                     return True
-            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
-                seen.add(part.id)
-                if any(names_base(value, seen) for value in bound[part.id]):
-                    return True
+            elif isinstance(part, ast.Name):
+                if part.id in bound and part.id not in seen:
+                    seen.add(part.id)
+                    if any(names_base(value, seen, scope) for value in bound[part.id]):
+                        return True
+                for function in scope:
+                    key = (function, part.id)
+                    if key in fed and key not in seen:
+                        seen.add(key)
+                        if any(names_base(value, seen) for value in fed[key]):
+                            return True
         return False
 
     def last_part(dotted: str) -> bool:
@@ -3296,7 +3341,15 @@ def _loads_module(source: str, stem: str) -> bool:
             elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if any(names_base(part, set()) for part in parts):
+                if not parent:
+                    read_params()
+                scope = []  # the defs around this call, innermost first: the parameters it can read
+                up = parent.get(node)
+                while up is not None:
+                    if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        scope.append(up)
+                    up = parent.get(up)
+                if any(names_base(part, set(), scope) for part in parts):
                     return True
     return False
 
