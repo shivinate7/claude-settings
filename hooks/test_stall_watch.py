@@ -1206,6 +1206,34 @@ def cd_to_an_unknown_dir_reports_the_log_as_unwatched():
     return problems
 
 
+@case
+def blank_or_comment_line_after_and_and_keeps_the_next_list():
+    """27h. a blank or comment-only line after a trailing && does not end the list: its & still backgrounds the cd's list, and the line after that runs in the main shell"""
+    return read_rows_problems([
+        ("cd /x &&\n\nmake > a &\nmake2 > log2", ["/x/a", "log2"], []),  # control: an empty line
+        ("cd /x &&\n \nmake > a &\nmake2 > log2", ["/x/a", "log2"], []),  # a line of spaces
+        ("cd /x &&\n# c\nmake > a &\nmake2 > log2", ["/x/a", "log2"], []),  # a comment line
+    ])
+
+
+@case
+def lone_apostrophe_in_a_comment_is_text():
+    """27i. a lone apostrophe in a `# comment` on a cd line is text: the cd still joins the logs after the comment's newline to its target"""
+    return read_rows_problems([
+        ("cd /x # don't\nmake > log", ["/x/log"], []),
+        ("cd /x && make > a # don't\nmake > log2", ["/x/a", "/x/log2"], []),
+    ])
+
+
+@case
+def hash_inside_a_multi_line_string_is_text():
+    """27j. a `#` inside a multi-line double-quoted string is text: the redirect after the string takes the cd's directory"""
+    return read_rows_problems([
+        ('cd /x && echo "a\n# b" > log', ["/x/log"], []),
+        ('cd /x\necho "a\n# b" > log', ["/x/log"], []),
+    ])
+
+
 VERDICT_QUIET = "3"  # the quiet time of the watch in the verdict cases
 VERDICT_SLEEP = 6  # the verdict child runs this many seconds, above the quiet time
 
