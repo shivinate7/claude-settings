@@ -208,10 +208,12 @@ Other tools, in `judge` order:
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
                        right after it, or a report's `FAIL, round N of 3, ...` line). Marks (`-`, `*`,
                        `#`, bold) before a line's first word are skipped. The verdict scan reads the
-                       brief after three steps: each backtick span is blanked (a quote), each line is
+                       brief after three steps: each backtick span is blanked (a quote) unless it
+                       holds only a verdict word (``Prior verdict: `FAIL` `` is refused), each line is
                        split at sentence ends (`.`, `;`, `!`, `?`) so each sentence starts its own
-                       line, and a choice list that ends its sentence (verdict words joined by `,`,
-                       `/`, `or` or `and`) is blanked, as a format line (`a verdict: PASS or FAIL`).
+                       line, and a choice list that ends its sentence (verdict words, bare or
+                       backticked, joined by `,`, `/`, `or` or `and`) is blanked, as a format line
+                       (`a verdict: PASS or FAIL`).
                        Each step hides only its own span or sentence, so a later label in the same
                        line is read afresh (`... PASS or FAIL. Prior verdict: FAIL.` is refused).
                        Shapes at sentence start only, so a brief that quotes the rule's words passes. A
@@ -2642,7 +2644,7 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # verdict word right after the colon. Or a report's leading verdict, `FAIL, round <n> of 3, ...`. A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote. The regex reads only that shape. The exemptions are made first, in
 # Python, by brief_blind_verdict_text: it blanks each backtick span (a quote, so a finding that quotes `verdict: FAIL`
-# passes), splits each line at its sentence ends so each sentence starts its own line, and blanks a verdict-word choice list
+# passes) but keeps a span that holds only a verdict word (``Round 1: `FAIL` `` is a verdict), splits each line at its sentence ends so each sentence starts its own line, and blanks a verdict-word choice list
 # that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format line). An
 # exemption hides only its own span or sentence, never the rest of its line: `Give a verdict: PASS or FAIL. Prior verdict:
 # FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon. Some
@@ -2651,15 +2653,18 @@ BRIEF_BLIND_VERDICT = re.compile(
     BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
     r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
-# A backtick span stays on one line. A sentence ends at `.`, `;`, `!` or `?` before a space, a capital letter or the line end,
-# so a path (`guard.py:12`) or a number (`2.5`) does not split.
-BRIEF_BLIND_SPAN = re.compile(r"`[^`\n]*`")
+# A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
+# that span. One pattern pairs every span left to right, so a kept span's closing backtick never opens the next span.
+# A sentence ends at `.`, `;`, `!` or `?` before a space, a capital letter or the line end, so a path (`guard.py:12`) or a
+# number (`2.5`) does not split.
+BRIEF_BLIND_SPAN = re.compile(r"`(?:(%s)`|[^`\n]*`)" % BRIEF_BLIND_VERDICT_WORDS)
 BRIEF_BLIND_SENTENCE_END = re.compile(r"[.;!?](?=[ \t]|$|[A-Z])[ \t]*", re.M)
 _BRIEF_BLIND_SEP = r"[ \t]*(?:,[ \t]*(?:(?:or|and)\b[ \t]*)?|/[ \t]*|(?:or|and)\b[ \t]*)"
-# A run of two or more verdict words joined by `,`, `/`, `or` or `and`, with marks. The line end is tested in Python after the
-# match: a regex that tests it backtracks the whole run from every start.
+# A run of two or more verdict words joined by `,`, `/`, `or` or `and`, with marks; a backtick is a mark, since a kept span
+# (`PASS` or `FAIL`) is still a choice. The line end is tested in Python after the match: a regex that tests it backtracks
+# the whole run from every start.
 BRIEF_BLIND_CHOICES = re.compile(
-    r"[*_]*\b(?:%(w)s)\b[*_]*(?:%(sep)s[*_]*\b(?:%(w)s)\b[*_]*)+" % {"w": BRIEF_BLIND_VERDICT_WORDS, "sep": _BRIEF_BLIND_SEP})
+    r"[*_`]*\b(?:%(w)s)\b[*_`]*(?:%(sep)s[*_`]*\b(?:%(w)s)\b[*_`]*)+" % {"w": BRIEF_BLIND_VERDICT_WORDS, "sep": _BRIEF_BLIND_SEP})
 _BRIEF_BLIND_LINE_END = re.compile(r"[ \t]*$", re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
@@ -2667,9 +2672,9 @@ BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior ve
 
 
 def brief_blind_verdict_text(brief: str) -> str:
-    """The brief as the verdict scan reads it: backtick spans blanked, one sentence per line, and each choice list that
-    ends its sentence blanked."""
-    text = BRIEF_BLIND_SENTENCE_END.sub("\n", BRIEF_BLIND_SPAN.sub(" ", brief))
+    """The brief as the verdict scan reads it: backtick spans blanked except a lone verdict word, one sentence per line,
+    and each choice list that ends its sentence blanked."""
+    text = BRIEF_BLIND_SENTENCE_END.sub("\n", BRIEF_BLIND_SPAN.sub(lambda m: m.group(0) if m.group(1) else " ", brief))
     return BRIEF_BLIND_CHOICES.sub(
         lambda m: " " if _BRIEF_BLIND_LINE_END.match(text, m.end()) else m.group(0), text)
 
