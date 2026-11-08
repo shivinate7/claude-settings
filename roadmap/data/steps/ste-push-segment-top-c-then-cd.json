@@ -1,0 +1,11 @@
+{
+  "title": "The STE push guard follow-up after #1755 (segment top, `-C` then `cd`)",
+  "why": "Follow-up of step lint-before-record-push (#1755, a push of Markdown that fails the STE lint is refused), named by the coordinator at 04:06 CST Nov 8. The gap sentence is asked of the lane (triage, 04:07 CST).",
+  "note": "Lane session_013NEJKzXyKNARtJsbz3Q1R2 (lint-before-record-push) builds it on branch ste-push-segment-top-c-then-cd off #1755's head 9278579a8, red tests first; its PR carries Merge after: #1755. Title and Fix line wait for the lane's one-sentence gap. Filed 04:07 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 586,
+  "owner": "triage",
+  "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
+  "updatedAt": "2026-11-08T04:05:00-06:00"
+}
