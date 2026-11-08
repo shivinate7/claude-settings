@@ -1094,7 +1094,17 @@ def case_powershell_bash_forms():
                      ("a bracket test", "if [ -f x ]; then git push; fi"),
                      ("a backslash line end", "git push origin \\\nmain"),
                      ("a pipe to jq", "Get-Content x | jq ."), ("a pipe to less", "Get-Content x | less"),
-                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi")):
+                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi"),
+                     ("a pipe to tail", "Get-Content x | tail -5"), ("a pipe to xargs", "Get-ChildItem | xargs rm"),
+                     ("a pipe to sed", "git log | sed 1d"), ("a pipe to awk", "git log | awk 1"),
+                     ("a pipe to cut", "git log | cut -c1-7"), ("a pipe to wc", "git log | wc -l"),
+                     ("a pipe to uniq", "git log --oneline | uniq"), ("a pipe to tr", "git log | tr a b"),
+                     ("a pipe to tac", "git log | tac"),
+                     ("a while bracket test", "while [ -f x ]; do git push; done"),
+                     ("an until bracket test", "until [ -f x ]; do git push; done"),
+                     ("an elif bracket test", "if false; then git push; elif [ -f x ]; then git push; fi"),
+                     ("a bracket test after an open paren", "git push ( [ -f x ] )"),
+                     ("a bracket test after a semicolon", "git status; [ -f x ]; git push")):
         page("a PowerShell command with %s is refused as a bash operator" % name, "set",
              entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
     # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
@@ -1190,10 +1200,11 @@ def case_powershell_hash_mid_token_is_no_comment():
 
 
 def case_step_shell_programs_partial():
-    # A single-span step is a shell line only when its first word is in SHELL_PROGRAMS, so a cloud CLI, a span with a
-    # flag after its word, or chmod passes. Each of the six spans below is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
-    # stays refused, as on main.
-    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x"):
+    # A single-span step is a shell line when its first word is in SHELL_PROGRAMS (a cloud CLI included), or a
+    # lowercase word whose second word is a flag (chmod +x f, rg --files). Each span below is refused. Controls pass:
+    # a bare tool name, a flag alone and a minus between two words. The chained span stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x",
+                 "pnpm install", "aws s3 ls", "az login", "helm list", "rg --files", "sync --dry-run"):
         page("a step holding `%s` is refused as a shell line" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
     for span in ("kubectl", "--force", "a - b"):
