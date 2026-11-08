@@ -1324,8 +1324,13 @@ def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
         return
     command = tool_input.get("command")
     if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
-        for found in _UPDATED_AT.finditer(command):
-            yield found.group(0), found.group(0)
+        # Only the last literal is judged: the new value comes last in `s/old/new/`, `.replace(old, new)` and an
+        # assignment, so a repair that rewrites an ahead value to the right time passes.
+        last = None
+        for last in _UPDATED_AT.finditer(command):
+            pass
+        if last:
+            yield last.group(0), last.group(0)
 
 
 def written_time_hit(tool: str, tool_input, cwd: str = ""):
@@ -1334,7 +1339,7 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
     the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
-    text. In a shell command: a literal `updatedAt` key with a double-quoted value. Only a value with an offset is
+    text. In a shell command: the last literal `updatedAt` key with a double-quoted value. Only a value with an offset is
     read. Cost: one clock read, and only when a judged value is present; one local file read, only for an items
     write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
     if not isinstance(tool_input, dict):
