@@ -12564,6 +12564,44 @@ sh("frozen shell: perl open3 running sed -i on the config settings, glued to -e,
    "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: perl readpipe running cat on the config settings, glued to -e, allows [reader-limits pin]",
    "perl -e'print readpipe(\"cat " + CFG_SETTINGS + "\")'", "allow", cwd=NOGIT)
+# A closed $'...' word at a segment's end does not make the reader read an apostrophe before it again. The
+# & inside echo's single quotes is text, so the sed -i in them is text too. A real sed -i after a closed
+# word still denies, which pins that the split happens when the command is not quoted.
+sh("frozen shell: an echo whose single quotes hold a & and sed -i on the config settings, then a closed $'c' "
+   "word, allows [reader-limits red]",
+   "echo x'a&sed -i s/a/b/ " + CFG_SETTINGS + "' $'c'", "allow", cwd=NOGIT)
+sh("frozen shell: an echo of x'a&b' and a closed $'c' word, then sed -i on the config settings after ;, denies "
+   "[reader-limits control]", "echo x'a&b' $'c'; sed -i s/a/b/ " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+# IPC::Run's run() and IPC::Cmd's run() start a command, and POSIX::execvp replaces the process with one, as
+# system() does. A script glued to -e that runs sed -i on the config settings through one of them is refused.
+# A script that imports IPC::Run and only prints is text, and is allowed.
+sh("frozen shell: perl IPC::Run run() running sed -i on the config settings, glued to -e, denies "
+   "[reader-limits red]",
+   "perl -e'use IPC::Run; run([\"sed\", \"-i\", \"s/a/b/\", \"" + CFG_SETTINGS + "\"])'", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: perl IPC::Cmd run() running sed -i on the config settings, glued to -e, denies "
+   "[reader-limits red]",
+   "perl -e'use IPC::Cmd; run(command => \"sed -i s/a/b/ " + CFG_SETTINGS + "\")'", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen shell: perl POSIX::execvp running sed -i on the config settings, glued to -e, denies "
+   "[reader-limits red]",
+   "perl -e'use POSIX; POSIX::execvp(\"sed\", (\"sed\", \"-i\", \"s/a/b/\", \"" + CFG_SETTINGS + "\"))'",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: perl that imports IPC::Run and only prints, glued to -e, allows [reader-limits pin]",
+   "perl -e'use IPC::Run; print \"ok\"'", "allow", cwd=NOGIT)
+# A backgrounded cd moves no shell, so a relative name is judged in the folder the shell stands in. A pid
+# captured after the `&` passes detached-launch and reaches this reader. From outside the config folder, the
+# name settings.json is not the frozen file, because the cd moved nothing. The full path is frozen anywhere.
+sh("frozen shell: cd into the config folder &, a newline, then sed -i on settings.json by its name from outside, "
+   "allows [reader-limits pin]",
+   "cd " + slash(CFG) + " &\nsed -i s/a/b/ settings.json; echo $!", "allow", cwd=NOGIT)
+sh("frozen shell: cd into the config folder && sleep 1 & echo $!, then sed -i on settings.json by its name from "
+   "outside, allows [reader-limits pin]",
+   "cd " + slash(CFG) + " && sleep 1 & echo $!; sed -i s/a/b/ settings.json", "allow", cwd=NOGIT)
+sh("frozen shell: cd into the config folder && sleep 1 & echo $!, then sed -i on the config settings by its full "
+   "path, denies [reader-limits pin]",
+   "cd " + slash(CFG) + " && sleep 1 & echo $!; sed -i s/a/b/ " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 # An output flag writes its file wherever its command runs. A spaced subshell is already read. The subshell
 # glued to its command word, and the text of `sh -c`, are not.
@@ -14232,6 +14270,19 @@ sh("builder-test: shell, echo a glued & then cd tests; sed -i on src/app.py, is 
    "echo a &cd tests; sed -i s/a/b/ src/app.py", "deny", rule=BT, carries=("test-author",), **DR)
 sh("builder-test: shell, cd tests; sed -i on test_a.py, is refused [follow_cd control]",
    "cd tests; sed -i s/a/b/ test_a.py", "deny", rule=BT, carries=("test-author",), **DR)
+# A `cd` that a lone `&` ends moves no shell, even with a pid captured after it: `cmd & echo $!` passes
+# detached-launch, which refuses a bare `&` with no pid, so these shapes reach this reader. The sed -i after
+# the `&` runs in the root, where src/app.py is the builder's own file. Judged inside tests it is
+# tests/src/app.py, a test path, so it is refused. The foreground `;` forms move the shell and stay refused.
+sh("builder-test: shell, cd tests &, a newline, then sed -i on src/app.py with $! captured, is allowed "
+   "[follow_cd red]", "cd tests &\nsed -i s/a/b/ src/app.py; echo $!", "allow", **DR)
+sh("builder-test: shell, cd tests && sleep 1 & echo $!, then sed -i on src/app.py, is allowed [follow_cd red]",
+   "cd tests && sleep 1 & echo $!; sed -i s/a/b/ src/app.py", "allow", **DR)
+sh("builder-test: shell, cd tests; sed -i on src/app.py with $! captured, is refused [follow_cd control]",
+   "cd tests; sed -i s/a/b/ src/app.py; echo $!", "deny", rule=BT, carries=("test-author",), **DR)
+sh("builder-test: shell, cd tests && sleep 1 & echo $!, then sed -i on tests/test_a.py, is refused "
+   "[follow_cd control]", "cd tests && sleep 1 & echo $!; sed -i s/a/b/ tests/test_a.py", "deny", rule=BT,
+   carries=("test-author",), **DR)
 # A listing that prints tracked paths is read by its pathspecs. A redirect word is no pathspec, and a
 # glob pathspec is matched against the tracked tree (DOTROOT holds tests/test_a.py).
 for _name, _command in (
@@ -22633,6 +22684,41 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a shell write into another checkout af
                          worktree_home_background_cd_case))
 
 
+def worktree_home_pid_background_cd_case():
+    """Rule 0, other-checkout, a `cd` that a lone `&` ends moves no shell, even with a pid captured after it.
+    `cmd & echo $!` passes detached-launch, so each write reaches this reader. From the primary, a write into
+    lane-b is refused, backgrounded cd or not. A relative name that is lane-b only from the cd's folder lands
+    outside the clone from the primary, so it is allowed."""
+    primary, _lane_a, lane_b, _ = _cross_checkout_fixture("xcopid")
+    src = slash(os.path.join(primary, "src"))
+    paths = (ROOT, slash(ROOT), lane_b, slash(lane_b))
+    into_lane_b = ".claude/worktrees/lane-b/src/app.py"
+    from_src = slash(os.path.relpath(os.path.join(lane_b, "src", "app.py"), os.path.join(primary, "src")))
+    problems = []
+    for label, command in (
+        ("cd src &, a newline, sed -i into lane-b with a pid captured, from the primary",
+         "cd " + src + " &\nsed -i s/a/b/ " + into_lane_b + "; echo $!"),
+        ("cd src && sleep 1 & echo $!, then sed -i into lane-b, from the primary",
+         "cd " + src + " && sleep 1 & echo $!; sed -i s/a/b/ " + into_lane_b),
+    ):
+        got, reason = _decide_full("Bash", primary, command=command)
+        problems += _other_checkout_problems(label, got, reason, paths)
+    _expect_call(problems, "cd src &, a newline, sed -i by the name lane-b has from src, from the primary",
+                 "allow", "Bash", primary, None, "cd " + src + " &\nsed -i s/a/b/ " + from_src + "; echo $!")
+    got, reason = _decide_full("Bash", primary,
+                               command="cd " + src + " && sleep 1; echo $!; sed -i s/a/b/ " + from_src)
+    problems += _other_checkout_problems("foreground control: cd src && sleep 1; echo $!, then sed -i into lane-b",
+                                         got, reason, paths)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a backgrounded cd with a pid moves no shell, so lane-b is refused from the primary"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: a shell write after a cd that a lone & ends, with a pid captured, is judged "
+                         "where the shell stands; a foreground cd still moves the shell",
+                         worktree_home_pid_background_cd_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
@@ -23366,6 +23452,44 @@ def session_home_background_cd_case():
 
 LOG_CHECKS_EXTRA.append(("session-home: a cd joined to a write by a glued & moves no shell, so the write is judged "
                          "in the primary; a cd after echo a & and ; moves it", session_home_background_cd_case))
+
+
+def session_home_pid_background_cd_case():
+    """Rule session-home, judged from the primary: a `cd` that a lone `&` ends moves no shell, even with a pid
+    captured after it. `cmd & echo $!` passes detached-launch, so each write reaches this reader. A write to
+    CLAUDE.md after such a cd is judged where the shell stands, the primary, and is refused. A foreground `;`
+    cd moves the shell into the scratch folder, so the same write is allowed there."""
+    primary = sh_new_primary("bgpid")
+    lost, lost_branch = sh_add_lane(primary, "lane-bgpid-lost")
+    session = sh_session()
+    scratch = os.path.join(ROOT, "shome_bgpid_scratch")
+    os.makedirs(scratch, exist_ok=True)
+    into = slash(scratch)
+    problems = []
+    _decide_full("Bash", lost, session=session, command="echo hi")
+    if not sh_holds(primary, session, lost):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lost, lost_branch)
+    for label, command in (
+        ("cd scratch &, a newline, sed -i on CLAUDE.md with a pid captured, from the primary",
+         "cd " + into + " &\nsed -i s/a/b/ CLAUDE.md; echo $!"),
+        ("cd scratch && sleep 1 & echo $!, then sed -i on CLAUDE.md, from the primary",
+         "cd " + into + " && sleep 1 & echo $!; sed -i s/a/b/ CLAUDE.md"),
+    ):
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(label, got, reason, primary, lost)
+    got, reason = _decide_full("Bash", primary, session=session,
+                               command="cd " + into + " && sleep 1; echo $!; sed -i s/a/b/ CLAUDE.md")
+    if got != "allow":
+        problems.append("foreground control: want allow, got %s (%s)" % (got, reason[:120]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a backgrounded cd with a pid captured moves no shell, so the write is refused in the primary"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a cd that a lone & ends, with a pid captured, moves no shell, so a write "
+                         "after it is judged in the primary; a foreground cd moves it",
+                         session_home_pid_background_cd_case))
 
 
 def session_home_clean_refuses_case():
