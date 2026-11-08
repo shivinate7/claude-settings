@@ -1299,6 +1299,21 @@ class SmallBaseMove(Env):
         with open(record, encoding="utf-8", newline="") as f:
             self.assertEqual(f.read(), MERGE_PR_BODY, "the merge's own lint did not get exactly the PR's body (an inherited CI_JOB_PR_BODY_FILE may have reached it)")
 
+    def test_the_small_move_lint_removes_its_temp_body_file_after_the_run(self):
+        temp = os.path.join(self.t, "temp")
+        os.mkdir(temp)
+        record = os.path.join(self.t, "body-seen.txt")
+        self.host.body = MERGE_PR_BODY
+        self.record_body_scoped(record)
+        with unittest.mock.patch.object(tempfile, "tempdir", temp):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        with open(record, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), MERGE_PR_BODY, "the lint did not read the temp body file, so the case proves nothing: " + out)
+        left = sorted(n for n in os.listdir(temp) if n.startswith("merge-body-"))
+        self.assertEqual(left, [], "the small-move lint left its temp body file behind")
+
     def test_an_inherited_pr_body_file_naming_no_file_does_not_refuse_the_small_move_proof(self):
         self.scoped()
         self.on("main", {"docs/guide.md": "# Guide\n"})
