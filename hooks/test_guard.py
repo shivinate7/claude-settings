@@ -423,6 +423,7 @@ SUBJSTASH = os.path.join(ROOT, "subjstash")  # a clean tree carrying one real st
 SUBJSTASHWT = os.path.join(ROOT, "subjstashlane")  # a linked worktree of it: same stack
 SUBJSTAGED = os.path.join(ROOT, "subjstaged")  # a real checkout: a staged edit, a staged new file
 GITBLIND = os.path.join(ROOT, "gitblind")  # a git that answers the repo test and no status read
+NOGIT_PATH = os.path.join(ROOT, "nogitpath")  # an empty folder on PATH: no git runs at all
 # A repository under a scratchpad named after one session. ROOT already sits under the system
 # temporary directory, which is the other half of the path test.
 FAKE_SESSION = "5b9f6a3d-0000-4000-8000-000000000000"
@@ -2855,6 +2856,30 @@ sh("per-file bare: checkout of a dirty file named from a subfolder in the shared
 sh("per-file bare: checkout of a staged-only file in the shared checkout denies "
    "(pin: staged counts as dirty, though git keeps it)",
    VCS + " checkout staged-note", "deny", "shared-tree", cwd=GITMAIN)
+
+# AN UNREADABLE LONE OPERAND (guard_shared_tree.lone_operand_is_dirty_file). A bare `checkout Makefile`
+# is judged as a path only when git can say what the name is and what its status is. When a read gets
+# no answer, the call is allowed (the verdict stays silent) and logged once as `noted`/`subject-unread`.
+# The two reads fail in different places, so each branch has its own case: no git at all (the revision
+# read gets no answer), and a git that answers the repo test only (the revision read fails, then the
+# status read gets no answer). The checks register with LOG_CHECKS_EXTRA below, where that list exists.
+UNREAD_NOGIT_LABEL = ("per-file bare log: a bare checkout of a dirty file with no git on PATH is allowed "
+                      "and logged once as subject-unread")
+UNREAD_STATUS_LABEL = ("per-file bare log: a bare checkout of a dirty file whose status git cannot read "
+                       "is allowed and logged once as subject-unread")
+
+
+def unread_lone_operand_no_git_case():
+    """No git on PATH: the revision read gets no answer, so the lone operand is allowed and logged once."""
+    os.makedirs(NOGIT_PATH, exist_ok=True)
+    return subject_unread_log_case(VCS + " checkout Makefile", cwd=GITMAIN, search_path=NOGIT_PATH,
+                                   needle="checkout Makefile")
+
+
+def unread_lone_operand_status_case():
+    """A git that answers the repo test only: the revision read fails, the status read gets no answer."""
+    return subject_unread_log_case(VCS + " checkout Makefile", cwd=GITMAIN, search_path=GITBLIND,
+                                   needle="checkout Makefile")
 
 # THE DISCARD FORMS THAT JOIN THE RULE (decision agent-worktree-discard-is-noted, "These discard forms
 # join the rule"). A linked worktree keeps the ask for each one: the lane's own change is not a
@@ -13975,6 +14000,12 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The two unreadable-lone-operand checks. Their cases and labels sit in the shared-tree block, which runs
+# before LOG_CHECKS_EXTRA exists, so they register here and their family is set by hand, as above.
+LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
+LOG_FAMILY[UNREAD_NOGIT_LABEL] = "shared-tree"
+LOG_CHECKS_EXTRA.append((UNREAD_STATUS_LABEL, unread_lone_operand_status_case))
+LOG_FAMILY[UNREAD_STATUS_LABEL] = "shared-tree"
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -18271,17 +18302,19 @@ def crash_log_case():
     return True, "allowed, and one crash line logged"
 
 
-def subject_unread_log_case(command=None, expect_note=True):
+def subject_unread_log_case(command=None, expect_note=True, cwd=SUBJDIRTY, search_path=GITBLIND, needle=None):
     """A subject the guard could not read is allowed, and logged as `noted`/`subject-unread`.
 
     The line must be DISTINCT from a refusal line, so a reader can tell "I could not confirm
-    this" from "this destroys something". The case drives a real dirty repository with a blind
-    `git` on PATH, and it also checks the allow stays silent on stdout.
+    this" from "this destroys something". The case drives a real dirty repository (`cwd`) with
+    `search_path` as the whole PATH, by default a blind `git`, and it also checks the allow stays silent
+    on stdout. `needle` is the text the logged command must carry: `worktree remove` when a command
+    is given, else `reset`, unless it names another.
     """
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
-    materialize(GITBLIND)  # lint calls this directly, with no run loop to build what it names
-    materialize(SUBJDIRTY)
+    materialize(search_path)  # lint calls this directly, with no run loop to build what it names
+    materialize(cwd)
     folder = os.path.join(ROOT, "unreadlog")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
@@ -18290,13 +18323,13 @@ def subject_unread_log_case(command=None, expect_note=True):
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_CONFIG_DIR"] = folder
-    env["PATH"] = GITBLIND
+    env["PATH"] = search_path
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     result = subprocess.run(
         [sys.executable, GUARD],
         input=json.dumps({"tool_name": "Bash",
                           "tool_input": {"command": command or VCS + " reset --hard HEAD"},
-                          "cwd": SUBJDIRTY}),
+                          "cwd": cwd}),
         capture_output=True, text=True, env=env, timeout=60,
     )
     if result.stdout.strip():
@@ -18314,7 +18347,8 @@ def subject_unread_log_case(command=None, expect_note=True):
     fields = lines[0].split("\t")
     if len(fields) != 6 or fields[2] != "noted" or fields[3] != "subject-unread":
         return False, "line does not read noted/subject-unread: %r" % lines[0]
-    if ("worktree remove" if command else "reset") not in fields[4]:
+    want = needle or ("worktree remove" if command else "reset")
+    if want not in fields[4]:
         return False, "the line does not carry the matched command: %r" % fields[4]
     return True, "one noted/subject-unread line, distinct from a refusal"
 
