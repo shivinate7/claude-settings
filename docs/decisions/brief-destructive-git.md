@@ -15,7 +15,7 @@ Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workf
   - a prohibition: a negator in the same clause, within 4 words before the span; `avoid` and `without` only as the word right before it; emphasis marks stripped
   - a heading with a negator then a run verb within 2 words ("Never run:") covers its bullet run, across blank lines and into a fence under it
 - The override lifts it (`owner-override`).
-- Accepted limits, in `docs/debts/notes.md`: a `$ ` line under "Never run:" is denied; gerund prohibitions ("avoid running", "instead of") are denied; an earlier negated sentence on a heading line covers an order list; an unread Workflow prompt passes; an order with no backticks passes and meets the shell guard at run time. These are forms Claude is unlikely to write by mistake (`guard-guards-mistakes-only`).
+- Accepted limits, in `docs/debts/notes.md`. A `$ ` line under "Never run:" is denied. Gerund prohibitions ("avoid running", "instead of") are denied. An earlier negated sentence on a heading line covers an order list. An unread Workflow prompt passes. An order with no backticks passes and meets the shell guard at run time. Claude is unlikely to write these forms by mistake (`guard-guards-mistakes-only`).
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 
 Protected by the `brief-destructive-git:` cases in `hooks/test_guard.py` (58), red before the rule landed, and one mutant in `hooks/mutate_guard.py`.
