@@ -12720,9 +12720,10 @@ def printed_review_lines(out):
     return [l for l in out.splitlines() if l.startswith(("repo ",) + REVIEWED_LINE_STARTS)]
 
 class ReviewedRoots(ReviewEnv):
-    """`merge --reviewed --root DIR [--root DIR ...]`. Output: one block per root, in the order given. A block is the header `repo <owner/name>:`,
-    then that repo's reviewed lines, then at most one batch line after them. A root whose read or config fails prints one line in its place,
-    `repo DIR: unknown (reason)`; every other root prints in full; exit 1.
+    """`merge --reviewed --root OWNER/NAME=DIR [--root OWNER/NAME=DIR ...]`. Output: one block per root, in the order given. A block is the header
+    `repo OWNER/NAME:`, then that repo's reviewed lines, then at most one batch line after them. A root whose read or config fails, or whose
+    checkout is another repo than its OWNER/NAME, prints one line in its place, `repo OWNER/NAME: unknown (reason)`; every other root prints in
+    full; exit 1. A bare DIR is a usage error.
     The two roots are real checkouts (copy_repos), so load_config reads their base. The cwd, self.co, is no root."""
 
     def setUp(self):
@@ -12737,9 +12738,17 @@ class ReviewedRoots(ReviewEnv):
             build_repos(t)
         return os.path.join(t, "co")
 
+    def spec(self, checkout):
+        """The --root value that names a checkout: OWNER/NAME=DIR, with the name its fake host answers to (alpha is o/alpha, bravo is o/bravo)."""
+        return {self.alpha: "o/alpha", self.bravo: "o/bravo"}[checkout] + "=" + checkout
+
     def run_roots(self, *argv, hosts):
-        """-> (rc, out, err) of `merge` with `argv` and `hosts`. The parser must know --root, so a refusal of it fails here, named first."""
-        rc, out, err = self.run_args(*argv, hosts=hosts)
+        """-> (rc, out, err) of `merge` with `argv` and `hosts`. The parser must know --root, so a refusal of it fails here, named first. A --root
+        whose value is read as a folder (the old bare DIR form, or a name the folder read cannot find) fails as an assertion, not as an error."""
+        try:
+            rc, out, err = self.run_args(*argv, hosts=hosts)
+        except OSError as e:
+            self.fail(f"a --root value was read as a folder and escaped merge as {type(e).__name__} ({e}), not as a repo block: {argv}")
         self.assertNotIn("unrecognized arguments", err, "the parser refuses --root under --reviewed")
         return rc, out, err
 
@@ -12852,7 +12861,7 @@ unexpected(method + " " + rel)
 
     def assert_batch_line_unknown(self, out, root, header, reason, done=(5,)):
         """The block under `header` (`repo <owner/name>:`) keeps its lines: each number in `done` has one done line in it, and it prints one
-        `batch line unknown (...)` that names `reason`, and no batch line. `root` (the --root as given) never prints as a whole unknown line.
+        `batch line unknown (...)` that names `reason`, and no batch line. `root` (its OWNER/NAME) never prints as a whole unknown line.
         -> the block's lines, from its header to the next header."""
         self.assertNotIn(f"repo {root}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
         lines = out.splitlines()
@@ -12920,9 +12929,9 @@ unexpected(method + " " + rel)
             self.assertIn(" done: ", lines[0])
 
     def assert_one_unknown_beside_a_full_block(self, out, failing, reason, other, failing_first):
-        """The printed lines are four. `failing`'s block is one line, `repo <failing as given>: unknown (...)`, at its place in the order given,
-        and `other`'s block is whole: its header, its one #5 line and its batch line. Nothing else prints. `reason` is a text the reason must
-        hold, or None for any reason that is not empty."""
+        """The printed lines are four. `failing` (its OWNER/NAME, as the --root gives it) has one line, `repo OWNER/NAME: unknown (...)`, at its
+        place in the order given, and `other`'s block is whole: its header, its one #5 line and its batch line. Nothing else prints. `reason` is a
+        text the reason must hold, or None for any reason that is not empty."""
         lines = printed_review_lines(out)
         self.assertEqual(len(lines), 4, "want one unknown line and one whole block, and nothing else:\n" + out)
         unknown, block = (lines[0], lines[1:]) if failing_first else (lines[3], lines[:3])
@@ -12937,14 +12946,87 @@ unexpected(method + " " + rel)
 
     def test_root_needs_reviewed(self):
         # --root goes only with --reviewed: the parser refuses it anywhere else, and the usage error names the flag's refusal.
-        for argv in (("--root", self.alpha), ("7", "--root", self.alpha), ("--reviewed", "--root", self.alpha, "--confirm"),
-                     ("--reviewed", "--root", self.alpha, "7")):
+        alpha = self.spec(self.alpha)
+        for argv in (("--root", alpha), ("7", "--root", alpha), ("--reviewed", "--root", alpha, "--confirm"), ("--reviewed", "--root", alpha, "7")):
             with self.subTest(argv=argv):
                 self.assert_usage_error(*argv)
 
+    def test_root_takes_exactly_owner_name_eq_dir(self):
+        # --root is OWNER/NAME=DIR and no other form. A bare DIR, or a name with no slash, is a usage error. The hosts are given, so a value the
+        # parser let through would read them and exit with another code.
+        hosts = self.roots_with_done()
+        for value in (self.alpha, "alpha=" + self.alpha):
+            with self.subTest(value=value):
+                rc, out, err = self.run_args("--reviewed", "--root", value, hosts=hosts)
+                self.assertEqual(rc, 2, "--root takes OWNER/NAME=DIR, and this value is not that form:\n" + out + err)
+                self.assertIn("--root", err, "the usage error does not name --root:\n" + err)
+                self.assertNotIn("Traceback", err)
+
+    def test_a_checkout_of_another_repo_is_unknown_and_the_others_print_in_full(self):
+        # --root o/other=DIR for the checkout of o/alpha: that root is one unknown line naming both repos, the other root prints in full, exit 1.
+        # Both orders: the unknown line is at the root's place.
+        for failing_first in (True, False):
+            with self.subTest(failing_first=failing_first):
+                good, wrong = self.spec(self.bravo), "o/other=" + self.alpha
+                argv = ("--reviewed", "--root", wrong, "--root", good) if failing_first else ("--reviewed", "--root", good, "--root", wrong)
+                rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f"repo o/other: unknown (the checkout at {self.alpha} is o/alpha, not o/other)", out.splitlines(), out)
+                self.assert_one_unknown_beside_a_full_block(out, "o/other", "the checkout at", "o/bravo", failing_first=failing_first)
+
+    def test_a_real_checkout_whose_gh_name_is_another_repo_is_unknown(self):
+        # No host is given, so gh names each checkout's repo (per_root_gh). The checkout at alpha is o/alpha, so --root o/other=DIR is unknown.
+        head5 = hex_head("5")
+        self.per_root_gh({
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+        })
+        rc, out, err = self.run_roots("--reviewed", "--root", "o/other=" + self.alpha, "--root", self.spec(self.bravo), hosts=None)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"repo o/other: unknown (the checkout at {self.alpha} is o/alpha, not o/other)", out.splitlines(), out)
+        self.assert_one_unknown_beside_a_full_block(out, "o/other", "the checkout at", "o/bravo", failing_first=True)
+
+    def block_named_any_case(self, out, name):
+        """-> the lines of the one block whose header names `name` in any case, up to the next header. The header's spelling is not pinned here."""
+        lines = out.splitlines()
+        starts = [k for k, l in enumerate(lines) if l.lower() == f"repo {name}:".lower()]
+        self.assertEqual(len(starts), 1, f"want one block for {name}, in any case:\n" + out)
+        start = starts[0]
+        end = next((k for k in range(start + 1, len(lines)) if lines[k].startswith("repo ")), len(lines))
+        return lines[start:end]
+
+    def test_a_name_that_differs_only_in_case_passes(self):
+        # The compare is case-insensitive, as the guard's repo_tag_names is: a checkout whose repo is O/Alpha passes as --root o/alpha=DIR.
+        # Only the case differs, so no root is unknown, and the block holds the repo's done line and its batch line.
+        head5 = hex_head("5")
+        hosts = {self.alpha: root_host("O/Alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", "o/alpha=" + self.alpha, "--root", self.spec(self.bravo), hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(": unknown (", out, "a name that differs only in case is unknown:\n" + out)
+        for name in ("o/alpha", "o/bravo"):
+            block = self.block_named_any_case(out, name)
+            self.assert_done(block, 5)
+            self.assertEqual(self.batch_numbers(block), [5], f"{name} lost its batch line:\n" + out)
+
+    def test_a_real_checkout_whose_gh_name_differs_only_in_case_passes(self):
+        # No host is given, so gh names the repo of each checkout (per_root_gh). gh says O/Alpha, the --root says o/alpha: the same repo, so it passes.
+        head5 = hex_head("5")
+        self.per_root_gh({
+            self.alpha: self.root_state("O/Alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
+        })
+        rc, out, err = self.run_roots("--reviewed", "--root", "o/alpha=" + self.alpha, "--root", self.spec(self.bravo), hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(": unknown (", out, "a gh name that differs only in case is unknown:\n" + out)
+        for name in ("o/alpha", "o/bravo"):
+            block = self.block_named_any_case(out, name)
+            self.assert_done(block, 5)
+            self.assertEqual(self.batch_numbers(block), [5], f"{name} lost its batch line:\n" + out)
+
     def test_root_repeats_under_reviewed(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: root_host("o/bravo")}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, "two --root values under --reviewed:\n" + out + err)
         self.assertEqual([name for name, _ in root_blocks(out)], ["o/alpha", "o/bravo"], out)
 
@@ -12953,7 +13035,7 @@ unexpected(method + " " + rel)
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(7, head7)], comments=[record_of(7, head7, rounds=OPEN_ROUNDS)],
                                        check_rows={head7: green()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.bravo), "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual([name for name, _ in root_blocks(out)], ["o/bravo", "o/alpha"], "the headers are not in the order given:\n" + out)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
@@ -12968,7 +13050,7 @@ unexpected(method + " " + rel)
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5"))],
                                        check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
@@ -12982,7 +13064,7 @@ unexpected(method + " " + rel)
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(5, head5), batch_pull(8, head8)],
                                        comments=[record_of(5, head5, rounds=OPEN_ROUNDS), record_of(8, head8, rounds=OPEN_ROUNDS)],
                                        check_rows={head8: green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
@@ -12993,7 +13075,7 @@ unexpected(method + " " + rel)
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5)],
                                        check_rows={head5: green(), head6: running()}),
                  self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["build next batch on the running head: o/alpha #5"], out)
@@ -13005,7 +13087,7 @@ unexpected(method + " " + rel)
                     record_of(4, hex_head("4"), net="negative")]
         check_rows = {hex_head("9"): green(), hex_head("5"): green()}
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5 #9"], out)
@@ -13015,14 +13097,14 @@ unexpected(method + " " + rel)
         pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
         comments = [record_of(n, heads[n]) for n in range(1, 13)]
         hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/bravo")
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo " + " ".join(f"#{n}" for n in range(1, 13))], out)
 
     def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_batch(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: self.roots_with_done()[self.bravo]}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(blocks["o/alpha"], ["no open pull requests."], out)
@@ -13033,13 +13115,13 @@ unexpected(method + " " + rel)
         head5, head6 = hex_head("5"), hex_head("6")
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
                                        comments=[record_of(5, head5)], check_rows={head5: green(), head6: running()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha")
         self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
 
     def test_a_failed_read_in_one_root_prints_that_root_unknown_and_the_others_in_full(self):
-        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        argv = ("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo))
         rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
         self.assertEqual(rc, 0, "control, no read fails, so both blocks print:\n" + out + err)
         self.assertEqual(sorted(name for name, _ in root_blocks(out)), ["o/alpha", "o/bravo"], out)
@@ -13049,11 +13131,11 @@ unexpected(method + " " + rel)
                     other = "o/bravo" if side == "alpha" else "o/alpha"
                     rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done(**{side + "_read": read}))
                     self.assertEqual(rc, 1, "a failed read exits 1:\n" + out + err)
-                    self.assert_one_unknown_beside_a_full_block(out, getattr(self, side), next(iter(read.values())), other, failing_first=side == "alpha")
+                    self.assert_one_unknown_beside_a_full_block(out, "o/" + side, next(iter(read.values())), other, failing_first=side == "alpha")
 
     def test_a_broken_config_in_one_root_is_unknown_and_the_others_print_in_full(self):
         # load_config reads each root's own base. A broken config on bravo's base makes bravo one unknown line that names the config; alpha prints in full.
-        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        argv = ("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo))
         rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
         self.assertEqual(rc, 0, "control, before the break:\n" + out + err)
         by_repo(self, out, "o/alpha", "o/bravo")
@@ -13062,7 +13144,7 @@ unexpected(method + " " + rel)
                         "{not json\n")
         rc, out, err = self.run_roots(*argv, hosts=self.roots_with_done())
         self.assertEqual(rc, 1, out + err)
-        self.assert_one_unknown_beside_a_full_block(out, self.bravo, ".github/stamp.json", "o/alpha", failing_first=False)
+        self.assert_one_unknown_beside_a_full_block(out, "o/bravo", ".github/stamp.json", "o/alpha", failing_first=False)
 
     def test_no_root_never_prints_a_batch_line(self):
         # the control: without --root the output keeps its lines, so a done pull request gets no batch line, with a batch running or not
@@ -13086,7 +13168,7 @@ unexpected(method + " " + rel)
             for draft9 in (True, False):
                 with self.subTest(status=status, draft=draft9):
                     hosts = self.held_hosts({(hex_head("5"), hex_head("9")): status}, draft9)
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
                     self.assert_done(block, 5, 6)
@@ -13096,7 +13178,7 @@ unexpected(method + " " + rel)
         # The control for the held case: the same pull requests, with no compare that holds #5. Both done lanes are named.
         for draft9 in (True, False):
             with self.subTest(draft=draft9):
-                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts({}, draft9))
+                rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=self.held_hosts({}, draft9))
                 self.assertEqual(rc, 0, out + err)
                 block = by_repo(self, out, "o/alpha")["o/alpha"]
                 self.assert_done(block, 5, 6)
@@ -13107,7 +13189,7 @@ unexpected(method + " " + rel)
         pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
         hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): running(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
         self.assert_done(block, 5, 6)
@@ -13118,7 +13200,7 @@ unexpected(method + " " + rel)
         pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
         hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
         self.assert_done(block, 5, 6)
@@ -13129,7 +13211,7 @@ unexpected(method + " " + rel)
         pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
         hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6"))],
                                        check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
         self.assert_done(block, 5, 6)
@@ -13141,7 +13223,7 @@ unexpected(method + " " + rel)
         self.make_trunk_default(self.alpha)
         hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
                                        comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         block = by_repo(self, out, "o/alpha")["o/alpha"]
         self.assert_done(block, 5)
@@ -13152,7 +13234,7 @@ unexpected(method + " " + rel)
         # read from origin/trunk: its notice names that branch.
         self.gh_shim_for(self.alpha, default_branch="trunk")
         self.make_trunk_default(self.alpha, config=json.dumps({"defaultBranch": "trunk", "merge": {"method": "merge"}}))
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        rc, out, err = self.run_roots("--reviewed", "--root", "o/r=" + self.alpha, hosts=None)
         self.assertEqual(rc, 0, out + err)
         self.assertIn("repo o/r:", out.splitlines(), out)
         self.assertIn("on origin/trunk", out, "the config was read from main, not from the root's default branch trunk:\n" + out + err)
@@ -13161,14 +13243,14 @@ unexpected(method + " " + rel)
         # The one real-host case with no default-branch change: no host is given, and the header is the full_name the gh shim answers (o/r),
         # not the root's folder.
         self.gh_shim_for(self.alpha)
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        rc, out, err = self.run_roots("--reviewed", "--root", "o/r=" + self.alpha, hosts=None)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(printed_review_lines(out), ["repo o/r:", "no open pull requests."], out)
 
     def test_a_root_notice_never_prints_before_the_blocks(self):
         # Each root's config read prints a notice (CONFIG leaves requiredChecks out). No notice may print before root 2's blocks are known: the
         # probe reads stdout at root 2's first pulls read, when nothing may have printed yet.
-        argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
+        argv = ("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo))
         hosts = self.roots_with_done()
         seen, read = [], hosts[self.bravo].pages
 
@@ -13190,21 +13272,19 @@ unexpected(method + " " + rel)
         self.assertEqual(sorted(l for l in (out + err).splitlines() if "leaves out" in l), notices, "a notice was dropped:\n" + out + err)
 
     def test_a_missing_root_prints_unknown_beside_the_good_root_in_full(self):
-        # The folder is never created. Today the read of its default branch raises OSError out of merge, so no line prints. The case fails on that
-        # escape, named. In both orders the missing root is one `repo DIR: unknown (...)` line at its place, and the good root's block is whole.
+        # The folder is never created. The read of its default branch raises OSError out of merge today, so no line prints; run_roots fails that
+        # escape by name. In both orders the missing root is one `repo OWNER/NAME: unknown (...)` line at its place, and the good root's block is whole.
         missing = os.path.join(os.path.dirname(self.alpha), "missing")
         self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, hex_head("5"))],
                                                       comments=[record_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})})
         for failing_first in (True, False):
-            order = (missing, self.alpha) if failing_first else (self.alpha, missing)
+            missing_spec, alpha_spec = "o/missing=" + missing, self.spec(self.alpha)
+            order = (missing_spec, alpha_spec) if failing_first else (alpha_spec, missing_spec)
             with self.subTest(failing_first=failing_first):
-                try:
-                    rc, out, err = self.run_roots("--reviewed", "--root", order[0], "--root", order[1], hosts=None)
-                except OSError as e:
-                    self.fail(f"a --root folder that does not exist escapes merge as {type(e).__name__} ({e}), not as `repo {missing}: unknown (...)`")
+                rc, out, err = self.run_roots("--reviewed", "--root", order[0], "--root", order[1], hosts=None)
                 self.assertEqual(rc, 1, out + err)
                 self.assertNotIn("Traceback", err)
-                self.assert_one_unknown_beside_a_full_block(out, missing, None, "o/alpha", failing_first=failing_first)
+                self.assert_one_unknown_beside_a_full_block(out, "o/missing", None, "o/alpha", failing_first=failing_first)
         self.assertFalse(os.path.exists(missing), "the case must not create the folder it names")
 
     def test_each_real_host_block_holds_its_own_roots_repo_and_pulls(self):
@@ -13216,7 +13296,7 @@ unexpected(method + " " + rel)
             self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)], check_rows={head5: green()}),
             self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
         })
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=None)
         self.assertEqual(rc, 0, out + err)
         self.assertNotIn("o/self", out, "a root's Host read the folder the test runs in, not its own root:\n" + out)
         self.assertEqual([name for name, _ in root_blocks(out)], ["o/alpha", "o/bravo"], out)
@@ -13234,7 +13314,7 @@ unexpected(method + " " + rel)
         for status in ("ahead", "identical"):
             for busy in (False, True):
                 with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=self.base_hosts(status, busy))
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
                     self.assert_done(block, 5, 6)
@@ -13247,7 +13327,7 @@ unexpected(method + " " + rel)
         for status in (None, "behind"):
             for busy in (False, True):
                 with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
+                    rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), hosts=self.base_hosts(status, busy))
                     self.assertEqual(rc, 0, out + err)
                     block = by_repo(self, out, "o/alpha")["o/alpha"]
                     self.assert_done(block, 5, 6)
@@ -13263,9 +13343,9 @@ unexpected(method + " " + rel)
                                         contexts=None),
             self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9)], check_rows={head9: green()}),
         })
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=None)
         self.assertEqual(rc, 1, out + err)
-        self.assert_batch_line_unknown(out, self.alpha, "repo o/alpha:", "no branch protection")
+        self.assert_batch_line_unknown(out, "o/alpha", "repo o/alpha:", "no branch protection")
         lines = out.splitlines()
         self.assertIn("repo o/bravo:", lines, out)
         self.assertEqual(batch_lines_of(lines[lines.index("repo o/bravo:"):]), ["open batch now: o/bravo #9"], out)
@@ -13299,7 +13379,7 @@ unexpected(method + " " + rel)
                 self.set_base_stamp(root, None)
             if pinned:
                 self.set_base_stamp(root, {**CONFIG, "merge": {**CONFIG["merge"], "requiredChecks": ["checks"]}})
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=None)
         self.assertEqual(rc, 0, out + err)
         return self.gh_calls()
 
@@ -13400,10 +13480,10 @@ unexpected(method + " " + rel)
                  ("the compare with the base fails", {"base_fails": True}, 1))
         for name, reads, rc_want in cases:
             with self.subTest(name):
-                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=self.compare_hosts(**reads))
+                rc, out, err = self.run_roots("--reviewed", "--root", self.spec(self.alpha), "--root", self.spec(self.bravo), hosts=self.compare_hosts(**reads))
                 self.assertEqual(rc, rc_want, "the exit code is not the stop's:\n" + out + err)
                 if rc_want:
-                    self.assert_batch_line_unknown(out, self.alpha, "repo o/alpha:", "cannot read whether")
+                    self.assert_batch_line_unknown(out, "o/alpha", "repo o/alpha:", "cannot read whether")
                     blocks = by_repo(self, out, "o/bravo")
                     self.assert_done(blocks["o/bravo"], 9)
                     self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
