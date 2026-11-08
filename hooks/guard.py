@@ -2410,7 +2410,7 @@ SESSION_TOOL = "mcp__ccd_session__start_session"
 CREATE_SESSION_TOOL = "mcp__claude-code-remote__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-LANE_TAG = "cs-build:lane"
+from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
     "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
