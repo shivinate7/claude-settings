@@ -4442,13 +4442,20 @@ def _python_write_may_hit(raw: str, where: str) -> bool:
     """True when a python or node script in RAW writes a path whose nearest `.git` is not the cwd's,
     so it is worth the one `git worktree list`. The scripts are read by interpreter_write_hit, the
     one reader frozen-path uses; the path test is stat and small file reads, no git."""
-    own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
-    if not own_root:
-        return False
-    stranded = _clone_scope(None, own_root)[2]
-    return bool(interpreter_write_hit(
-        raw, where,
-        lambda path, at: stranded or _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)))
+    # The text scan runs first: the checkout root and the stranded test (a `.git` file and
+    # `commondir` read) are read once, and only when a script names a path it opens for writing.
+    found = {}
+
+    def reaches_elsewhere(path, at):
+        if not found:
+            own_root = _checkout_root_by_stat(os.path.realpath(where)) if where else ""
+            found["root"] = own_root
+            found["stranded"] = bool(own_root) and _clone_scope(None, own_root)[2]
+        own_root = found["root"]
+        if not own_root:
+            return False
+        return found["stranded"] or _checkout_root_by_stat(_resolved(path, at)) not in ("", own_root)
+    return bool(interpreter_write_hit(raw, where, reaches_elsewhere))
 
 
 def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
@@ -4475,6 +4482,17 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
         folder = parent
 
 
+def _own_agent_worktree(payload, primary: str, path: str) -> bool:
+    """True when PATH is at or inside the caller's own agent worktree
+    `<primary>/.claude/worktrees/agent-<its agent id>`. The id and the separator after it match
+    whole (`path_is_inside`), so `agent-<id>b` and the red-run folder `agent-<id>-<suffix>` do not
+    pass. PRIMARY is the primary checkout alone. No file read, no git."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id) or not primary or not path:
+        return False
+    return path_is_inside(path, os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id)) is True
+
+
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",
                        payload=None,
                        has_agent: bool = True) -> str:
@@ -4489,7 +4507,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
     refused the same way; the clone check spawns no git. A `git -C` verb that changes files is refused
-    into another checkout only for a call with an `agent_id`; a top-level session is refused only into
+    into another checkout only for a call with an `agent_id`, and never into that agent's own
+    worktree (`_own_agent_worktree`); a top-level session is refused only into
     a separate clone. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
@@ -4565,7 +4584,11 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             def in_other(folder, _at):
                 # A top-level session keeps the clone-only refusal: a git command run with -C into
                 # another checkout is no write there (decision an-agent-outside-its-home-tree-must-stop).
-                if elsewhere(folder, folder) and (has_agent or clone_hit.get(folder)):
+                # An agent's git -C into its own worktree is the pointer rule's remedy, so it passes;
+                # a separate clone stays refused.
+                if elsewhere(folder, folder) and (
+                        clone_hit.get(folder)
+                        or (has_agent and not _own_agent_worktree(payload, roots[0], folder))):
                     folders.append(folder)
                     return True
                 return False
