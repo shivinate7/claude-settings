@@ -5657,9 +5657,9 @@ sh("git-after-cd: a quoted heredoc and a plain heredoc on one line, the quoted b
    "cat <<'EOF' <<X | tee r.md && %s push -u origin b\n$(make check)\nEOF\nok\nX" % VCS, "allow", cwd=NOGIT)
 # NEGATED CHECKS AS THE TEST OF AN if OR A while. Ruling 2026-11-08 20:29 CST withdraws the refusal of a push in these
 # bodies, so both pass. Real bash runs each push on a failed check: the expectation is the ruling's, not bash's.
-sh("git-after-cd: a negated check as an if test, then a git push -u in the then branch, is refused",
+sh("git-after-cd: a negated check as an if test, then a git push -u in the then branch, passes: ruling 2026-11-08 20:29 CST withdrew the refusal",
    "if ! pytest -q; then %s push -u origin b; fi" % VCS, "allow", cwd=NOGIT)
-sh("git-after-cd: a negated check as a while test, then a git push -u in the body, is refused",
+sh("git-after-cd: a negated check as a while test, then a git push -u in the body, passes: ruling 2026-11-08 20:29 CST withdrew the refusal",
    "while ! make check; do %s push -u origin b; done" % VCS, "allow", cwd=NOGIT)
 # AN ELIF BODY AFTER A NEGATED CHECK. The elif test runs only when the negated test failed, so its then body runs only on a
 # passing check. Real bash runs the push only when make passes, so it is allowed. The negated test's found flag must reset
