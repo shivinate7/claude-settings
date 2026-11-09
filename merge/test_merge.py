@@ -12448,6 +12448,11 @@ class CloudSession(Env):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def runner_confirm(self):
+        """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
+        (decision auto-mode-owner-acts). The head is read when the call is made, so a case that moves feat first reads the moved head."""
+        return self.run_main("7", "--confirm", "--head", self.head())
+
 class MergeRoleCheck(CloudSession):
     """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
@@ -12603,7 +12608,7 @@ class MergeRoleCheck(CloudSession):
 
     def test_a_batch_runner_session_merges(self):
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12662,7 +12667,7 @@ class MergeRoleCheck(CloudSession):
         # decision session-tiers: re-pointed from coordinator to batch-runner
         rc, out, err = self.run_main("--role", "batch-runner")
         self.assertEqual(rc, 0, out + err)
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12765,14 +12770,14 @@ class StandingGrantSwitch(CloudSession):
         """`merge 7 --confirm` in a cloud session as `role`, after a false grant on the base: the grant refusal, and nothing merged."""
         self.put_role(role)
         refs = self.refs()
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())  # decision auto-mode-owner-acts: a confirm names the head it runs on
         self.assert_grant_refused(rc, out, err, refs)
 
     # ---- the key is optional: absent is today's behaviour, and no notice names it
     # decision session-tiers: re-pointed from coordinator to batch-runner
     def test_an_absent_key_proceeds_for_a_batch_runner_and_no_notice_names_it(self):
         self.put_role("batch-runner")  # the fixture's base is CONFIG, which leaves out requiredChecks: the defaults notice prints
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
         self.assertIn("leaves out", out)  # the notice is there, so the check below reads a real one
         self.assertNotRegex(out + err, r"(?i)standinggrant")
@@ -12781,7 +12786,7 @@ class StandingGrantSwitch(CloudSession):
         drop_config(self)
         self.put_role("batch-runner")
         with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):
-            rc, out, err = self.run_main("7", "--confirm")
+            rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
         self.assertNotRegex(out + err, r"(?i)standinggrant")
 
@@ -12797,7 +12802,7 @@ class StandingGrantSwitch(CloudSession):
     def test_true_proceeds_for_a_batch_runner_in_the_cloud(self):
         self.grant_config(standingGrant=True)
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
 
     def test_true_proceeds_outside_the_cloud(self):
@@ -12868,8 +12873,68 @@ class StandingGrantSwitch(CloudSession):
         self.grant_config()
         self.put_pr_tree(self.grant_text(standingGrant=False))
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
+
+
+class BatchRunnerHead(CloudSession):
+    """A batch runner's `merge <pr> --confirm` names the head its CI ran on (decision auto-mode-owner-acts). With no
+    --head the confirm is refused before the lock, any claim or any write. The refusal names the --head flag, the way
+    through, and never the live head (git-remedy-never-names-target). With --head set to the live head it proceeds.
+    A session with no batch-runner role is not checked here: MergeRoleCheck and Flow pin those paths."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("batch-runner")
+
+    def assert_scope(self):
+        """The case probes the batch-runner branch, so the role it probes is read back first (P7)."""
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "batch-runner", "the case did not record the batch-runner role it probes")
+
+    def refused_without_head(self):
+        """`merge 7 --confirm` with no --head in the batch runner's session: rc 1, a line on stderr, nothing merged. -> stderr"""
+        self.assert_scope()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a batch runner's confirm with no --head merged")
+        self.assertNotIn("Traceback", err)
+        return err
+
+    def test_a_confirm_with_no_head_is_refused_before_the_lock_claim_or_write(self):
+        self.assert_scope()
+        taken = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (taken.append(b), acquire(b, ttl))[1]
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertEqual(taken, [], "the refused confirm took the lock")
+        self.assertEqual(self.refs(), refs, "the refused confirm pushed a claim or took the lock")
+        self.assertEqual(self.claims(), 0, "the refused confirm pushed a claim to main")
+        self.assertEqual(self.worktrees(), 1, "the refused confirm left a worktree")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_the_refusal_says_the_merge_needs_the_head_the_ci_ran_on(self):
+        err = self.refused_without_head()
+        self.assertRegex(err, r"(?i)needs the head the CI ran on", "the refusal does not say the merge needs the head the CI ran on")
+
+    def test_the_refusal_names_the_head_flag_and_no_live_head(self):
+        err = self.refused_without_head()
+        head = self.head()
+        self.assertIn("--head", err, "the refusal does not name the --head flag, the way through")
+        self.assertNotIn("--confirm", err, "the refusal names the refused command's flag --confirm")
+        self.assertNotRegex(err, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
+        self.assertNotIn(head[:7], err, "the refusal names the live head")
+        self.assertNotRegex(err, r"[0-9a-f]{40}", "the refusal names a full sha")
+
+    def test_a_confirm_with_the_live_head_flag_merges(self):
+        # the control: the head flag is the way through, so the refusal above is the missing flag and nothing else
+        self.assert_scope()
+        rc, out, err = self.runner_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
 
 
 REPO_ROOT = os.path.dirname(HERE)
