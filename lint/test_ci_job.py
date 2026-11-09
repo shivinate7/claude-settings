@@ -1780,14 +1780,19 @@ class HeavyBrake(Job):
         return re.search(r"(?<!\d)%d(?!\d)" % pid, text) is not None
 
     def files_naming(self, pid):
-        """The names of the files in this test's temp dir whose text holds `pid`."""
+        """The names of the files in this test's temp dir whose text holds `pid`. A step's script that verdict deletes after
+        the listing is gone by its read: it names nothing, so it is skipped."""
         found = []
         for name in os.listdir(self.tmp):
             path = os.path.join(self.tmp, name)
             if os.path.isfile(path):
-                with open(path, encoding="utf-8", errors="replace") as f:
-                    if self.names(f.read(), pid):
-                        found.append(name)
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        text = f.read()
+                except FileNotFoundError:
+                    continue  # deleted between the check and the read
+                if self.names(text, pid):
+                    found.append(name)
         return found
 
     def kill_holder_while_its_step_runs(self):
