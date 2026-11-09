@@ -6390,6 +6390,12 @@ sh("wsl: wrapped by verdict, node",
    "python bin/verdict wsl -e node --test mods/plain-diff/plain-diff.test.mjs", "allow", cwd=NOGIT)
 sh("wsl: wrapped by verdict, python",
    "python bin/verdict wsl -e python3 hooks/test_guard.py", "allow", cwd=NOGIT)
+# The bare `verdict` form is the one the WSL remedy names. These pin it as a control: the remedy's own
+# form stays allowed.
+sh("wsl: wrapped by bare verdict, node",
+   "verdict wsl -e node --test a.test.mjs", "allow", cwd=NOGIT)
+sh("wsl: wrapped by bare verdict, python",
+   "verdict wsl -e python3 tests/test_x.py", "allow", cwd=NOGIT)
 
 # Owner ruling 2026-10-17 11:40 CDT: under WSL a plain `node <file>.test.mjs` runs, with no --test
 # flag (CI runs the mod tests this way). Plain node runs only its
@@ -6500,6 +6506,8 @@ sh("wsl: a WSLENV prefix on the wsl call",
    rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a refused form wrapped by verdict",
    "python bin/verdict wsl -e bash -c ls", "deny", rule=WSL_RULE, cwd=NOGIT)
+sh("wsl: a refused form wrapped by bare verdict",
+   "verdict wsl -e bash -c ls", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a lone apostrophe in text does not hide a refused verb",
    "echo don't; wsl --shutdown", "deny", rule=WSL_RULE, cwd=NOGIT)
 sh("wsl: a comment opener in a string does not hide a refused verb",
