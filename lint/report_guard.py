@@ -149,7 +149,9 @@ clone: when it leaves the boundary older than the salt commit, later reads in an
 seconds, below the hook's 35 s timeout in settings.json (a killed hook is a silent allow). A gh read gets what is left, never more than REVIEW_READ_TIMEOUT. The cutover read runs inside
 merge's shared_deadline for what is left, so each deepen fetch gets the time left, never more than its own cap (merge MERGE_READ_TIMEOUT). When the budget runs out mid-deepen,
 review_stamp_since raises Stop naming the budget and starts no fetch after it, and the hook adds the UNKNOWN cutover note; a spent budget before a gh read adds the UNKNOWN read note.
-The Stop always ends with a verdict or its UNKNOWN note. No log, process kept or timer. A stop_hook_active rewrite is not checked.
+The budget covers only review_record_problem: its gh reads and the cutover read. It does not cover relay_reasons, which runs past_ruling_problem, a model call of up to 15 s
+(hooks/call_judge.py), after it. A hang there can pass the hook's 35 s timeout, and a killed hook is a silent allow. A budget for the whole hook is queued as step report-guard-hook-budget.
+No log, process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
 import json
@@ -158,7 +160,7 @@ import re
 import sys
 import time
 
-HERE =os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
@@ -1650,7 +1652,9 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read, cut to what REVIEW_HOOK_BUDGET has left
-REVIEW_HOOK_BUDGET = 28  # seconds for every gh read and the cutover read of one Stop, below the 35 s timeout of this hook in settings.json (a kill is a silent allow)
+# Seconds for every gh read and the cutover read of one Stop (review_record_problem only). 28 s leaves a 7 s margin under the 35 s timeout of this hook in settings.json
+# (a kill is a silent allow). The margin is unmeasured. The judge call in past_ruling_problem is outside this budget.
+REVIEW_HOOK_BUDGET = 28
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -1689,11 +1693,11 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd, end=None):
+def _gh_json(args, cwd, end):
     """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. `end` is the time.monotonic() value
     where the Stop's budget runs out (REVIEW_HOOK_BUDGET): the read gets what is left, or raises TimeoutError when nothing is."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-    timeout = REVIEW_READ_TIMEOUT if end is None else min(REVIEW_READ_TIMEOUT, end - time.monotonic())
+    timeout = min(REVIEW_READ_TIMEOUT, end - time.monotonic())
     if timeout <= 0:
         raise TimeoutError("the Stop's time budget is spent")
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
