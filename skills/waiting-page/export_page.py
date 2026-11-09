@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Copy an artifact's page, its files and its database into the repo, and build the database back (skill waiting-page, decision waiting-data-in-repo).
+"""Copy an artifact's page, its files and its database into the repo, build the database back, and merge a copy into a live page (skill waiting-page, decision waiting-data-in-repo).
 
-Export, the writer's step at each wake and before each republish:
+Four modes: export (--fetched, --out), rebuild (--rebuild, --batches), merge (--merge, --live, --batches) and --all.
+
+Export,the writer's step at each wake and before each republish:
 
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
         [--allow-empty COLLECTION]
@@ -67,6 +69,19 @@ nothing and exits 2. Without the flag every entry exports. A page-only entry who
 prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
+
+Merge, a second account's copy into a live page. It reads the repo copy and a fetch of the live page:
+
+    python3 ~/.claude/skills/waiting-page/export_page.py --merge COPY_DIR --live LIVE_DIR --batches OUT_DIR [--collections NAME ...]
+
+COPY_DIR holds the --rebuild layout. LIVE_DIR holds the fetched layout, one folder per collection with its `.complete`
+marker. OUT_DIR gets batch-NNN.json files as --rebuild writes them (the same split and caps), with one `set` entry for
+each (collection, doc_id) of the copy that the live page lacks. The live page wins: a doc it holds is never written.
+A copied item whose `n` is taken, by a live item or an earlier written copied item (sorted doc_id order), takes the next
+free `n` above the highest in either folder, and its answer takes the same `n`. The last line is
+`batches K docs N kept-live S renumbered R`. Unknown, exit 2: a missing or empty copy, a missing live folder, a live
+collection with no marker, a folder that is no collection in either, a doc over the cap, or nothing left to write.
+`--merge` without `--live` or `--batches` is a usage error, exit 2. `--collections` works as with --rebuild.
 
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
 """
@@ -527,7 +542,8 @@ def batch_bytes(count, entries_total):
     return 3 + 2 * count + entries_total
 
 
-def rebuild(waiting, batches, collections=COLLECTIONS):
+def read_copy(waiting, collections):
+    """The `set` entries of each doc in the copy `waiting`, in sorted folder then doc_id order. `page/` is no doc."""
     entries = []
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
@@ -540,7 +556,12 @@ def rebuild(waiting, batches, collections=COLLECTIONS):
                 entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
     if not entries:
         raise Stop("unknown - %s holds no docs" % waiting, UNKNOWN)
+    return entries
 
+
+def write_batches(entries, batches):
+    """Split `entries` into batch-NNN.json files under `batches`: at most BATCH_SIZE entries and under BATCH_BYTES each.
+    A doc over the cap is unknown, and nothing is written. The one home of the split, for --rebuild and --merge."""
     pieces, piece, total = [], [], 0
     for entry in entries:
         size = entry_bytes(entry)
@@ -557,7 +578,78 @@ def rebuild(waiting, batches, collections=COLLECTIONS):
     for number, piece in enumerate(pieces, 1):
         with open(os.path.join(batches, "batch-%03d.json" % number), "w", encoding="utf-8", newline="") as handle:
             handle.write(canonical(piece))
-    return "batches %d docs %d" % (len(pieces), len(entries))
+    return len(pieces)
+
+
+def rebuild(waiting, batches, collections=COLLECTIONS):
+    entries = read_copy(waiting, collections)
+    return "batches %d docs %d" % (write_batches(entries, batches), len(entries))
+
+
+def live_docs(live, collections):
+    """{collection: {doc_id: data}} of the live page's fetched folder. Each collection needs its folder and marker: a
+    fetch cut short would make its missing docs look absent, and a merge would `set` over them."""
+    if not os.path.isdir(live):
+        raise Stop("unknown - the live folder %s is missing" % live, UNKNOWN)
+    for name in sorted(os.listdir(live)):
+        if name not in collections or not os.path.isdir(os.path.join(live, name)):
+            raise Stop("unknown - %s/%s is not a collection folder" % (live, name), UNKNOWN)
+    held = {}
+    for name in collections:
+        folder = os.path.join(live, name)
+        if not os.path.isdir(folder):
+            raise Stop("unknown - the live folder has no %s folder" % name, UNKNOWN)
+        if not os.path.isfile(os.path.join(folder, MARKER)):
+            raise Stop("unknown - live %s has no %s marker, so the fetch may have stopped early" % (name, MARKER), UNKNOWN)
+        held[name] = docs_in(folder, name)
+    return held
+
+
+def number_of(data):
+    """The `n` of an item, or None when it has none that is a whole number."""
+    n = data.get("n") if isinstance(data, dict) else None
+    return n if isinstance(n, int) and not isinstance(n, bool) else None
+
+
+def renumber(fresh, entries, held):
+    """The entries in `fresh` with each item whose `n` is taken given the next free `n` above the highest in the live
+    page or the copy, in sorted doc_id order, and its answer given the same `n` and its item's id. (entries, count)."""
+    taken = {number_of(data) for data in held["items"].values()} - {None}
+    highest = max([n for n in (number_of(e["data"]) for e in entries if e["collection"] == "items") if n is not None]
+                  + list(taken), default=0)
+    moved = {}
+    for entry in sorted((e for e in fresh if e["collection"] == "items"), key=lambda e: e["doc_id"]):
+        n = number_of(entry["data"])
+        if n is None:
+            continue
+        if n in taken:
+            highest += 1
+            n = highest
+            moved[entry["doc_id"]] = (n, entry["data"].get("id") if isinstance(entry["data"].get("id"), str) else entry["doc_id"])
+        taken.add(n)
+    result = []
+    for entry in fresh:
+        move = moved.get(entry["doc_id"])
+        if move and entry["collection"] == "items":
+            entry = dict(entry, data=dict(entry["data"], n=move[0]))
+        elif move and entry["collection"] == "answers":
+            entry = dict(entry, data=dict(entry["data"], n=move[0], item=move[1]))
+        result.append(entry)
+    return result, len(moved)
+
+
+def merge(copy, live, batches, collections=COLLECTIONS):
+    """Batches of `set` entries for each doc of the repo copy that the live page lacks. The live page wins."""
+    entries = read_copy(copy, collections)
+    held = live_docs(live, collections)
+    fresh = [e for e in entries if e["doc_id"] not in held[e["collection"]]]
+    kept = len(entries) - len(fresh)
+    if not fresh:
+        raise Stop("unknown - the live page already holds all %d doc(s) of the copy; nothing to write" % len(entries), UNKNOWN)
+    moved = 0
+    if "items" in collections:
+        fresh, moved = renumber(fresh, entries, held)
+    return "batches %d docs %d kept-live %d renumbered %d" % (write_batches(fresh, batches), len(fresh), kept, moved)
 
 
 def main(argv):
@@ -572,21 +664,27 @@ def main(argv):
     ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
+    ap.add_argument("--merge", help="the repo copy whose docs the live page lacks are batched")
+    ap.add_argument("--live", help="with --merge: the folder `ArtifactData list` saved from the live page, markers included")
     ap.add_argument("--collections", nargs="+", metavar="NAME",
-                    help="with --rebuild: the collection folders to allow, in place of the waiting page's five")
+                    help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's five")
     args = ap.parse_args(argv)
-    if args.collections is not None and not args.rebuild:
-        ap.error("--collections goes with --rebuild")
+    if args.collections is not None and not (args.rebuild or args.merge):
+        ap.error("--collections goes with --rebuild or --merge")
     for name in args.collections or ():
         if not COLLECTION_SLUG.fullmatch(name):
             ap.error("--collections names are slugs: letters, digits, _ and -, starting with a letter or digit: %r" % name)
         if name == PAGE_FOLDER:
             ap.error("--collections cannot name %r: that folder holds the page and its files" % PAGE_FOLDER)
     all_mode = bool(args.all or args.worktree)
-    export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
-    if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
+    merge_mode = bool(args.merge or args.live)
+    export_mode = bool(args.out or args.page or (args.fetched and not all_mode and not merge_mode))
+    rebuild_mode = bool(args.rebuild or (args.batches and not merge_mode))
+    if merge_mode and not (args.merge and args.live and args.batches):
+        ap.error("--merge needs --live DIR and --batches DIR: --merge DIR --live DIR --batches DIR")
+    if [all_mode, export_mode, rebuild_mode, merge_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
             or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
-        ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
+        ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR, or --merge DIR --live DIR --batches DIR")
     if args.account is not None and not all_mode:
         ap.error("--account goes with --all")
     if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
@@ -596,6 +694,8 @@ def main(argv):
             return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty, args.account)
         if export_mode:
             verdict = export(args.fetched, args.out, args.page, args.allow_empty)
+        elif merge_mode:
+            verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS))
         else:
             verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS))
     except Stop as stop:
