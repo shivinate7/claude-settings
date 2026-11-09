@@ -26325,6 +26325,14 @@ SPO_RUNNER_FORMS = (
     ("subst-quoted", 'out="$(python3 F)"', "probe2.py", PY_TEXT, 'out="$(python3 %s)"'),
     ("echo-subst-quoted", 'echo "$(python3 F)"', "probe2.py", PY_TEXT, 'echo "$(python3 %s)"'),
     ("test-subst", '[ "$(python3 F)" = ok ]', "probe2.py", PY_TEXT, '[ "$(python3 %s)" = ok ]'),
+    # An assignment ahead of a substitution that closes inside the same word (`A=$(date)`, a quoted, backtick or
+    # `$((` form, or `env` ahead of it). The group ends in that word, so the command after it runs the file too.
+    # The open form `x=$(python3 F)` is the control below, where the run sits inside the group.
+    ("subst-assign", "A=$(date) python3 F", "probe2.py", PY_TEXT, "A=$(date) python3 %s"),
+    ("subst-assign-quoted", 'A="$(date)" python3 F', "probe2.py", PY_TEXT, 'A="$(date)" python3 %s'),
+    ("subst-assign-backtick", "A=`date` python3 F", "probe2.py", PY_TEXT, "A=`date` python3 %s"),
+    ("subst-assign-arith", "A=$((1+2)) python3 F", "probe2.py", PY_TEXT, "A=$((1+2)) python3 %s"),
+    ("subst-assign-env", "env A=$(pwd) python3 F", "probe2.py", PY_TEXT, "env A=$(pwd) python3 %s"),
     ("subshell", "(python3 F)", "probe2.py", PY_TEXT, "(python3 %s)"),
     ("uv", "uv run F", "probe2.py", PY_TEXT, "uv run %s"),
     ("npx-tsx", "npx tsx F", "probe2.ts", TS_TEXT, "npx tsx %s"),
@@ -26375,6 +26383,8 @@ spo_register("scratchpad-owner: runner control, agent B's out=$(cat F) of agent 
              lambda: spo_text_case("ctl-subst-cat", "runner control, out=$(cat F)",
                                    lambda probe, outside: "out=$(cat %s)" % probe,
                                    "agent B's out=$(cat F) of agent A's script is allowed"))
+spo_register("scratchpad-owner: runner control, agent B's x=$(python3 F) of agent A's script is asked",
+             spo_runner_case("subst-open-ctl", "x=$(python3 F)", "probe2.py", PY_TEXT, "x=$(python3 %s)"))
 
 
 def spo_flip_denied_case():
