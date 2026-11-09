@@ -15244,6 +15244,27 @@ class BatchFreeze(CloudSession):
         verdict = f"FAIL {self.FAILED_STEP_CMD} rc=1 (0.2s) log={log}"
         return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
 
+    def lint_fail_unreadable_log(self):
+        """ci_job_run's answer for a batch head whose lint FAILs, but whose `log=` names a log that is not there: its step output cannot be read."""
+        log = os.path.join(self.t, "ci-job-batch-never-written.log")
+        verdict = f"FAIL {self.FAILED_STEP_CMD} rc=1 (0.2s) log={log}"
+        return ("fail", ["%-15s %s: %s" % ("FAIL", "Check lane paths", verdict)], [f"log={log}"], False)
+
+    @contextlib.contextmanager
+    def blame_spy(self):
+        """Spies on merge.blamed_lanes. Yields a list that receives each result the run makes: {} when the log was read and no frozen lane
+        touches a path it names, None when the log could not be read, and an empty list when the blame never ran. create=True: on a commit
+        with no blamed_lanes, the case fails on its own assert, not on the patch."""
+        seen = []
+        real = getattr(merge, "blamed_lanes", None)
+
+        def spy(*args, **kwargs):
+            got = real(*args, **kwargs)
+            seen.append(got)
+            return got
+        with unittest.mock.patch.object(merge, "blamed_lanes", side_effect=spy, create=True):
+            yield seen
+
     def drop_pr_numbers(self, out, name):
         """The PR numbers of each `merge --batch-drop NAME <pr>` command the run printed, in order."""
         return re.findall(rf"merge --batch-drop {re.escape(name)} (\d+)", out)
@@ -15534,12 +15555,46 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("docs/unrelated.md")):
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("docs/unrelated.md")), self.blame_spy() as seen:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(seen, [{}], "the log is readable and names docs/unrelated.md, which no frozen lane touches, so the blame should read it as "
+                         "no lane ({}), not as an unreadable log (None): blamed_lanes returned %r: %s" % (seen, out))
         self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
                          "the lint FAIL names docs/unrelated.md, which no frozen lane touches, but does not say the blame is unknown: %s" % out)
         self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
                          "the lint FAIL names docs/unrelated.md, which no frozen lane touches, yet prints a drop command: a guess: %s" % out)
+        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+
+    def test_ready_lint_fail_does_not_blame_a_lane_that_only_a_passing_step_prints(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        answer = self.lint_fail_naming("docs/unrelated.md", passing=("lanes/102.txt",))
+        with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(seen, [{}], "a passing step printed lanes/102.txt, which #102 touches, and the failing step printed only docs/unrelated.md, "
+                         "which no lane touches: the blame should read the failing step alone (no lane), not the whole log: blamed_lanes returned %r: %s" % (seen, out))
+        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
+                         "a passing step printed lanes/102.txt and the failing step printed docs/unrelated.md, but the run does not say the blame is unknown: %s" % out)
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
+                         "a passing step printed lanes/102.txt, which #102 touches, yet the run prints a drop command for #102: a whole-log scan, not the failing step: %s" % out)
+        self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
+        self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
+
+    def test_ready_lint_fail_with_a_log_that_is_not_there_says_the_blame_is_unknown_and_prints_no_drop_command(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_unreadable_log()), self.blame_spy() as seen:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(seen, [None], "the lint FAIL's log is not there, so the blame should read it as unreadable (None): blamed_lanes returned %r: %s" % (seen, out))
+        self.assertRegex(out, r"blame[^\n]*unknown|unknown[^\n]*blame",
+                         "the lint FAIL's log is not there, but the run does not say the blame is unknown: %s" % out)
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), [],
+                         "the lint FAIL's log is not there, yet the run prints a drop command: a guess: %s" % out)
         self.assertEqual(self.host.readies, [], "a FAILing lint of the batch head called Host.ready: %s" % out)
         self.assertTrue(self.host.prs[pr]["draft"], "a FAILing lint marked the batch PR ready: %s" % out)
         self.assertEqual(rc, 1, "a FAILing lint exited %s, not 1: %s" % (rc, out))
