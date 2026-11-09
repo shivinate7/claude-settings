@@ -13373,11 +13373,12 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIn("Round 1: reviewer, sonnet, PASS", posted_body(self, out).splitlines(), "the plain round line changed")
 
     def test_round_heads_fix_path_refuses_a_foreign_round_head_at_write(self):
-        # the --fix-check branch runs the same own-commit check as the plain one. The fix base is the earlier record's Head, so the fix base is not
-        # compared. The copy names its own first round head, and the new second round names a head of another pull request
+        # the --fix-check branch runs the same own-commit check as the plain one. The fix base is the top round's sha, which is the foreign head, so
+        # the refusal comes from that check, not from the fix base rule. The copy names its own first round head, and the new second round names a
+        # head of another pull request
         earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=(f"Round 1: reviewer, sonnet, PASS, {REVIEW_OLD_HEAD}",)))
         rounds = (f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}", f"2:reviewer:sonnet:PASS:{self.FOREIGN[0]}")
-        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        fix = ("--fix-check", f"{self.FOREIGN[0]}:reviewer:haiku:PASS")
         host = self.record_host(earlier, diffs=self.own_replies(REVIEW_OLD_HEAD))
         rc, out, err = self.write_at(host, rounds, extra=fix)
         self.assertIn((self.FOREIGN[0], self.LIVE), host.compare_reads, "scope: the fix-check write did not compare the foreign head with the live head")
@@ -13556,7 +13557,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIn(f"Round 1: reviewer, haiku, PASS, {self.OWN}", lines, "the PASS line of round 1 is not printed")
 
     def top_round_lines(self, top=None):
-        """The three record lines of the fix base cases: round 1 FAIL on OWN, round 2 FAIL on OWN_TWO, round 3 PASS on `top` (OWN_THREE by default)."""
+        """The three record lines of the fix base cases: the first round FAIL on OWN, the second round FAIL on OWN_TWO, the third round PASS on `top` (OWN_THREE by default)."""
         top = self.OWN_THREE if top is None else top
         return (f"Round 1: reviewer, haiku, FAIL, {self.OWN}", f"Round 2: reviewer, haiku, FAIL, {self.OWN_TWO}", f"Round 3: reviewer, opus, PASS, {top}")
 
@@ -13570,7 +13571,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
                          "the printed fix check does not start from the top round's sha")
 
     def test_fix_base_top_round_other_named_sha_is_refused_with_no_earlier_record(self):
-        # control: the round 2 head is a named own commit, but not the top round's, so the same write with it as the base is refused
+        # control: the second round's head is a named own commit, but not the top round's, so the same write with it as the base is refused
         host = self.record_host(diffs=self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE))
         rc, out, err = self.write_at(host, round_args(self.top_round_lines()), extra=("--fix-check", f"{self.OWN_TWO}:reviewer:sonnet:PASS"))
         self.assert_refused_without_record(rc, out, err, "a fix base that is a named round 2 head, not the top round's, with no earlier record")
@@ -13589,7 +13590,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
                          "the printed fix check does not start from the top round's sha")
 
     def test_fix_base_top_round_other_named_sha_is_refused_after_an_earlier_record_at_another_head(self):
-        # control: the round 1 head is a named own commit, not the earlier Head and not the top round's. The old base rule compares it with HEAD_A,
+        # control: the first round's head is a named own commit, not the earlier Head and not the top round's. The old base rule compares it with HEAD_A,
         # finds them diverged, and refuses it
         earlier = self.earlier_top_fail()
         diffs = {**self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE), (self.HEAD_A, self.OWN_THREE): compare_of("ahead", file_entry("merge/merge.py"))}
@@ -13640,7 +13641,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
                 self.assertIn("may not follow it", err, f"the refusal after an earlier fix check {verdict} does not name the chain:\n" + err)
 
     def test_fix_base_top_round_plain_earlier_head_is_refused_when_the_top_round_names_another_head(self):
-        # the debt scenario: round 1 PASS read OWN, and an earlier record at OWN_TWO has no fix check. The read from OWN to OWN_TWO never happened,
+        # the debt scenario: the first round's PASS read OWN, and an earlier record at OWN_TWO has no fix check. The read from OWN to OWN_TWO never happened,
         # so OWN_TWO is no base, though it is the earlier record's Head
         earlier = review_comment(1, 7, record_text(head=self.OWN_TWO, rounds=(f"Round 1: reviewer, haiku, PASS, {self.OWN}",)))
         self.assertIsNotNone(review_fn(self, "parse_review")(earlier["body"]), "scope: the earlier record does not parse, so the case tests nothing")
@@ -14611,16 +14612,17 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assert_own_remedy(rc, out, err, "this record drops or reorders Round 1: design-reviewer, opus, FAIL", self.DROPPED_REMEDY)
 
     def test_round_heads_r1_a_copy_that_drops_or_reorders_a_round_line_with_a_sha_names_the_line_with_its_sha(self):
-        # control, green on the old code: a copy that keeps both lines, in order, is written, with each line's head an own commit of this pull request
+        # control, green on the old code: a copy that keeps both lines, in order, is written, with each line's head an own commit of this pull request.
+        # The fix base is s1, a sha the top round names, and every copy below keeps that line, so the base rule takes it from the copy's own rounds
         s1, s2 = "4a" * 20, "4b" * 20
         lines = (f"Round 1: reviewer, sonnet, PASS, {s1}", f"Round 1: design-reviewer, opus, PASS, {s2}")
         comments = self.pair(None, rounds=lines)
         diffs = {pair: compare_of("ahead") for sha in (s1, s2) for pair in ((sha, self.LIVE), ("main", sha))}
-        rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=round_args(lines))
+        rc, out, err, _ = self.run_chain(s1, comments, diffs=diffs, rounds=round_args(lines))
         self.assertEqual(rc, 0, "control: a copy that keeps every round line was refused:\n" + out + err)
         for label, copy in (("drops the design line", lines[:1]), ("reorders the two lines", lines[::-1])):
             with self.subTest(label=label):
-                rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=round_args(copy))
+                rc, out, err, _ = self.run_chain(s1, comments, diffs=diffs, rounds=round_args(copy))
                 self.assertEqual(rc, 2, f"a copy that {label} was not refused:\n" + out + err)
                 self.assertIn("this record drops or reorders", err, "scope: the refusal is not the dropped-line refusal:\n" + err)
                 self.assertIn(f"Round 1: design-reviewer, opus, PASS, {s2}", err, "the refusal does not print the dropped line with its sha:\n" + err)
