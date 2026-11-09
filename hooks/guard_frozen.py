@@ -8,8 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded, _resolved,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, is_powershell,
+    nested_script, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -382,7 +383,8 @@ _VAR_TOKEN = re.compile(
 
 
 def _resolve_vars(cmd: str) -> str:
-    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
+    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command. The text keeps its
+    type, so a script that pwsh runs (PowerShellScript) is still read by PowerShell's rules after."""
     table = {"HOME": "~"}
 
     def use(m):
@@ -402,7 +404,7 @@ def _resolve_vars(cmd: str) -> str:
             return m.group(0)
         return use(m) if (m.group("x") or m.group("y")) else m.group(0)
 
-    return _VAR_TOKEN.sub(step, cmd)
+    return type(cmd)(_VAR_TOKEN.sub(step, cmd))
 
 
 # LOOPS AND BRACES. `for NAME in WORDS; do ... "$NAME" ...; done` names the words NAME takes, and a brace list
@@ -615,7 +617,8 @@ def _resolve_loops(cmd):
 # FAIL CLOSED. No text is data when the command holds, outside single quotes, a backtick, `$(`,
 # `$'`, `$"`, `<(`, `>(`, a backslash before a quote, an unmated quote, a `<#` (a PowerShell block
 # comment, which hides its quotes), or anywhere a smart quote U+2018 to U+201E (PowerShell reads it
-# as a quote, even inside single quotes): the shell may then read its quotes differently from the
+# as a quote, even inside single quotes, so text with one is never data; a word that holds one is read
+# with it as a quote, `_unquoted`): the shell may then read its quotes differently from the
 # scanner. Bash text is read by bash's own rules: inside double quotes `\"` and `\\` are literal, and
 # a smart quote is an ordinary character. A newline and a `#` inside quotes are text. A backtick and
 # `$(` inside double quotes stay live and stay closed. PowerShell text keeps every mark above. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
@@ -633,7 +636,7 @@ _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
-_SMART_QUOTES = frozenset("\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
+_SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
@@ -741,11 +744,28 @@ def _data_words(kind: str, words):
     return data
 
 
+def _typed(text: str, like: str) -> str:
+    """`text` with the PowerShell type of `like`, so the reading follows a word to the next reader."""
+    return PowerShellScript(text) if isinstance(like, PowerShellScript) else text
+
+
+def _straight(word: str) -> str:
+    """In PowerShell text, the word with each smart quote spelled as its ASCII twin. Bash text is as it is."""
+    return _typed(word.translate(PS_STRAIGHT_QUOTES), word) if is_powershell(word) else word
+
+
+def _has_quote(word: str) -> bool:
+    """True when the word holds a quote mark: ASCII, or a smart quote in PowerShell text."""
+    return "'" in word or '"' in word or (is_powershell(word) and any(c in _SMART_QUOTES for c in word))
+
+
 def _unquoted(word: str) -> str:
     """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
     kind of quote is text. The `$` of an unquoted `$'...'` or `$"..."` goes with the quote.
+    In PowerShell text a smart quote is a quote too (`_straight`).
     RESIDUAL GAP: a backslash escape inside `$'...'` (hex or octal) is not decoded."""
     out, quote = [], ""
+    word = _straight(word)
     for index, char in enumerate(word):
         if char == quote:
             quote = ""
@@ -760,8 +780,9 @@ def _words_of(word: str):
     """The words a word stands for with its quotes read: the word itself after quote removal, that
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
-    inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
+    word = _straight(word)
+    inner = _typed(_unquoted(word), word)
+    out = [inner] + [_unquoted(_typed(w, word)) for w in _quoted_words(inner)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
@@ -790,15 +811,25 @@ _CP_LINK_LONG = ("link", "symbolic-link")
 _NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
+# A DEST that is one quoted variable (`"$f"`) stays one word, so it cannot split into `-t dir`. Its
+# value is unknown, but a DEST is only ever written, so the sources stay reads.
+_QUOTED_VAR = re.compile(r'"\$(?:\w+|\{\w+\})"')
+
+
+def _cp_start(raw) -> int:
+    """The index of the `cp` command word of a segment, past assignments, a loop keyword (`do`, `then`,
+    `else`, `{`) and a wrapper, by the one reader `resolve_command`; -1 when the segment runs no `cp`."""
+    start = resolve_command(tuple(raw))
+    return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
 def _copy_reads(raw, predicate, cwd):
     """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = _command_start(raw)
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return set()
-    operands, target, index = [], None, start + 1
+    operands, target, index, shown = [], None, start + 1, ""
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -825,11 +856,12 @@ def _copy_reads(raw, predicate, cwd):
             target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
             if target is None:
                 return set()
+            shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
+            target, shown = word.split("=", 1)[1], ""
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+            target, shown = word[2:], ""
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -840,8 +872,9 @@ def _copy_reads(raw, predicate, cwd):
     if target is None:
         if len(operands) < 2:
             return set()
+        shown = raw[operands[-1]]
         target = words[operands.pop()]
-    if not operands or not target or _CP_DEST_UNSAFE.search(target):
+    if not operands or not target or (_CP_DEST_UNSAFE.search(target) and not _QUOTED_VAR.fullmatch(shown)):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
@@ -854,8 +887,8 @@ def _cp_link_source(raw, holds, cwd) -> str:
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = _command_start(raw)
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    start = _cp_start(raw)
+    if start < 0:
         return ""
     link = target = False
     operands = []
@@ -919,14 +952,14 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment) for segment in segments]
-    if not guard_core.is_powershell(cmd):
-        parsed = [_expand_braces(words) for words in parsed]
+    # `_expand_braces` builds new strings, so each word is typed again after it: `parsed` and `scripts` keep the
+    # same length, and the reading follows a word to the next reader.
+    expand = _expand_braces if not guard_core.is_powershell(cmd) else (lambda words: words)
+    parsed = [[_typed(word, segment) for word in expand(_quoted_words(segment))] for segment in segments]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
-    scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
-    if command_position and not guard_core.is_powershell(cmd):
-        scripts = [_expand_braces(words) for words in scripts]   # indexes must match `parsed`
+    scripts = ([[_typed(word, segment) for word in expand(_quoted_words(segment, True))] for segment in segments]
+               if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -969,21 +1002,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             else:
                 # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
                 # part of it. A quoted word ends in its quote, so it is never cut here.
-                word = word.rstrip(")`") or word
-                pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word
+                pieces = _words_of(word) if _has_quote(word) else [word]
                 # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
                 # holds a backtick substitution ends its path word with one.
-                pieces = [piece.rstrip("`") or piece for piece in pieces]
+                pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
                 if index in files:
                     written.add(_unquoted(word))
                 kept = scripts[number][index]
-                script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
+                script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         position = _segment_command(script) if command_position else (None, ())
+        for nested in _powershell_scripts_of(segments[number]):
+            # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command,
+                                   writes_first)
+            if hit:
+                return hit
         for place, word in enumerate(words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -996,6 +1035,25 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             elif accepts() and writes_to(word, text, *position, written):
                 return word
     return ""
+
+
+_PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
+
+
+def _powershell_scripts_of(segment: str) -> list:
+    """The PowerShell scripts a segment hands on (`pwsh -c`, `powershell -Command`, `cmd /c`, `iex`), else [].
+    A shell the segment starts (`bash -c`, `sh -c`, `env -S`, `eval`) hands on text that is no PowerShell
+    itself: its segments are read the same way, so a `pwsh -c` inside one is found. Each step cuts the
+    text to the script the segment holds, so the walk ends."""
+    if not _PS_LAUNCHER.search(segment):
+        return []
+    tokens = segment_tokens(segment)
+    script = nested_script(tokens) if tokens else ""
+    if not script:
+        return []
+    if isinstance(script, PowerShellScript):
+        return [script]
+    return [found for inner in split_segments(script, []) for found in _powershell_scripts_of(inner)]
 
 
 def _segment_command(words):
@@ -1280,6 +1338,13 @@ def _inline_scripts(command: str):
             if kind and flag.match(tokens[at]):
                 yield kind, str(tokens[at + 1]), number, segments, ends
                 break
+
+
+def interpreter_may_write(raw: str) -> bool:
+    """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
+    the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
