@@ -50,17 +50,21 @@ exit 3. The writer holds the republish on any exit but 0: a check that cannot re
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
-    python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR
+    python3 ~/.claude/skills/waiting-page/export_page.py --rebuild WAITING_DIR --batches OUT_DIR [--collections NAME ...]
 
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
-neither one of the five collections nor `page/`, or one doc over the byte cap.
+neither one of the five collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
+For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
+entry's `collections`). They replace the five as the allowed folders, and a batch entry's `collection` is the folder
+name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the five.
+`--collections` without `--rebuild`, a name that is not a collection slug, or the name `page` is a usage error, exit 2.
 
 Every artifact, the step "Before you switch Claude accounts":
 
     python3 ~/.claude/skills/waiting-page/export_page.py --all REPO_ROOT --fetched DIR --worktree RECORD_WORKTREE
-        [--allow-empty COLLECTION]
+        [--allow-empty COLLECTION] [--account LABEL]
 
 REPO_ROOT holds the extras file with the artifacts registry (lint/layout.py `artifacts()`). DIR holds one folder per
 artifact id, each laid out as in a single export, plus `page.html` and `files/<path>` (the page's supporting files).
@@ -69,7 +73,12 @@ waiting-data folder; any other artifact: `artifacts/<id>/`), with the same scan 
 `<id>/page.html` lands at `page/page.html` there, and `<id>/files/<path>` at `page/files/<path>`; a waiting-page entry
 also exports its designData block. A supporting file no longer fetched stays in the copy; history is the delete.
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
-counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
+counts as exit 0. An entry with `"collections": []` is page-only: its page and files export, and no database does.
+With --account LABEL, an entry whose account differs prints `<id>: skipped - account <its account>` and is treated the
+same way, so a session that can read only one account's pages exports those and holds the rest. A LABEL that is empty or
+that no entry's account holds prints one line, `unknown - --account ... matches no registry entry's account ...`, writes
+nothing and exits 2. Without the flag every entry exports. A page-only entry whose fetched folder has no `page.html`
+prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
 the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash); 4 (a held
 item) only when none of those happened. The waiting-page entry prints each `held item` line after its verdict, prefixed `<id>: `.
@@ -90,6 +99,7 @@ import page_check  # noqa: E402  the one home that runs the page's picture check
 # The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
@@ -498,7 +508,7 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
     return ("changed %d" % changed if changed else "same"), unknown, held
 
 
-def export_all(root, fetched, worktree, allow_empty):
+def export_all(root, fetched, worktree, allow_empty, account=None):
     """Export each registry artifact of the repo at `root`; print one line per artifact; the exit code."""
     sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
     sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
@@ -509,11 +519,17 @@ def export_all(root, fetched, worktree, allow_empty):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
+    if account is not None and account not in {entry["account"] for entry in entries}:
+        # a mistyped or empty label would otherwise skip every entry and still exit 0, which reads as a clean copy
+        raise Stop("unknown - --account %r matches no registry entry's account, so nothing was exported" % account, UNKNOWN)
     worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
             print("%s: skipped - no export" % name)
+            continue
+        if account is not None and entry["account"] != account:  # a page this session cannot read: no folder needed
+            print("%s: skipped - account %s" % (name, entry["account"]))
             continue
         folder = os.path.join(fetched, name)
         page = os.path.join(folder, PAGE_FILE)
@@ -521,6 +537,8 @@ def export_all(root, fetched, worktree, allow_empty):
         try:
             if not os.path.isdir(folder):
                 raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
+            if not entry["collections"] and not os.path.isfile(page):  # a page-only entry has nothing else to export, so "same" would hide a failed fetch
+                raise Stop("unknown - the fetched folder has no %s, and this page-only entry exports nothing else" % PAGE_FILE, UNKNOWN)
             verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
@@ -566,14 +584,14 @@ def batch_bytes(count, entries_total):
     return 3 + 2 * count + entries_total
 
 
-def rebuild(waiting, batches):
+def rebuild(waiting, batches, collections=COLLECTIONS):
     entries = []
     if os.path.isdir(waiting):
         for name in sorted(os.listdir(waiting)):
             folder = os.path.join(waiting, name)
             if name == PAGE_FOLDER:
                 continue
-            if name not in COLLECTIONS or not os.path.isdir(folder):
+            if name not in collections or not os.path.isdir(folder):
                 raise Stop("unknown - %s/%s is neither a collection folder nor %s/" % (waiting, name, PAGE_FOLDER), UNKNOWN)
             for doc_id, data in docs_in(folder, name).items():
                 entries.append({"op": "set", "collection": name, "doc_id": doc_id, "data": data})
@@ -609,9 +627,19 @@ def main(argv):
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
     ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
+    ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
+    ap.add_argument("--collections", nargs="+", metavar="NAME",
+                    help="with --rebuild: the collection folders to allow, in place of the waiting page's five")
     args = ap.parse_args(argv)
+    if args.collections is not None and not args.rebuild:
+        ap.error("--collections goes with --rebuild")
+    for name in args.collections or ():
+        if not COLLECTION_SLUG.fullmatch(name):
+            ap.error("--collections names are slugs: letters, digits, _ and -, starting with a letter or digit: %r" % name)
+        if name == PAGE_FOLDER:
+            ap.error("--collections cannot name %r: that folder holds the page and its files" % PAGE_FOLDER)
     all_mode = bool(args.all or args.worktree)
     export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
     if args.check:
@@ -628,16 +656,18 @@ def main(argv):
     if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
             or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
+    if args.account is not None and not all_mode:
+        ap.error("--account goes with --all")
     if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
         ap.error("--allow-empty names one of: %s" % ", ".join(COLLECTIONS))
     try:
         if all_mode:
-            return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty)
+            return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty, args.account)
         unknown, held = None, []
         if export_mode:
             verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty)
         else:
-            verdict = rebuild(args.rebuild, args.batches)
+            verdict = rebuild(args.rebuild, args.batches, tuple(args.collections or COLLECTIONS))
     except Stop as stop:
         print(str(stop))
         return stop.code
