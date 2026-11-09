@@ -4713,7 +4713,7 @@ GIT_PUSH_BODY_REASON = (
 GIT_PUSH_BODY_OPENERS = {
     "else": ("`else` branch of an `if` on a check", "put the push in the `then` branch, or "),
     "until": ("body of an `until` on a check", ""),
-    "elif": ("`elif` branch of an `if` on a check", "put the push in the `then` branch, or "),
+    "elif": ("`elif` branch of an `if` on a check", "put the push in the branch that runs when the check passes, or "),
 }
 # The reason each kind of `git_push_after_check_hit` prints: a `;` or newline join, a pipe that hides its check, a
 # pipe joined to the push by `;` or a newline, a `||` that runs the push on a failed check, an `|| exit` that reads
