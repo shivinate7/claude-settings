@@ -2433,7 +2433,7 @@ def merge_conflicts(root: str):
 # Rule orchestrator-merge-write (decision builders-cannot-edit-tests, the merge route). A session with no agent_id
 # whose own newest get_session record carries cs-build:lane or cs-build:coordinator, with no set_session_tags
 # call after it, does not write a non-.md file or commit a merge that conflicts one while a merge is in progress: the
-# whole merge goes to a role agent. A call with no agent_id and no merge pays one MERGE_HEAD probe and reads no
+# whole merge goes to a role agent. A non-.md write or a commit with no agent_id and no merge pays one MERGE_HEAD probe and reads no
 # transcript. A session id the env does not give (a local session) allows with no log. An unreadable record and a git
 # failure allow, and log one `orchestrator-merge-write-unread` line. The owner's typed override lifts the refusal.
 ORCH_MERGE_REASON = (
