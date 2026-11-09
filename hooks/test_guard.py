@@ -30542,6 +30542,10 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 # the guard under test (ROLE_REVIEWER_FREE_ROUNDS), never copied here. A refusal for any other role names neither.
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
+# The sentence a reviewer's refusal says about round 1 and the test-author, as a literal (never the guard's text).
+ROUND_ONE_SENTENCE = "round 1 and the test-author run on their role's model"
+# The first-line form a fix check on a later round names: the round marker, then the fix check words.
+ROUND_FIX_FORM = "Round N of 3 (fix check)"
 # The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
 # that constant is new, and a read at import time would fail every case on the old code.
 EXPLORE_MARKER = "Audit:"
@@ -31541,6 +31545,18 @@ role_model_refuse("role-model: fix check: test-author on sonnet with the marker 
 role_model_refuse("role-model: fix check: Explore on sonnet with the marker is denied, only the audit marker lifts an Explore",
                   "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
                   lacks=ROLE_LACKS + (FIX_MARKER,))
+
+# A reviewer's refusal names each brief form that lifts it above its row: rounds 2 and 3, and the fix check on line one.
+# It also says round 1 and the test-author run on their role's model. A builder's refusal names none of these.
+role_model_refuse("role-model: reviewer on sonnet with no round line names each brief form and the round 1 sentence",
+                  "reviewer", "sonnet", "Check the diff for typos.",
+                  carries=(ROLE_REMEDY, ROUND_MARKER, ROUND_ONE_SENTENCE, FIX_MARKER, ROUND_FIX_FORM) + FREE_ROUND_MARKERS)
+role_model_refuse("role-model: builder on fable names no reviewer form and no round 1 sentence",
+                  "builder", "fable", "Fix the failing case.",
+                  lacks=ROLE_LACKS + (ROUND_MARKER, FIX_MARKER, ROUND_FIX_FORM, ROUND_ONE_SENTENCE) + FREE_ROUND_MARKERS)
+# A fix check on a later round, its first line `Round 2 of 3 (fix check)`, lifts a reviewer on Sonnet: the round row reads it.
+role_model_allow("role-model: fix check: reviewer on sonnet with Round 2 of 3 (fix check) on line one is allowed",
+                 "reviewer", "sonnet", "Round 2 of 3 (fix check). Re-run the cases.")
 
 
 LOG_CHECKS = LOG_CHECKS + tuple(LOG_CHECKS_EXTRA)
