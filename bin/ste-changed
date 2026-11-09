@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# ste-changed <base>: lint what the CI ste-lint step lints for the diff <base>...HEAD.
+# ste-changed <base>: lint what the CI ste-lint step lints, from the merge base of <base> and HEAD through the working
+# tree: the commits, the uncommitted edits and removals, and each untracked file .gitignore does not match.
 # It runs actions/ste-lint/run.sh, the one home of the step, with the step's env and defaults
 # read from actions/ste-lint/action.yml. Same output lines, same exit code. <base>: main or origin/main.
 # Excludes: .ste-lint-exclude at the git top level of the repo being linted. EXCLUDE is set to the
