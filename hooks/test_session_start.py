@@ -1431,5 +1431,189 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
             self.assertEqual(wired(event), [], "session_start is wired to %s" % event)
 
 
+# The live-hooks lag line. A cloud install writes state/hooks-source-sha last; the session start names the lag between
+# that stamp and origin/main of the clone in one line, then says whether a resume of this source can reinstall.
+LAG_STATE = os.path.join("state", "hooks-source-sha")
+LAG_LINE = re.compile(r"^claude-settings: live hooks are from ([0-9a-f]{12}), (\d+) commits behind origin/main; "
+                      r"rulings since then are not in force\.")
+LAG_UNKNOWN = "live hooks source unknown"
+LAG_UNREAD = "origin/main unread; lag unknown"
+REINSTALLS = "a resume reinstalls"
+NO_REINSTALL = "this source does not reinstall; start a fresh session"
+# The refresh entry install.sh writes into a cloud settings.json: the command its HOOK_CMD builds, with the raw URL of main.
+REFRESH_CMD = ('i=$(cat); curl -fsSL https://raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh'
+               ' | CS_HOOK_INPUT="$i" bash -s -- --cloud')
+DEFAULT_MATCHER = "startup|resume"
+NO_MATCHER = object()  # an entry with no matcher key, which fires for every source
+
+
+class SessionStartLiveHooksLagTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The live-hooks lag line: the stamp a cloud install writes, compared with origin/main of the clone at session start."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.first = self.head_sha()
+        for number in range(2, 5):
+            self.commit("main commit %d" % number)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.tip = self.head_sha()
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+        self.stamp_file = os.path.join(self.config, LAG_STATE)
+        self.cloud_now = False
+
+    def stamp(self, sha):
+        self.put(self.stamp_file, sha + "\n")
+
+    def drop_stamp(self):
+        if os.path.exists(self.stamp_file):
+            os.remove(self.stamp_file)
+
+    def write_settings(self, matcher=DEFAULT_MATCHER, refresh=True):
+        """The config dir's settings.json as install.sh writes it: the refresh entry with this matcher (NO_MATCHER: no
+        matcher key), or no refresh entry at all, as a local install has."""
+        hooks = {"SessionEnd": []}
+        if refresh:
+            hook = {"type": "command", "command": REFRESH_CMD, "timeout": 60}
+            entry = {"hooks": [hook]} if matcher is NO_MATCHER else {"matcher": matcher, "hooks": [hook]}
+            hooks["SessionStart"] = [entry]
+        self.put(os.path.join(self.config, "settings.json"), json.dumps({"hooks": hooks}, indent=2) + "\n")
+
+    def become(self, cloud, matcher=DEFAULT_MATCHER):
+        """A cloud session: the clone is the cloud mirror, the refresh entry is in settings.json, and CLAUDE_CODE_REMOTE
+        is true for the run. A local session has none of the three."""
+        if cloud:
+            vcs(self.primary, "config", "claude-settings.cloudMirror", "true")
+        else:
+            subprocess.run([VCS, "-C", self.primary, "config", "--unset", "claude-settings.cloudMirror"],
+                           capture_output=True, text=True, timeout=60)
+        self.cloud_now = cloud
+        self.write_settings(matcher, refresh=cloud)
+
+    def run_lag(self, source="startup", path_dir=None):
+        """The hook's lines for one session start, after a control: the hook printed its checkout line."""
+        lines = self.run_hook(remote="true" if self.cloud_now else None, source=source, path_dir=path_dir)
+        self.assertTrue(any(line.startswith("checkout ") for line in lines),
+                        "the hook printed no checkout line: %r" % lines)
+        return lines
+
+    def logged_run(self, source="startup"):
+        """The hook's lines, and each git start the run made, read from a PATH shim's log."""
+        if getattr(self, "shim_folder", None) is None:
+            self.shim_folder = self.make_git_shim()
+        log = os.path.join(self.root, GIT_STARTS_LOG)
+        if os.path.exists(log):
+            os.remove(log)
+        lines = self.run_lag(source=source, path_dir=self.shim_folder)
+        starts = []
+        if os.path.exists(log):
+            with open(log, encoding="utf-8") as handle:
+                starts = [entry.strip() for entry in handle if entry.strip()]
+        return lines, starts
+
+    @staticmethod
+    def lag_lines(lines):
+        return [line for line in lines if "live hooks" in line or LAG_UNREAD in line]
+
+    @staticmethod
+    def lag_block(lines):
+        """The lag line and the line after it, where the reinstall phrase sits. Empty when there is no single lag line."""
+        at = [i for i, line in enumerate(lines) if line.startswith("claude-settings: live hooks are from ")]
+        return "" if len(at) != 1 else "\n".join(lines[at[0]:at[0] + 2])
+
+    def test_a_stamp_behind_origin_main_names_sha12_and_the_count_and_clears_at_the_tip(self):
+        self.become(True)
+        self.stamp(self.first)
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "want one lag line, got %r" % hits)
+        found = LAG_LINE.match(hits[0])
+        self.assertIsNotNone(found, "the line is not the lag line: %r" % hits[0])
+        self.assertEqual(found.group(1), self.first[:12], "the sha is not the stamp's first twelve: %r" % hits[0])
+        self.assertEqual(found.group(2), "3", "the count is not the three commits origin/main is ahead: %r" % hits[0])
+        self.stamp(self.tip)
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a stamp at origin/main still prints a lag line")
+
+    def test_the_lag_line_prints_at_start_resume_and_compact_alike(self):
+        self.become(True)
+        self.stamp(self.first)
+        for source in ("startup", "resume", "compact"):
+            with self.subTest(source=source):
+                hits = self.lag_lines(self.run_lag(source=source))
+                self.assertEqual(len(hits), 1, "want one lag line for %s, got %r" % (source, hits))
+                self.assertIsNotNone(LAG_LINE.match(hits[0]), "not the lag line for %s: %r" % (source, hits[0]))
+
+    def test_a_resume_reinstalls_when_the_refresh_matcher_fires_for_the_source(self):
+        self.stamp(self.first)
+        cases = ((DEFAULT_MATCHER, "resume"), ("", "resume"), ("*", "resume"), (NO_MATCHER, "resume"),
+                 ("res.*", "resume"), ("", "compact"))
+        for matcher, source in cases:
+            label = "absent" if matcher is NO_MATCHER else matcher
+            with self.subTest(matcher=label, source=source):
+                self.become(True, matcher)
+                lines = self.run_lag(source=source)
+                self.assertEqual(len(self.lag_lines(lines)), 1, "want one lag line, got %r" % lines)
+                self.assertIn(REINSTALLS, self.lag_block(lines), "no reinstall phrase in %r" % lines)
+                self.assertNotIn(NO_REINSTALL, "\n".join(lines), "the no-reinstall phrase printed in %r" % lines)
+
+    def test_a_source_the_refresh_matcher_does_not_fire_for_says_start_a_fresh_session(self):
+        self.stamp(self.first)
+        cases = (("startup|resume", "compact"), ("startup|resume", "clear"), ("startup", "resume"), ("resu", "resume"))
+        for matcher, source in cases:
+            with self.subTest(matcher=matcher, source=source):
+                self.become(True, matcher)
+                lines = self.run_lag(source=source)
+                self.assertEqual(len(self.lag_lines(lines)), 1, "want one lag line, got %r" % lines)
+                self.assertIn(NO_REINSTALL, self.lag_block(lines), "no start-fresh phrase in %r" % lines)
+                self.assertNotIn(REINSTALLS, "\n".join(lines), "the reinstall phrase printed in %r" % lines)
+
+    def test_no_stamp_in_a_cloud_session_names_the_source_unknown(self):
+        self.become(True)
+        self.drop_stamp()
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "want one line for a missing stamp, got %r" % hits)
+        self.assertIn(LAG_UNKNOWN, hits[0], "the line does not name the source unknown: %r" % hits[0])
+        self.assertNotIn("clear", hits[0].lower(), "the unknown line reads as clear: %r" % hits[0])
+
+    def test_an_origin_main_that_cannot_be_read_says_unread_and_gives_no_count(self):
+        self.become(True)
+        self.stamp(self.first)
+        vcs(self.primary, "update-ref", "-d", "refs/remotes/origin/main")
+        vcs(self.primary, "remote", "set-url", "origin", os.path.join(self.root, "nowhere.git"))
+        hits = self.lag_lines(self.run_lag())
+        self.assertEqual(len(hits), 1, "want one line for an unreadable origin/main, got %r" % hits)
+        self.assertIn(LAG_UNREAD, hits[0], "the line is not the unread line: %r" % hits[0])
+        self.assertNotIn("behind", hits[0], "the unread line gives a count: %r" % hits[0])
+
+    def test_a_local_session_stays_silent_while_a_cloud_session_names_the_lag(self):
+        self.stamp(self.first)
+        self.become(True)
+        self.assertEqual(len(self.lag_lines(self.run_lag())), 1, "control: the cloud session printed no lag line")
+        self.become(False)
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a local session with a stale stamp printed a lag line")
+        self.drop_stamp()
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a local session with no stamp printed a lag line")
+
+    def test_the_lag_check_starts_at_most_two_git_processes_and_no_fetch(self):
+        self.become(True)
+        self.stamp(self.first)
+        lines_on, starts_on = self.logged_run()
+        self.assertEqual(len(self.lag_lines(lines_on)), 1, "control: no lag line, so the check did not run: %r" % lines_on)
+        self.drop_stamp()
+        lines_off, starts_off = self.logged_run()
+        self.assertEqual(len(self.lag_lines(lines_off)), 1,
+                         "control: no unknown line for the run without a stamp: %r" % lines_off)
+        added = len(starts_on) - len(starts_off)
+        self.assertLessEqual(added, 2, "the lag check starts %d git processes, want at most 2; with the stamp %r, "
+                             "without it %r" % (added, starts_on, starts_off))
+        fetches = [start for start in starts_on if start.split()[0] == "fetch"]
+        self.assertEqual(fetches, [], "the hook starts git fetch: %r" % fetches)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
