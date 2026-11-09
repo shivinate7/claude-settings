@@ -3268,6 +3268,8 @@ def shallow_boundary(root):
     # A file read, not a git call: on a full clone the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
     path = os.path.join(root, ".git")
+    if not os.path.exists(path):  # no git dir could hold a shallow file, so whether the clone is shallow is unknown
+        raise Stop(f"cannot read {path} to tell whether this clone is shallow: there is no .git here. Run the command from inside the repository. " + REVIEW_CITE)
     try:
         gitdir = path
         if os.path.isfile(gitdir):
@@ -3293,23 +3295,26 @@ def review_stamp_since(root, base, default=None):
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of
-    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on each of REVIEW_RACE_TRIES reads, or a shallow file that cannot be read) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
-    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
+    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on each of REVIEW_RACE_TRIES reads, a shallow file that cannot be read, or no .git)
+    raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (repo top, `base`, default branch) in a process. A `root` in a subfolder reads the repo top's history, since the pathspec is relative to it. A record
     created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
     pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
-    key = (root, base)
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    top = git_reads.repo_top(root) or root  # `merge/merge.py` below is a path from the repo top; with no top, git or shallow_boundary stops naming it
+    default = default or default_branch_once(root)
+    key = (top, base, default)
     if key not in _stamp_since:
-        default = default or default_branch_once(root)
         for deepened in range(REVIEW_DEEPEN_TRIES + 1):
             # Another process may deepen this clone between the log and the boundary read, which would pair the log's old history with a new boundary.
             # Read the boundary before and after the log, and run the log again until the two reads agree.
             for _ in range(REVIEW_RACE_TRIES):
-                before = shallow_boundary(root)
-                c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
+                before = shallow_boundary(top)
+                c, out = git(top, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
                 if c:
                     raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
-                boundary = shallow_boundary(root)
+                boundary = shallow_boundary(top)
                 if boundary == before:
                     break
             else:
@@ -3322,7 +3327,7 @@ def review_stamp_since(root, base, default=None):
             if deepened == REVIEW_DEEPEN_TRIES:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is still the shallow boundary "
                            f"after {REVIEW_DEEPEN_TRIES} deepens of {REVIEW_DEEPEN_STEP} commits. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
-            fc, fout = fetch_branch(root, default, deepen=REVIEW_DEEPEN_STEP)
+            fc, fout = fetch_branch(top, default, deepen=REVIEW_DEEPEN_STEP)
             if fc:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
                            f"and the fetch that deepens it by {REVIEW_DEEPEN_STEP} commits (`git fetch --deepen={REVIEW_DEEPEN_STEP} origin`) failed (git exited {fc}): {fout[:300]}. "

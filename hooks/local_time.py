@@ -141,15 +141,12 @@ def repo_marker_path(session_id):
 
 def repo_root(start):
     """The nearest folder at or above `start` that holds `.git` (a folder, or a file in a linked
-    worktree), or None. It starts no process."""
-    here = os.path.realpath(start)
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    worktree), or None. It starts no process. The walk is hooks/git_reads.repo_top."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import git_reads
+    return git_reads.repo_top(start)
 
 
 def bind_repo(session_id, cwd):
@@ -210,7 +207,7 @@ def capture(raw, stamp):
         return
     try:
         bind_repo(hook.get("session_id"), hook.get("cwd"))
-    except (OSError, ValueError) as e:  # the message is saved; only the repeat check loses this inbox
+    except (OSError, ValueError, ImportError) as e:  # the message is saved; only the repeat check loses this inbox
         print("local_time: repo sidecar: %s" % e, file=sys.stderr)
 
 
