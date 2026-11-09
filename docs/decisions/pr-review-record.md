@@ -130,7 +130,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
 
 ## The cutover
 
-Coordinator, 2026-11-08 12:51 CST, item 386 (the no-salt cutover): on any read with no salt, take the cutover from the tool checkout.
+Coordinator, 2026-11-08 12:51 CST, from PR #1923 round 3 (the no-salt cutover; the fix rides in the lane under owner item 386, 2026-11-07 22:25 CST): on any read with no salt, take the cutover from the tool checkout.
 
 A record last edited before the stamp's merge commit reads as it did before. With no Stamp line, it still parses. A Stamp line that is there must match. A record last edited at or after that commit needs the stamp, so an unstamped one reads `bad`.
 
