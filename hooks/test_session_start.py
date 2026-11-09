@@ -1656,23 +1656,19 @@ class SessionStartLiveHooksLagTests(GitFixtureMixin, SessionStartAgentWorktreeNo
     def absent_line(sha):
         return "claude-settings: live hooks are from %s, which this clone does not have; lag unknown." % sha[:12]
 
-    def test_a_stamp_ahead_of_origin_main_by_a_local_commit_is_not_read_as_zero_behind(self):
-        # The stamp holds a commit origin/main lacks, so a count of 0 behind would read as the hooks being current.
+    def test_a_stamp_ahead_of_origin_main_by_a_local_commit_prints_no_lag_line(self):
+        # The stamp is past origin/main, so the hooks hold everything main has and no lag line applies.
         self.become(True)
         self.commit("local commit ahead of origin")
         self.stamp(self.head_sha())
-        hits = self.lag_lines(self.run_lag())
-        self.assertEqual(len(hits), 1, "want one lag line for a stamp ahead of origin/main, got %r" % hits)
-        self.assertNotIn("0 commits behind", hits[0], "a stamp ahead of origin/main reads as current: %r" % hits[0])
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a stamp ahead of origin/main printed a lag line")
 
-    def test_a_stamp_ahead_of_origin_main_after_origin_main_moved_back_is_not_read_as_zero_behind(self):
+    def test_a_stamp_ahead_of_origin_main_after_origin_main_moved_back_prints_no_lag_line(self):
         # origin/main went back to an older commit, so the stamp is past it. The fetch moves the tracking ref back too.
         self.become(True)
         self.stamp(self.tip)
         vcs(self.origin_repo, "update-ref", "refs/heads/main", self.first)
-        hits = self.lag_lines(self.run_lag())
-        self.assertEqual(len(hits), 1, "want one lag line for a stamp ahead of origin/main, got %r" % hits)
-        self.assertNotIn("0 commits behind", hits[0], "a stamp ahead of origin/main reads as current: %r" % hits[0])
+        self.assertEqual(self.lag_lines(self.run_lag()), [], "a stamp ahead of origin/main printed a lag line")
 
     def test_a_stamp_the_clone_does_not_have_names_it_with_no_count(self):
         # A clone that lacks the stamp's commit cannot count from it, so the line names the stamp and gives no count.
