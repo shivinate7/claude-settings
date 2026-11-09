@@ -37,6 +37,20 @@ The guard runs before the generator, so it cannot tell whether a chained `genera
 will change the page. It refuses such a chain even when the page ends unchanged. The refusal is exact for what
 it can see.
 
+A merge commit of a past base tip is allowed too. A lane merges the base, takes the page the merge brought,
+and the base then moves on, so that page is no longer the base's. The guard allows the commit when the page it
+would hold has the exact blob id of the page at MERGE_HEAD, and MERGE_HEAD is an ancestor of origin/<base>
+(a past base tip, never another lane's branch). A rebuilt page, a page of a merge of another branch, a page
+and a page taken after `merge --quit` all stay refused. The guard runs before the chain, so it reads the
+page as it stands at the hook.
+Cost: two more git reads, `rev-parse -q --verify MERGE_HEAD:docs/records.md` and
+`merge-base --is-ancestor MERGE_HEAD origin/<base>`. They run only on a commit the guard would otherwise
+refuse, so an allowed commit and a commit with no records page make the reads they made before. No file, no
+timer, no new process beyond those two git calls. Measure: 13 cases of the `records-page` family pin it
+(`hooks/test_guard.py`); how often a real lane hits it is unmeasured. A chained
+`git show MERGE_HEAD:docs/records.md > docs/records.md && git add && git commit` is still refused: the guard
+reads the tree before the chain runs.
+
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop
 paths have tests. `RECORDS_HEADER` in `hooks/guard_merge.py` copies the first line of `RECORDS_INTRO` in
