@@ -120,7 +120,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, forcedColors = null } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -129,7 +129,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   if (errors) page.on("pageerror", (e) => errors.push(e.message));
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
   t.after(() => page.close());
-  await page.emulateMedia({ colorScheme: scheme });
+  await page.emulateMedia({ colorScheme: scheme, ...(forcedColors ? { forcedColors } : {}) });
   const body = designData ? pageHtml.replace(DESIGN_SLOT, `<script type="application/json" id="designData">${JSON.stringify(designData).replace(/</g, "\\u003c")}</script>`) : pageHtml;
   // The page is served from a stand-in origin, so the init script and localStorage both apply.
   // Every other request (the fonts) is refused.
@@ -2838,10 +2838,10 @@ const FOLD_ROWS = {
 };
 // Opens the page with the one folded row of the kind, seen on an earlier visit so the answer folds at load. A restore row is
 // opened from the dismissed list, as the owner opens it. Null when there is no browser, so the case returns without a verdict.
-async function foldedRowPage(t, kind, width, scheme = "light") {
+async function foldedRowPage(t, kind, width, scheme = "light", { unfolded = false } = {}) {
   const { ask, reply } = FOLD_ROWS[kind];
   const asks = { [ask.id]: ask, ...(reply ? { [reply.id]: reply } : {}) };
-  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": "2026-10-31T00:00:00Z" }, viewport: { width, height: 800 }, scheme }); if (!page) return null;
+  const page = await open(t, { dbExtra: { asks }, storage: { "waiting.askSeen": unfolded ? "2026-10-29T12:00:00Z" : "2026-10-31T00:00:00Z" }, viewport: { width, height: 800 }, scheme }); if (!page) return null;
   if (kind === "restore") { await mustHave(page, "#askDismissed", "Show dismissed asks control"); await page.click("#askDismissed"); }
   await mustHave(page, `#row-${ask.id}`, `the folded row for ${kind}`);
   return page;
@@ -2926,7 +2926,7 @@ const SIDE_KINDS = ["dismiss", "restore"];
 const PRESS_KINDS = ["dismiss", "restore", "wait"];
 const meets = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5;
 const spanOf = (b) => `${Math.round(b.l)} to ${Math.round(b.r)} px`;
-const zoomText = (page) => page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+const zoomText = (page, size = "200%") => page.evaluate((size) => { document.documentElement.style.fontSize = size; }, size);
 // Boxes in the page's own px: the row, its title's column, its press, its text runs, the Ask box's two presses, and the page's scroll width.
 const pressGeo = (page, id) => page.evaluate((id) => {
   const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
@@ -3319,6 +3319,175 @@ for (const width of TAB_SIZES) for (const zoom of [false, true]) for (const desi
     assert.deepEqual(reading, dom, `the tabs read ${reading.join(", ")}, not in DOM order ${dom.join(", ")}`);
   });
 }
+
+// ---------------------------------------------------------------- an answered row at large text: its presses sit in the row, and the page does not scroll sideways
+// The row with Dismiss, unfolded (not seen before its answer, so the answer is new and the row stays open, with Reply and Dismiss at its
+// end) or folded (seen on an earlier visit, so Dismiss is the row's side press). Each case reads its scope first (the fold, the root font
+// size, and Dismiss shown), then makes one claim, so a failure names one cause. Red widths are where the old page fails; each control is
+// a width where it passes.
+const DIS_ROW = FOLD_ROWS.dismiss.ask.id;
+// Opens the Dismiss row at a width, then sets the root font size to pct percent of its own. Null without a browser.
+async function dismissRowAt(t, { folded, width, pct, scheme }) {
+  const page = await foldedRowPage(t, "dismiss", width, scheme, { unfolded: !folded }); if (!page) return null;
+  const before = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  await zoomText(page, pct + "%");
+  const s = await page.evaluate((id) => ({ folded: document.getElementById("row-" + id).classList.contains("folded"), root: parseFloat(getComputedStyle(document.documentElement).fontSize), dismiss: !!document.getElementById("dis-" + id) }), DIS_ROW);
+  assert.equal(s.root, before * pct / 100, `the root font size is ${s.root} px after the zoom, not ${before * pct / 100} px, at ${width} wide`);
+  assert.equal(s.folded, folded, `the row is ${s.folded ? "folded" : "unfolded"} at ${width} wide, not ${folded ? "folded" : "unfolded"}`);
+  assert.ok(s.dismiss, `Dismiss is not shown at ${width} wide with the root font size at ${pct}%`);
+  return page;
+}
+// The row's edges against one element's, in px. The element sits in the row when both its edges fall inside the row's, to half a pixel.
+const inRowFault = (page, sel, name) => page.evaluate(({ id, sel, name }) => {
+  const row = document.getElementById("row-" + id), el = row.querySelector(sel);
+  if (!el) return `${name} is not in the row`;
+  const r = row.getBoundingClientRect(), e = el.getBoundingClientRect();
+  if (e.left >= r.left - 0.5 && e.right <= r.right + 0.5) return null;
+  return `${name} runs from ${Math.round(e.left)} to ${Math.round(e.right)} px, past its row, which runs from ${Math.round(r.left)} to ${Math.round(r.right)} px`;
+}, { id: DIS_ROW, sel, name });
+const ROW_CLAIMS = {
+  sideways: { what: "the page does not scroll sideways", check: (page) => sidewaysFault(page) },
+  dismiss: { what: "the Dismiss press sits inside its row", check: (page) => inRowFault(page, ".replyend .endrow > .btn.fixw", "the Dismiss press") },
+  ahead: { what: "the You asked line sits inside its row", check: (page) => inRowFault(page, ".ahead", "the You asked line") },
+  sizer: { what: "the hidden Dismiss label (span.sz) sits inside its row", check: (page) => inRowFault(page, "span.sz", "the hidden Dismiss label") },
+};
+// [claim, folded, root font size in percent, widths]. ROW_RED fails on the old page; ROW_CONTROL passes on it.
+const ROW_RED = [
+  ["sideways", false, 200, [180, 200, 220, 240]], ["dismiss", false, 200, [180, 200, 220, 240]], ["ahead", false, 200, [180, 200, 220]],
+  ["sideways", true, 200, [180, 200, 220]], ["sizer", true, 200, [180, 200, 220]],
+  ["sideways", false, 300, [180, 260, 340]], ["sideways", true, 300, [180, 240, 320]],
+];
+const ROW_CONTROL = [
+  ["sideways", false, 200, [260]], ["dismiss", false, 200, [280]], ["ahead", false, 200, [240]],
+  ["sideways", true, 200, [240]], ["sizer", true, 200, [260]],
+  ["sideways", false, 300, [360]], ["sideways", true, 300, [340]],
+];
+for (const [set, note] of [[ROW_RED, ""], [ROW_CONTROL, " (control)"]]) for (const [claim, folded, pct, widths] of set) for (const width of widths) for (const scheme of SCHEMES) {
+  const where = `${folded ? "folded" : "unfolded"} at ${width} wide with the root font size ${pct === 200 ? "doubled" : "tripled"}`;
+  test(`answered row, ${scheme}: ${where}${note}: ${ROW_CLAIMS[claim].what}`, async (t) => {
+    const page = await dismissRowAt(t, { folded, width, pct, scheme }); if (!page) return;
+    const fault = await ROW_CLAIMS[claim].check(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- large text: folded rows, the Ask box, the viewer, the send bar, and the forced-colour line
+// Each claim is one test after its scope, so a failure names one cause. The row titles are read at 820 to 1280 wide: the ask list's
+// container query reads the list's width, not the window's, so a row can be squeezed at a width the window has room for.
+const rootPx = (page) => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+// Sets the root font size to pct percent and asserts it took, so the claim after it reads the zoomed page.
+async function zoomedTo(page, pct) {
+  const before = await rootPx(page);
+  await zoomText(page, pct + "%");
+  const after = await rootPx(page);
+  assert.equal(after, before * pct / 100, `the root font size is ${after} px after the zoom, not ${before * pct / 100} px`);
+}
+for (const kind of ["dismiss", "restore"]) for (const width of [820, 1024, 1280]) for (const scheme of SCHEMES) {
+  const where = `folded ${FOLD_ROWS[kind].press} row at ${width} wide with the root font size doubled`;
+  test(`answered row, ${scheme}: ${where}: the title is not 0 px wide`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    await zoomedTo(page, 200);
+    const g = await page.evaluate((id) => { const li = document.getElementById("row-" + id); return { folded: li.classList.contains("folded"), title: li.querySelector(".ftext").getBoundingClientRect().width }; }, FOLD_ROWS[kind].ask.id);
+    assert.equal(g.folded, true, `the row is not folded in the ${where}`);
+    assert.ok(g.title > 0.5, `the row title is ${Math.round(g.title)} px wide in the ${where}, so the press beside it leaves no room for the text`);
+  });
+  test(`answered row, ${scheme}: ${where}: no two presses overlap`, async (t) => {
+    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
+    await zoomedTo(page, 200);
+    const pairs = await page.evaluate((id) => {
+      const li = document.getElementById("row-" + id), btns = [...li.querySelectorAll("button")].filter((b) => b.getBoundingClientRect().width > 1), out = [];
+      for (let i = 0; i < btns.length; i++) for (let j = i + 1; j < btns.length; j++) {
+        const a = btns[i], b = btns[j]; if (a.contains(b) || b.contains(a)) continue;
+        const x = a.getBoundingClientRect(), y = b.getBoundingClientRect();
+        if (Math.min(x.right, y.right) - Math.max(x.left, y.left) > 0.5 && Math.min(x.bottom, y.bottom) - Math.max(x.top, y.top) > 0.5) out.push((a.id || a.textContent.trim()) + " and " + (b.id || b.textContent.trim()));
+      }
+      return out;
+    }, FOLD_ROWS[kind].ask.id);
+    assert.deepEqual(pairs, [], `presses overlap in the ${where}: ${pairs.join("; ")}`);
+  });
+}
+
+// The Ask box at 600 wide with the root font size doubled: the hint's text runs (not its box) stay clear of Add to list.
+// 1280 wide is the control: the hint has room there.
+for (const [width, note] of [[600, ""], [1280, " (control)"]]) for (const scheme of SCHEMES) test(`ask box, ${scheme}: at ${width} wide with the root font size doubled${note}: the hint text does not run under Add to list`, async (t) => {
+  const page = await open(t, { viewport: { width, height: 900 }, scheme }); if (!page) return;
+  await mustHave(page, "#askAdd", "Add to list");
+  await zoomedTo(page, 200);
+  const g = await page.evaluate(() => {
+    const add = document.getElementById("askAdd").getBoundingClientRect(), hint = document.getElementById("askHint"), runs = [];
+    const walk = document.createTreeWalker(hint, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); for (const b of rg.getClientRects()) if (b.width > 0.5) runs.push({ l: b.left, r: b.right, t: b.top, b: b.bottom }); }
+    const hit = runs.find((x) => Math.min(x.r, add.right) - Math.max(x.l, add.left) > 0.5 && Math.min(x.b, add.bottom) - Math.max(x.t, add.top) > 0.5);
+    return { add: [add.left, add.right], hit: hit ? [hit.l, hit.r] : null };
+  });
+  assert.ok(!g.hit, g.hit && `the hint text runs from ${Math.round(g.hit[0])} to ${Math.round(g.hit[1])} px, under Add to list from ${Math.round(g.add[0])} px, at ${width} wide with the root font size doubled`);
+});
+
+// The Designs viewer at 600 wide with the root font size doubled: Close is inside the window. 1280 wide is the control.
+for (const [width, note] of [[600, ""], [1280, " (control)"]]) for (const scheme of SCHEMES) test(`designs viewer, ${scheme}: at ${width} wide with the root font size doubled${note}: Close is inside the window`, async (t) => {
+  const it = viewerItem();
+  const page = await open(t, { items: [it], designData: { ...VIEWER_DATA, "v-a": FULLW }, viewport: { width, height: 900 }, scheme }); if (!page) return;
+  await zoomedTo(page, 200);
+  await card(page, it).locator(`label.opt[for="o-${it.id}-a"] .opic`).click();
+  await page.waitForFunction(() => { const f = document.querySelector("#dStage .dframe:not(.off)"); return f && f.getBoundingClientRect().height > 60; });
+  const g = await page.evaluate(() => ({ shown: !document.getElementById("dsheet").hidden, close: document.getElementById("dClose").getBoundingClientRect().right, iw: innerWidth }));
+  assert.equal(g.shown, true, `the viewer did not open at ${width} wide`);
+  assert.ok(g.close <= g.iw + 0.5, `Close runs to ${Math.round(g.close)} px in a ${g.iw} px window, at ${width} wide with the root font size doubled`);
+});
+
+// Without an open answered ask, at 180 and 240 wide with the root font size doubled: the waiting-reply row's stacked Show answer and the
+// Send answers button stay inside the window.
+for (const width of [180, 240]) for (const scheme of SCHEMES) {
+  const where = `without an open answered ask, at ${width} wide with the root font size doubled`;
+  test(`answered row, ${scheme}: ${where}: the page does not scroll sideways`, async (t) => {
+    const page = await foldedRowPage(t, "wait", width, scheme); if (!page) return;
+    await zoomedTo(page, 200);
+    const fault = await sidewaysFault(page);
+    assert.ok(!fault, fault && `${fault}, ${where}`);
+  });
+  test(`answered row, ${scheme}: ${where}: Send answers sits inside the window`, async (t) => {
+    const page = await foldedRowPage(t, "wait", width, scheme); if (!page) return;
+    await zoomedTo(page, 200);
+    const g = await page.evaluate(() => ({ right: document.getElementById("send").getBoundingClientRect().right, iw: innerWidth }));
+    assert.ok(g.right <= g.iw + 0.5, `Send answers runs to ${Math.round(g.right)} px in a ${g.iw} px window, ${where}`);
+  });
+}
+
+// ---------------------------------------------------------------- the tab list in forced colours
+// The line under the tabs is read from pixels, so no case pins the element that draws it. Under the unselected tab it shows (green on
+// the old page); the selected tab must break it (red on the old page).
+// Forced colours: the selected tab breaks the line under the tabs, so it sets the selected tab apart. The
+// pixels are read from a screenshot of the bar, on its bottom border row under the centre of each tab; the canvas pixel at the bar's
+// top-left corner is the reference for "no line".
+const barPixels = async (page, ids) => {
+  const g = await page.evaluate((ids) => {
+    const n = document.getElementById("tabs").getBoundingClientRect(), at = { canvas: [0, 0] };
+    for (const id of ids) { const r = document.getElementById(id).getBoundingClientRect(); at[id] = [Math.floor((r.left + r.right) / 2 - n.left), Math.floor(n.height - 1)]; }
+    return at;
+  }, ids);
+  const png = (await page.locator("#tabs").screenshot()).toString("base64");
+  return page.evaluate(async ({ png, at }) => {
+    const img = new Image(); img.src = "data:image/png;base64," + png; await img.decode();
+    const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+    const out = {}; for (const k in at) out[k] = Array.from(cx.getImageData(at[k][0], at[k][1], 1, 1).data.slice(0, 3)); return out;
+  }, { png, at: g });
+};
+const pixelsDiffer = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 200;
+for (const scheme of SCHEMES) test(`tab list in forced colours, ${scheme}: a line shows under the unselected tab`, async (t) => {
+  const page = await open(t, { viewport: { width: 360, height: 900 }, scheme, forcedColors: "active" }); if (!page) return;
+  await mustHave(page, "#tabStatus", "Status tab");
+  assert.equal(await page.evaluate(() => matchMedia("(forced-colors: active)").matches), true, "the page is not in forced colours, so the line is not tested");
+  const px = await barPixels(page, ["tabStatus"]);
+  assert.equal(pixelsDiffer(px.tabStatus, px.canvas), true, `no line shows under the unselected Status tab (pixel ${px.tabStatus.join(",")} against ${px.canvas.join(",")})`);
+});
+for (const scheme of SCHEMES) test(`tab list in forced colours, ${scheme}: the selected tab breaks the bar's line under it`, async (t) => {
+  const page = await open(t, { viewport: { width: 360, height: 900 }, scheme, forcedColors: "active" }); if (!page) return;
+  await mustHave(page, "#tabQ", "Questions tab");
+  assert.equal(await page.getAttribute("#tabQ", "aria-selected"), "true", "Questions is not the selected tab");
+  const px = await barPixels(page, ["tabStatus", "tabQ"]);
+  assert.equal(pixelsDiffer(px.tabStatus, px.canvas), true, `no line is drawn under the unselected Status tab (pixel ${px.tabStatus.join(",")} against ${px.canvas.join(",")}), so there is no line for the selected tab to break`);
+  assert.equal(pixelsDiffer(px.tabQ, px.canvas), false, `the line runs under the selected Questions tab (pixel ${px.tabQ.join(",")} against ${px.canvas.join(",")}), so the selected tab does not break it`);
+});
 
 // The Status view at 240 and 180 wide does not scroll the page sideways, with no roadmap build and with a baked one (the full view).
 // 320 wide is the control: both fit there.
