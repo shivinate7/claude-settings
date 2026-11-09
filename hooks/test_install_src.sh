@@ -115,6 +115,15 @@ make_uname_stub() {
 tarsrc="$work/tarsrc/claude-settings-main"; mkdir -p "$tarsrc"
 ( cd "$REPO_ROOT" && git ls-files -z | tar -cf - --null -T - ) | tar -xf - -C "$tarsrc"
 tar -czf "$work/repo.tar.gz" -C "$work/tarsrc" claude-settings-main
+# A reduced copy of the same tree: the six files the mirror cases read or check, and nothing else. An install costs
+# about a file-by-file pass over the tree it lands, so the full ~1000-file tree makes each install take seconds.
+# m8_setup uses it for the mirror cases below. Only m8_setup sets fixture_tar to it.
+smallsrc="$work/smallsrc/claude-settings-main"; mkdir -p "$smallsrc/hooks" "$smallsrc/merge"
+for f in CLAUDE.md settings.json install.sh landed-dirs.txt hooks/session_start.sh merge/cloud_allow.json; do
+  cp "$tarsrc/$f" "$smallsrc/$f"
+done
+tar -czf "$work/small.tar.gz" -C "$work/smallsrc" claude-settings-main
+fixture_tar="$work/repo.tar.gz"
 
 # Make a bare-bones fake checkout of the repo at $1, with CLAUDE.md/settings.json content
 # of our choosing. $3, if given, is the origin URL (default: the legitimate https form);
@@ -4234,7 +4243,7 @@ win_sh3() { win_sh_case win_sh3 CYGWIN_NT-10.0-26200; }
 # misses fails, it does not leak.
 make_github_fixture() {
   mkdir -p "$1/src"
-  tar -xzf "$work/repo.tar.gz" --strip-components=1 -C "$1/src"
+  tar -xzf "$fixture_tar" --strip-components=1 -C "$1/src"
   git init -q -b main "$1/src"
   git -C "$1/src" add -A
   git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "fixture main"
@@ -4770,6 +4779,8 @@ move_fixture() {
   fi
   gc add -A; gc commit -q -m "before the rules"
   old=$(git -C "$fx/src" rev-parse HEAD)
+  # git rm removes a folder it empties, and a reduced tree's merge/ holds only this file.
+  mkdir -p "$fx/src/merge"
   cp "$work/$1-rules.json" "$fx/src/merge/cloud_allow.json"
   cp "$work/tarsrc/claude-settings-main/CLAUDE.md" "$fx/src/CLAUDE.md"
   cp "$work/tarsrc/claude-settings-main/hooks/session_start.sh" "$fx/src/hooks/session_start.sh"
@@ -5024,7 +5035,9 @@ m8_check() {
 # that leaves a marked mirror at main $first. Sets fx, h, co, old, want, first, mirror, co_head and co_branch. On a fixture
 # fault it sets m8_setup_why and returns 1. Call it directly, never in $(...): the globals it sets must reach the case.
 m8_setup() {
+  fixture_tar="$work/small.tar.gz"
   move_fixture "$1"
+  fixture_tar="$work/repo.tar.gz"
   git -C "$co" checkout -q -b lane
   co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
   move_install
@@ -5032,7 +5045,7 @@ m8_setup() {
   if [ "$rc" -ne 0 ]; then m8_setup_why="the first install exited $rc: $(install_problems)"; return 1; fi
   if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
      || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
-    m8_setup_why="the first install did not leave a marked mirror at main [$first]"; return 1
+    m8_setup_why="the first install did not leave a marked mirror at main [$first]: $(install_problems)"; return 1
   fi
   # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
   : > "$mirror/.git/refresh-sentinel"
