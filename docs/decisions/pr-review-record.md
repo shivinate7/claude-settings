@@ -98,7 +98,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
   - A read that cannot run refuses the edit and says so (decision `guard-hooks-fail-closed`). So does a body file named on the edit that is missing or unreadable.
   - A comment id, issue number, repo or pull request selector held in a shell expansion cannot be read, so the guard makes no read. The forms: a variable (`$ID`, `${ID}`, `issues/$N`, `$PR`, or `$O` in a pull request URL), a command substitution (`$(..)` or backticks, also in double quotes, also as the repo), an arithmetic (`$((..))`) and a default expansion (`${X:-y}`). A variable repo counts too: `repos/$REPO/...`, `repos/${REPO}/...` and `-R "$REPO"`.
   - The splitter cuts a `$(..)` at `|`, `;`, `&&` or a newline. `review_segments` in `hooks/guard.py` joins those cuts back for a gh call. `_joined_substitutions` then joins a substitution the tokenizer split at its spaces. Both count open substitutions in `_open_substitutions`, so the inner call never stands for the route. A quoted parenthesis is text there. The patterns have one home, `_issue_route`. `shell_expanded` in `hooks/guard_merge.py` names an expansion.
-  - An endpoint that starts with an expansion (`$URL`, `"$URL"`, `${URL}`, `$(gh api ...)`) is a variable target. It is an edit under PATCH in any spelling `_api_method` reads, else a post.
+  - An endpoint that starts with an expansion (`$URL`, `"$URL"`, `${URL}`, `$(gh api ...)`) is a variable target. It is an edit under PATCH only, in any spelling `_api_method` reads (PUT is not a comment edit), else a post.
   - A marked body is refused with no read. Any other body of such an edit is refused as a read that could not run.
   - The remedy names the part to write literally. `_LiteralIdNeeded` in `hooks/guard_merge.py` carries it. For a `gh api` route, `REVIEW_LITERAL_ID_REMEDY` says to write a literal `owner/repo` and comment id, or the `{owner}/{repo}` placeholder. For `gh pr comment --edit-last`, `REVIEW_LITERAL_PR_REMEDY` says to write a literal pull request number, and `REVIEW_LITERAL_REPO_REMEDY` says to write a literal `-R owner/repo`. Neither says to run the edit again, because a retry fails the same way. A read that fails on a literal route, such as a network failure, keeps the run-it-again remedy (`REVIEW_UNREAD_REMEDY`).
   - `gh pr comment -e` and `gh issue comment -e` are posts: gh's `-e` is `--editor`, and only `--edit-last` is an edit.
@@ -115,7 +115,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
   - a `gh api --input` body;
   - a post to a full-URL endpoint, `gh api https://api.github.com/repos/...` (an edit by full URL is judged, see the edit bullet).
 
-  Judged now (checked 2026-11-09): an unquoted `$(...)` route with a `|`, `;` or `&&`, a backtick id, a `$(...)` id that holds a `)`, and a post route with `$(...)` in the number or the repo. Tests pin all but the `)` id. A probe refused `$(echo $(cat idfile))`, which no test pins.
+  Judged now (checked 2026-11-09): an unquoted `$(...)` route with a `|`, `;` or `&&`, a backtick id, a `$(...)` id that holds a `)`, and a post route with `$(...)` in the number. A `$(..)` in the repo part of a route is judged both unspaced and spaced or quoted (`_ROUTE_REPO`, hooks/guard.py). Tests pin all but the `)` id. A probe refused `$(echo $(cat idfile))`, which no test pins.
 
   Origin main has no record judge (checked 2026-11-09). Step `record-guard-wrapper-forms` is the home of their fix.
 
