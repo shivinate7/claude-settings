@@ -8,12 +8,14 @@ another session's entry leaves no trace.
 
 The predicate is the act's direction:
 
-- `list` and `show` read the stack. They pass.
+- `list` and `show` read the stack. `create` reads the working tree and index. All three pass.
+  `create` writes an unreachable commit and prints its hash. It adds no entry and changes no ref,
+  index or working tree, so it takes nothing from any session.
 - `push`, `save` and a bare `git stash` put work on. The subject is the working tree, read with
   `git status --porcelain`.
-- Every other action takes an entry off (`pop`, `apply`, `drop`, `clear`, `branch`, `export`,
-  `import`). The subject is the stack, read with `git stash list`. A wrong answer here costs
-  another session its work.
+- Every other action touches the stack. It takes an entry off (`pop`, `apply`, `drop`, `clear`,
+  `branch`) or changes its entries or refs (`store`, `export`, `import`). The subject is the stack,
+  read with `git stash list`. A wrong answer here costs another session its work.
 - An empty subject passes, because an empty stack holds nothing to take and git itself errors there.
 - A word that is no known action is a pathspec, read as a push. A known action that is neither a
   read nor a push falls on the stack side.
